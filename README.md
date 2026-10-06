@@ -143,6 +143,9 @@ Unknown paths return the standard plain-text `404 page not found`.
 `players` rows look like this:
 
 ```
+Players on server:
+
+[#] [IP Address]:[Port] [Ping] [GUID] [Name]
 0   10.0.1.51:48796       69   7a6sd5f876asdf567asd8765fd897sdf(?)  Player_Name
 ```
 
