@@ -1,6 +1,6 @@
 # DayZ RCON Bridge — API Guide
 
-A small Go web server that turns HTTP requests into BattlEye RCON commands for a DayZ server. It keeps no state: every request logs into RCON, runs its command, and disconnects.
+A small Go web server that turns HTTP requests into BattlEye RCON commands for a DayZ server. It keeps no state: every request logs into RCON, runs its command, and disconnects unless the `-i` interactive flag is used.
 
 Base URL in this setup: `http://<server-ip>:8080`.
 
