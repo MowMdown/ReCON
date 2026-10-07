@@ -33,7 +33,7 @@ No auth. Returns `{"ok": true}`. Use it for uptime checks.
 Runs one RCON command. URL-encode the command.
 
 ```bash
-curl "http://<host>:8080/rcon?cmd=players" -H "X-API-Token: $TOKEN"
+curl "http://<host>:8080/rcon?cmd=players"
 ```
 
 ### `POST /rcon`
