@@ -446,7 +446,7 @@ function handleActionClick(btn){openModal(parseInt(btn.getAttribute('data-id'),1
 function openModal(id,a,name){current=id;action=a;document.getElementById('title').textContent=a[0].toUpperCase()+a.slice(1)+' '+name;document.getElementById('durationWrap').style.display=a==='ban'?'block':'none';document.getElementById('textLabel').textContent=a==='message'?'Message':'Reason';document.getElementById('text').value='';document.getElementById('minutes').value='';document.getElementById('modal').style.display='flex';}
 function closeModal(){document.getElementById('modal').style.display='none'}
 document.getElementById('submit').onclick=async()=>{let body=action==='message'?{message:document.getElementById('text').value}:{reason:document.getElementById('text').value,minutes:parseInt(document.getElementById('minutes').value,10)};if(action==='ban'&&(!Number.isInteger(body.minutes)||body.minutes<=0)){alert('Duration must be a whole number of minutes greater than 0.');return}let r=await api('/api/players/'+current+'/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let d=await r.json();if(!d.ok){alert(d.error||'Action failed');return}closeModal();refresh()};
-refresh();setInterval(refresh,60000);
+refresh();setInterval(refresh,5000);
 </script></body></html>`))
 
 func handlePlayersPage(w http.ResponseWriter, r *http.Request) {
