@@ -26,22 +26,27 @@ var webRCON = struct {
 	s *live
 }{}
 
-var webPlayerRow = regexp.MustCompile(`^\s*(\d+)\s+(\S+):(\d+)\s+(\d+)\s+(\S+)\s*(.*)$`)
+// Temporary: old regex-based web player parser.
+// var webPlayerRow = regexp.MustCompile(`^\s*(\d+)\s+(\S+):(\d+)\s+(-?\d+)\s+(\S+)\s*(.*)$`)
 
 func webConnect() (*live, error) {
 	webRCON.Lock()
 	defer webRCON.Unlock()
+
 	if webRCON.s != nil && !webRCON.s.dead() {
 		return webRCON.s, nil
 	}
+
 	if webRCON.s != nil {
 		webRCON.s.close()
 		webRCON.s = nil
 	}
+
 	s, err := dialLive()
 	if err != nil {
 		return nil, err
 	}
+
 	webRCON.s = s
 	return s, nil
 }
@@ -51,8 +56,9 @@ func webConnect() (*live, error) {
 func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
-		maxAttempts = 3 // Max 3 retries for read operations to avoid HTTP timeouts
+		maxAttempts = 3
 	}
+
 	var lastErr error
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -62,10 +68,12 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 			time.Sleep(1 * time.Second)
 			continue
 		}
+
 		out, acked, err := s.run(command, wait)
 		if err == nil && acked {
 			return out, acked, nil
 		}
+
 		if err != nil {
 			lastErr = err
 		}
@@ -81,9 +89,11 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 			time.Sleep(1 * time.Second)
 		}
 	}
+
 	if lastErr == nil {
 		lastErr = fmt.Errorf("RCON command unacknowledged")
 	}
+
 	return "", false, lastErr
 }
 
@@ -91,29 +101,47 @@ func parseWebPlayers(out string) []webPlayer {
 	players := []webPlayer{}
 
 	for _, line := range strings.Split(out, "\n") {
-		m := webPlayerRow.FindStringSubmatch(line)
-		if m == nil {
+		fields := strings.Fields(line)
+
+		// Expected:
+		// ID IP:PORT PING GUID NAME...
+		if len(fields) < 5 {
 			continue
 		}
 
-		id, err1 := strconv.Atoi(m[1])
-		ping, err2 := strconv.Atoi(m[4])
-		if err1 != nil || err2 != nil {
+		id, err := strconv.Atoi(fields[0])
+		if err != nil {
 			continue
 		}
 
-		guid := strings.TrimSpace(m[5])
-		if idx := strings.Index(guid, "("); idx != -1 {
+		host, port, ok := strings.Cut(fields[1], ":")
+		if !ok {
+			continue
+		}
+
+		ping, err := strconv.Atoi(fields[2])
+		if err != nil {
+			continue
+		}
+
+		// Do not validate or otherwise restrict the GUID contents.
+		// It may contain '-' or other characters.
+		guid := fields[3]
+
+		// Remove BattlEye's status suffix, e.g. "(OK)" or "(?)".
+		if idx := strings.IndexByte(guid, '('); idx != -1 {
 			guid = guid[:idx]
 		}
 
+		name := strings.Join(fields[4:], " ")
+
 		players = append(players, webPlayer{
 			ID:   id,
-			IP:   m[2],
-			Port: m[3],
+			IP:   host,
+			Port: port,
 			Ping: ping,
 			GUID: guid,
-			Name: strings.TrimSpace(m[6]),
+			Name: name,
 		})
 	}
 
@@ -126,6 +154,7 @@ func findWebPlayer(out string, id int) (webPlayer, bool) {
 			return p, true
 		}
 	}
+
 	return webPlayer{}, false
 }
 
@@ -133,20 +162,38 @@ func webReason(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(s))
 }
 
-func webCommandAllowed(command string) bool { return permitted(command) }
+func webCommandAllowed(command string) bool {
+	return permitted(command)
+}
 
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use GET"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"ok":    false,
+			"error": "use GET",
+		})
 		return
 	}
+
 	out, acked, err := webRun("players", 3*time.Second, true)
 	if err != nil || !acked {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": "RCON unavailable"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":        false,
+			"connected": false,
+			"retrying":  true,
+			"error":     "RCON unavailable",
+		})
 		return
 	}
+
 	players := parseWebPlayers(out)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": true, "players": players, "count": len(players)})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"connected": true,
+		"players":   players,
+		"count":     len(players),
+	})
 }
 
 type webActionRequest struct {
@@ -157,14 +204,18 @@ type webActionRequest struct {
 
 func parsePlayerIDPath(path string) (int, bool) {
 	const prefix = "/api/players/"
+
 	if !strings.HasPrefix(path, prefix) {
 		return 0, false
 	}
+
 	rest := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/")
 	parts := strings.Split(rest, "/")
+
 	if len(parts) != 2 {
 		return 0, false
 	}
+
 	id, err := strconv.Atoi(parts[0])
 	return id, err == nil && id >= 0
 }
@@ -173,105 +224,208 @@ func readWebAction(w http.ResponseWriter, r *http.Request, dst *webActionRequest
 	if r.ContentLength > 4096 {
 		return fmt.Errorf("body too large")
 	}
-	return json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(dst)
+
+	return json.NewDecoder(
+		http.MaxBytesReader(w, r.Body, 4096),
+	).Decode(dst)
 }
 
 func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use POST"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"ok":    false,
+			"error": "use POST",
+		})
 		return
 	}
+
 	id, ok := parsePlayerIDPath(r.URL.Path)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "invalid player action"})
+		writeJSON(w, http.StatusNotFound, map[string]any{
+			"ok":    false,
+			"error": "invalid player action",
+		})
 		return
 	}
+
 	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
 	action := parts[len(parts)-1]
+
 	var req webActionRequest
+
 	if err := readWebAction(w, r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "bad JSON"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "bad JSON",
+		})
 		return
 	}
 
 	if action == "message" {
 		msg := webReason(req.Message)
+
 		if msg == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "message is required"})
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": "message is required",
+			})
 			return
 		}
+
 		cmd := fmt.Sprintf("say %d %s", id, msg)
+
 		if !webCommandAllowed("say") {
-			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "command not allowed"})
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": "command not allowed",
+			})
 			return
 		}
+
 		_, acked, err := webRun(cmd, 2*time.Second, false)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
+			writeJSON(w, http.StatusBadGateway, map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": acked, "acked": acked})
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":    acked,
+			"acked": acked,
+		})
 		return
 	}
 
 	out, _, err := webRun("players", 3*time.Second, true)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": "RCON unavailable"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":        false,
+			"connected": false,
+			"retrying":  true,
+			"error":     "RCON unavailable",
+		})
 		return
 	}
+
 	p, found := findWebPlayer(out, id)
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "player is no longer connected"})
+		writeJSON(w, http.StatusNotFound, map[string]any{
+			"ok":    false,
+			"error": "player is no longer connected",
+		})
 		return
 	}
 
 	req.Reason = webReason(req.Reason)
+
 	if req.Reason == "" {
 		req.Reason = "No reason specified"
 	}
+
 	if action == "kick" {
 		if !webCommandAllowed("kick") {
-			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "command not allowed"})
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": "command not allowed",
+			})
 			return
 		}
+
 		cmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
+
 		_, acked, err := webRun(cmd, 1500*time.Millisecond, false)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
+			writeJSON(w, http.StatusBadGateway, map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": acked, "acked": acked})
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":    acked,
+			"acked": acked,
+		})
 		return
 	}
+
 	if action == "ban" {
 		if req.Minutes <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "minutes must be a whole integer greater than 0"})
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": "minutes must be a whole integer greater than 0",
+			})
 			return
 		}
+
 		if !webCommandAllowed("addBan") {
-			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "command not allowed"})
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": "command not allowed",
+			})
 			return
 		}
-		guidCmd := fmt.Sprintf("addBan %s %d %s", p.GUID, req.Minutes, req.Reason)
-		ipCmd := fmt.Sprintf("addBan %s %d %s", p.IP, req.Minutes, req.Reason)
-		_, guidAck, guidErr := webRun(guidCmd, 1500*time.Millisecond, false)
-		_, ipAck, ipErr := webRun(ipCmd, 1500*time.Millisecond, false)
-		ok := guidErr == nil && ipErr == nil && guidAck && ipAck
-		resp := map[string]any{"ok": ok, "guid_ban": guidAck && guidErr == nil, "ip_ban": ipAck && ipErr == nil}
+
+		guidCmd := fmt.Sprintf(
+			"addBan %s %d %s",
+			p.GUID,
+			req.Minutes,
+			req.Reason,
+		)
+
+		ipCmd := fmt.Sprintf(
+			"addBan %s %d %s",
+			p.IP,
+			req.Minutes,
+			req.Reason,
+		)
+
+		_, guidAck, guidErr := webRun(
+			guidCmd,
+			1500*time.Millisecond,
+			false,
+		)
+
+		_, ipAck, ipErr := webRun(
+			ipCmd,
+			1500*time.Millisecond,
+			false,
+		)
+
+		ok := guidErr == nil &&
+			ipErr == nil &&
+			guidAck &&
+			ipAck
+
+		resp := map[string]any{
+			"ok":       ok,
+			"guid_ban": guidAck && guidErr == nil,
+			"ip_ban":   ipAck && ipErr == nil,
+		}
+
 		if guidErr != nil {
 			resp["guid_error"] = guidErr.Error()
 		}
+
 		if ipErr != nil {
 			resp["ip_error"] = ipErr.Error()
 		}
+
 		code := http.StatusOK
 		if !ok {
 			code = http.StatusBadGateway
 		}
+
 		writeJSON(w, code, resp)
 		return
 	}
-	writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "unknown action"})
+
+	writeJSON(w, http.StatusNotFound, map[string]any{
+		"ok":    false,
+		"error": "unknown action",
+	})
 }
 
 var playersPage = template.Must(template.New("players").Parse(`<!doctype html>
@@ -296,6 +450,7 @@ func handlePlayersPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	playersPage.Execute(w, nil)
 }
