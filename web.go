@@ -46,12 +46,12 @@ func webConnect() (*live, error) {
 	return s, nil
 }
 
-// webRun executes commands with retry control based on action type[cite: 2].
-// allowRetry is true for read-only calls (e.g. players), false for state-mutating actions[cite: 2].
+// webRun executes commands with retry control based on action type.
+// allowRetry is true for read-only calls (e.g. players), false for state-mutating actions.
 func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
-		maxAttempts = 3 // Max 3 retries for read operations to avoid HTTP timeouts[cite: 2]
+		maxAttempts = 3 // Max 3 retries for read operations to avoid HTTP timeouts
 	}
 	var lastErr error
 
