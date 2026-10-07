@@ -182,6 +182,7 @@ var keepaliveEvery = 30 * time.Second
 type live struct {
 	conn    net.Conn
 	mu      sync.Mutex // guards writing to conn and seq counter
+	cmd     sync.Mutex // held for the whole of run(), so commands can't take each other's replies
 	seq     byte
 	replies chan []byte
 	done    chan struct{}
@@ -284,6 +285,8 @@ func (l *live) alive() bool {
 }
 
 func (l *live) run(command string, wait time.Duration) (string, bool, error) {
+	l.cmd.Lock()
+	defer l.cmd.Unlock()
 	if l.dead() {
 		return "", false, l.err
 	}

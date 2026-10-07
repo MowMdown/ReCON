@@ -78,12 +78,16 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 			lastErr = err
 		}
 
-		webRCON.Lock()
-		if webRCON.s == s {
-			s.close()
-			webRCON.s = nil
+		// Only throw the shared session away if it is really dead. A single
+		// lost packet must not kill it for every other request using it.
+		if err != nil || !s.alive() {
+			webRCON.Lock()
+			if webRCON.s == s {
+				s.close()
+				webRCON.s = nil
+			}
+			webRCON.Unlock()
 		}
-		webRCON.Unlock()
 
 		if allowRetry {
 			time.Sleep(1 * time.Second)
