@@ -15,24 +15,10 @@ Set through environment variables on the container.
 | `RCON_HOST`        | `127.0.0.1`            | Host or IP of the DayZ server                                                                          |
 | `RCON_PORT`        | `2305`                 | BattlEye RCON UDP port (`RConPort` in `BEServer_x64.cfg`)                                              |
 | `RCON_PASSWORD`    | required               | BattlEye RCON password                                                                                 |
-| `API_TOKEN`        | required (server mode) | Token callers must send                                                                                |
 | `LISTEN_ADDR`      | `:8080`                | Address the HTTP server listens on                                                                     |
 | `ALLOWED_PREFIXES` | empty (allow all)      | Comma-separated command prefixes the HTTP API may run, e.g. `say,players,#lock,#unlock,kick,#shutdown` |
 
 `ALLOWED_PREFIXES` is case-insensitive and matches the start of the command. It applies to the HTTP API only, not to the console commands.
-
----
-
-## Authentication
-
-Every endpoint except `/health` needs the token in one of these headers:
-
-```text
-Authorization: <token>
-X-API-Token: <token>
-```
-
-The token must match `API_TOKEN`. A missing or wrong token returns `401`.
 
 ---
 
@@ -59,7 +45,6 @@ Runs one RCON command.
 
 ```bash
 curl -X POST http://<host>:8080/rcon \
-  -H "Authorization: $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"command":"say -1 Restart in 5 minutes"}'
 ```
@@ -92,7 +77,6 @@ Body (optional JSON):
 
 ```bash
 curl -X POST http://<host>:8080/kickall \
-  -H "Authorization: $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"reason":"Server is going down for a restart NOW!!!","lock":true}'
 ```
@@ -186,7 +170,7 @@ Notes:
 | URI                  | `http://<server-ip>:8080/kickall`                                    |
 | Payload              | `{"reason":"Server is going down for a restart NOW!!!","lock":true}` |
 | Headers              | blank                                                                |
-| Authorization Header | the `API_TOKEN` value                                                |
+| Authorization Header | blank                                                                |
 | Content Type         | `application/json`                                                   |
 
 Each task sends one request. For a restart sequence, schedule separate tasks, for example a `say -1` warning, then `/kickall` a few minutes later.
@@ -199,7 +183,6 @@ Each task sends one request. For a restart sequence, schedule separate tasks, fo
 * **Retries:** login is retried up to 3 times (1 second each) because UDP packets can be lost. Commands are never retried, so a lost reply can't make `kick` or `say` run twice.
 * **Timing:** commands wait up to 2 seconds for a reply. Login can take up to about 3 seconds when packets are lost. `/kickall` can take longer with many players; the HTTP server allows up to 120 seconds per request.
 * **Server messages:** BattlEye pushes server console messages to connected RCON clients; the bridge acknowledges them while a command is waiting.
-* **Security:** the token is sent in plain text over HTTP. Keep the bridge on your LAN, or put it behind HTTPS before exposing it. Anyone holding the token can run any allowed RCON command.
 
 ---
 
