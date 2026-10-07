@@ -1,21 +1,18 @@
 // HTTP -> BattlEye RCON bridge (stdlib only).
 //
-//	POST /rcon  {"command":"say -1 Restart in 5 minutes"}  (or text/plain body)
-//	GET  /rcon?cmd=players
-//	POST /kickall {"reason":"Server restarting","lock":false,"shutdown":false}  (kicks highest player # down to 0)
-//	GET  /health                                           (no auth)
-//
-// Auth: "Authorization: Bearer <token>" (or the raw token), or "X-API-Token: <token>".
+//    POST /rcon  {"command":"say -1 Restart in 5 minutes"}  (or text/plain body)
+//    GET  /rcon?cmd=players
+//    POST /kickall {"reason":"Server restarting","lock":false,"shutdown":false}  (kicks highest player # down to 0)
+//    GET  /health                                                            (no auth)
 //
 // Env: RCON_HOST (127.0.0.1) RCON_PORT (2306) RCON_PASSWORD (required)
 //
-//	API_TOKEN (required) LISTEN_ADDR (:8080)
-//	ALLOWED_PREFIXES optional, comma list e.g. "say,players,#lock,#unlock,#shutdown"
+//    LISTEN_ADDR (:8080)
+//    ALLOWED_PREFIXES optional, comma list e.g. "say,players,#lock,#unlock,#shutdown"
 package main
 
 import (
 	"bufio"
-	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -37,7 +34,6 @@ import (
 var (
 	rconAddr     string
 	rconPassword string
-	apiToken     string
 	allowed      []string
 )
 
@@ -426,14 +422,6 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func authed(r *http.Request) bool {
-	tok := r.Header.Get("X-API-Token")
-	if tok == "" {
-		tok = r.Header.Get("Authorization")
-	}
-	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(tok)), []byte(apiToken)) == 1
-}
-
 func permitted(command string) bool {
 	if len(allowed) == 0 {
 		return true
@@ -465,10 +453,6 @@ func runCommand(w http.ResponseWriter, command string) {
 }
 
 func handleRcon(w http.ResponseWriter, r *http.Request) {
-	if !authed(r) {
-		writeJSON(w, 401, map[string]any{"ok": false, "error": "unauthorized"})
-		return
-	}
 	switch r.Method {
 	case http.MethodGet:
 		runCommand(w, r.URL.Query().Get("cmd"))
@@ -496,10 +480,6 @@ func handleRcon(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleKickAll(w http.ResponseWriter, r *http.Request) {
-	if !authed(r) {
-		writeJSON(w, 401, map[string]any{"ok": false, "error": "unauthorized"})
-		return
-	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, 405, map[string]any{"ok": false, "error": "use POST"})
 		return
@@ -647,10 +627,6 @@ func main() {
 		return
 	}
 
-	apiToken = os.Getenv("API_TOKEN")
-	if apiToken == "" {
-		log.Fatal("API_TOKEN is required")
-	}
 	for _, p := range strings.Split(os.Getenv("ALLOWED_PREFIXES"), ",") {
 		if p = strings.TrimSpace(strings.ToLower(p)); p != "" {
 			allowed = append(allowed, p)
