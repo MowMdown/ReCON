@@ -438,9 +438,6 @@ func authed(r *http.Request) bool {
 	if tok == "" {
 		tok = r.Header.Get("Authorization")
 	}
-	if len(tok) > 7 && strings.EqualFold(tok[:7], "bearer ") {
-		tok = tok[7:]
-	}
 	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(tok)), []byte(apiToken)) == 1
 }
 
