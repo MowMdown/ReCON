@@ -129,10 +129,6 @@ func webReason(s string) string {
 func webCommandAllowed(command string) bool { return permitted(command) }
 
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
-	if !authed(r) {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
-		return
-	}
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use GET"})
 		return
@@ -174,10 +170,6 @@ func readWebAction(w http.ResponseWriter, r *http.Request, dst *webActionRequest
 }
 
 func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
-	if !authed(r) {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
-		return
-	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use POST"})
 		return
@@ -281,11 +273,9 @@ var playersPage = template.Must(template.New("players").Parse(`<!doctype html>
 <body><h1>DayZ Players</h1><div id="status">Connecting...</div><table><thead><tr><th>ID</th><th>Player</th><th>Ping</th><th>Actions</th></tr></thead><tbody id="players"></tbody></table>
 <div id="modal" class="modal"><div class="box"><h2 id="title"></h2><div id="durationWrap"><label>Duration (minutes)</label><input id="minutes" type="number" min="1" step="1"></div><label id="textLabel"></label><textarea id="text" rows="4"></textarea><div class="buttons"><button onclick="closeModal()">Cancel</button><button id="submit">Submit</button></div></div></div>
 <script>
-let token=sessionStorage.getItem('rconToken');
-if(!token){token=prompt('API token:');if(token)sessionStorage.setItem('rconToken',token)}
 let current=null, action=null;
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function api(url,opt={}){opt.headers=Object.assign({'X-API-Token':token},opt.headers||{});return fetch(url,opt)}
+async function api(url,opt={}){return fetch(url,opt)}
 async function refresh(){try{let r=await api('/api/players');let d=await r.json();if(!d.ok){document.getElementById('status').textContent='Server unavailable — retrying...';return}document.getElementById('status').textContent='Connected — '+d.count+' player(s)';document.getElementById('players').innerHTML=d.players.map(function(p){let n=esc(p.name);return '<tr><td>'+p.id+'</td><td>'+n+'</td><td>'+p.ping+'</td><td><button data-id="'+p.id+'" data-action="message" data-name="'+n+'" onclick="handleActionClick(this)">Message</button><button data-id="'+p.id+'" data-action="kick" data-name="'+n+'" onclick="handleActionClick(this)">Kick</button><button data-id="'+p.id+'" data-action="ban" data-name="'+n+'" onclick="handleActionClick(this)">Ban</button></td></tr>';}).join('')}catch(e){document.getElementById('status').textContent='Server unavailable — retrying...'}}
 function handleActionClick(btn){openModal(parseInt(btn.getAttribute('data-id'),10),btn.getAttribute('data-action'),btn.getAttribute('data-name'))}
 function openModal(id,a,name){current=id;action=a;document.getElementById('title').textContent=a[0].toUpperCase()+a.slice(1)+' '+name;document.getElementById('durationWrap').style.display=a==='ban'?'block':'none';document.getElementById('textLabel').textContent=a==='message'?'Message':'Reason';document.getElementById('text').value='';document.getElementById('minutes').value='';document.getElementById('modal').style.display='flex';}
