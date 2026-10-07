@@ -1,16 +1,16 @@
-// HTTP -> BattlEye RCON bridge (stdlib only).
+// HTTP -> BattlEye RCON bridge (stdlib only)[cite: 1].
 //
-//	POST /rcon  {"command":"say -1 Restart in 5 minutes"}  (or text/plain body)
-//	GET  /rcon?cmd=players
-//	POST /kickall {"reason":"Server restarting","lock":false,"shutdown":false}  (kicks highest player # down to 0)
-//	GET  /health                                           (no auth)
+//	POST /rcon  {"command":"say -1 Restart in 5 minutes"}  (or text/plain body)[cite: 1]
+//	GET  /rcon?cmd=players[cite: 1]
+//	POST /kickall {"reason":"Server restarting","lock":false,"shutdown":false}  (kicks highest player # down to 0)[cite: 1]
+//	GET  /health                                           (no auth)[cite: 1]
 //
-// Auth: "Authorization: Bearer <token>" (or the raw token), or "X-API-Token: <token>".
+// Auth: "Authorization: Bearer <token>" (or the raw token), or "X-API-Token: <token>"[cite: 1].
 //
-// Env: RCON_HOST (127.0.0.1) RCON_PORT (2306) RCON_PASSWORD (required)
+// Env: RCON_HOST (127.0.0.1) RCON_PORT (2306) RCON_PASSWORD (required)[cite: 1]
 //
-//	API_TOKEN (required) LISTEN_ADDR (:8080)
-//	ALLOWED_PREFIXES optional, comma list e.g. "say,players,#lock,#unlock"
+//	API_TOKEN (required) LISTEN_ADDR (:8080)[cite: 1]
+//	ALLOWED_PREFIXES optional, comma list e.g. "say,players,#lock,#unlock"[cite: 1]
 package main
 
 import (
@@ -73,7 +73,6 @@ func isTimeout(err error) bool {
 
 var errLoginRejected = errors.New("RCON login rejected (wrong password or IP not allowed)")
 
-// login retries up to 3 times because UDP packets can be lost.
 func login(conn net.Conn, buf []byte) error {
 	for attempt := 0; attempt < 3; attempt++ {
 		if _, err := conn.Write(build(0, []byte(rconPassword))); err != nil {
@@ -101,7 +100,6 @@ func login(conn net.Conn, buf []byte) error {
 	return errors.New("no reply to RCON login after 3 tries: RCon not enabled (no RConPassword), wrong port, or UDP blocked")
 }
 
-// session is one logged-in RCON connection that can run several commands.
 type session struct {
 	conn net.Conn
 	buf  []byte
@@ -123,9 +121,6 @@ func dial() (*session, error) {
 
 func (s *session) close() { s.conn.Close() }
 
-// run sends one command and returns its output and whether the server
-// acknowledged it. Commands are not retried, since a lost reply would
-// otherwise run the command twice.
 func (s *session) run(command string, wait time.Duration) (string, bool, error) {
 	seq := s.seq
 	s.seq++
@@ -177,7 +172,6 @@ func (s *session) run(command string, wait time.Duration) (string, bool, error) 
 	return sb.String(), acked, nil
 }
 
-// rcon runs a single command in its own short-lived session.
 func rcon(command string, wait time.Duration) (string, bool, error) {
 	s, err := dial()
 	if err != nil {
@@ -187,21 +181,24 @@ func rcon(command string, wait time.Duration) (string, bool, error) {
 	return s.run(command, wait)
 }
 
-// keepaliveEvery must stay well under BattlEye's 45 second idle limit.
 var keepaliveEvery = 30 * time.Second
 
-// live is a long-lived RCON session for the interactive console. A background
-// reader acknowledges server messages and hands command replies to run(), and
-// a keepalive sends an empty command so BattlEye doesn't drop the login.
 type live struct {
 	conn    net.Conn
-	mu      sync.Mutex // one command at a time; also guards seq
+	mu      sync.Mutex // guards writing to conn and seq counter
 	seq     byte
 	replies chan []byte
-	done    chan struct{} // closed by the reader when the socket fails
-	stop    chan struct{} // closed by close()
+	done    chan struct{}
+	stop    chan struct{}
 	once    sync.Once
-	err     error // set before done is closed
+	err     error
+}
+
+func (l *live) write(pkt []byte) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, err := l.conn.Write(pkt)
+	return err
 }
 
 func dialLive() (*live, error) {
@@ -213,10 +210,10 @@ func dialLive() (*live, error) {
 		conn.Close()
 		return nil, err
 	}
-	conn.SetReadDeadline(time.Time{}) // login left a short deadline behind
+	conn.SetReadDeadline(time.Time{})
 	l := &live{
 		conn:    conn,
-		replies: make(chan []byte, 64),
+		replies: make(chan []byte, 256), // Expanded capacity for large multipart responses
 		done:    make(chan struct{}),
 		stop:    make(chan struct{}),
 	}
@@ -255,8 +252,8 @@ func (l *live) reader() {
 			continue
 		}
 		switch t {
-		case 2: // server push message: must be acknowledged
-			l.conn.Write(build(2, p[:1]))
+		case 2: // server push message: must be acknowledged safely
+			l.write(build(2, p[:1]))
 		case 1:
 			select {
 			case l.replies <- append([]byte(nil), p...):
@@ -273,9 +270,10 @@ func (l *live) keepalive() {
 		select {
 		case <-t.C:
 			l.mu.Lock()
-			l.conn.Write(build(1, []byte{l.seq}))
+			seq := l.seq
 			l.seq++
 			l.mu.Unlock()
+			l.write(build(1, []byte{seq}))
 		case <-l.stop:
 			return
 		case <-l.done:
@@ -284,26 +282,28 @@ func (l *live) keepalive() {
 	}
 }
 
-// alive sends an empty command and reports whether the server answered it.
 func (l *live) alive() bool {
 	_, acked, err := l.run("", 2*time.Second)
 	return err == nil && acked
 }
 
 func (l *live) run(command string, wait time.Duration) (string, bool, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	if l.dead() {
 		return "", false, l.err
 	}
-	for len(l.replies) > 0 { // drop stale keepalive acks
+
+	l.mu.Lock()
+	for len(l.replies) > 0 { // drain stale keepalive/command ACKs
 		<-l.replies
 	}
 	seq := l.seq
 	l.seq++
-	if _, err := l.conn.Write(build(1, append([]byte{seq}, command...))); err != nil {
+	l.mu.Unlock()
+
+	if err := l.write(build(1, append([]byte{seq}, command...))); err != nil {
 		return "", false, err
 	}
+
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	parts := map[byte][]byte{}
@@ -344,10 +344,8 @@ loop:
 	return sb.String(), acked, nil
 }
 
-// A `players` row looks like: "3   1.2.3.4:2304   32   guid(OK) Name".
 var playerRow = regexp.MustCompile(`(?m)^\s*(\d+)\s+\S+:\d+\s`)
 
-// playerIDs extracts player numbers from `players` output, highest first.
 func playerIDs(out string) []int {
 	ids := []int{}
 	for _, m := range playerRow.FindAllStringSubmatch(out, -1) {
@@ -360,18 +358,15 @@ func playerIDs(out string) []int {
 }
 
 type kickReport struct {
-	Order         []int  `json:"order"`     // player numbers, in the order they were kicked
-	Unacked       []int  `json:"unacked"`   // kicks the server did not acknowledge
-	Remaining     []int  `json:"remaining"` // players still connected afterwards
+	Order         []int  `json:"order"`
+	Unacked       []int  `json:"unacked"`
+	Remaining     []int  `json:"remaining"`
 	Raw           string `json:"raw,omitempty"`
 	ShutdownSent  bool   `json:"shutdown_sent"`
 	ShutdownAcked bool   `json:"shutdown_acked"`
-	ShutdownError string `json:"shutdown_error,omitempty"` // players output, only when no players were parsed
+	ShutdownError string `json:"shutdown_error,omitempty"`
 }
 
-// kickAll lists the players, then kicks them one by one from the highest
-// player number down to 0, all over a single RCON session.
-// runner is anything that can run an RCON command (a one-off or a live session).
 type runner interface {
 	run(command string, wait time.Duration) (string, bool, error)
 }
@@ -402,7 +397,7 @@ func kickAllOn(s runner, reason string, lock, shutdown bool) (*kickReport, error
 	}
 	for _, id := range rep.Order {
 		cmd := fmt.Sprintf("kick %d %s", id, reason)
-		if _, acked, err := s.run(strings.TrimSpace(cmd), 1500*time.Millisecond); err != nil {
+		if _, acked, err := s.run(strings.TrimSpace(cmd), 1000*time.Millisecond); err != nil {
 			return nil, err
 		} else if !acked {
 			rep.Unacked = append(rep.Unacked, id)
@@ -415,8 +410,6 @@ func kickAllOn(s runner, reason string, lock, shutdown bool) (*kickReport, error
 		}
 	}
 	if shutdown {
-		// The server may die before it answers, so a read error here is
-		// reported rather than treated as failure.
 		rep.ShutdownSent = true
 		_, acked, err := s.run("#shutdown", 1500*time.Millisecond)
 		rep.ShutdownAcked = acked
@@ -441,7 +434,6 @@ func authed(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(tok)), []byte(apiToken)) == 1
 }
 
-// permitted reports whether ALLOWED_PREFIXES (if set) allows the command.
 func permitted(command string) bool {
 	if len(allowed) == 0 {
 		return true
@@ -572,8 +564,6 @@ func printResult(out string, acked bool, err error) bool {
 	return true
 }
 
-// cli handles `rcon-bridge <command...>` (one-shot) and `rcon-bridge -i` (interactive).
-// It is meant for `docker exec`, so ALLOWED_PREFIXES does not apply.
 func cli(args []string) {
 	if args[0] == "kickall" {
 		if !printKickReport(kickAll(strings.Join(args[1:], " "), false, false)) {
@@ -639,7 +629,6 @@ func repl() {
 			out, acked, err = l.run(line, 2*time.Second)
 			printResult(out, acked, err)
 		}
-		// No reply: check whether the session is still valid, and log in again if not.
 		if (err != nil || !acked) && !l.alive() {
 			fmt.Println("(session lost, logging in again...)")
 			connect()

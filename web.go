@@ -46,16 +46,20 @@ func webConnect() (*live, error) {
 	return s, nil
 }
 
-func webRun(command string, wait time.Duration) (string, bool, error) {
+// webRun executes commands with retry control based on action type[cite: 2].
+// allowRetry is true for read-only calls (e.g. players), false for state-mutating actions[cite: 2].
+func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
+	maxAttempts := 1
+	if allowRetry {
+		maxAttempts = 3 // Max 3 retries for read operations to avoid HTTP timeouts[cite: 2]
+	}
 	var lastErr error
-	// Keep retrying for up to one minute. The browser itself polls every
-	// 60 seconds, so a longer retry loop would unnecessarily hold an HTTP
-	// request open. A subsequent poll will continue reconnect attempts.
-	for attempt := 0; attempt < 30; attempt++ {
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		s, err := webConnect()
 		if err != nil {
 			lastErr = err
-			time.Sleep(2 * time.Second)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 		out, acked, err := s.run(command, wait)
@@ -65,18 +69,20 @@ func webRun(command string, wait time.Duration) (string, bool, error) {
 		if err != nil {
 			lastErr = err
 		}
-		// The persistent session may have died between the connection check
-		// and run. Discard it so the next iteration logs in again.
+
 		webRCON.Lock()
 		if webRCON.s == s {
 			s.close()
 			webRCON.s = nil
 		}
 		webRCON.Unlock()
-		time.Sleep(2 * time.Second)
+
+		if allowRetry {
+			time.Sleep(1 * time.Second)
+		}
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("RCON unavailable")
+		lastErr = fmt.Errorf("RCON command unacknowledged")
 	}
 	return "", false, lastErr
 }
@@ -93,8 +99,15 @@ func parseWebPlayers(out string) []webPlayer {
 		if err1 != nil || err2 != nil {
 			continue
 		}
+
+		// Clean status tags like (OK) or (?) from BattlEye GUID strings
+		guid := strings.TrimSpace(m[5])
+		if idx := strings.Index(guid, "("); idx != -1 {
+			guid = guid[:idx]
+		}
+
 		players = append(players, webPlayer{
-			ID: id, IP: m[2], Port: m[3], Ping: ping, GUID: m[5], Name: strings.TrimSpace(m[6]),
+			ID: id, IP: m[2], Port: m[3], Ping: ping, GUID: guid, Name: strings.TrimSpace(m[6]),
 		})
 	}
 	return players
@@ -124,7 +137,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use GET"})
 		return
 	}
-	out, acked, err := webRun("players", 3*time.Second)
+	out, acked, err := webRun("players", 3*time.Second, true)
 	if err != nil || !acked {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": "RCON unavailable"})
 		return
@@ -193,7 +206,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "command not allowed"})
 			return
 		}
-		_, acked, err := webRun(cmd, 2*time.Second)
+		_, acked, err := webRun(cmd, 2*time.Second, false)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
 			return
@@ -202,7 +215,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, _, err := webRun("players", 3*time.Second)
+	out, _, err := webRun("players", 3*time.Second, true)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": "RCON unavailable"})
 		return
@@ -223,7 +236,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
-		_, acked, err := webRun(cmd, 1500*time.Millisecond)
+		_, acked, err := webRun(cmd, 1500*time.Millisecond, false)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
 			return
@@ -242,8 +255,8 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 		}
 		guidCmd := fmt.Sprintf("addBan %s %d %s", p.GUID, req.Minutes, req.Reason)
 		ipCmd := fmt.Sprintf("addBan %s %d %s", p.IP, req.Minutes, req.Reason)
-		_, guidAck, guidErr := webRun(guidCmd, 1500*time.Millisecond)
-		_, ipAck, ipErr := webRun(ipCmd, 1500*time.Millisecond)
+		_, guidAck, guidErr := webRun(guidCmd, 1500*time.Millisecond, false)
+		_, ipAck, ipErr := webRun(ipCmd, 1500*time.Millisecond, false)
 		ok := guidErr == nil && ipErr == nil && guidAck && ipAck
 		resp := map[string]any{"ok": ok, "guid_ban": guidAck && guidErr == nil, "ip_ban": ipAck && ipErr == nil}
 		if guidErr != nil {
@@ -271,9 +284,10 @@ var playersPage = template.Must(template.New("players").Parse(`<!doctype html>
 let token=sessionStorage.getItem('rconToken');
 if(!token){token=prompt('API token:');if(token)sessionStorage.setItem('rconToken',token)}
 let current=null, action=null;
-function esc(s){return String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]))}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function api(url,opt={}){opt.headers=Object.assign({'X-API-Token':token},opt.headers||{});return fetch(url,opt)}
-async function refresh(){try{let r=await api('/api/players');let d=await r.json();if(!d.ok){document.getElementById('status').textContent='Server unavailable — retrying...';return}document.getElementById('status').textContent='Connected — '+d.count+' player(s)';document.getElementById('players').innerHTML=d.players.map(function(p){let n=esc(p.name);return '<tr><td>'+p.id+'</td><td>'+n+'</td><td>'+p.ping+'</td><td><button onclick="openModal('+p.id+',\'message\',\''+n+'\')">Message</button><button onclick="openModal('+p.id+',\'kick\',\''+n+'\')">Kick</button><button onclick="openModal('+p.id+',\'ban\',\''+n+'\')">Ban</button></td></tr>';}).join('')}catch(e){document.getElementById('status').textContent='Server unavailable — retrying...'}}
+async function refresh(){try{let r=await api('/api/players');let d=await r.json();if(!d.ok){document.getElementById('status').textContent='Server unavailable — retrying...';return}document.getElementById('status').textContent='Connected — '+d.count+' player(s)';document.getElementById('players').innerHTML=d.players.map(function(p){let n=esc(p.name);return '<tr><td>'+p.id+'</td><td>'+n+'</td><td>'+p.ping+'</td><td><button data-id="'+p.id+'" data-action="message" data-name="'+n+'" onclick="handleActionClick(this)">Message</button><button data-id="'+p.id+'" data-action="kick" data-name="'+n+'" onclick="handleActionClick(this)">Kick</button><button data-id="'+p.id+'" data-action="ban" data-name="'+n+'" onclick="handleActionClick(this)">Ban</button></td></tr>';}).join('')}catch(e){document.getElementById('status').textContent='Server unavailable — retrying...'}}
+function handleActionClick(btn){openModal(parseInt(btn.getAttribute('data-id'),10),btn.getAttribute('data-action'),btn.getAttribute('data-name'))}
 function openModal(id,a,name){current=id;action=a;document.getElementById('title').textContent=a[0].toUpperCase()+a.slice(1)+' '+name;document.getElementById('durationWrap').style.display=a==='ban'?'block':'none';document.getElementById('textLabel').textContent=a==='message'?'Message':'Reason';document.getElementById('text').value='';document.getElementById('minutes').value='';document.getElementById('modal').style.display='flex';}
 function closeModal(){document.getElementById('modal').style.display='none'}
 document.getElementById('submit').onclick=async()=>{let body=action==='message'?{message:document.getElementById('text').value}:{reason:document.getElementById('text').value,minutes:parseInt(document.getElementById('minutes').value,10)};if(action==='ban'&&(!Number.isInteger(body.minutes)||body.minutes<=0)){alert('Duration must be a whole number of minutes greater than 0.');return}let r=await api('/api/players/'+current+'/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let d=await r.json();if(!d.ok){alert(d.error||'Action failed');return}closeModal();refresh()};
