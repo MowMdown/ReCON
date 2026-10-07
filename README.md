@@ -107,7 +107,6 @@ All errors are JSON: `{"ok": false, "error": "<message>"}`.
 | Status | Meaning                                                                   |
 | ------ | ------------------------------------------------------------------------- |
 | 400    | No command, bad JSON, or unreadable body                                  |
-| 401    | Missing or wrong token                                                    |
 | 403    | Command not allowed by `ALLOWED_PREFIXES`                                 |
 | 405    | Wrong HTTP method (`/kickall` is POST only)                               |
 | 502    | RCON problem: login rejected, no reply from the server, or a socket error |
@@ -158,7 +157,7 @@ docker exec dayz-rcon-bridge rcon players
 Notes:
 
 * Quote a leading `#` (`rcon "#lock"`) or the shell treats it as a comment. Use single quotes around messages containing `!`.
-* The console uses the container's own `RCON_*` variables, needs no API token, and ignores `ALLOWED_PREFIXES`.
+* The console uses the container's own `RCON_*` variables and ignores `ALLOWED_PREFIXES`.
 * `rcon kickall` with no reason sends the kicks with no reason text. The HTTP endpoint defaults to `Server restarting`.
 
 ---
