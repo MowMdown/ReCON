@@ -674,6 +674,9 @@ func main() {
 	})
 	mux.HandleFunc("/rcon", handleRcon)
 	mux.HandleFunc("/kickall", handleKickAll)
+	mux.HandleFunc("/players", handlePlayersPage)
+	mux.HandleFunc("/api/players", handlePlayersJSON)
+	mux.HandleFunc("/api/players/", handlePlayerAction)
 
 	addr := env("LISTEN_ADDR", ":8080")
 	srv := &http.Server{
