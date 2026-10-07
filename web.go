@@ -88,28 +88,35 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 }
 
 func parseWebPlayers(out string) []webPlayer {
-	var players []webPlayer
+	players := []webPlayer{}
+
 	for _, line := range strings.Split(out, "\n") {
 		m := webPlayerRow.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
+
 		id, err1 := strconv.Atoi(m[1])
 		ping, err2 := strconv.Atoi(m[4])
 		if err1 != nil || err2 != nil {
 			continue
 		}
 
-		// Clean status tags like (OK) or (?) from BattlEye GUID strings
 		guid := strings.TrimSpace(m[5])
 		if idx := strings.Index(guid, "("); idx != -1 {
 			guid = guid[:idx]
 		}
 
 		players = append(players, webPlayer{
-			ID: id, IP: m[2], Port: m[3], Ping: ping, GUID: guid, Name: strings.TrimSpace(m[6]),
+			ID:   id,
+			IP:   m[2],
+			Port: m[3],
+			Ping: ping,
+			GUID: guid,
+			Name: strings.TrimSpace(m[6]),
 		})
 	}
+
 	return players
 }
 
