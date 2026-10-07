@@ -1,16 +1,16 @@
-// HTTP -> BattlEye RCON bridge (stdlib only)[cite: 1].
+// HTTP -> BattlEye RCON bridge (stdlib only).
 //
-//	POST /rcon  {"command":"say -1 Restart in 5 minutes"}  (or text/plain body)[cite: 1]
-//	GET  /rcon?cmd=players[cite: 1]
-//	POST /kickall {"reason":"Server restarting","lock":false,"shutdown":false}  (kicks highest player # down to 0)[cite: 1]
-//	GET  /health                                           (no auth)[cite: 1]
+//	POST /rcon  {"command":"say -1 Restart in 5 minutes"}  (or text/plain body)
+//	GET  /rcon?cmd=players
+//	POST /kickall {"reason":"Server restarting","lock":false,"shutdown":false}  (kicks highest player # down to 0)
+//	GET  /health                                           (no auth)
 //
-// Auth: "Authorization: Bearer <token>" (or the raw token), or "X-API-Token: <token>"[cite: 1].
+// Auth: "Authorization: Bearer <token>" (or the raw token), or "X-API-Token: <token>".
 //
-// Env: RCON_HOST (127.0.0.1) RCON_PORT (2306) RCON_PASSWORD (required)[cite: 1]
+// Env: RCON_HOST (127.0.0.1) RCON_PORT (2306) RCON_PASSWORD (required)
 //
-//	API_TOKEN (required) LISTEN_ADDR (:8080)[cite: 1]
-//	ALLOWED_PREFIXES optional, comma list e.g. "say,players,#lock,#unlock"[cite: 1]
+//	API_TOKEN (required) LISTEN_ADDR (:8080)
+//	ALLOWED_PREFIXES optional, comma list e.g. "say,players,#lock,#unlock,#shutdown"
 package main
 
 import (
