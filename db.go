@@ -96,15 +96,21 @@ func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
 	}
 	dbSessions := make(map[string]existingSession)
 
-	for rows.Next() {
-		var s existingSession
-		if err := rows.Scan(&s.guid, &s.ip, &s.connectedAt); err != nil {
-			rows.Close()
-			return err
-		}
-		dbSessions[s.guid] = s
-	}
-	rows.Close()
+    for rows.Next() {
+    	var s existingSession
+    	if err := rows.Scan(&s.guid, &s.ip, &s.connectedAt); err != nil {
+    		rows.Close()
+    		return err
+    	}
+    	dbSessions[s.guid] = s
+    }
+    
+    if err := rows.Err(); err != nil {
+    	rows.Close()
+    	return err
+    }
+    
+    rows.Close()
 
 	for guid, sess := range dbSessions {
 		if _, stillOnline := activeMap[guid]; !stillOnline {
