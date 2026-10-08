@@ -198,24 +198,38 @@ func (l *live) write(pkt []byte) error {
 	return err
 }
 
-func dialLive() (*live, error) {
-	conn, err := net.Dial("udp", rconAddr)
+func dialLive(enableKeepalive bool) (*live, error) {
+	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{
+		IP:   net.ParseIP(rconHost),
+		Port: rconPort,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := login(conn, make([]byte, 65535)); err != nil {
+
+	buf := make([]byte, 4096)
+
+	if err := login(conn, buf); err != nil {
 		conn.Close()
 		return nil, err
 	}
-	conn.SetReadDeadline(time.Time{})
+
+	_ = conn.SetReadDeadline(time.Time{})
+
 	l := &live{
 		conn:    conn,
-		replies: make(chan []byte, 256), // Expanded capacity for large multipart responses
+		buf:     buf,
+		replies: make(chan []byte, 32),
 		done:    make(chan struct{}),
 		stop:    make(chan struct{}),
 	}
+
 	go l.reader()
-	go l.keepalive()
+
+	if enableKeepalive {
+		go l.keepalive()
+	}
+
 	return l, nil
 }
 
