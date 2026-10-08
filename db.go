@@ -23,6 +23,7 @@ func InitDB(filepath string) (*DB, error) {
 		"PRAGMA busy_timeout = 5000;",
 		"PRAGMA foreign_keys = ON;",
 	}
+
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
 			db.Close()
@@ -57,7 +58,19 @@ func InitDB(filepath string) (*DB, error) {
 		FOREIGN KEY(guid) REFERENCES players(guid) ON DELETE CASCADE
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_session_history_guid ON session_history(guid);
+	CREATE TABLE IF NOT EXISTS bans (
+		guid TEXT PRIMARY KEY,
+		player_name TEXT NOT NULL,
+		ip TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		perm INTEGER NOT NULL DEFAULT 0
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_session_history_guid
+		ON session_history(guid);
+
+	CREATE INDEX IF NOT EXISTS idx_bans_player_name
+		ON bans(player_name);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -76,15 +89,20 @@ func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
 	defer tx.Rollback()
 
 	now := time.Now().UTC()
+
 	activeMap := make(map[string]webPlayer, len(currentPlayers))
+
 	for _, p := range currentPlayers {
 		if p.GUID == "" {
 			continue
 		}
+
 		activeMap[p.GUID] = p
 	}
 
-	rows, err := tx.Query("SELECT guid, ip, connected_at FROM active_sessions")
+	rows, err := tx.Query(
+		"SELECT guid, ip, connected_at FROM active_sessions",
+	)
 	if err != nil {
 		return err
 	}
@@ -94,51 +112,82 @@ func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
 		ip          string
 		connectedAt time.Time
 	}
+
 	dbSessions := make(map[string]existingSession)
 
-    for rows.Next() {
-    	var s existingSession
-    	if err := rows.Scan(&s.guid, &s.ip, &s.connectedAt); err != nil {
-    		rows.Close()
-    		return err
-    	}
-    	dbSessions[s.guid] = s
-    }
-    
-    if err := rows.Err(); err != nil {
-    	rows.Close()
-    	return err
-    }
-    
-    rows.Close()
+	for rows.Next() {
+		var s existingSession
+
+		if err := rows.Scan(
+			&s.guid,
+			&s.ip,
+			&s.connectedAt,
+		); err != nil {
+			rows.Close()
+			return err
+		}
+
+		dbSessions[s.guid] = s
+	}
+
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+
+	rows.Close()
 
 	for guid, sess := range dbSessions {
 		if _, stillOnline := activeMap[guid]; !stillOnline {
-			duration := int(now.Sub(sess.connectedAt).Seconds())
+			duration := int(
+				now.Sub(sess.connectedAt).Seconds(),
+			)
+
 			if duration < 0 {
 				duration = 0
 			}
 
 			_, err = tx.Exec(`
-				INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds)
+				INSERT INTO session_history (
+					guid,
+					ip,
+					connected_at,
+					disconnected_at,
+					duration_seconds
+				)
 				VALUES (?, ?, ?, ?, ?)`,
-				guid, sess.ip, sess.connectedAt, now, duration,
+				guid,
+				sess.ip,
+				sess.connectedAt,
+				now,
+				duration,
 			)
+
 			if err != nil {
 				return err
 			}
 
 			_, err = tx.Exec(`
-				UPDATE players 
-				SET last_seen = ?, total_playtime_seconds = total_playtime_seconds + ?
+				UPDATE players
+				SET
+					last_seen = ?,
+					total_playtime_seconds =
+						total_playtime_seconds + ?
 				WHERE guid = ?`,
-				now, duration, guid,
+				now,
+				duration,
+				guid,
 			)
+
 			if err != nil {
 				return err
 			}
 
-			_, err = tx.Exec("DELETE FROM active_sessions WHERE guid = ?", guid)
+			_, err = tx.Exec(
+				"DELETE FROM active_sessions WHERE guid = ?",
+				guid,
+			)
+
 			if err != nil {
 				return err
 			}
@@ -147,24 +196,42 @@ func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
 
 	for guid, p := range activeMap {
 		_, err = tx.Exec(`
-			INSERT INTO players (guid, last_name, last_ip, first_seen, last_seen)
+			INSERT INTO players (
+				guid,
+				last_name,
+				last_ip,
+				first_seen,
+				last_seen
+			)
 			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(guid) DO UPDATE SET
 				last_name = excluded.last_name,
 				last_ip = excluded.last_ip,
 				last_seen = excluded.last_seen`,
-			guid, p.Name, p.IP, now, now,
+			guid,
+			p.Name,
+			p.IP,
+			now,
+			now,
 		)
+
 		if err != nil {
 			return err
 		}
 
 		if _, exists := dbSessions[guid]; !exists {
 			_, err = tx.Exec(`
-				INSERT INTO active_sessions (guid, ip, connected_at)
+				INSERT INTO active_sessions (
+					guid,
+					ip,
+					connected_at
+				)
 				VALUES (?, ?, ?)`,
-				guid, p.IP, now,
+				guid,
+				p.IP,
+				now,
 			)
+
 			if err != nil {
 				return err
 			}
@@ -172,4 +239,35 @@ func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
 	}
 
 	return tx.Commit()
+}
+
+func (db *DB) BanUser(
+	guid string,
+	playerName string,
+	ip string,
+	reason string,
+	perm int,
+) error {
+	_, err := db.Exec(`
+		INSERT INTO bans (
+			guid,
+			player_name,
+			ip,
+			reason,
+			perm
+		)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(guid) DO UPDATE SET
+			player_name = excluded.player_name,
+			ip = excluded.ip,
+			reason = excluded.reason,
+			perm = excluded.perm`,
+		guid,
+		playerName,
+		ip,
+		reason,
+		perm,
+	)
+
+	return err
 }
