@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	//"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,13 +20,70 @@ type webPlayer struct {
 	Name string `json:"name"`
 }
 
+var webUI = struct {
+	// Layout
+	PageMargin string
+
+	// Table
+	TableWidth      string
+	CellPadding     string
+	RowHeight       string
+	HeaderFontSize  string
+	BodyFontSize    string
+
+	// Table columns
+	IDWidth      string
+	PlayerWidth  string
+	IPWidth      string
+	GUIDWidth    string
+	PingWidth    string
+	ActionsWidth string
+
+	// Modal
+	ModalWidth   string
+	ModalPadding string
+
+	// Controls
+	InputPadding  string
+	ButtonPadding string
+
+	// Behavior
+	RefreshInterval time.Duration
+}{
+	// Layout
+	PageMargin: "24px",
+
+	// Table
+	TableWidth:     "100%",
+	CellPadding:    "9px",
+	RowHeight:      "42px",
+	HeaderFontSize: "14px",
+	BodyFontSize:   "14px",
+
+	// Table columns
+	IDWidth:      "60px",
+	PlayerWidth:  "220px",
+	IPWidth:      "150px",
+	GUIDWidth:    "280px",
+	PingWidth:    "80px",
+	ActionsWidth: "240px",
+
+	// Modal
+	ModalWidth:   "420px",
+	ModalPadding: "20px",
+
+	// Controls
+	InputPadding:  "9px",
+	ButtonPadding: "6px 10px",
+
+	// Behavior
+	RefreshInterval: 5 * time.Second,
+}
+
 var webRCON = struct {
 	sync.Mutex
 	s *live
 }{}
-
-// Temporary: old regex-based web player parser.
-// var webPlayerRow = regexp.MustCompile(`^\s*(\d+)\s+(\S+):(\d+)\s+(-?\d+)\s+(\S+)\s*(.*)$`)
 
 func webConnect() (*live, error) {
 	webRCON.Lock()
@@ -42,7 +98,7 @@ func webConnect() (*live, error) {
 		webRCON.s = nil
 	}
 
-	s, err := dialLive()
+	s, err := dialLive(false)
 	if err != nil {
 		return nil, err
 	}
@@ -52,9 +108,11 @@ func webConnect() (*live, error) {
 }
 
 // webRun executes commands with retry control based on action type.
-// allowRetry is true for read-only calls (e.g. players), false for state-mutating actions.
+// allowRetry is true for read-only calls (e.g. players),
+// false for state-mutating actions.
 func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
 	maxAttempts := 1
+
 	if allowRetry {
 		maxAttempts = 3
 	}
@@ -63,6 +121,7 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		s, err := webConnect()
+
 		if err != nil {
 			lastErr = err
 			time.Sleep(1 * time.Second)
@@ -70,6 +129,7 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 		}
 
 		out, acked, err := s.run(command, wait)
+
 		if err == nil && acked {
 			return out, acked, nil
 		}
@@ -78,14 +138,17 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 			lastErr = err
 		}
 
-		// Only throw the shared session away if it is really dead. A single
-		// lost packet must not kill it for every other request using it.
+		// Only throw the shared session away if it is really dead.
+		// A single lost packet must not kill it for every other
+		// request using the same connection.
 		if err != nil || !s.alive() {
 			webRCON.Lock()
+
 			if webRCON.s == s {
 				s.close()
 				webRCON.s = nil
 			}
+
 			webRCON.Unlock()
 		}
 
@@ -163,7 +226,10 @@ func findWebPlayer(out string, id int) (webPlayer, bool) {
 }
 
 func webReason(s string) string {
-	return strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(s))
+	return strings.NewReplacer(
+		"\r", " ",
+		"\n", " ",
+	).Replace(strings.TrimSpace(s))
 }
 
 func webCommandAllowed(command string) bool {
@@ -179,7 +245,12 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, acked, err := webRun("players", 3*time.Second, true)
+	out, acked, err := webRun(
+		"players",
+		3*time.Second,
+		true,
+	)
+
 	if err != nil || !acked {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"ok":        false,
@@ -213,7 +284,11 @@ func parsePlayerIDPath(path string) (int, bool) {
 		return 0, false
 	}
 
-	rest := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/")
+	rest := strings.TrimSuffix(
+		strings.TrimPrefix(path, prefix),
+		"/",
+	)
+
 	parts := strings.Split(rest, "/")
 
 	if len(parts) != 2 {
@@ -221,10 +296,15 @@ func parsePlayerIDPath(path string) (int, bool) {
 	}
 
 	id, err := strconv.Atoi(parts[0])
+
 	return id, err == nil && id >= 0
 }
 
-func readWebAction(w http.ResponseWriter, r *http.Request, dst *webActionRequest) error {
+func readWebAction(
+	w http.ResponseWriter,
+	r *http.Request,
+	dst *webActionRequest,
+) error {
 	if r.ContentLength > 4096 {
 		return fmt.Errorf("body too large")
 	}
@@ -244,6 +324,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, ok := parsePlayerIDPath(r.URL.Path)
+
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{
 			"ok":    false,
@@ -252,7 +333,11 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
+	parts := strings.Split(
+		strings.TrimSuffix(r.URL.Path, "/"),
+		"/",
+	)
+
 	action := parts[len(parts)-1]
 
 	var req webActionRequest
@@ -276,8 +361,6 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		cmd := fmt.Sprintf("say %d %s", id, msg)
-
 		if !webCommandAllowed("say") {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"ok":    false,
@@ -286,7 +369,18 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_, acked, err := webRun(cmd, 2*time.Second, false)
+		cmd := fmt.Sprintf(
+			"say %d %s",
+			id,
+			msg,
+		)
+
+		_, acked, err := webRun(
+			cmd,
+			2*time.Second,
+			false,
+		)
+
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{
 				"ok":    false,
@@ -299,10 +393,16 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			"ok":    acked,
 			"acked": acked,
 		})
+
 		return
 	}
 
-	out, _, err := webRun("players", 3*time.Second, true)
+	out, _, err := webRun(
+		"players",
+		3*time.Second,
+		true,
+	)
+
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"ok":        false,
@@ -314,6 +414,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, found := findWebPlayer(out, id)
+
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]any{
 			"ok":    false,
@@ -337,9 +438,18 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		cmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
+		cmd := fmt.Sprintf(
+			"kick %d %s",
+			p.ID,
+			req.Reason,
+		)
 
-		_, acked, err := webRun(cmd, 1500*time.Millisecond, false)
+		_, acked, err := webRun(
+			cmd,
+			1500*time.Millisecond,
+			false,
+		)
+
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{
 				"ok":    false,
@@ -352,6 +462,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			"ok":    acked,
 			"acked": acked,
 		})
+
 		return
 	}
 
@@ -418,11 +529,13 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		code := http.StatusOK
+
 		if !ok {
 			code = http.StatusBadGateway
 		}
 
 		writeJSON(w, code, resp)
+
 		return
 	}
 
@@ -432,29 +545,456 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-var playersPage = template.Must(template.New("players").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DayZ Players</title>
-<style>body{font-family:system-ui,sans-serif;margin:24px;background:#111;color:#eee}table{width:100%;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #333;text-align:left}button{margin-right:5px;padding:6px 10px}#status{margin-bottom:15px;color:#aaa}.modal{display:none;position:fixed;inset:0;background:#0009;align-items:center;justify-content:center}.box{background:#222;padding:20px;border-radius:8px;width:min(420px,90vw)}input,textarea{box-sizing:border-box;width:100%;margin:6px 0 14px;padding:9px;background:#111;color:#eee;border:1px solid #555}.buttons{text-align:right}.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;word-break:break-all}</style></head>
-<body><h1>DayZ Players</h1><div id="status">Connecting...</div><table><thead><tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Actions</th></tr></thead><tbody id="players"></tbody></table>
-<div id="modal" class="modal"><div class="box"><h2 id="title"></h2><div id="durationWrap"><label>Duration (minutes)</label><input id="minutes" type="number" min="1" step="1"></div><label id="textLabel"></label><textarea id="text" rows="4"></textarea><div class="buttons"><button onclick="closeModal()">Cancel</button><button id="submit">Submit</button></div></div></div>
+var playersPage = template.Must(
+	template.New("players").Parse(`<!doctype html>
+<html>
+
+<head>
+
+<meta charset="utf-8">
+
+<meta
+	name="viewport"
+	content="width=device-width,initial-scale=1"
+>
+
+<title>DayZ Players</title>
+
+<style>
+
+body {
+	font-family: system-ui, sans-serif;
+	margin: {{.PageMargin}};
+	background: #111;
+	color: #eee;
+}
+
+table {
+	width: {{.TableWidth}};
+	border-collapse: collapse;
+	table-layout: fixed;
+}
+
+th,
+td {
+	padding: {{.CellPadding}};
+	height: {{.RowHeight}};
+	border-bottom: 1px solid #333;
+	text-align: left;
+	font-size: {{.BodyFontSize}};
+	vertical-align: middle;
+	overflow: hidden;
+}
+
+th {
+	font-size: {{.HeaderFontSize}};
+}
+
+td:nth-child(2) {
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+td:nth-child(3),
+td:nth-child(4) {
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+button {
+	margin-right: 5px;
+	padding: {{.ButtonPadding}};
+}
+
+#status {
+	margin-bottom: 15px;
+	color: #aaa;
+}
+
+.modal {
+	display: none;
+	position: fixed;
+	inset: 0;
+	background: #0009;
+	align-items: center;
+	justify-content: center;
+}
+
+.box {
+	background: #222;
+	padding: {{.ModalPadding}};
+	border-radius: 8px;
+	width: min({{.ModalWidth}}, 90vw);
+}
+
+input,
+textarea {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 6px 0 14px;
+	padding: {{.InputPadding}};
+	background: #111;
+	color: #eee;
+	border: 1px solid #555;
+}
+
+.buttons {
+	text-align: right;
+}
+
+.mono {
+	font-family: ui-monospace, Consolas, monospace;
+	font-size: 12px;
+	word-break: break-all;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>DayZ Players</h1>
+
+<div id="status">Connecting...</div>
+
+<table>
+
+	<colgroup>
+		<col style="width: {{.IDWidth}}">
+		<col style="width: {{.PlayerWidth}}">
+		<col style="width: {{.IPWidth}}">
+		<col style="width: {{.GUIDWidth}}">
+		<col style="width: {{.PingWidth}}">
+		<col style="width: {{.ActionsWidth}}">
+	</colgroup>
+
+	<thead>
+
+		<tr>
+			<th>ID</th>
+			<th>Player</th>
+			<th>IP</th>
+			<th>GUID</th>
+			<th>Ping</th>
+			<th>Actions</th>
+		</tr>
+
+	</thead>
+
+	<tbody id="players"></tbody>
+
+</table>
+
+<div id="modal" class="modal">
+
+	<div class="box">
+
+		<h2 id="title"></h2>
+
+		<div id="durationWrap">
+
+			<label>Duration (minutes)</label>
+
+			<input
+				id="minutes"
+				type="number"
+				min="1"
+				step="1"
+			>
+
+		</div>
+
+		<label id="textLabel"></label>
+
+		<textarea
+			id="text"
+			rows="4"
+		></textarea>
+
+		<div class="buttons">
+
+			<button onclick="closeModal()">
+				Cancel
+			</button>
+
+			<button id="submit">
+				Submit
+			</button>
+
+		</div>
+
+	</div>
+
+</div>
+
 <script>
-let current=null, action=null;
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function api(url,opt={}){return fetch(url,opt)}
-async function refresh(){try{let r=await api('/api/players');let d=await r.json();if(!d.ok){document.getElementById('status').textContent='Server unavailable — retrying...';return}document.getElementById('status').textContent='Connected — '+d.count+' player(s)';document.getElementById('players').innerHTML=d.players.map(function(p){let n=esc(p.name);return '<tr><td>'+p.id+'</td><td>'+n+'</td><td class="mono">'+esc(p.ip)+'</td><td class="mono">'+esc(p.guid)+'</td><td>'+p.ping+'</td><td><button data-id="'+p.id+'" data-action="message" data-name="'+n+'" onclick="handleActionClick(this)">Message</button><button data-id="'+p.id+'" data-action="kick" data-name="'+n+'" onclick="handleActionClick(this)">Kick</button><button data-id="'+p.id+'" data-action="ban" data-name="'+n+'" onclick="handleActionClick(this)">Ban</button></td></tr>';}).join('')}catch(e){document.getElementById('status').textContent='Server unavailable — retrying...'}}
-function handleActionClick(btn){openModal(parseInt(btn.getAttribute('data-id'),10),btn.getAttribute('data-action'),btn.getAttribute('data-name'))}
-function openModal(id,a,name){current=id;action=a;document.getElementById('title').textContent=a[0].toUpperCase()+a.slice(1)+' '+name;document.getElementById('durationWrap').style.display=a==='ban'?'block':'none';document.getElementById('textLabel').textContent=a==='message'?'Message':'Reason';document.getElementById('text').value='';document.getElementById('minutes').value='';document.getElementById('modal').style.display='flex';}
-function closeModal(){document.getElementById('modal').style.display='none'}
-document.getElementById('submit').onclick=async()=>{let body=action==='message'?{message:document.getElementById('text').value}:{reason:document.getElementById('text').value,minutes:parseInt(document.getElementById('minutes').value,10)};if(action==='ban'&&(!Number.isInteger(body.minutes)||body.minutes<=0)){alert('Duration must be a whole number of minutes greater than 0.');return}let r=await api('/api/players/'+current+'/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let d=await r.json();if(!d.ok){alert(d.error||'Action failed');return}closeModal();refresh()};
-refresh();setInterval(refresh,5000);
-</script></body></html>`))
+
+let current = null;
+let action = null;
+
+function esc(s) {
+
+	return String(s).replace(
+		/[&<>"']/g,
+		c => ({
+			'&':'&amp;',
+			'<':'&lt;',
+			'>':'&gt;',
+			'"':'&quot;',
+			"'":'&#39;'
+		}[c])
+	);
+
+}
+
+async function api(url, opt = {}) {
+	return fetch(url, opt);
+}
+
+async function refresh() {
+
+	try {
+
+		let r = await api('/api/players');
+
+		let d = await r.json();
+
+		if (!d.ok) {
+
+			document.getElementById('status').textContent =
+				'Server unavailable — retrying...';
+
+			return;
+		}
+
+		document.getElementById('status').textContent =
+			'Connected — ' + d.count + ' player(s)';
+
+		document.getElementById('players').innerHTML =
+			d.players.map(function(p) {
+
+				let n = esc(p.name);
+
+				return '<tr>' +
+
+					'<td>' +
+						p.id +
+					'</td>' +
+
+					'<td>' +
+						n +
+					'</td>' +
+
+					'<td class="mono">' +
+						esc(p.ip) +
+					'</td>' +
+
+					'<td class="mono">' +
+						esc(p.guid) +
+					'</td>' +
+
+					'<td>' +
+						p.ping +
+					'</td>' +
+
+					'<td>' +
+
+						'<button ' +
+							'data-id="' + p.id + '" ' +
+							'data-action="message" ' +
+							'data-name="' + n + '" ' +
+							'onclick="handleActionClick(this)">' +
+							'Message' +
+						'</button>' +
+
+						'<button ' +
+							'data-id="' + p.id + '" ' +
+							'data-action="kick" ' +
+							'data-name="' + n + '" ' +
+							'onclick="handleActionClick(this)">' +
+							'Kick' +
+						'</button>' +
+
+						'<button ' +
+							'data-id="' + p.id + '" ' +
+							'data-action="ban" ' +
+							'data-name="' + n + '" ' +
+							'onclick="handleActionClick(this)">' +
+							'Ban' +
+						'</button>' +
+
+					'</td>' +
+
+				'</tr>';
+
+			}).join('');
+
+	} catch(e) {
+
+		document.getElementById('status').textContent =
+			'Server unavailable — retrying...';
+
+	}
+
+}
+
+function handleActionClick(btn) {
+
+	openModal(
+		parseInt(
+			btn.getAttribute('data-id'),
+			10
+		),
+		btn.getAttribute('data-action'),
+		btn.getAttribute('data-name')
+	);
+
+}
+
+function openModal(id, a, name) {
+
+	current = id;
+	action = a;
+
+	document.getElementById('title').textContent =
+		a[0].toUpperCase() +
+		a.slice(1) +
+		' ' +
+		name;
+
+	document.getElementById('durationWrap').style.display =
+		a === 'ban'
+			? 'block'
+			: 'none';
+
+	document.getElementById('textLabel').textContent =
+		a === 'message'
+			? 'Message'
+			: 'Reason';
+
+	document.getElementById('text').value = '';
+
+	document.getElementById('minutes').value = '';
+
+	document.getElementById('modal').style.display = 'flex';
+
+}
+
+function closeModal() {
+
+	document.getElementById('modal').style.display = 'none';
+
+}
+
+document.getElementById('submit').onclick = async () => {
+
+	let body =
+		action === 'message'
+
+			? {
+				message:
+					document.getElementById('text').value
+			}
+
+			: {
+				reason:
+					document.getElementById('text').value,
+
+				minutes:
+					parseInt(
+						document.getElementById('minutes').value,
+						10
+					)
+			};
+
+	if (
+		action === 'ban' &&
+		(
+			!Number.isInteger(body.minutes) ||
+			body.minutes <= 0
+		)
+	) {
+
+		alert(
+			'Duration must be a whole number of minutes greater than 0.'
+		);
+
+		return;
+	}
+
+	let r = await api(
+		'/api/players/' +
+		current +
+		'/' +
+		action,
+		{
+			method: 'POST',
+
+			headers: {
+				'Content-Type': 'application/json'
+			},
+
+			body: JSON.stringify(body)
+		}
+	);
+
+	let d = await r.json();
+
+	if (!d.ok) {
+
+		alert(
+			d.error ||
+			'Action failed'
+		);
+
+		return;
+	}
+
+	closeModal();
+
+	refresh();
+
+};
+
+refresh();
+
+setInterval(
+	refresh,
+	{{.RefreshInterval.Milliseconds}}
+);
+
+</script>
+
+</body>
+
+</html>`),
+)
 
 func handlePlayersPage(w http.ResponseWriter, r *http.Request) {
+
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(
+			w,
+			"method not allowed",
+			http.StatusMethodNotAllowed,
+		)
+
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	playersPage.Execute(w, nil)
+	w.Header().Set(
+		"Content-Type",
+		"text/html; charset=utf-8",
+	)
+
+	if err := playersPage.Execute(w, webUI); err != nil {
+		http.Error(
+			w,
+			"template error",
+			http.StatusInternalServerError,
+		)
+
+		return
+	}
 }
