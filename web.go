@@ -164,6 +164,34 @@ func webReason(s string) string {
 
 func webCommandAllowed(command string) bool { return permitted(command) }
 
+// startPoller tracks players in the background so the DB stays current
+// without the web UI open. It is the only caller of SyncPlayers.
+func startPoller(interval time.Duration) {
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		fails := 0
+		for range t.C {
+			out, acked, err := webRun("players", 3*time.Second, false)
+			if err != nil || !acked {
+				fails++
+				// Server probably down: close open sessions once so
+				// playtime doesn't keep accruing while it's offline.
+				if fails == 3 {
+					if err := globalDB.SyncPlayers(nil); err != nil {
+						log.Printf("poller: close sessions: %v", err)
+					}
+				}
+				continue
+			}
+			fails = 0
+			if err := globalDB.SyncPlayers(parseWebPlayers(out)); err != nil {
+				log.Printf("poller: sync: %v", err)
+			}
+		}
+	}()
+}
+
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use GET"})
@@ -175,11 +203,6 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	players := parseWebPlayers(out)
-	if globalDB != nil {
-		if err := globalDB.SyncPlayers(players); err != nil {
-			log.Printf("error syncing players to DB: %v", err)
-		}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": true, "players": players, "count": len(players)})
 }
 

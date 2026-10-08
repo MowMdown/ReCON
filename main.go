@@ -650,6 +650,11 @@ func main() {
 		return
 	}
 
+	// Drop sessions left open by a previous run so restart gaps aren't counted as playtime.
+	if _, err := globalDB.Exec("DELETE FROM active_sessions"); err != nil {
+		log.Printf("failed to clear stale sessions: %v", err)
+	}
+
 	for _, p := range strings.Split(os.Getenv("ALLOWED_PREFIXES"), ",") {
 		if p = strings.TrimSpace(strings.ToLower(p)); p != "" {
 			allowed = append(allowed, p)
@@ -674,6 +679,7 @@ func main() {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      120 * time.Second,
 	}
+	startPoller(5 * time.Second)
 	log.Printf("listening on %s -> RCON %s", addr, rconAddr)
 	log.Fatal(srv.ListenAndServe())
 }
