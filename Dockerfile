@@ -1,13 +1,22 @@
+# --- Stage 1: Build ---
 FROM golang:1.22-alpine AS build
+
+RUN apk add --no-cache gcc musl-dev sqlite-dev
+
 WORKDIR /src
+
 COPY go.mod ./
 COPY go.sum* ./
 RUN go mod download
-
 COPY *.go ./
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /rcon-bridge .
+
+# Enable CGO so SQLite bindings compile correctly
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /rcon-bridge .
 
 FROM alpine:3.20
+
+# Install runtime dependencies required for SQLite and SSL
+RUN apk add --no-cache sqlite-libs ca-certificates tzdata
 
 # Configure Unraid standard user/group (nobody:users -> 99:100)
 RUN getent group 100 || addgroup -g 100 users && \
