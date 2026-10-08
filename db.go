@@ -31,7 +31,7 @@ func InitDB(filepath string) (*DB, error) {
 	schema := `
 	CREATE TABLE IF NOT EXISTS players (
 		guid TEXT PRIMARY KEY,
-		last_name TEXT NOT NULL,
+		username TEXT NOT NULL,
 		last_ip TEXT NOT NULL,
 		first_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -167,14 +167,14 @@ func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
 		_, err = tx.Exec(`
 			INSERT INTO players (
 				guid,
-				last_name,
+				username,
 				last_ip,
 				first_seen,
 				last_seen
 			)
 			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(guid) DO UPDATE SET
-				last_name = excluded.last_name,
+				username = excluded.username,
 				last_ip = excluded.last_ip,
 				last_seen = excluded.last_seen`,
 			guid,
