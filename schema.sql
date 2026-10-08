@@ -24,4 +24,16 @@ CREATE TABLE IF NOT EXISTS session_history (
     FOREIGN KEY(guid) REFERENCES players(guid) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_session_history_guid ON session_history(guid);
+CREATE TABLE IF NOT EXISTS bans (
+    guid TEXT PRIMARY KEY,
+    player_name TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    perm INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_history_guid
+    ON session_history(guid);
+
+CREATE INDEX IF NOT EXISTS idx_bans_player_name
+    ON bans(player_name);
