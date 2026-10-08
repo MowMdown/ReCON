@@ -23,7 +23,6 @@ import (
 var (
 	rconAddr     string
 	rconPassword string
-	allowed      []string
 	globalDB     *DB
 )
 
@@ -437,26 +436,10 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func permitted(command string) bool {
-	if len(allowed) == 0 {
-		return true
-	}
-	for _, p := range allowed {
-		if strings.HasPrefix(strings.ToLower(command), p) {
-			return true
-		}
-	}
-	return false
-}
-
 func runCommand(w http.ResponseWriter, command string) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": "no command"})
-		return
-	}
-	if !permitted(command) {
-		writeJSON(w, 403, map[string]any{"ok": false, "error": "command not allowed"})
 		return
 	}
 	out, acked, err := rcon(command, 2*time.Second)
@@ -513,10 +496,6 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Reason == "" {
 		body.Reason = "Server restarting"
-	}
-	if !permitted("players") || !permitted("kick") || (body.Lock && !permitted("#lock")) || (body.Shutdown && !permitted("#shutdown")) {
-		writeJSON(w, 403, map[string]any{"ok": false, "error": "command not allowed"})
-		return
 	}
 	rep, err := kickAll(body.Reason, body.Lock, body.Shutdown)
 	if err != nil {
@@ -655,12 +634,6 @@ func main() {
 		log.Printf("failed to clear stale sessions: %v", err)
 	}
 
-	for _, p := range strings.Split(os.Getenv("ALLOWED_PREFIXES"), ",") {
-		if p = strings.TrimSpace(strings.ToLower(p)); p != "" {
-			allowed = append(allowed, p)
-		}
-	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
@@ -670,6 +643,9 @@ func main() {
 	mux.HandleFunc("/players", handlePlayersPage)
 	mux.HandleFunc("/api/players", handlePlayersJSON)
 	mux.HandleFunc("/api/players/", handlePlayerAction)
+	mux.HandleFunc("/bans", handleBansPage)
+	mux.HandleFunc("/api/bans", handleBansJSON)
+	mux.HandleFunc("/api/bans/", handleBanAction)
 
 	addr := env("LISTEN_ADDR", ":8080")
 	srv := &http.Server{
