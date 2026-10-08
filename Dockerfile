@@ -14,7 +14,8 @@ FROM alpine:3.20
 
 RUN apk add --no-cache \
     ca-certificates \
-    tzdata
+    tzdata \
+    sqlite
     
 RUN addgroup -g 100 users 2>/dev/null || true && \
     mkdir -p /data && \
