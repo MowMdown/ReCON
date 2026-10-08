@@ -1,0 +1,38 @@
+services:
+  rcon-bridge-deerisle:
+    container_name: dayz-rcon-bridge-deerisle
+    build: ./rcon-bridge
+    restart: unless-stopped
+    networks: 
+      - proxy-net
+    environment:
+      RCON_HOST: 10.0.1.40
+      RCON_PORT: "2305"
+      RCON_PASSWORD: ${RCON_PASSWORD1}
+      ALLOWED_PREFIXES: ${PREFIXES}
+      DB_PATH: /data/players.db
+    volumes:
+      - /mnt/user/appdata/rcon/deerisle:/data
+    ports:
+      - "9998:8080"
+
+  rcon-bridge-namalsk:
+    container_name: dayz-rcon-bridge-namalsk
+    build: ./rcon-bridge
+    restart: unless-stopped
+    networks: 
+      - proxy-net
+    environment:
+      RCON_HOST: 10.0.1.40
+      RCON_PORT: "2309"
+      RCON_PASSWORD: ${RCON_PASSWORD2}
+      ALLOWED_PREFIXES: ${PREFIXES}
+      DB_PATH: /data/players.db
+    volumes:
+      - /mnt/user/appdata/rcon/namalsk:/data
+    ports:
+      - "9997:8080"
+
+networks:
+  proxy-net:
+    external: true
