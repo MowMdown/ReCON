@@ -1,14 +1,3 @@
-// HTTP -> BattlEye RCON bridge (stdlib only).
-//
-//    POST /rcon  {"command":"say -1 Restart in 5 minutes"}  (or text/plain body)
-//    GET  /rcon?cmd=players
-//    POST /kickall {"reason":"Server restarting","lock":false,"shutdown":false}  (kicks highest player # down to 0)
-//    GET  /health                                                            (no auth)
-//
-// Env: RCON_HOST (127.0.0.1) RCON_PORT (2306) RCON_PASSWORD (required)
-//
-//    LISTEN_ADDR (:8080)
-//    ALLOWED_PREFIXES optional, comma list e.g. "say,players,#lock,#unlock,#shutdown"
 package main
 
 import (
@@ -35,6 +24,7 @@ var (
 	rconAddr     string
 	rconPassword string
 	allowed      []string
+	globalDB     *DB
 )
 
 func env(key, def string) string {
@@ -138,14 +128,14 @@ func (s *session) run(command string, wait time.Duration) (string, bool, error) 
 		if !ok {
 			continue
 		}
-		if t == 2 && len(p) > 0 { // server push message: must be acked
+		if t == 2 && len(p) > 0 {
 			s.conn.Write(build(2, p[:1]))
 			continue
 		}
-		if t == 1 && len(p) > 0 && p[0] == seq { // reply to this command
+		if t == 1 && len(p) > 0 && p[0] == seq {
 			acked = true
 			body := p[1:]
-			if len(body) >= 3 && body[0] == 0 { // multipart: 0x00 | total | index
+			if len(body) >= 3 && body[0] == 0 {
 				parts[body[2]] = append([]byte(nil), body[3:]...)
 				if len(parts) == int(body[1]) {
 					break
@@ -181,8 +171,8 @@ var keepaliveEvery = 30 * time.Second
 
 type live struct {
 	conn    net.Conn
-	mu      sync.Mutex // guards writing to conn and seq counter
-	cmd     sync.Mutex // held for the whole of run(), so commands can't take each other's replies
+	mu      sync.Mutex
+	cmd     sync.Mutex
 	seq     byte
 	replies chan []byte
 	done    chan struct{}
@@ -199,9 +189,18 @@ func (l *live) write(pkt []byte) error {
 }
 
 func dialLive(enableKeepalive bool) (*live, error) {
+	host, portStr, err := net.SplitHostPort(rconAddr)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{
-		IP:   net.ParseIP(rconHost),
-		Port: rconPort,
+		IP:   net.ParseIP(host),
+		Port: port,
 	})
 	if err != nil {
 		return nil, err
@@ -218,7 +217,6 @@ func dialLive(enableKeepalive bool) (*live, error) {
 
 	l := &live{
 		conn:    conn,
-		buf:     buf,
 		replies: make(chan []byte, 32),
 		done:    make(chan struct{}),
 		stop:    make(chan struct{}),
@@ -263,7 +261,7 @@ func (l *live) reader() {
 			continue
 		}
 		switch t {
-		case 2: // server push message: must be acknowledged safely
+		case 2:
 			l.write(build(2, p[:1]))
 		case 1:
 			select {
@@ -306,7 +304,7 @@ func (l *live) run(command string, wait time.Duration) (string, bool, error) {
 	}
 
 	l.mu.Lock()
-	for len(l.replies) > 0 { // drain stale keepalive/command ACKs
+	for len(l.replies) > 0 {
 		<-l.replies
 	}
 	seq := l.seq
@@ -330,7 +328,7 @@ loop:
 			}
 			acked = true
 			body := p[1:]
-			if len(body) >= 3 && body[0] == 0 { // multipart: 0x00 | total | index
+			if len(body) >= 3 && body[0] == 0 {
 				parts[body[2]] = append([]byte(nil), body[3:]...)
 				if len(parts) == int(body[1]) {
 					break loop
@@ -639,6 +637,14 @@ func main() {
 		log.Fatal("RCON_PASSWORD is required")
 	}
 	rconAddr = net.JoinHostPort(env("RCON_HOST", "127.0.0.1"), env("RCON_PORT", "2306"))
+
+	dbPath := env("DB_PATH", "/data/players.db")
+	var err error
+	globalDB, err = InitDB(dbPath)
+	if err != nil {
+		log.Fatalf("failed to initialize database: %v", err)
+	}
+
 	if len(os.Args) > 1 {
 		cli(os.Args[1:])
 		return

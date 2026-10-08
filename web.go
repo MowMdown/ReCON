@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,17 +22,14 @@ type webPlayer struct {
 }
 
 var webUI = struct {
-	// Layout
 	PageMargin string
 
-	// Table
-	TableWidth      string
-	CellPadding     string
-	RowHeight       string
-	HeaderFontSize  string
-	BodyFontSize    string
+	TableWidth     string
+	CellPadding    string
+	RowHeight      string
+	HeaderFontSize string
+	BodyFontSize   string
 
-	// Table columns
 	IDWidth      string
 	PlayerWidth  string
 	IPWidth      string
@@ -39,28 +37,22 @@ var webUI = struct {
 	PingWidth    string
 	ActionsWidth string
 
-	// Modal
 	ModalWidth   string
 	ModalPadding string
 
-	// Controls
 	InputPadding  string
 	ButtonPadding string
 
-	// Behavior
 	RefreshInterval time.Duration
 }{
-	// Layout
 	PageMargin: "24px",
 
-	// Table
 	TableWidth:     "100%",
 	CellPadding:    "9px",
 	RowHeight:      "42px",
 	HeaderFontSize: "14px",
 	BodyFontSize:   "14px",
 
-	// Table columns
 	IDWidth:      "60px",
 	PlayerWidth:  "220px",
 	IPWidth:      "150px",
@@ -68,15 +60,12 @@ var webUI = struct {
 	PingWidth:    "80px",
 	ActionsWidth: "240px",
 
-	// Modal
 	ModalWidth:   "420px",
 	ModalPadding: "20px",
 
-	// Controls
 	InputPadding:  "9px",
 	ButtonPadding: "6px 10px",
 
-	// Behavior
 	RefreshInterval: 5 * time.Second,
 }
 
@@ -107,9 +96,6 @@ func webConnect() (*live, error) {
 	return s, nil
 }
 
-// webRun executes commands with retry control based on action type.
-// allowRetry is true for read-only calls (e.g. players),
-// false for state-mutating actions.
 func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
 	maxAttempts := 1
 
@@ -138,9 +124,6 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 			lastErr = err
 		}
 
-		// Only throw the shared session away if it is really dead.
-		// A single lost packet must not kill it for every other
-		// request using the same connection.
 		if err != nil || !s.alive() {
 			webRCON.Lock()
 
@@ -170,8 +153,6 @@ func parseWebPlayers(out string) []webPlayer {
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 
-		// Expected:
-		// ID IP:PORT PING GUID NAME...
 		if len(fields) < 5 {
 			continue
 		}
@@ -191,11 +172,8 @@ func parseWebPlayers(out string) []webPlayer {
 			continue
 		}
 
-		// Do not validate or otherwise restrict the GUID contents.
-		// It may contain '-' or other characters.
 		guid := fields[3]
 
-		// Remove BattlEye's status suffix, e.g. "(OK)" or "(?)".
 		if idx := strings.IndexByte(guid, '('); idx != -1 {
 			guid = guid[:idx]
 		}
@@ -262,6 +240,12 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	players := parseWebPlayers(out)
+
+	if globalDB != nil {
+		if err := globalDB.SyncPlayers(players); err != nil {
+			log.Printf("error syncing players to DB: %v", err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
