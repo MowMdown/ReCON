@@ -37,14 +37,14 @@ import (
 // Player is one row of the BattlEye `players` output, also the JSON shape
 // returned by /api/players.
 type Player struct {
-    ID                  int    `json:"id"`
-    IP                  string `json:"ip"`
-    Port                string `json:"port"`
-    Ping                int    `json:"ping"`
-    GUID                string `json:"guid"`
-    Name                string `json:"name"`
-    Offline             bool   `json:"offline"`
-    TotalPlaytimeSecs   int64  `json:"totalPlaytimeSeconds"`
+	ID                int    `json:"id"`
+	IP                string `json:"ip"`
+	Port              string `json:"port"`
+	Ping              int    `json:"ping"`
+	GUID              string `json:"guid"`
+	Name              string `json:"name"`
+	Offline           bool   `json:"offline"`
+	TotalPlaytimeSecs int64  `json:"totalPlaytimeSeconds"`
 }
 
 // Ban is one entry of the GUID section of the BattlEye `bans` output, also the
@@ -815,6 +815,7 @@ nav a.active { color: #eee; font-weight: bold; }
 //
 // Note: player data is passed through data-* attributes rather than inline JS
 // strings, which avoids quoting/injection problems with odd player names.
+
 var playersPage = template.Must(template.Must(baseTemplate.Clone()).New("players").Parse(`<!doctype html>
 <html>
 <head>
@@ -825,6 +826,7 @@ var playersPage = template.Must(template.Must(baseTemplate.Clone()).New("players
 <style>
 td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
+.offline-section { margin-top: 42px; }
 </style>
 </head>
 <body>
@@ -845,6 +847,23 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 	</thead>
 	<tbody id="players"></tbody>
 </table>
+
+<div class="offline-section">
+	<h2>Offline Players</h2>
+	<table>
+		<colgroup>
+			<col style="width: {{.PlayerWidth}}">
+			<col style="width: {{.IPWidth}}">
+			<col style="width: {{.GUIDWidth}}">
+			<col>
+		</colgroup>
+		<thead>
+			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th></tr>
+		</thead>
+		<tbody id="offlinePlayers"></tbody>
+	</table>
+</div>
+
 <div id="modal" class="modal">
 	<div class="box">
 		<h2 id="title"></h2>
@@ -892,6 +911,22 @@ async function refresh() {
 					'<button data-id="' + p.id + '" data-action="kick" data-name="' + n + '" onclick="handleActionClick(this)">Kick</button>' +
 					'<button data-id="' + p.id + '" data-action="ban" data-name="' + n + '" onclick="handleActionClick(this)">Ban</button>' +
 				'</td>' +
+			'</tr>';
+		}).join('');
+
+		// Render offline players returned by the database.
+		document.getElementById('offlinePlayers').innerHTML = (d.offlinePlayers || []).map(function(p) {
+			let seconds = Math.max(0, Number(p.totalPlaytimeSeconds) || 0);
+			let days = Math.floor(seconds / 86400);
+			let hours = Math.floor((seconds % 86400) / 3600);
+			let minutes = Math.floor((seconds % 3600) / 60);
+			let playtime = (days ? days + 'd ' : '') + (hours ? hours + 'h ' : '') + minutes + 'm';
+
+			return '<tr>' +
+				'<td>' + esc(p.name) + '</td>' +
+				'<td class="mono">' + esc(p.ip) + '</td>' +
+				'<td class="mono">' + esc(p.guid) + '</td>' +
+				'<td>' + playtime + '</td>' +
 			'</tr>';
 		}).join('');
 	} catch(e) {
