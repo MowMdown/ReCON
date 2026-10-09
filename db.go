@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -233,5 +234,99 @@ func (db *DB) BanUser(
 		reason,
 		perm,
 	)
+	return err
+}
+
+// SyncBans mirrors the BattlEye GUID ban list into the bans table:
+// bans missing from the DB are inserted (name/IP looked up from players),
+// existing rows get their reason/perm refreshed, and rows no longer in
+// BattlEye (expired or removed) are deleted. Callers must pass a list
+// parsed from a complete, recognised `bans` reply.
+func (db *DB) SyncBans(bans []webBan) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	live := make(map[string]struct{}, len(bans))
+	for _, b := range bans {
+		g := strings.ToLower(b.GUID)
+		if _, dup := live[g]; dup {
+			continue // BattlEye can list the same GUID more than once
+		}
+		live[g] = struct{}{}
+		perm := 0
+		if b.Perm {
+			perm = 1
+		}
+		_, err := tx.Exec(`
+			INSERT INTO bans (guid, player_name, ip, reason, perm)
+			VALUES (
+				?,
+				COALESCE((SELECT username FROM players WHERE guid = ?), 'Unknown'),
+				COALESCE((SELECT last_ip FROM players WHERE guid = ?), ''),
+				?, ?
+			)
+			ON CONFLICT(guid) DO UPDATE SET
+				reason = excluded.reason,
+				perm = excluded.perm`,
+			g, g, g, b.Reason, perm,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	rows, err := tx.Query("SELECT guid FROM bans")
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for rows.Next() {
+		var g string
+		if err := rows.Scan(&g); err != nil {
+			rows.Close()
+			return err
+		}
+		if _, ok := live[strings.ToLower(g)]; !ok {
+			stale = append(stale, g)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	for _, g := range stale {
+		if _, err := tx.Exec("DELETE FROM bans WHERE guid = ?", g); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// BanNames returns guid (lowercase) -> player_name for every row in bans.
+func (db *DB) BanNames() (map[string]string, error) {
+	rows, err := db.Query("SELECT guid, player_name FROM bans")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := map[string]string{}
+	for rows.Next() {
+		var g, n string
+		if err := rows.Scan(&g, &n); err != nil {
+			return nil, err
+		}
+		names[strings.ToLower(g)] = n
+	}
+	return names, rows.Err()
+}
+
+// DeleteBan removes a ban row by GUID (case-insensitive).
+func (db *DB) DeleteBan(guid string) error {
+	_, err := db.Exec("DELETE FROM bans WHERE lower(guid) = lower(?)", guid)
 	return err
 }

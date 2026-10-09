@@ -86,7 +86,7 @@ func webConnect() (*live, error) {
 		webRCON.s.close()
 		webRCON.s = nil
 	}
-	s, err := dialLive(false)
+	s, err := dialLive("web", false)
 	if err != nil {
 		return nil, err
 	}

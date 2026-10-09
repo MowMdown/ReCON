@@ -89,14 +89,15 @@ type session struct {
 	conn net.Conn
 	buf  []byte
 	seq  byte
+	src  string
 }
 
-func dial() (*session, error) {
+func dial(src string) (*session, error) {
 	conn, err := net.Dial("udp", rconAddr)
 	if err != nil {
 		return nil, err
 	}
-	s := &session{conn: conn, buf: make([]byte, 65535)}
+	s := &session{conn: conn, buf: make([]byte, 65535), src: src}
 	if err := login(conn, s.buf); err != nil {
 		conn.Close()
 		return nil, err
@@ -107,6 +108,10 @@ func dial() (*session, error) {
 func (s *session) close() { s.conn.Close() }
 
 func (s *session) run(command string, wait time.Duration) (string, bool, error) {
+	return logged(s.src, command, func() (string, bool, error) { return s.runRaw(command, wait) })
+}
+
+func (s *session) runRaw(command string, wait time.Duration) (string, bool, error) {
 	seq := s.seq
 	s.seq++
 	if _, err := s.conn.Write(build(1, append([]byte{seq}, command...))); err != nil {
@@ -157,8 +162,8 @@ func (s *session) run(command string, wait time.Duration) (string, bool, error) 
 	return sb.String(), acked, nil
 }
 
-func rcon(command string, wait time.Duration) (string, bool, error) {
-	s, err := dial()
+func rcon(src, command string, wait time.Duration) (string, bool, error) {
+	s, err := dial(src)
 	if err != nil {
 		return "", false, err
 	}
@@ -169,6 +174,7 @@ func rcon(command string, wait time.Duration) (string, bool, error) {
 var keepaliveEvery = 30 * time.Second
 
 type live struct {
+	src     string
 	conn    net.Conn
 	mu      sync.Mutex
 	cmd     sync.Mutex
@@ -187,7 +193,7 @@ func (l *live) write(pkt []byte) error {
 	return err
 }
 
-func dialLive(enableKeepalive bool) (*live, error) {
+func dialLive(src string, enableKeepalive bool) (*live, error) {
 	host, portStr, err := net.SplitHostPort(rconAddr)
 	if err != nil {
 		return nil, err
@@ -215,6 +221,7 @@ func dialLive(enableKeepalive bool) (*live, error) {
 	_ = conn.SetReadDeadline(time.Time{})
 
 	l := &live{
+		src:     src,
 		conn:    conn,
 		replies: make(chan []byte, 32),
 		done:    make(chan struct{}),
@@ -296,6 +303,10 @@ func (l *live) alive() bool {
 }
 
 func (l *live) run(command string, wait time.Duration) (string, bool, error) {
+	return logged(l.src, command, func() (string, bool, error) { return l.runRaw(command, wait) })
+}
+
+func (l *live) runRaw(command string, wait time.Duration) (string, bool, error) {
 	l.cmd.Lock()
 	defer l.cmd.Unlock()
 	if l.dead() {
@@ -381,8 +392,8 @@ type runner interface {
 	run(command string, wait time.Duration) (string, bool, error)
 }
 
-func kickAll(reason string, lock, shutdown bool) (*kickReport, error) {
-	s, err := dial()
+func kickAll(src, reason string, lock, shutdown bool) (*kickReport, error) {
+	s, err := dial(src)
 	if err != nil {
 		return nil, err
 	}
@@ -430,6 +441,38 @@ func kickAllOn(s runner, reason string, lock, shutdown bool) (*kickReport, error
 	return rep, nil
 }
 
+// logged runs an RCON command and logs it to stdout with its source
+// ("web", "console", "cli", "http", "http-kickall") and whether the server
+// acknowledged it. The web poller's routine `players`/`bans` reads and empty
+// keepalive probes are skipped so the log only shows real actions.
+func logged(src, command string, f func() (string, bool, error)) (string, bool, error) {
+	out, acked, err := f()
+	if command != "" && !(src == "web" && (command == "players" || command == "bans")) {
+		log.Printf("rcon[%s] > %q (acked=%v err=%v)", src, command, acked, err)
+	}
+	return out, acked, err
+}
+
+// logRequests logs every HTTP request except the pages' routine polling.
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		quiet := r.Method == http.MethodGet && (r.URL.Path == "/health" || r.URL.Path == "/players" ||
+			r.URL.Path == "/bans" || r.URL.Path == "/api/players" || r.URL.Path == "/api/bans")
+		if !quiet {
+			from := r.RemoteAddr
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				from += " (xff " + xff + ")"
+			}
+			target := r.URL.Path
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			log.Printf("http %s %s from %s ua=%q", r.Method, target, from, r.UserAgent())
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -442,7 +485,7 @@ func runCommand(w http.ResponseWriter, command string) {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": "no command"})
 		return
 	}
-	out, acked, err := rcon(command, 2*time.Second)
+	out, acked, err := rcon("http", command, 2*time.Second)
 	if err != nil {
 		writeJSON(w, 502, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -497,7 +540,7 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	if body.Reason == "" {
 		body.Reason = "Server restarting"
 	}
-	rep, err := kickAll(body.Reason, body.Lock, body.Shutdown)
+	rep, err := kickAll("http-kickall", body.Reason, body.Lock, body.Shutdown)
 	if err != nil {
 		writeJSON(w, 502, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -540,13 +583,15 @@ func printResult(out string, acked bool, err error) bool {
 
 func cli(args []string) {
 	if args[0] == "kickall" {
-		if !printKickReport(kickAll(strings.Join(args[1:], " "), false, false)) {
+		rep, err := kickAll("cli", strings.Join(args[1:], " "), false, false)
+		if !printKickReport(rep, err) {
 			os.Exit(1)
 		}
 		return
 	}
 	if args[0] != "-i" {
-		if !printResult(rcon(strings.Join(args, " "), 2*time.Second)) {
+		out, acked, err := rcon("cli", strings.Join(args, " "), 2*time.Second)
+		if !printResult(out, acked, err) {
 			os.Exit(1)
 		}
 		return
@@ -567,7 +612,7 @@ func repl() {
 			l.close()
 			l = nil
 		}
-		nl, err := dialLive(true)
+		nl, err := dialLive("console", true)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return false
@@ -650,7 +695,7 @@ func main() {
 	addr := env("LISTEN_ADDR", ":8080")
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           logRequests(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      120 * time.Second,
