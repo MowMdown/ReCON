@@ -282,19 +282,19 @@ SQLite in WAL mode at `DB_PATH` (default `/data/players.db`). It can be read whi
 
 Total playtime only increases when a player disconnects, so a player who is online right now is not counted until they leave.
 
-### Views with friendlier column names
+### Views
 
-Read-only views for browsing. The tables above are what the bridge writes to.
+Easier-to-read versions of the tables, for browsing with sqlite3. They are read-only.
 
-| View              | Replaces          | Columns                                                                                           |
-| ----------------- | ----------------- | ------------------------------------------------------------------------------------------------- |
-| `view_players`    | `players`         | player_name, player_guid, last_ip_address, first_joined, last_seen, playtime_seconds, playtime    |
-| `view_online`     | `active_sessions` | player_name, player_guid, ip_address, connected_at                                                |
-| `view_sessions`   | `session_history` | session_id, player_name, player_guid, ip_address, connected_at, disconnected_at, duration_seconds, duration |
-| `view_player_ips` | `player_ips`      | player_name, player_guid, ip_address, first_used, last_used                                       |
-| `view_bans`       | `bans`            | player_name, player_guid, ip_address_when_banned, ban_reason, ban_type                            |
+| View              | Shows                                                     |
+| ----------------- | --------------------------------------------------------- |
+| `view_players`    | Every player with their last IP and total playtime        |
+| `view_online`     | Who is online right now                                   |
+| `view_sessions`   | Each visit with its start, end and length                 |
+| `view_player_ips` | Every IP each player has connected from                   |
+| `view_bans`       | The ban list, marked Permanent or Timed                   |
 
-`playtime` and `duration` are readable text such as `1h 30m`. `ban_type` is `Permanent` or `Timed`.
+Playtime and session lengths are shown as readable text such as `1h 30m`, next to the raw seconds.
 
 ---
 
@@ -471,8 +471,4 @@ Compose does not rebuild an existing image on its own. From the project folder:
 docker compose up -d --build rcon-bridge
 ```
 
-If the build seems to use old code, force a clean build with `docker compose build --no-cache rcon-bridge`. After upgrading from an older version, the database picks up new tables and views on startup. If your existing `players` table still has a `last_name` column, rename it once with the bridge stopped:
-
-```bash
-sqlite3 /data/players.db "ALTER TABLE players RENAME COLUMN last_name TO username;"
-```
+If the build seems to use old code, force a clean build with `docker compose build --no-cache rcon-bridge`.
