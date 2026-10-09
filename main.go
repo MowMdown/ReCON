@@ -21,26 +21,26 @@ import (
 )
 
 var (
-	rconAddr     string
-	rconPassword string
-	globalDB     *DB
+	rconAddress    string
+	rconPassword   string
+	globalDatabase *Database
 )
 
-func env(key, def string) string {
+func environmentOrDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return def
 }
 
-func build(ptype byte, payload []byte) []byte {
+func buildPacket(ptype byte, payload []byte) []byte {
 	body := append([]byte{0xFF, ptype}, payload...)
 	pkt := []byte{'B', 'E', 0, 0, 0, 0}
 	binary.LittleEndian.PutUint32(pkt[2:6], crc32.ChecksumIEEE(body))
 	return append(pkt, body...)
 }
 
-func parse(data []byte) (ptype byte, payload []byte, ok bool) {
+func parsePacket(data []byte) (ptype byte, payload []byte, ok bool) {
 	if len(data) < 8 || data[0] != 'B' || data[1] != 'E' {
 		return 0, nil, false
 	}
@@ -60,7 +60,7 @@ var errLoginRejected = errors.New("RCON login rejected (wrong password or IP not
 
 func login(conn net.Conn, buf []byte) error {
 	for attempt := 0; attempt < 3; attempt++ {
-		if _, err := conn.Write(build(0, []byte(rconPassword))); err != nil {
+		if _, err := conn.Write(buildPacket(0, []byte(rconPassword))); err != nil {
 			return err
 		}
 		conn.SetReadDeadline(time.Now().Add(time.Second))
@@ -72,7 +72,7 @@ func login(conn net.Conn, buf []byte) error {
 				}
 				return err
 			}
-			t, p, ok := parse(buf[:n])
+			t, p, ok := parsePacket(buf[:n])
 			if !ok || t != 0 {
 				continue
 			}
@@ -85,19 +85,19 @@ func login(conn net.Conn, buf []byte) error {
 	return errors.New("no reply to RCON login after 3 tries: RCon not enabled (no RConPassword), wrong port, or UDP blocked")
 }
 
-type session struct {
+type oneShotConnection struct {
 	conn net.Conn
 	buf  []byte
 	seq  byte
 	src  string
 }
 
-func dial(src string) (*session, error) {
-	conn, err := net.Dial("udp", rconAddr)
+func dialOneShot(src string) (*oneShotConnection, error) {
+	conn, err := net.Dial("udp", rconAddress)
 	if err != nil {
 		return nil, err
 	}
-	s := &session{conn: conn, buf: make([]byte, 65535), src: src}
+	s := &oneShotConnection{conn: conn, buf: make([]byte, 65535), src: src}
 	if err := login(conn, s.buf); err != nil {
 		conn.Close()
 		return nil, err
@@ -105,16 +105,16 @@ func dial(src string) (*session, error) {
 	return s, nil
 }
 
-func (s *session) close() { s.conn.Close() }
+func (s *oneShotConnection) close() { s.conn.Close() }
 
-func (s *session) run(command string, wait time.Duration) (string, bool, error) {
-	return logged(s.src, command, func() (string, bool, error) { return s.runRaw(command, wait) })
+func (s *oneShotConnection) run(command string, wait time.Duration) (string, bool, error) {
+	return runLogged(s.src, command, func() (string, bool, error) { return s.runRaw(command, wait) })
 }
 
-func (s *session) runRaw(command string, wait time.Duration) (string, bool, error) {
+func (s *oneShotConnection) runRaw(command string, wait time.Duration) (string, bool, error) {
 	seq := s.seq
 	s.seq++
-	if _, err := s.conn.Write(build(1, append([]byte{seq}, command...))); err != nil {
+	if _, err := s.conn.Write(buildPacket(1, append([]byte{seq}, command...))); err != nil {
 		return "", false, err
 	}
 	s.conn.SetReadDeadline(time.Now().Add(wait))
@@ -128,12 +128,12 @@ func (s *session) runRaw(command string, wait time.Duration) (string, bool, erro
 			}
 			return "", false, err
 		}
-		t, p, ok := parse(s.buf[:n])
+		t, p, ok := parsePacket(s.buf[:n])
 		if !ok {
 			continue
 		}
 		if t == 2 && len(p) > 0 {
-			s.conn.Write(build(2, p[:1]))
+			s.conn.Write(buildPacket(2, p[:1]))
 			continue
 		}
 		if t == 1 && len(p) > 0 && p[0] == seq {
@@ -162,8 +162,8 @@ func (s *session) runRaw(command string, wait time.Duration) (string, bool, erro
 	return sb.String(), acked, nil
 }
 
-func rcon(src, command string, wait time.Duration) (string, bool, error) {
-	s, err := dial(src)
+func sendOneShot(src, command string, wait time.Duration) (string, bool, error) {
+	s, err := dialOneShot(src)
 	if err != nil {
 		return "", false, err
 	}
@@ -173,28 +173,28 @@ func rcon(src, command string, wait time.Duration) (string, bool, error) {
 
 var keepaliveEvery = 30 * time.Second
 
-type live struct {
-	src     string
-	conn    net.Conn
-	mu      sync.Mutex
-	cmd     sync.Mutex
-	seq     byte
-	replies chan []byte
-	done    chan struct{}
-	stop    chan struct{}
-	once    sync.Once
-	err     error
+type persistentConnection struct {
+	src         string
+	conn        net.Conn
+	writeLock   sync.Mutex
+	commandLock sync.Mutex
+	seq         byte
+	replies     chan []byte
+	done        chan struct{}
+	stop        chan struct{}
+	once        sync.Once
+	err         error
 }
 
-func (l *live) write(pkt []byte) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+func (l *persistentConnection) write(pkt []byte) error {
+	l.writeLock.Lock()
+	defer l.writeLock.Unlock()
 	_, err := l.conn.Write(pkt)
 	return err
 }
 
-func dialLive(src string, enableKeepalive bool) (*live, error) {
-	host, portStr, err := net.SplitHostPort(rconAddr)
+func dialPersistent(src string, enableKeepalive bool) (*persistentConnection, error) {
+	host, portStr, err := net.SplitHostPort(rconAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func dialLive(src string, enableKeepalive bool) (*live, error) {
 
 	_ = conn.SetReadDeadline(time.Time{})
 
-	l := &live{
+	l := &persistentConnection{
 		src:     src,
 		conn:    conn,
 		replies: make(chan []byte, 32),
@@ -237,14 +237,14 @@ func dialLive(src string, enableKeepalive bool) (*live, error) {
 	return l, nil
 }
 
-func (l *live) close() {
+func (l *persistentConnection) close() {
 	l.once.Do(func() {
 		close(l.stop)
 		l.conn.Close()
 	})
 }
 
-func (l *live) dead() bool {
+func (l *persistentConnection) isClosed() bool {
 	select {
 	case <-l.done:
 		return true
@@ -253,7 +253,7 @@ func (l *live) dead() bool {
 	}
 }
 
-func (l *live) reader() {
+func (l *persistentConnection) reader() {
 	buf := make([]byte, 65535)
 	for {
 		n, err := l.conn.Read(buf)
@@ -262,13 +262,13 @@ func (l *live) reader() {
 			close(l.done)
 			return
 		}
-		t, p, ok := parse(buf[:n])
+		t, p, ok := parsePacket(buf[:n])
 		if !ok || len(p) == 0 {
 			continue
 		}
 		switch t {
 		case 2:
-			l.write(build(2, p[:1]))
+			l.write(buildPacket(2, p[:1]))
 		case 1:
 			select {
 			case l.replies <- append([]byte(nil), p...):
@@ -278,17 +278,17 @@ func (l *live) reader() {
 	}
 }
 
-func (l *live) keepalive() {
+func (l *persistentConnection) keepalive() {
 	t := time.NewTicker(keepaliveEvery)
 	defer t.Stop()
 	for {
 		select {
 		case <-t.C:
-			l.mu.Lock()
+			l.writeLock.Lock()
 			seq := l.seq
 			l.seq++
-			l.mu.Unlock()
-			l.write(build(1, []byte{seq}))
+			l.writeLock.Unlock()
+			l.write(buildPacket(1, []byte{seq}))
 		case <-l.stop:
 			return
 		case <-l.done:
@@ -297,31 +297,31 @@ func (l *live) keepalive() {
 	}
 }
 
-func (l *live) alive() bool {
+func (l *persistentConnection) isResponsive() bool {
 	_, acked, err := l.run("", 2*time.Second)
 	return err == nil && acked
 }
 
-func (l *live) run(command string, wait time.Duration) (string, bool, error) {
-	return logged(l.src, command, func() (string, bool, error) { return l.runRaw(command, wait) })
+func (l *persistentConnection) run(command string, wait time.Duration) (string, bool, error) {
+	return runLogged(l.src, command, func() (string, bool, error) { return l.runRaw(command, wait) })
 }
 
-func (l *live) runRaw(command string, wait time.Duration) (string, bool, error) {
-	l.cmd.Lock()
-	defer l.cmd.Unlock()
-	if l.dead() {
+func (l *persistentConnection) runRaw(command string, wait time.Duration) (string, bool, error) {
+	l.commandLock.Lock()
+	defer l.commandLock.Unlock()
+	if l.isClosed() {
 		return "", false, l.err
 	}
 
-	l.mu.Lock()
+	l.writeLock.Lock()
 	for len(l.replies) > 0 {
 		<-l.replies
 	}
 	seq := l.seq
 	l.seq++
-	l.mu.Unlock()
+	l.writeLock.Unlock()
 
-	if err := l.write(build(1, append([]byte{seq}, command...))); err != nil {
+	if err := l.write(buildPacket(1, append([]byte{seq}, command...))); err != nil {
 		return "", false, err
 	}
 
@@ -388,20 +388,20 @@ type kickReport struct {
 	ShutdownError string `json:"shutdown_error,omitempty"`
 }
 
-type runner interface {
+type commandRunner interface {
 	run(command string, wait time.Duration) (string, bool, error)
 }
 
 func kickAll(src, reason string, lock, shutdown bool) (*kickReport, error) {
-	s, err := dial(src)
+	s, err := dialOneShot(src)
 	if err != nil {
 		return nil, err
 	}
 	defer s.close()
-	return kickAllOn(s, reason, lock, shutdown)
+	return kickAllUsing(s, reason, lock, shutdown)
 }
 
-func kickAllOn(s runner, reason string, lock, shutdown bool) (*kickReport, error) {
+func kickAllUsing(s commandRunner, reason string, lock, shutdown bool) (*kickReport, error) {
 	reason = strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(reason))
 	if lock {
 		if _, _, err := s.run("#lock", 2*time.Second); err != nil {
@@ -441,11 +441,11 @@ func kickAllOn(s runner, reason string, lock, shutdown bool) (*kickReport, error
 	return rep, nil
 }
 
-// logged runs an RCON command and logs it to stdout with its source
+// runLogged runs an RCON command and logs it to stdout with its source
 // ("web", "console", "cli", "http", "http-kickall") and whether the server
 // acknowledged it. The web poller's routine `players`/`bans` reads and empty
 // keepalive probes are skipped so the log only shows real actions.
-func logged(src, command string, f func() (string, bool, error)) (string, bool, error) {
+func runLogged(src, command string, f func() (string, bool, error)) (string, bool, error) {
 	out, acked, err := f()
 	if command != "" && !(src == "web" && (command == "players" || command == "bans")) {
 		log.Printf("rcon[%s] > %q (acked=%v err=%v)", src, command, acked, err)
@@ -473,6 +473,10 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
+func fail(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]any{"ok": false, "error": msg})
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -482,12 +486,12 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func runCommand(w http.ResponseWriter, command string) {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		writeJSON(w, 400, map[string]any{"ok": false, "error": "no command"})
+		fail(w, 400, "no command")
 		return
 	}
-	out, acked, err := rcon("http", command, 2*time.Second)
+	out, acked, err := sendOneShot("http", command, 2*time.Second)
 	if err != nil {
-		writeJSON(w, 502, map[string]any{"ok": false, "error": err.Error()})
+		fail(w, 502, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "command": command, "acked": acked, "output": out})
@@ -500,7 +504,7 @@ func handleRcon(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
 		if err != nil {
-			writeJSON(w, 400, map[string]any{"ok": false, "error": "bad body"})
+			fail(w, 400, "bad body")
 			return
 		}
 		cmd := string(raw)
@@ -509,20 +513,20 @@ func handleRcon(w http.ResponseWriter, r *http.Request) {
 				Command string `json:"command"`
 			}
 			if err := json.Unmarshal(raw, &body); err != nil {
-				writeJSON(w, 400, map[string]any{"ok": false, "error": "bad JSON"})
+				fail(w, 400, "bad JSON")
 				return
 			}
 			cmd = body.Command
 		}
 		runCommand(w, cmd)
 	default:
-		writeJSON(w, 405, map[string]any{"ok": false, "error": "method not allowed"})
+		fail(w, 405, "method not allowed")
 	}
 }
 
 func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, 405, map[string]any{"ok": false, "error": "use POST"})
+		fail(w, 405, "use POST")
 		return
 	}
 	var body struct {
@@ -533,7 +537,7 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
 	if len(strings.TrimSpace(string(raw))) > 0 {
 		if err := json.Unmarshal(raw, &body); err != nil {
-			writeJSON(w, 400, map[string]any{"ok": false, "error": "bad JSON"})
+			fail(w, 400, "bad JSON")
 			return
 		}
 	}
@@ -542,7 +546,7 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	}
 	rep, err := kickAll("http-kickall", body.Reason, body.Lock, body.Shutdown)
 	if err != nil {
-		writeJSON(w, 502, map[string]any{"ok": false, "error": err.Error()})
+		fail(w, 502, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "result": rep})
@@ -581,7 +585,7 @@ func printResult(out string, acked bool, err error) bool {
 	return true
 }
 
-func cli(args []string) {
+func runCommandLine(args []string) {
 	if args[0] == "kickall" {
 		rep, err := kickAll("cli", strings.Join(args[1:], " "), false, false)
 		if !printKickReport(rep, err) {
@@ -590,18 +594,18 @@ func cli(args []string) {
 		return
 	}
 	if args[0] != "-i" {
-		out, acked, err := rcon("cli", strings.Join(args, " "), 2*time.Second)
+		out, acked, err := sendOneShot("cli", strings.Join(args, " "), 2*time.Second)
 		if !printResult(out, acked, err) {
 			os.Exit(1)
 		}
 		return
 	}
-	repl()
+	runConsole()
 }
 
-func repl() {
+func runConsole() {
 	fmt.Println("Interactive RCON console (logs in once and stays logged in). Type 'exit' to quit.")
-	var l *live
+	var l *persistentConnection
 	defer func() {
 		if l != nil {
 			l.close()
@@ -612,7 +616,7 @@ func repl() {
 			l.close()
 			l = nil
 		}
-		nl, err := dialLive("console", true)
+		nl, err := dialPersistent("console", true)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return false
@@ -630,7 +634,7 @@ func repl() {
 		if line == "" {
 			continue
 		}
-		if l == nil || l.dead() {
+		if l == nil || l.isClosed() {
 			fmt.Println("(not connected, logging in...)")
 			if !connect() {
 				continue
@@ -640,7 +644,7 @@ func repl() {
 		var err error
 		if line == "kickall" || strings.HasPrefix(line, "kickall ") {
 			var rep *kickReport
-			rep, err = kickAllOn(l, strings.TrimPrefix(line, "kickall"), false, false)
+			rep, err = kickAllUsing(l, strings.TrimPrefix(line, "kickall"), false, false)
 			printKickReport(rep, err)
 			acked = err == nil
 		} else {
@@ -648,7 +652,7 @@ func repl() {
 			out, acked, err = l.run(line, 2*time.Second)
 			printResult(out, acked, err)
 		}
-		if (err != nil || !acked) && !l.alive() {
+		if (err != nil || !acked) && !l.isResponsive() {
 			fmt.Println("(session lost, logging in again...)")
 			connect()
 		}
@@ -660,22 +664,22 @@ func main() {
 	if rconPassword == "" {
 		log.Fatal("RCON_PASSWORD is required")
 	}
-	rconAddr = net.JoinHostPort(env("RCON_HOST", "127.0.0.1"), env("RCON_PORT", "2306"))
+	rconAddress = net.JoinHostPort(environmentOrDefault("RCON_HOST", "127.0.0.1"), environmentOrDefault("RCON_PORT", "2306"))
 
-	dbPath := env("DB_PATH", "/data/players.db")
+	dbPath := environmentOrDefault("DB_PATH", "/data/players.db")
 	var err error
-	globalDB, err = InitDB(dbPath)
+	globalDatabase, err = OpenDatabase(dbPath)
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 
 	if len(os.Args) > 1 {
-		cli(os.Args[1:])
+		runCommandLine(os.Args[1:])
 		return
 	}
 
 	// Drop sessions left open by a previous run so restart gaps aren't counted as playtime.
-	if _, err := globalDB.Exec("DELETE FROM active_sessions"); err != nil {
+	if _, err := globalDatabase.Exec("DELETE FROM active_sessions"); err != nil {
 		log.Printf("failed to clear stale sessions: %v", err)
 	}
 
@@ -692,7 +696,7 @@ func main() {
 	mux.HandleFunc("/api/bans", handleBansJSON)
 	mux.HandleFunc("/api/bans/", handleBanAction)
 
-	addr := env("LISTEN_ADDR", ":8080")
+	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           logRequests(mux),
@@ -700,7 +704,7 @@ func main() {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      120 * time.Second,
 	}
-	startPoller(5 * time.Second)
-	log.Printf("listening on %s -> RCON %s", addr, rconAddr)
+	startBackgroundSync(5 * time.Second)
+	log.Printf("listening on %s -> RCON %s", addr, rconAddress)
 	log.Fatal(srv.ListenAndServe())
 }

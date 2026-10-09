@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-type webPlayer struct {
+type Player struct {
 	ID   int    `json:"id"`
 	IP   string `json:"ip"`
 	Port string `json:"port"`
@@ -22,7 +22,7 @@ type webPlayer struct {
 	Name string `json:"name"`
 }
 
-type webBan struct {
+type Ban struct {
 	Index   int    `json:"index"`
 	GUID    string `json:"guid"`
 	Name    string `json:"name"`
@@ -31,7 +31,7 @@ type webBan struct {
 	Reason  string `json:"reason"`
 }
 
-var webUI = struct {
+var pageSettings = struct {
 	PageMargin          string
 	TableWidth          string
 	CellPadding         string
@@ -71,37 +71,37 @@ var webUI = struct {
 	BansRefreshInterval: 10 * time.Second,
 }
 
-var webRCON = struct {
+var sharedConnection = struct {
 	sync.Mutex
-	s *live
+	connection *persistentConnection
 }{}
 
-func webConnect() (*live, error) {
-	webRCON.Lock()
-	defer webRCON.Unlock()
-	if webRCON.s != nil && !webRCON.s.dead() {
-		return webRCON.s, nil
+func connectShared() (*persistentConnection, error) {
+	sharedConnection.Lock()
+	defer sharedConnection.Unlock()
+	if sharedConnection.connection != nil && !sharedConnection.connection.isClosed() {
+		return sharedConnection.connection, nil
 	}
-	if webRCON.s != nil {
-		webRCON.s.close()
-		webRCON.s = nil
+	if sharedConnection.connection != nil {
+		sharedConnection.connection.close()
+		sharedConnection.connection = nil
 	}
-	s, err := dialLive("web", false)
+	s, err := dialPersistent("web", false)
 	if err != nil {
 		return nil, err
 	}
-	webRCON.s = s
+	sharedConnection.connection = s
 	return s, nil
 }
 
-func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
+func runShared(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
 		maxAttempts = 3
 	}
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		s, err := webConnect()
+		s, err := connectShared()
 		if err != nil {
 			lastErr = err
 			time.Sleep(1 * time.Second)
@@ -114,13 +114,13 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 		if err != nil {
 			lastErr = err
 		}
-		if err != nil || !s.alive() {
-			webRCON.Lock()
-			if webRCON.s == s {
+		if err != nil || !s.isResponsive() {
+			sharedConnection.Lock()
+			if sharedConnection.connection == s {
 				s.close()
-				webRCON.s = nil
+				sharedConnection.connection = nil
 			}
-			webRCON.Unlock()
+			sharedConnection.Unlock()
 		}
 		if allowRetry {
 			time.Sleep(1 * time.Second)
@@ -132,8 +132,8 @@ func webRun(command string, wait time.Duration, allowRetry bool) (string, bool, 
 	return "", false, lastErr
 }
 
-func parseWebPlayers(out string) []webPlayer {
-	players := []webPlayer{}
+func parsePlayers(out string) []Player {
+	players := []Player{}
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 5 {
@@ -156,35 +156,35 @@ func parseWebPlayers(out string) []webPlayer {
 			guid = guid[:idx]
 		}
 		name := strings.Join(fields[4:], " ")
-		players = append(players, webPlayer{ID: id, IP: host, Port: port, Ping: ping, GUID: guid, Name: name})
+		players = append(players, Player{ID: id, IP: host, Port: port, Ping: ping, GUID: guid, Name: name})
 	}
 	return players
 }
 
-func findWebPlayer(out string, id int) (webPlayer, bool) {
-	for _, p := range parseWebPlayers(out) {
+func findPlayer(out string, id int) (Player, bool) {
+	for _, p := range parsePlayers(out) {
 		if p.ID == id {
 			return p, true
 		}
 	}
-	return webPlayer{}, false
+	return Player{}, false
 }
 
-func webReason(s string) string {
+func cleanReason(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(s))
 }
 
-// banOpMu serialises everything that changes or mirrors the ban list
+// banListLock serialises everything that changes or mirrors the ban list
 // (ban, unban, and BattlEye->DB sync) so a sync can't act on a stale
 // list and delete a ban that was just added.
-var banOpMu sync.Mutex
+var banListLock sync.Mutex
 
-func doBan(w http.ResponseWriter, p webPlayer, req webActionRequest) {
-	banOpMu.Lock()
-	defer banOpMu.Unlock()
+func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
+	banListLock.Lock()
+	defer banListLock.Unlock()
 	// BattlEye ban is GUID-only.
 	guidCmd := fmt.Sprintf("addBan %s %d %s", p.GUID, req.Minutes, req.Reason)
-	_, guidAck, guidErr := webRun(guidCmd, 1500*time.Millisecond, false)
+	_, guidAck, guidErr := runShared(guidCmd, 1500*time.Millisecond, false)
 	if guidErr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "guid_ban": false, "guid_error": guidErr.Error()})
 		return
@@ -197,7 +197,7 @@ func doBan(w http.ResponseWriter, p webPlayer, req webActionRequest) {
 	// The ban is already in place, so a failed kick doesn't fail the request.
 	kicked := false
 	kickCmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
-	_, kickAck, kickErr := webRun(kickCmd, 1500*time.Millisecond, false)
+	_, kickAck, kickErr := runShared(kickCmd, 1500*time.Millisecond, false)
 	kicked = kickErr == nil && kickAck
 	if !kicked {
 		log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
@@ -209,7 +209,7 @@ func doBan(w http.ResponseWriter, p webPlayer, req webActionRequest) {
 	}
 	// Record the GUID, player name, and current IP in SQLite.
 	// The IP is informational only and is NOT banned.
-	if err := globalDB.BanUser(p.GUID, p.Name, p.IP, req.Reason, perm); err != nil {
+	if err := globalDatabase.BanUser(p.GUID, p.Name, p.IP, req.Reason, perm); err != nil {
 		log.Printf("error recording ban in DB: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "guid_ban": true, "db_updated": false, "kicked": kicked, "error": "GUID ban succeeded but database update failed"})
 		return
@@ -217,10 +217,10 @@ func doBan(w http.ResponseWriter, p webPlayer, req webActionRequest) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "kicked": kicked, "perm": perm == 1})
 }
 
-// startPoller tracks players (and periodically the ban list) in the
+// startBackgroundSync tracks players (and periodically the ban list) in the
 // background so the DB stays current without any web page open.
 // It is the only caller of SyncPlayers.
-func startPoller(interval time.Duration) {
+func startBackgroundSync(interval time.Duration) {
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -228,25 +228,25 @@ func startPoller(interval time.Duration) {
 		n := 0
 		for range t.C {
 			n++
-			out, acked, err := webRun("players", 3*time.Second, false)
+			out, acked, err := runShared("players", 3*time.Second, false)
 			if err != nil || !acked {
 				fails++
 				// Server probably down: close open sessions once so
 				// playtime doesn't keep accruing while it's offline.
 				if fails == 3 {
-					if err := globalDB.SyncPlayers(nil); err != nil {
+					if err := globalDatabase.SyncPlayers(nil); err != nil {
 						log.Printf("poller: close sessions: %v", err)
 					}
 				}
 				continue
 			}
 			fails = 0
-			if err := globalDB.SyncPlayers(parseWebPlayers(out)); err != nil {
+			if err := globalDatabase.SyncPlayers(parsePlayers(out)); err != nil {
 				log.Printf("poller: sync: %v", err)
 			}
 			// Ban list changes rarely: reconcile at start and every 6th poll (~30s).
 			if n%6 == 1 {
-				if _, err := syncBans(); err != nil {
+				if _, err := syncBanList(); err != nil {
 					log.Printf("poller: bans: %v", err)
 				}
 			}
@@ -256,25 +256,25 @@ func startPoller(interval time.Duration) {
 
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use GET"})
+		fail(w, http.StatusMethodNotAllowed, "use GET")
 		return
 	}
-	out, acked, err := webRun("players", 3*time.Second, true)
+	out, acked, err := runShared("players", 3*time.Second, true)
 	if err != nil || !acked {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": "RCON unavailable"})
 		return
 	}
-	players := parseWebPlayers(out)
+	players := parsePlayers(out)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": true, "players": players, "count": len(players)})
 }
 
-type webActionRequest struct {
+type actionRequest struct {
 	Reason  string `json:"reason"`
 	Minutes int    `json:"minutes"`
 	Message string `json:"message"`
 }
 
-func parsePlayerIDPath(path string) (int, bool) {
+func parsePlayerPath(path string) (int, bool) {
 	const prefix = "/api/players/"
 	if !strings.HasPrefix(path, prefix) {
 		return 0, false
@@ -288,7 +288,7 @@ func parsePlayerIDPath(path string) (int, bool) {
 	return id, err == nil && id >= 0
 }
 
-func readWebAction(w http.ResponseWriter, r *http.Request, dst *webActionRequest) error {
+func readActionRequest(w http.ResponseWriter, r *http.Request, dst *actionRequest) error {
 	if r.ContentLength > 4096 {
 		return fmt.Errorf("body too large")
 	}
@@ -297,58 +297,58 @@ func readWebAction(w http.ResponseWriter, r *http.Request, dst *webActionRequest
 
 func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use POST"})
+		fail(w, http.StatusMethodNotAllowed, "use POST")
 		return
 	}
-	id, ok := parsePlayerIDPath(r.URL.Path)
+	id, ok := parsePlayerPath(r.URL.Path)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "invalid player action"})
+		fail(w, http.StatusNotFound, "invalid player action")
 		return
 	}
 	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
 	action := parts[len(parts)-1]
-	var req webActionRequest
-	if err := readWebAction(w, r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "bad JSON"})
+	var req actionRequest
+	if err := readActionRequest(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
 		return
 	}
 
 	if action == "message" {
-		msg := webReason(req.Message)
+		msg := cleanReason(req.Message)
 		if msg == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "message is required"})
+			fail(w, http.StatusBadRequest, "message is required")
 			return
 		}
 		cmd := fmt.Sprintf("say %d %s", id, msg)
-		_, acked, err := webRun(cmd, 2*time.Second, false)
+		_, acked, err := runShared(cmd, 2*time.Second, false)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
+			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": acked, "acked": acked})
 		return
 	}
 
-	out, _, err := webRun("players", 3*time.Second, true)
+	out, _, err := runShared("players", 3*time.Second, true)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": "RCON unavailable"})
 		return
 	}
-	p, found := findWebPlayer(out, id)
+	p, found := findPlayer(out, id)
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "player is no longer connected"})
+		fail(w, http.StatusNotFound, "player is no longer connected")
 		return
 	}
-	req.Reason = webReason(req.Reason)
+	req.Reason = cleanReason(req.Reason)
 	if req.Reason == "" {
 		req.Reason = "No reason specified"
 	}
 
 	if action == "kick" {
 		cmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
-		_, acked, err := webRun(cmd, 1500*time.Millisecond, false)
+		_, acked, err := runShared(cmd, 1500*time.Millisecond, false)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
+			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": acked, "acked": acked})
@@ -357,14 +357,14 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 
 	if action == "ban" {
 		if req.Minutes < 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "minutes must be 0 or greater"})
+			fail(w, http.StatusBadRequest, "minutes must be 0 or greater")
 			return
 		}
-		doBan(w, p, req)
+		banPlayer(w, p, req)
 		return
 	}
 
-	writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "unknown action"})
+	fail(w, http.StatusNotFound, "unknown action")
 }
 
 // parseBans parses BattlEye `bans` output, e.g.
@@ -380,8 +380,8 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 // Only the GUID section is read; IP bans are ignored. ok is false when the
 // "GUID Bans" header wasn't found, so callers never treat an unrecognised
 // reply as an empty ban list.
-func parseBans(out string) (bans []webBan, ok bool) {
-	bans = []webBan{}
+func parseBans(out string) (bans []Ban, ok bool) {
+	bans = []Ban{}
 	section := ""
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -402,7 +402,7 @@ func parseBans(out string) (bans []webBan, ok bool) {
 			continue
 		}
 		idx, err := strconv.Atoi(fields[0])
-		if err != nil || !guidRe.MatchString(fields[1]) {
+		if err != nil || !guidPattern.MatchString(fields[1]) {
 			continue
 		}
 		perm := strings.EqualFold(fields[2], "perm")
@@ -411,7 +411,7 @@ func parseBans(out string) (bans []webBan, ok bool) {
 				continue
 			}
 		}
-		bans = append(bans, webBan{
+		bans = append(bans, Ban{
 			Index:   idx,
 			GUID:    strings.ToLower(fields[1]),
 			Minutes: strings.ToLower(fields[2]),
@@ -422,11 +422,11 @@ func parseBans(out string) (bans []webBan, ok bool) {
 	return bans, ok
 }
 
-var guidRe = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
+var guidPattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
 
-// fetchBans reads the live GUID ban list from BattlEye.
-func fetchBans() ([]webBan, error) {
-	out, acked, err := webRun("bans", 4*time.Second, true)
+// readBanList reads the live GUID ban list from BattlEye.
+func readBanList() ([]Ban, error) {
+	out, acked, err := runShared("bans", 4*time.Second, true)
 	if err != nil {
 		return nil, err
 	}
@@ -444,15 +444,15 @@ func fetchBans() ([]webBan, error) {
 	return bans, nil
 }
 
-// syncBans reads the BattlEye list and mirrors it into the DB.
-func syncBans() ([]webBan, error) {
-	banOpMu.Lock()
-	defer banOpMu.Unlock()
-	bans, err := fetchBans()
+// syncBanList reads the BattlEye list and mirrors it into the DB.
+func syncBanList() ([]Ban, error) {
+	banListLock.Lock()
+	defer banListLock.Unlock()
+	bans, err := readBanList()
 	if err != nil {
 		return nil, err
 	}
-	if err := globalDB.SyncBans(bans); err != nil {
+	if err := globalDatabase.SyncBans(bans); err != nil {
 		return bans, err
 	}
 	return bans, nil
@@ -460,10 +460,10 @@ func syncBans() ([]webBan, error) {
 
 func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use GET"})
+		fail(w, http.StatusMethodNotAllowed, "use GET")
 		return
 	}
-	bans, err := syncBans()
+	bans, err := syncBanList()
 	if bans == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": err.Error()})
 		return
@@ -471,10 +471,10 @@ func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("error syncing bans to DB: %v", err)
 	}
-	names, _ := globalDB.BanNames()
+	names, _ := globalDatabase.BanNames()
 	// BattlEye may list one GUID several times; show it once.
 	seen := map[string]bool{}
-	list := make([]webBan, 0, len(bans))
+	list := make([]Ban, 0, len(bans))
 	for _, b := range bans {
 		if seen[b.GUID] {
 			continue
@@ -492,25 +492,25 @@ func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 // handleBanAction serves POST /api/bans/<guid>/unban.
 func handleBanAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "use POST"})
+		fail(w, http.StatusMethodNotAllowed, "use POST")
 		return
 	}
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/bans/"), "/"), "/")
-	if len(parts) != 2 || parts[1] != "unban" || !guidRe.MatchString(parts[0]) {
-		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "invalid ban action"})
+	if len(parts) != 2 || parts[1] != "unban" || !guidPattern.MatchString(parts[0]) {
+		fail(w, http.StatusNotFound, "invalid ban action")
 		return
 	}
 	guid := strings.ToLower(parts[0])
 
-	banOpMu.Lock()
-	defer banOpMu.Unlock()
+	banListLock.Lock()
+	defer banListLock.Unlock()
 
 	// BattlEye indexes shift after every removal and the same GUID can be
 	// listed more than once, so remove one entry at a time from a fresh list
 	// until the GUID is gone.
 	removed := 0
 	for removed < 20 {
-		bans, err := fetchBans()
+		bans, err := readBanList()
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "removed": removed, "error": err.Error()})
 			return
@@ -525,7 +525,7 @@ func handleBanAction(w http.ResponseWriter, r *http.Request) {
 		if idx < 0 {
 			break
 		}
-		_, acked, err := webRun(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false)
+		_, acked, err := runShared(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "removed": removed, "error": err.Error()})
 			return
@@ -542,11 +542,11 @@ func handleBanAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	saved := false
-	_, saved, _ = webRun("writeBans", 1500*time.Millisecond, false)
+	_, saved, _ = runShared("writeBans", 1500*time.Millisecond, false)
 
 	// The list was re-read after the last removal, so BattlEye no longer
 	// has this GUID; now drop it from the database.
-	if err := globalDB.DeleteBan(guid); err != nil {
+	if err := globalDatabase.DeleteBan(guid); err != nil {
 		log.Printf("error deleting ban from DB: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "be_removed": true, "db_removed": false, "error": "unbanned in BattlEye but database update failed"})
 		return
@@ -554,7 +554,7 @@ func handleBanAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "be_removed": removed > 0, "db_removed": true, "removed": removed, "saved": saved})
 }
 
-var baseTmpl = template.Must(template.New("base").Parse(`{{define "style"}}<style>
+var baseTemplate = template.Must(template.New("base").Parse(`{{define "style"}}<style>
 body { font-family: system-ui, sans-serif; margin: {{.PageMargin}}; background: #111; color: #eee; }
 table { width: {{.TableWidth}}; border-collapse: collapse; table-layout: fixed; }
 th, td { padding: {{.CellPadding}}; height: {{.RowHeight}}; border-bottom: 1px solid #333; text-align: left; font-size: {{.BodyFontSize}}; vertical-align: middle; overflow: hidden; }
@@ -571,7 +571,7 @@ nav a { color: #8ab4f8; margin-right: 16px; text-decoration: none; }
 nav a.active { color: #eee; font-weight: bold; }
 </style>{{end}}`))
 
-var playersPage = template.Must(template.Must(baseTmpl.Clone()).New("players").Parse(`<!doctype html>
+var playersPage = template.Must(template.Must(baseTemplate.Clone()).New("players").Parse(`<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -709,13 +709,13 @@ func handlePlayersPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := playersPage.Execute(w, webUI); err != nil {
+	if err := playersPage.Execute(w, pageSettings); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}
 }
 
-var bansPage = template.Must(template.Must(baseTmpl.Clone()).New("bans").Parse(`<!doctype html>
+var bansPage = template.Must(template.Must(baseTemplate.Clone()).New("bans").Parse(`<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -810,7 +810,7 @@ func handleBansPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := bansPage.Execute(w, webUI); err != nil {
+	if err := bansPage.Execute(w, pageSettings); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}

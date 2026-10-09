@@ -9,11 +9,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type DB struct {
+type Database struct {
 	*sql.DB
 }
 
-func InitDB(filepath string) (*DB, error) {
+func OpenDatabase(filepath string) (*Database, error) {
 	db, err := sql.Open("sqlite", filepath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -60,26 +60,103 @@ func InitDB(filepath string) (*DB, error) {
 		reason TEXT NOT NULL,
 		perm INTEGER NOT NULL DEFAULT 0
 	);
+	CREATE TABLE IF NOT EXISTS player_ips (
+		guid TEXT NOT NULL,
+		ip TEXT NOT NULL,
+		first_seen DATETIME NOT NULL,
+		last_seen DATETIME NOT NULL,
+		PRIMARY KEY (guid, ip),
+		FOREIGN KEY(guid) REFERENCES players(guid) ON DELETE CASCADE
+	);
 	CREATE INDEX IF NOT EXISTS idx_session_history_guid
 		ON session_history(guid);
-	CREATE INDEX IF NOT EXISTS idx_bans_player_name
-		ON bans(player_name);
+	DROP INDEX IF EXISTS idx_bans_player_name;
+
+	-- Read-only views with friendlier column names. The tables above are
+	-- what the app writes to; these are just for browsing in sqlite3.
+	DROP VIEW IF EXISTS view_players;
+	CREATE VIEW view_players AS
+		SELECT
+			username AS player_name,
+			guid AS player_guid,
+			last_ip AS last_ip_address,
+			first_seen AS first_joined,
+			last_seen AS last_seen,
+			total_playtime_seconds AS playtime_seconds,
+			printf('%dh %02dm', total_playtime_seconds / 3600, (total_playtime_seconds % 3600) / 60) AS playtime
+		FROM players;
+
+	DROP VIEW IF EXISTS view_online;
+	CREATE VIEW view_online AS
+		SELECT
+			p.username AS player_name,
+			a.guid AS player_guid,
+			a.ip AS ip_address,
+			a.connected_at AS connected_at
+		FROM active_sessions a
+		JOIN players p ON p.guid = a.guid;
+
+	DROP VIEW IF EXISTS view_sessions;
+	CREATE VIEW view_sessions AS
+		SELECT
+			s.id AS session_id,
+			p.username AS player_name,
+			s.guid AS player_guid,
+			s.ip AS ip_address,
+			s.connected_at AS connected_at,
+			s.disconnected_at AS disconnected_at,
+			s.duration_seconds AS duration_seconds,
+			printf('%dh %02dm', s.duration_seconds / 3600, (s.duration_seconds % 3600) / 60) AS duration
+		FROM session_history s
+		JOIN players p ON p.guid = s.guid;
+
+	DROP VIEW IF EXISTS view_player_ips;
+	CREATE VIEW view_player_ips AS
+		SELECT
+			p.username AS player_name,
+			i.guid AS player_guid,
+			i.ip AS ip_address,
+			i.first_seen AS first_used,
+			i.last_seen AS last_used
+		FROM player_ips i
+		JOIN players p ON p.guid = i.guid;
+
+	DROP VIEW IF EXISTS view_bans;
+	CREATE VIEW view_bans AS
+		SELECT
+			player_name AS player_name,
+			guid AS player_guid,
+			ip AS ip_address_when_banned,
+			reason AS ban_reason,
+			CASE perm WHEN 1 THEN 'Permanent' ELSE 'Timed' END AS ban_type
+		FROM bans;
 	`
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create schema: %w", err)
 	}
-	return &DB{db}, nil
+	// Seed player_ips with every IP already recorded in session history.
+	// Safe to repeat: existing (guid, ip) rows are left alone.
+	_, err = db.Exec(`
+		INSERT OR IGNORE INTO player_ips (guid, ip, first_seen, last_seen)
+		SELECT guid, ip, MIN(connected_at), MAX(disconnected_at)
+		FROM session_history
+		GROUP BY guid, ip`)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to seed player_ips: %w", err)
+	}
+	return &Database{db}, nil
 }
 
-func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
+func (db *Database) SyncPlayers(currentPlayers []Player) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	activeMap := make(map[string]webPlayer, len(currentPlayers))
+	activeMap := make(map[string]Player, len(currentPlayers))
 	for _, p := range currentPlayers {
 		if p.GUID == "" {
 			continue
@@ -187,6 +264,20 @@ func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
 		if err != nil {
 			return err
 		}
+		// Remember every IP this player has connected from.
+		_, err = tx.Exec(`
+			INSERT INTO player_ips (guid, ip, first_seen, last_seen)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(guid, ip) DO UPDATE SET
+				last_seen = excluded.last_seen`,
+			guid,
+			p.IP,
+			now,
+			now,
+		)
+		if err != nil {
+			return err
+		}
 		if _, exists := dbSessions[guid]; !exists {
 			_, err = tx.Exec(`
 				INSERT INTO active_sessions (
@@ -207,7 +298,7 @@ func (db *DB) SyncPlayers(currentPlayers []webPlayer) error {
 	return tx.Commit()
 }
 
-func (db *DB) BanUser(
+func (db *Database) BanUser(
 	guid string,
 	playerName string,
 	ip string,
@@ -242,7 +333,7 @@ func (db *DB) BanUser(
 // existing rows get their reason/perm refreshed, and rows no longer in
 // BattlEye (expired or removed) are deleted. Callers must pass a list
 // parsed from a complete, recognised `bans` reply.
-func (db *DB) SyncBans(bans []webBan) error {
+func (db *Database) SyncBans(bans []Ban) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -308,7 +399,7 @@ func (db *DB) SyncBans(bans []webBan) error {
 }
 
 // BanNames returns guid (lowercase) -> player_name for every row in bans.
-func (db *DB) BanNames() (map[string]string, error) {
+func (db *Database) BanNames() (map[string]string, error) {
 	rows, err := db.Query("SELECT guid, player_name FROM bans")
 	if err != nil {
 		return nil, err
@@ -326,7 +417,7 @@ func (db *DB) BanNames() (map[string]string, error) {
 }
 
 // DeleteBan removes a ban row by GUID (case-insensitive).
-func (db *DB) DeleteBan(guid string) error {
+func (db *Database) DeleteBan(guid string) error {
 	_, err := db.Exec("DELETE FROM bans WHERE lower(guid) = lower(?)", guid)
 	return err
 }
