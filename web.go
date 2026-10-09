@@ -13,24 +13,53 @@ import (
 	"time"
 )
 
+// ============================================================================
+// web.go overview
+// ----------------------------------------------------------------------------
+// This file is the "management UI + JSON API" layer that sits on top of the
+// RCON plumbing in main.go. It provides:
+//
+//   - Two HTML pages (/players and /bans) rendered from Go templates
+//   - JSON endpoints the pages poll and call:
+//       GET  /api/players                  list connected players
+//       POST /api/players/<id>/message     private message to a player
+//       POST /api/players/<id>/kick        kick a player
+//       POST /api/players/<id>/ban         ban a player by GUID (+kick)
+//       GET  /api/bans                     list GUID bans (also syncs to DB)
+//       POST /api/bans/<guid>/unban        remove every ban entry for a GUID
+//   - A shared, auto-reconnecting RCON session (runShared) for all of the above
+//   - A background poller that keeps the SQLite DB in sync with the server
+//
+// Concurrency note: everything that mutates or mirrors the ban list takes
+// banListLock, so a background sync can never act on a stale list.
+// ============================================================================
+
+// Player is one row of the BattlEye `players` output, also the JSON shape
+// returned by /api/players.
 type Player struct {
-	ID   int    `json:"id"`
-	IP   string `json:"ip"`
-	Port string `json:"port"`
-	Ping int    `json:"ping"`
-	GUID string `json:"guid"`
-	Name string `json:"name"`
+	ID   int    `json:"id"`   // BattlEye player number (used by kick/say)
+	IP   string `json:"ip"`   // client IP (informational only)
+	Port string `json:"port"` // client UDP port
+	Ping int    `json:"ping"` // ping in ms
+	GUID string `json:"guid"` // BattlEye GUID (32 hex chars), the identity used for bans
+	Name string `json:"name"` // in-game name
 }
 
+// Ban is one entry of the GUID section of the BattlEye `bans` output, also the
+// JSON shape returned by /api/bans.
 type Ban struct {
-	Index   int    `json:"index"`
-	GUID    string `json:"guid"`
-	Name    string `json:"name"`
-	Minutes string `json:"minutes"`
-	Perm    bool   `json:"perm"`
+	Index   int    `json:"index"`   // position in the BattlEye list (shifts after each removal!)
+	GUID    string `json:"guid"`    // banned GUID, lower-cased
+	Name    string `json:"name"`    // last-known player name, filled from the DB (BattlEye doesn't store it)
+	Minutes string `json:"minutes"` // minutes left as text, or "perm"
+	Perm    bool   `json:"perm"`    // true for permanent bans
 	Reason  string `json:"reason"`
 }
 
+// pageSettings holds every tweakable layout value used by the HTML templates
+// (widths, paddings, font sizes) plus the browser polling intervals. It's
+// passed to the templates as their data object, so editing a value here
+// changes the page without touching the HTML.
 var pageSettings = struct {
 	PageMargin          string
 	TableWidth          string
@@ -48,8 +77,8 @@ var pageSettings = struct {
 	ModalPadding        string
 	InputPadding        string
 	ButtonPadding       string
-	RefreshInterval     time.Duration
-	BansRefreshInterval time.Duration
+	RefreshInterval     time.Duration // how often the players page polls /api/players
+	BansRefreshInterval time.Duration // how often the bans page polls /api/bans
 }{
 	PageMargin:          "24px",
 	TableWidth:          "100%",
@@ -71,11 +100,27 @@ var pageSettings = struct {
 	BansRefreshInterval: 10 * time.Second,
 }
 
+// ---------------------------------------------------------------------------
+// Shared RCON session
+// ---------------------------------------------------------------------------
+
+// sharedConnection is the single long-lived RCON session used by the web
+// layer and the background poller. The embedded Mutex protects the pointer
+// (not the commands themselves; persistentConnection serialises those).
+// Keepalive is disabled for it (see connectShared) because the 5s poller
+// already generates traffic well inside BattlEye's idle timeout.
 var sharedConnection = struct {
 	sync.Mutex
 	connection *persistentConnection
 }{}
 
+// connectShared returns the shared session, creating or replacing it as needed:
+//   - healthy existing session -> returned as is
+//   - existing but dead        -> closed, cleared, and a new one dialed
+//   - none                     -> a new one is dialed
+//
+// The lock is held during dialing, so concurrent callers wait for one login
+// rather than each opening their own.
 func connectShared() (*persistentConnection, error) {
 	sharedConnection.Lock()
 	defer sharedConnection.Unlock()
@@ -94,6 +139,19 @@ func connectShared() (*persistentConnection, error) {
 	return s, nil
 }
 
+// runShared runs a command on the shared session with optional retry/reconnect.
+//
+//   - allowRetry=false: one attempt. Used for state-changing commands (kick,
+//     ban, say, ...) so a slow-but-successful command is never repeated.
+//   - allowRetry=true: up to 3 attempts with 1s pauses. Used for read-only
+//     commands (players, bans) where repeating is harmless.
+//
+// After a failed attempt, if there was an error or the session no longer
+// answers a probe (isResponsive), the session is discarded so the next
+// attempt (or caller) logs in fresh. The pointer comparison under the lock
+// avoids discarding a newer session another goroutine already created.
+//
+// Success means err == nil AND the server acknowledged the command.
 func runShared(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
@@ -114,6 +172,7 @@ func runShared(command string, wait time.Duration, allowRetry bool) (string, boo
 		if err != nil {
 			lastErr = err
 		}
+		// Drop the session if it errored or has gone silent.
 		if err != nil || !s.isResponsive() {
 			sharedConnection.Lock()
 			if sharedConnection.connection == s {
@@ -132,6 +191,19 @@ func runShared(command string, wait time.Duration, allowRetry bool) (string, boo
 	return "", false, lastErr
 }
 
+// ---------------------------------------------------------------------------
+// Parsing helpers
+// ---------------------------------------------------------------------------
+
+// parsePlayers turns the text output of the `players` command into Player
+// structs. Each data line looks like:
+//
+//	12   203.0.113.5:2304   47   a1b2c3...(OK)   Some Name
+//
+// Fields are whitespace-separated: id, ip:port, ping, guid(status), then the
+// name (which may itself contain spaces, so all remaining fields are rejoined).
+// The "(OK)"/"(?)" verification suffix is stripped from the GUID. Header lines,
+// separators and the footer fail one of the checks and are skipped.
 func parsePlayers(out string) []Player {
 	players := []Player{}
 	for _, line := range strings.Split(out, "\n") {
@@ -161,6 +233,8 @@ func parsePlayers(out string) []Player {
 	return players
 }
 
+// findPlayer parses `players` output and returns the player with the given ID.
+// The bool is false if that ID isn't connected.
 func findPlayer(out string, id int) (Player, bool) {
 	for _, p := range parsePlayers(out) {
 		if p.ID == id {
@@ -170,15 +244,34 @@ func findPlayer(out string, id int) (Player, bool) {
 	return Player{}, false
 }
 
+// cleanReason trims whitespace and replaces CR/LF with spaces so user-supplied
+// text can't break out of a single RCON command line.
 func cleanReason(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(s))
 }
+
+// ---------------------------------------------------------------------------
+// Banning
+// ---------------------------------------------------------------------------
 
 // banListLock serialises everything that changes or mirrors the ban list
 // (ban, unban, and BattlEye->DB sync) so a sync can't act on a stale
 // list and delete a ban that was just added.
 var banListLock sync.Mutex
 
+// banPlayer bans player p and writes the JSON response itself.
+//
+// Steps:
+//  1. Lock the ban list.
+//  2. `addBan <guid> <minutes> <reason>` (GUID-only ban). Failure or no ack
+//     -> 502, nothing else happens.
+//  3. Kick the player immediately with the same reason. The ban already
+//     exists, so a failed kick is only logged and reported via "kicked".
+//  4. Record GUID/name/IP/reason/perm in SQLite. If this fails the response is
+//     500 with guid_ban=true, so the UI knows the in-game ban did succeed.
+//
+// BattlEye treats duration 0 as permanent. The IP is stored for reference
+// only and is NOT banned.
 func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
 	banListLock.Lock()
 	defer banListLock.Unlock()
@@ -217,9 +310,22 @@ func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "kicked": kicked, "perm": perm == 1})
 }
 
+// ---------------------------------------------------------------------------
+// Background sync
+// ---------------------------------------------------------------------------
+
 // startBackgroundSync tracks players (and periodically the ban list) in the
 // background so the DB stays current without any web page open.
 // It is the only caller of SyncPlayers.
+//
+// Every `interval`:
+//   - Poll `players` (single attempt, 3s wait).
+//   - On failure, count consecutive failures. At exactly 3 in a row the server
+//     is assumed down and SyncPlayers(nil) closes all open sessions once, so
+//     playtime stops accruing while it's offline.
+//   - On success, reset the failure counter and sync the parsed list into the DB.
+//   - On the 1st poll and every 6th after (~30s at a 5s interval), also
+//     reconcile the ban list, since it changes rarely.
 func startBackgroundSync(interval time.Duration) {
 	go func() {
 		t := time.NewTicker(interval)
@@ -254,6 +360,14 @@ func startBackgroundSync(interval time.Duration) {
 	}()
 }
 
+// ---------------------------------------------------------------------------
+// Player API
+// ---------------------------------------------------------------------------
+
+// handlePlayersJSON serves GET /api/players: the live player list.
+// Uses retrying runShared since this is a read. If RCON can't be reached it
+// returns 503 with retrying=true so the page shows "retrying..." instead of
+// an error.
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		fail(w, http.StatusMethodNotAllowed, "use GET")
@@ -268,12 +382,22 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": true, "players": players, "count": len(players)})
 }
 
+// actionRequest is the JSON body for the per-player action endpoints.
+// Which fields matter depends on the action:
+//
+//	kick    -> Reason
+//	ban     -> Reason, Minutes (0 = permanent)
+//	message -> Message
 type actionRequest struct {
 	Reason  string `json:"reason"`
 	Minutes int    `json:"minutes"`
 	Message string `json:"message"`
 }
 
+// parsePlayerPath validates a path of the form /api/players/<id>/<action>
+// (an optional trailing slash is allowed) and returns the numeric id.
+// ok is false for a wrong prefix, wrong segment count, or a non-numeric/negative id.
+// The action segment is extracted separately by the caller.
 func parsePlayerPath(path string) (int, bool) {
 	const prefix = "/api/players/"
 	if !strings.HasPrefix(path, prefix) {
@@ -288,6 +412,9 @@ func parsePlayerPath(path string) (int, bool) {
 	return id, err == nil && id >= 0
 }
 
+// readActionRequest decodes the JSON body into dst. The body is capped at
+// 4 KiB (rejected up front by Content-Length, and enforced while reading by
+// MaxBytesReader for requests that don't declare a length).
 func readActionRequest(w http.ResponseWriter, r *http.Request, dst *actionRequest) error {
 	if r.ContentLength > 4096 {
 		return fmt.Errorf("body too large")
@@ -295,6 +422,18 @@ func readActionRequest(w http.ResponseWriter, r *http.Request, dst *actionReques
 	return json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(dst)
 }
 
+// handlePlayerAction serves POST /api/players/<id>/<action> for
+// action = message | kick | ban.
+//
+// Flow:
+//  1. Validate method, path and JSON body.
+//  2. "message": send `say <id> <text>` right away (no lookup needed).
+//  3. Otherwise re-fetch `players` and make sure the target is still
+//     connected. This both gets the GUID/name/IP needed for a ban and guards
+//     against IDs having been reassigned since the page last refreshed.
+//  4. Default an empty reason to "No reason specified".
+//  5. "kick" runs `kick <id> <reason>`; "ban" validates minutes >= 0 and
+//     delegates to banPlayer; anything else is 404.
 func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		fail(w, http.StatusMethodNotAllowed, "use POST")
@@ -329,6 +468,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// kick/ban: confirm the player is still there (retrying read).
 	out, _, err := runShared("players", 3*time.Second, true)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": "RCON unavailable"})
@@ -367,6 +507,10 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	fail(w, http.StatusNotFound, "unknown action")
 }
 
+// ---------------------------------------------------------------------------
+// Ban list: parsing, reading, syncing
+// ---------------------------------------------------------------------------
+
 // parseBans parses BattlEye `bans` output, e.g.
 //
 //	GUID Bans:
@@ -380,6 +524,12 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 // Only the GUID section is read; IP bans are ignored. ok is false when the
 // "GUID Bans" header wasn't found, so callers never treat an unrecognised
 // reply as an empty ban list.
+//
+// The parser is a tiny state machine: `section` flips to "guid" or "ip" when
+// a header line is seen, and only lines in the "guid" section are parsed.
+// A data line needs: numeric index, a 32-hex GUID, then "perm" or a number
+// of minutes; everything after that is the reason. Lines failing any check
+// (column titles, dashes, blank lines) are skipped.
 func parseBans(out string) (bans []Ban, ok bool) {
 	bans = []Ban{}
 	section := ""
@@ -422,9 +572,13 @@ func parseBans(out string) (bans []Ban, ok bool) {
 	return bans, ok
 }
 
+// guidPattern matches a BattlEye GUID: exactly 32 hex characters. Used both to
+// recognise ban rows and to validate the GUID in unban URLs.
 var guidPattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
 
-// readBanList reads the live GUID ban list from BattlEye.
+// readBanList reads the live GUID ban list from BattlEye (retrying read,
+// 4s wait). An unrecognised reply is logged (first 500 chars) and returned
+// as an error rather than as an empty list.
 func readBanList() ([]Ban, error) {
 	out, acked, err := runShared("bans", 4*time.Second, true)
 	if err != nil {
@@ -445,6 +599,11 @@ func readBanList() ([]Ban, error) {
 }
 
 // syncBanList reads the BattlEye list and mirrors it into the DB.
+// Holds banListLock for the whole read+mirror so it can't interleave with a
+// ban/unban. Return values matter to callers:
+//   - (nil, err)   -> couldn't read the live list at all
+//   - (bans, err)  -> list was read fine, but the DB mirror failed
+//   - (bans, nil)  -> fully synced
 func syncBanList() ([]Ban, error) {
 	banListLock.Lock()
 	defer banListLock.Unlock()
@@ -458,6 +617,13 @@ func syncBanList() ([]Ban, error) {
 	return bans, nil
 }
 
+// handleBansJSON serves GET /api/bans.
+//
+// It syncs first (so viewing the page refreshes the DB too). If the live list
+// couldn't be read it returns 503; if only the DB mirror failed, it logs the
+// problem and still serves the live list. Player names come from the DB since
+// BattlEye only stores GUIDs; unknown GUIDs show as "Unknown". BattlEye can
+// list one GUID multiple times, so duplicates are collapsed to the first.
 func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		fail(w, http.StatusMethodNotAllowed, "use GET")
@@ -490,6 +656,19 @@ func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleBanAction serves POST /api/bans/<guid>/unban.
+//
+// BattlEye removes bans by list index, and indexes shift after every removal;
+// the same GUID can also appear more than once. So the handler loops:
+//
+//	re-read the list -> find the first entry for the GUID -> removeBan <index>
+//
+// until the GUID no longer appears (safety cap: 20 removals). Each iteration
+// uses a fresh list, so a stale index is never used.
+//
+// After that it runs `writeBans` to persist the list to disk (best effort,
+// reported as "saved") and deletes the GUID from the DB. Partial states are
+// reported explicitly (be_removed / db_removed) so the UI/logs can tell what
+// actually happened. The whole operation runs under banListLock.
 func handleBanAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		fail(w, http.StatusMethodNotAllowed, "use POST")
@@ -523,7 +702,7 @@ func handleBanAction(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if idx < 0 {
-			break
+			break // GUID no longer listed: done
 		}
 		_, acked, err := runShared(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false)
 		if err != nil {
@@ -541,6 +720,7 @@ func handleBanAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ask BattlEye to write bans.txt to disk. Best effort: only the ack is kept.
 	saved := false
 	_, saved, _ = runShared("writeBans", 1500*time.Millisecond, false)
 
@@ -554,6 +734,14 @@ func handleBanAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "be_removed": removed > 0, "db_removed": true, "removed": removed, "saved": saved})
 }
 
+// ---------------------------------------------------------------------------
+// HTML templates and page handlers
+// ---------------------------------------------------------------------------
+
+// baseTemplate defines a reusable "style" block (the shared CSS) that both
+// pages include with {{template "style" .}}. Layout values come from
+// pageSettings. Each page template below is created from a Clone() of this
+// base so they share the "style" definition without affecting each other.
 var baseTemplate = template.Must(template.New("base").Parse(`{{define "style"}}<style>
 body { font-family: system-ui, sans-serif; margin: {{.PageMargin}}; background: #111; color: #eee; }
 table { width: {{.TableWidth}}; border-collapse: collapse; table-layout: fixed; }
@@ -571,6 +759,20 @@ nav a { color: #8ab4f8; margin-right: 16px; text-decoration: none; }
 nav a.active { color: #eee; font-weight: bold; }
 </style>{{end}}`))
 
+// playersPage is the /players page: a table of connected players that polls
+// /api/players every RefreshInterval, with Message / Kick / Ban buttons that
+// open one shared modal dialog.
+//
+// Client-side script outline:
+//   - esc():              HTML-escapes any server data before it's put into innerHTML
+//   - refresh():          fetches /api/players and rebuilds the table rows
+//   - handleActionClick():reads data-* attributes off the clicked button and opens the modal
+//   - openModal():        configures the modal for message/kick/ban (duration field only for ban)
+//   - submit handler:     validates ban duration, POSTs JSON to /api/players/<id>/<action>,
+//                         alerts on failure, warns if the ban succeeded but the kick didn't
+//
+// Note: player data is passed through data-* attributes rather than inline JS
+// strings, which avoids quoting/injection problems with odd player names.
 var playersPage = template.Must(template.Must(baseTemplate.Clone()).New("players").Parse(`<!doctype html>
 <html>
 <head>
@@ -703,6 +905,9 @@ setInterval(refresh, {{.RefreshInterval.Milliseconds}});
 </body>
 </html>`))
 
+// handlePlayersPage serves GET /players by rendering playersPage with the
+// layout settings. Only GET is allowed. Rendering errors become a plain 500.
+// (If Execute fails midway, part of the page may already have been sent.)
 func handlePlayersPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -715,6 +920,17 @@ func handlePlayersPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// bansPage is the /bans page: a read-mostly table of GUID bans that polls
+// /api/bans every BansRefreshInterval, with an Unban button per row.
+//
+// Client-side script outline:
+//   - esc():         HTML-escapes server data before it's inserted
+//   - fmtMinutes():  turns minutes-left into "Permanent" or "Xd Yh Zm"
+//   - refresh():     fetches /api/bans and rebuilds the table; shows the
+//                    server's error text if unavailable
+//   - unban():       confirms, disables the button to prevent double clicks,
+//                    POSTs to /api/bans/<guid>/unban, alerts on failure, and
+//                    refreshes either way
 var bansPage = template.Must(template.Must(baseTemplate.Clone()).New("bans").Parse(`<!doctype html>
 <html>
 <head>
@@ -804,6 +1020,8 @@ setInterval(refresh, {{.BansRefreshInterval.Milliseconds}});
 </body>
 </html>`))
 
+// handleBansPage serves GET /bans by rendering bansPage. Same rules as
+// handlePlayersPage: GET only, plain 500 on template errors.
 func handleBansPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
