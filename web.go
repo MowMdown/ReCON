@@ -37,12 +37,14 @@ import (
 // Player is one row of the BattlEye `players` output, also the JSON shape
 // returned by /api/players.
 type Player struct {
-	ID   int    `json:"id"`   // BattlEye player number (used by kick/say)
-	IP   string `json:"ip"`   // client IP (informational only)
-	Port string `json:"port"` // client UDP port
-	Ping int    `json:"ping"` // ping in ms
-	GUID string `json:"guid"` // BattlEye GUID (32 hex chars), the identity used for bans
-	Name string `json:"name"` // in-game name
+    ID                  int    `json:"id"`
+    IP                  string `json:"ip"`
+    Port                string `json:"port"`
+    Ping                int    `json:"ping"`
+    GUID                string `json:"guid"`
+    Name                string `json:"name"`
+    Offline             bool   `json:"offline"`
+    TotalPlaytimeSecs   int64  `json:"totalPlaytimeSeconds"`
 }
 
 // Ban is one entry of the GUID section of the BattlEye `bans` output, also the
@@ -310,6 +312,33 @@ func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "kicked": kicked, "perm": perm == 1})
 }
 
+// getOfflinePlayers returns all players from the database who are not currently connected.
+func getOfflinePlayers() ([]Player, error) {
+    rows, err := globalDatabase.Query(`
+        SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds
+        FROM players p
+        WHERE NOT EXISTS (
+            SELECT 1 FROM active_sessions a WHERE a.guid = p.guid
+        )
+        ORDER BY p.username COLLATE NOCASE
+    `)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    players := []Player{}
+    for rows.Next() {
+        var p Player
+        if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs); err != nil {
+            return nil, err
+        }
+        p.Offline = true
+        players = append(players, p)
+    }
+    return players, rows.Err()
+}
+
 // ---------------------------------------------------------------------------
 // Background sync
 // ---------------------------------------------------------------------------
@@ -379,7 +408,20 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	players := parsePlayers(out)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": true, "players": players, "count": len(players)})
+
+	offlinePlayers, err := getOfflinePlayers()
+	if err != nil {
+		log.Printf("error reading offline players from DB: %v", err)
+		offlinePlayers = []Player{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"connected":      true,
+		"players":        players,
+		"count":          len(players),
+		"offlinePlayers": offlinePlayers,
+	})
 }
 
 // actionRequest is the JSON body for the per-player action endpoints.
