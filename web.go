@@ -802,7 +802,147 @@ input, textarea { box-sizing: border-box; width: 100%; margin: 6px 0 14px; paddi
 nav { margin-bottom: 16px; }
 nav a { color: #8ab4f8; margin-right: 16px; text-decoration: none; }
 nav a.active { color: #eee; font-weight: bold; }
-</style>{{end}}`))
+nav a#resetCols { float: right; margin-right: 0; color: #888; font-size: 13px; }
+th[draggable="true"] { cursor: grab; user-select: none; }
+th.dragging { opacity: 0.4; }
+th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
+th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+</style>{{end}}
+
+{{define "reorder"}}<script>
+// Drag-and-drop column reordering for every table on the page that has a
+// <thead> and a <tbody id="...">. Drag a header onto another header to move
+// the column. The order is remembered per table in localStorage, and is
+// re-applied each time the table body is re-rendered by the polling code.
+(function () {
+	var resets = [];
+
+	function readOrder(storeKey, keys) {
+		try {
+			var saved = JSON.parse(localStorage.getItem(storeKey) || 'null');
+			if (Array.isArray(saved) && saved.length === keys.length &&
+				keys.every(function (k) { return saved.indexOf(k) !== -1; })) {
+				return saved;
+			}
+		} catch (e) {}
+		return keys.slice();
+	}
+
+	function saveOrder(storeKey, order, isDefault) {
+		try {
+			if (isDefault) { localStorage.removeItem(storeKey); }
+			else { localStorage.setItem(storeKey, JSON.stringify(order)); }
+		} catch (e) {}
+	}
+
+	function setup(table) {
+		var headRow = table.tHead && table.tHead.rows[0];
+		var body = table.tBodies[0];
+		if (!headRow || !body || !body.id) { return; }
+
+		var ths = Array.prototype.slice.call(headRow.cells);
+		var keys = ths.map(function (th) { return th.textContent.trim(); });
+		var storeKey = 'cols:' + location.pathname + ':' + body.id;
+		var order = readOrder(storeKey, keys);
+
+		var thByKey = {};
+		ths.forEach(function (th, i) { thByKey[keys[i]] = th; });
+
+		// <col> elements follow their columns so the widths move too.
+		var colgroup = table.querySelector('colgroup');
+		var cols = colgroup ? Array.prototype.slice.call(colgroup.children) : [];
+		var colByKey = null;
+		if (cols.length === keys.length) {
+			colByKey = {};
+			cols.forEach(function (c, i) { colByKey[keys[i]] = c; });
+		}
+
+		// Body rows are rebuilt in the default order by the page script, so each
+		// cell is tagged with its default column key the first time it is seen.
+		function reorderRow(row) {
+			var cells = Array.prototype.slice.call(row.children);
+			if (cells.length !== keys.length) { return; } // e.g. a one-cell message row
+			var map = {};
+			cells.forEach(function (c, i) {
+				if (!c.dataset.ck) { c.dataset.ck = keys[i]; }
+				map[c.dataset.ck] = c;
+			});
+			order.forEach(function (k) { if (map[k]) { row.appendChild(map[k]); } });
+		}
+
+		function applyBody() { Array.prototype.forEach.call(body.rows, reorderRow); }
+
+		function applyAll() {
+			order.forEach(function (k) { headRow.appendChild(thByKey[k]); });
+			if (colByKey) { order.forEach(function (k) { colgroup.appendChild(colByKey[k]); }); }
+			applyBody();
+		}
+
+		// Re-apply whenever the page script replaces the rows. Moving cells inside
+		// a row doesn't change the tbody's own children, so this can't loop.
+		new MutationObserver(applyBody).observe(body, { childList: true });
+
+		var dragKey = null;
+		function clearMarks() {
+			ths.forEach(function (t) { t.classList.remove('dragging', 'drag-over-left', 'drag-over-right'); });
+		}
+
+		ths.forEach(function (th, i) {
+			var key = keys[i];
+			th.draggable = true;
+			th.title = 'Drag to reorder';
+
+			th.addEventListener('dragstart', function (e) {
+				dragKey = key;
+				e.dataTransfer.effectAllowed = 'move';
+				e.dataTransfer.setData('text/plain', key); // Firefox needs data to start a drag
+				th.classList.add('dragging');
+			});
+			th.addEventListener('dragend', function () { dragKey = null; clearMarks(); });
+			th.addEventListener('dragover', function (e) {
+				if (dragKey === null || dragKey === key) { return; }
+				e.preventDefault();
+				e.dataTransfer.dropEffect = 'move';
+				var movingRight = order.indexOf(dragKey) < order.indexOf(key);
+				th.classList.toggle('drag-over-right', movingRight);
+				th.classList.toggle('drag-over-left', !movingRight);
+			});
+			th.addEventListener('dragleave', function () {
+				th.classList.remove('drag-over-left', 'drag-over-right');
+			});
+			th.addEventListener('drop', function (e) {
+				e.preventDefault();
+				if (dragKey === null || dragKey === key) { clearMarks(); return; }
+				var from = order.indexOf(dragKey);
+				var to = order.indexOf(key);
+				order.splice(from, 1);
+				order.splice(to, 0, dragKey);
+				clearMarks();
+				dragKey = null;
+				saveOrder(storeKey, order, order.join('\u0000') === keys.join('\u0000'));
+				applyAll();
+			});
+		});
+
+		resets.push(function () {
+			order = keys.slice();
+			saveOrder(storeKey, order, true);
+			applyAll();
+		});
+		applyAll();
+	}
+
+	Array.prototype.forEach.call(document.querySelectorAll('table'), setup);
+
+	var link = document.getElementById('resetCols');
+	if (link) {
+		link.addEventListener('click', function (e) {
+			e.preventDefault();
+			resets.forEach(function (fn) { fn(); });
+		});
+	}
+})();
+</script>{{end}}`))
 
 // playersPage is the /players page: a table of connected players that polls
 // /api/players every RefreshInterval, with Message / Kick / Ban buttons that
@@ -833,7 +973,7 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 </style>
 </head>
 <body>
-<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a></nav>
+<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="#" id="resetCols">Reset columns</a></nav>
 <h1>DayZ Players</h1>
 <div id="status">Connecting...</div>
 <table>
@@ -997,6 +1137,7 @@ document.getElementById('submit').onclick = async () => {
 refresh();
 setInterval(refresh, {{.RefreshInterval.Milliseconds}});
 </script>
+{{template "reorder" .}}
 </body>
 </html>`))
 
@@ -1038,7 +1179,7 @@ td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-ov
 </style>
 </head>
 <body>
-<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a></nav>
+<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="#" id="resetCols">Reset columns</a></nav>
 <h1>Server Bans</h1>
 <div id="status">Connecting...</div>
 <table>
@@ -1112,6 +1253,7 @@ async function unban(btn) {
 refresh();
 setInterval(refresh, {{.BansRefreshInterval.Milliseconds}});
 </script>
+{{template "reorder" .}}
 </body>
 </html>`))
 
