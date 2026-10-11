@@ -45,6 +45,7 @@ type Player struct {
 	Name              string `json:"name"`
 	Offline           bool   `json:"offline"`
 	TotalPlaytimeSecs int64  `json:"totalPlaytimeSeconds"`
+	LastSeenUnix      int64  `json:"lastSeenUnix"` // offline players: when they were last seen (Unix seconds)
 }
 
 // Ban is one entry of the GUID section of the BattlEye `bans` output, also the
@@ -315,7 +316,7 @@ func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
 // getOfflinePlayers returns all players from the database who are not currently connected.
 func getOfflinePlayers() ([]Player, error) {
     rows, err := globalDatabase.Query(`
-        SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds
+        SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen
         FROM players p
         WHERE NOT EXISTS (
             SELECT 1 FROM active_sessions a WHERE a.guid = p.guid
@@ -330,9 +331,11 @@ func getOfflinePlayers() ([]Player, error) {
     players := []Player{}
     for rows.Next() {
         var p Player
-        if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs); err != nil {
+        var lastSeen time.Time
+        if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen); err != nil {
             return nil, err
         }
+        p.LastSeenUnix = lastSeen.Unix()
         p.Offline = true
         players = append(players, p)
     }
@@ -855,10 +858,11 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 			<col style="width: {{.PlayerWidth}}">
 			<col style="width: {{.IPWidth}}">
 			<col style="width: {{.GUIDWidth}}">
-			<col>
+			<col style="width: 130px">
+			<col style="width: 210px">
 		</colgroup>
 		<thead>
-			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th></tr>
+			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th></tr>
 		</thead>
 		<tbody id="offlinePlayers"></tbody>
 	</table>
@@ -927,11 +931,25 @@ async function refresh() {
 				'<td class="mono">' + esc(p.ip) + '</td>' +
 				'<td class="mono">' + esc(p.guid) + '</td>' +
 				'<td>' + playtime + '</td>' +
+				'<td>' + fmtLastSeen(p.lastSeenUnix) + '</td>' +
 			'</tr>';
 		}).join('');
 	} catch(e) {
 		document.getElementById('status').textContent = 'Server unavailable — retrying...';
 	}
+}
+
+// fmtLastSeen formats Unix seconds as MM-DD-YYYY - HH:MM am|pm in the
+// viewer's local time zone. Returns a dash when there is no timestamp.
+function fmtLastSeen(unix) {
+	if (!unix || unix <= 0) return '—';
+	let d = new Date(unix * 1000);
+	let pad = function(n) { return String(n).padStart(2, '0'); };
+	let h = d.getHours();
+	let ampm = h >= 12 ? 'pm' : 'am';
+	h = h % 12 || 12;
+	return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + d.getFullYear() +
+		' - ' + pad(h) + ':' + pad(d.getMinutes()) + ' ' + ampm;
 }
 
 function handleActionClick(btn) {
