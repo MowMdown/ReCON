@@ -60,6 +60,8 @@ import (
 //	POST /api/flows/<id>/enable        (needs a schedule)   /disable
 //	POST /api/flows/<id>/delete
 //	POST /api/flows/preview            {schedule, script} -> plain-English description
+//	POST /api/flows/reorder            {ids: [...]} saves the order shown on the page
+//	POST /api/flows/command            {command: lock|unlock|shutdown|kickall} the page's quick buttons
 // Page: /flows
 //
 // Runs live in memory: restarting this program abandons a run in progress
@@ -494,23 +496,7 @@ const defaultRestartScript = `// Server restart. Offsets are relative to the cro
 cancel | say -1 Server restart cancelled.
 `
 
-// legacyRestartScript is the seeded flow from before offsets were signed; it is
-// upgraded in place so an existing database keeps a working example.
-const legacyRestartScript = `// Server restart: counts down from 60 minutes
-60m | say -1 Server is going to restart in $minutes minutes!
-30m | say -1 Server is going to restart in $minutes minutes!
-15m | say -1 Server is going to restart in $minutes minutes!
-10m | say -1 Server is going to restart in $minutes minutes!
-5m  | say -1 Server is going to restart in $minutes minutes!
-3m  | say -1 Server is going to restart in $minutes minutes!
-3m  | #lock
-0m  | #shutdown
-up+10s | #unlock
-cancel | say -1 Server restart cancelled.
-`
-
-// initFlows creates the table, adds columns missing from older databases,
-// upgrades the old seeded example, and seeds a restart flow on first run.
+// initFlows creates the table and seeds an example restart flow on first run.
 func initFlows() error {
 	if _, err := globalDatabase.Exec(`
 		CREATE TABLE IF NOT EXISTS flows (
@@ -518,25 +504,9 @@ func initFlows() error {
 			name TEXT NOT NULL UNIQUE,
 			script TEXT NOT NULL,
 			schedule TEXT NOT NULL DEFAULT '',
-			schedule_enabled INTEGER NOT NULL DEFAULT 0
+			schedule_enabled INTEGER NOT NULL DEFAULT 0,
+			position INTEGER NOT NULL DEFAULT 0
 		)`); err != nil {
-		return err
-	}
-	for _, c := range []struct{ name, ddl string }{
-		{"schedule", "ALTER TABLE flows ADD COLUMN schedule TEXT NOT NULL DEFAULT ''"},
-		{"schedule_enabled", "ALTER TABLE flows ADD COLUMN schedule_enabled INTEGER NOT NULL DEFAULT 0"},
-	} {
-		var n int
-		if err := globalDatabase.QueryRow("SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name = ?", c.name).Scan(&n); err != nil {
-			return err
-		}
-		if n == 0 {
-			if _, err := globalDatabase.Exec(c.ddl); err != nil {
-				return err
-			}
-		}
-	}
-	if _, err := globalDatabase.Exec("UPDATE flows SET script = ? WHERE script = ?", defaultRestartScript, legacyRestartScript); err != nil {
 		return err
 	}
 	var n int
@@ -544,7 +514,7 @@ func initFlows() error {
 		return err
 	}
 	if n == 0 {
-		_, err := globalDatabase.Exec("INSERT INTO flows (name, script, schedule) VALUES (?, ?, ?)",
+		_, err := globalDatabase.Exec("INSERT INTO flows (name, script, schedule, position) VALUES (?, ?, ?, 1)",
 			"Server restart", defaultRestartScript, "0 6 * * *")
 		return err
 	}
@@ -552,7 +522,7 @@ func initFlows() error {
 }
 
 func listFlows() ([]Flow, error) {
-	rows, err := globalDatabase.Query("SELECT id, name, script, schedule, schedule_enabled FROM flows ORDER BY name COLLATE NOCASE")
+	rows, err := globalDatabase.Query("SELECT id, name, script, schedule, schedule_enabled FROM flows ORDER BY position, id")
 	if err != nil {
 		return nil, err
 	}
@@ -585,7 +555,7 @@ func saveFlow(f Flow) (int64, error) {
 		en = 1
 	}
 	if f.ID == 0 {
-		res, err := globalDatabase.Exec("INSERT INTO flows (name, script, schedule, schedule_enabled) VALUES (?, ?, ?, ?)",
+		res, err := globalDatabase.Exec("INSERT INTO flows (name, script, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
 			f.Name, f.Script, f.Schedule, en)
 		if err != nil {
 			return 0, err
@@ -668,6 +638,7 @@ func snapshotRuns() []runView {
 			AnchorUnix: r.anchor.Unix(), Log: append([]string(nil), r.log...),
 		})
 	}
+	sort.Slice(out, func(a, b int) bool { return out[a].FlowID < out[b].FlowID })
 	return out
 }
 
@@ -977,8 +948,84 @@ func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleFlowReorder serves POST /api/flows/reorder: the body lists flow ids in
+// the order they should appear.
+func handleFlowReorder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := decodeBody(w, r, &req); err != nil || len(req.IDs) == 0 {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	tx, err := globalDatabase.Begin()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	for i, id := range req.IDs {
+		if _, err := tx.Exec("UPDATE flows SET position = ? WHERE id = ?", i+1, id); err != nil {
+			fail(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleQuickCommand serves POST /api/flows/command for the page's static
+// buttons. Only these four commands are accepted (not arbitrary RCON text).
+func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := decodeBody(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(req.Command), "#"))
+	switch name {
+	case "lock", "unlock":
+		_, acked, err := runShared("#"+name, 2*time.Second, true)
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if !acked {
+			fail(w, http.StatusBadGateway, "#"+name+" was not acknowledged")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "#" + name + " sent"})
+	case "shutdown":
+		// The server may die before it acknowledges, so only a transport error is a failure.
+		_, acked, err := runShared("#shutdown", 2*time.Second, false)
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": acked, "message": "#shutdown sent"})
+	case "kickall":
+		rep, err := kickAllUsing(sharedRunner{}, "Server restarting", false, false)
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		msg := fmt.Sprintf("Kicked %d player(s)", len(rep.Order))
+		if len(rep.Remaining) > 0 {
+			msg += fmt.Sprintf(", %d still connected", len(rep.Remaining))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg})
+	default:
+		fail(w, http.StatusBadRequest, "unknown command")
+	}
+}
+
 // handleFlowAction serves POST /api/flows/<id>/<run|stop|enable|disable|delete>
-// and POST /api/flows/preview.
+// and the /api/flows/preview, /reorder and /command endpoints.
 func handleFlowAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		fail(w, http.StatusMethodNotAllowed, "use POST")
@@ -986,6 +1033,14 @@ func handleFlowAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/preview" {
 		handleFlowPreview(w, r)
+		return
+	}
+	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/command" {
+		handleQuickCommand(w, r)
+		return
+	}
+	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/reorder" {
+		handleFlowReorder(w, r)
 		return
 	}
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/flows/"), "/"), "/")
@@ -1008,7 +1063,7 @@ func handleFlowAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch parts[1] {
-	case "run", "start":
+	case "run":
 		var body struct {
 			Minutes int `json:"minutes"`
 		}
@@ -1031,7 +1086,7 @@ func handleFlowAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	case "stop", "cancel":
+	case "stop":
 		flowRuns.Lock()
 		run := flowRuns.byFlow[id]
 		active := run != nil && run.active
@@ -1099,6 +1154,17 @@ var flowsPage = template.Must(template.Must(baseTemplate.Clone()).New("flows").P
 {{template "style" .}}
 <style>
 .box.wide { width: min(760px, 95vw); }
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.top h1 { margin: 0 0 8px; }
+.quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.quick button { margin-right: 0; }
+#quickMsg { color: #aaa; font-size: 13px; margin-right: 8px; }
+.box.helpbox { width: min(820px, 95vw); max-height: 85vh; overflow-y: auto; }
+.helpbox h3 { margin: 18px 0 6px; font-size: 15px; }
+.helpbox p, .helpbox li { font-size: 13px; line-height: 1.6; color: #ccc; }
+.helpbox ul { margin: 4px 0; padding-left: 20px; }
+.helpbox code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #111; padding: 1px 5px; border-radius: 3px; }
+.helpbox pre { background: #111; padding: 10px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 6px 0; }
 textarea.script, #sched { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 textarea.script { white-space: pre; }
 .help { color: #aaa; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
@@ -1107,13 +1173,26 @@ textarea.script { white-space: pre; }
 pre.log { background: #1a1a1a; padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; }
 td.actions { white-space: nowrap; }
 button:disabled { opacity: 0.4; cursor: default; }
+#flows tr[draggable="true"] { cursor: grab; }
+#flows tr.dragging { opacity: 0.4; }
+#flows tr.drop-above td { box-shadow: inset 0 3px 0 #8ab4f8; }
+#flows tr.drop-below td { box-shadow: inset 0 -3px 0 #8ab4f8; }
 </style>
 </head>
 <body>
 <nav><a href="/players">Players</a><a href="/bans">Server Bans</a><a class="active" href="/flows">Flows</a></nav>
-<h1>Flows</h1>
+<div class="top">
+	<h1>Flows</h1>
+	<div class="quick">
+		<span id="quickMsg"></span>
+		<button onclick="quick('lock')">#Lock</button>
+		<button onclick="quick('unlock')">#Unlock</button>
+		<button onclick="quick('shutdown')">#Shutdown</button>
+		<button onclick="quick('kickall')">#Kick All</button>
+	</div>
+</div>
 <div id="status">Connecting...</div>
-<p><button onclick="newFlow()">New flow</button></p>
+<p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button></p>
 <table>
 	<colgroup>
 		<col style="width: 200px">
@@ -1134,13 +1213,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<h2 id="title"></h2>
 		<label>Name</label>
 		<input id="name" type="text">
-		<div class="help">
-			One step per line: <b>offset | command</b>.
-			<b>-60m</b> runs 60 minutes before the schedule time, <b>0m</b> on it, <b>+90</b> 90 seconds after it
-			(units: s, m, h; no unit means seconds). <b>$minutes</b> and <b>$seconds</b> become how long before the
-			schedule time the step runs. <b>cancel | command</b> runs if the flow is stopped before the schedule time.
-			<b>kickall [reason]</b> (or <b>#kickall</b>) kicks everyone. Lines starting with // are comments.
-		</div>
 		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
 		<label>Schedule (cron: minute hour day-of-month month day-of-week)</label>
 		<input id="sched" type="text" placeholder="0 6 * * *" spellcheck="false">
@@ -1151,10 +1223,82 @@ button:disabled { opacity: 0.4; cursor: default; }
 		</div>
 	</div>
 </div>
+<div id="confirmModal" class="modal" onclick="if (event.target === this) closeConfirm()">
+	<div class="box">
+		<h2 id="confirmTitle"></h2>
+		<p id="confirmText"></p>
+		<div class="buttons">
+			<button onclick="closeConfirm()">Cancel</button>
+			<button id="confirmOk">Confirm</button>
+		</div>
+	</div>
+</div>
+<div id="helpModal" class="modal" onclick="if (event.target === this) closeHelp()">
+	<div class="box helpbox">
+		<h2>Flow help</h2>
+
+		<h3>What a flow is</h3>
+		<p>A flow is a saved list of steps that run around a schedule. When the schedule (a cron expression) fires, each step runs at its own offset from that time: before it, on it, or after it. Flows only run on their schedule while they are <b>Enabled</b>; <b>Run</b> starts one by hand.</p>
+
+		<h3>Writing steps</h3>
+		<p>One step per line: <code>offset | command</code>. Lines starting with <code>//</code> are comments.</p>
+<pre>-60m | say -1 Server is going to restart in $minutes minutes!
+-3m  | #lock
+-1m  | #kickall Restarting now
+0m   | #shutdown
++90  | #unlock
+cancel | say -1 Server restart cancelled.</pre>
+		<ul>
+			<li><code>-60m</code> runs 60 minutes <b>before</b> the schedule time, <code>0m</code> runs <b>on</b> it, <code>+90</code> runs 90 seconds <b>after</b> it.</li>
+			<li>Units are <code>s</code>, <code>m</code> and <code>h</code>. No unit means seconds, so <code>-90</code> is 90 seconds before.</li>
+			<li>Any offset other than 0 needs a <code>+</code> or <code>-</code> sign.</li>
+			<li><code>$minutes</code> and <code>$seconds</code> in a command become how long before the schedule time that step runs (0 for steps on or after it).</li>
+			<li><code>cancel | command</code> lines run only if you press Stop before the schedule time arrives. Use them to undo a countdown, for example a "restart cancelled" message.</li>
+		</ul>
+
+		<h3>Commands you can use</h3>
+		<ul>
+			<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
+			<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
+		</ul>
+
+		<h3>Schedule (cron)</h3>
+		<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone. The text under the field explains in plain English what you typed and shows the next runs. The schedule time is the <code>0m</code> point, so a flow starting at <code>-60m</code> begins its countdown an hour earlier.</p>
+		<ul>
+			<li><code>0 6 * * *</code> every day at 06:00</li>
+			<li><code>0 */6 * * *</code> every 6 hours (00:00, 06:00, 12:00, 18:00)</li>
+			<li><code>30 4 * * 1,4</code> Mondays and Thursdays at 04:30</li>
+			<li><code>0 5 * * 1-5</code> weekdays at 05:00</li>
+			<li><code>@daily</code>, <code>@hourly</code>, <code>@weekly</code>, <code>@monthly</code> shortcuts also work.</li>
+		</ul>
+
+		<h3>Buttons</h3>
+		<ul>
+			<li><b>Enable / Disable</b> turns the schedule on or off. Enable needs a schedule.</li>
+			<li><b>Run / Stop</b> switches with the flow's state. Run starts the flow immediately: the earliest step fires right away and the rest follow at their offsets. Stop halts a running flow.</li>
+			<li><b>Edit</b> changes the steps or schedule. <b>Delete</b> removes the flow (not while it is running).</li>
+			<li>Drag a row up or down to reorder the list.</li>
+			<li>The <b>#Lock</b>, <b>#Unlock</b>, <b>#Shutdown</b> and <b>#Kick All</b> buttons at the top right send that command to the server immediately. Shutdown and Kick All open a confirm/cancel dialog first.</li>
+		</ul>
+
+		<h3>Tips</h3>
+		<ul>
+			<li>Put <code>#kickall</code> at least a minute before <code>0m | #shutdown</code>, since the sweep takes a few seconds.</li>
+			<li>Set <code>+90</code> (or more) for <code>#unlock</code> to leave time for the server to restart and RCON to log in again.</li>
+			<li>Use <code>say -1</code> for messages to everyone; <code>say &lt;id&gt;</code> messages one player.</li>
+			<li>If the app restarts during a scheduled countdown it rejoins it and skips steps whose time has passed. Manually started runs are not resumed.</li>
+			<li>A flow runs one copy at a time. To start one from a task scheduler, POST to <code>/api/flows/&lt;id&gt;/run</code>.</li>
+		</ul>
+
+		<div class="buttons"><button onclick="closeHelp()">Close</button></div>
+	</div>
+</div>
 <script>
 let flows = [];
 let editing = null;
 let previewTimer = null;
+let dragging = false;
+let dragId = null;
 
 function esc(s) {
 	return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1190,6 +1334,7 @@ function btn(label, onclick, disabled) {
 }
 
 async function refresh() {
+	if (dragging) return; // do not rebuild rows under a drag in progress
 	try {
 		let r = await fetch('/api/flows');
 		let d = await r.json();
@@ -1208,18 +1353,18 @@ async function refresh() {
 			let next = f.scheduleEnabled ? (f.nextRun || '-') : (hasCron ? 'Disabled' : '-');
 			let buttons =
 				btn(f.scheduleEnabled ? 'Disable' : 'Enable', 'toggleFlow(' + f.id + ')', false) +
-				btn('Run', 'runFlow(' + f.id + ')', active) +
-				btn('Stop', 'stopFlow(' + f.id + ')', false) +
+				(active ? btn('Stop', 'stopFlow(' + f.id + ')', false) : btn('Run', 'runFlow(' + f.id + ')', false)) +
 				btn('Edit', 'editFlow(' + f.id + ')', false) +
 				btn('Delete', 'deleteFlow(' + f.id + ')', active);
-			return '<tr><td>' + esc(f.name) + '</td>' +
+			return '<tr draggable="true" data-id="' + f.id + '"><td>' + esc(f.name) + '</td>' +
 				'<td class="mono">' + (hasCron ? esc(f.schedule) : '-') + '</td>' +
 				'<td>' + esc(statusText(run)) + '</td>' +
 				'<td>' + esc(next) + '</td>' +
 				'<td class="actions">' + buttons + '</td></tr>';
 		}).join('');
-		document.getElementById('runs').innerHTML = (d.runs || []).map(function(x) {
-			return '<div class="run"><b>' + esc(x.name) + '</b> - ' + esc(statusText(x)) +
+		document.getElementById('runs').innerHTML = flows.filter(function(f) { return runs[f.id]; }).map(function(f) {
+			let x = runs[f.id];
+			return '<div class="run"><b>' + esc(f.name) + '</b> - ' + esc(statusText(x)) +
 				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
 		}).join('');
 	} catch(e) {
@@ -1237,12 +1382,7 @@ async function toggleFlow(id) {
 }
 
 async function runFlow(id) {
-	let f = find(id);
-	let v = prompt('Run "' + f.name + '" now. Minutes until the schedule time (leave blank to start the earliest step immediately):', '');
-	if (v === null) return;
-	let minutes = v.trim() === '' ? 0 : parseInt(v, 10);
-	if (!Number.isInteger(minutes) || minutes < 0) { alert('Enter a whole number of minutes.'); return; }
-	let d = await post('/api/flows/' + id + '/run', { minutes: minutes });
+	let d = await post('/api/flows/' + id + '/run');
 	if (!d.ok) alert(d.error || 'Run failed');
 	refresh();
 }
@@ -1261,6 +1401,43 @@ async function deleteFlow(id) {
 	if (!d.ok) alert(d.error || 'Delete failed');
 	refresh();
 }
+
+let quickTimer = null;
+
+const quickConfirm = {
+	shutdown: { title: 'Shut down server?', text: 'This sends #shutdown to the server immediately.', ok: 'Shut down' },
+	kickall: { title: 'Kick all players?', text: 'This kicks every connected player immediately.', ok: 'Kick all' }
+};
+
+function quick(cmd) {
+	let c = quickConfirm[cmd];
+	if (!c) { sendQuick(cmd); return; }
+	document.getElementById('confirmTitle').textContent = c.title;
+	document.getElementById('confirmText').textContent = c.text;
+	let ok = document.getElementById('confirmOk');
+	ok.textContent = c.ok;
+	ok.onclick = function() { closeConfirm(); sendQuick(cmd); };
+	document.getElementById('confirmModal').style.display = 'flex';
+}
+
+function closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; }
+
+async function sendQuick(cmd) {
+	let msg = document.getElementById('quickMsg');
+	msg.textContent = 'Sending...';
+	try {
+		let d = await post('/api/flows/command', { command: cmd });
+		msg.textContent = d.ok ? (d.message || 'Sent') : (d.error || 'Failed');
+	} catch(e) {
+		msg.textContent = 'Request failed';
+	}
+	clearTimeout(quickTimer);
+	quickTimer = setTimeout(function() { msg.textContent = ''; }, 8000);
+	refresh();
+}
+
+function openHelp() { document.getElementById('helpModal').style.display = 'flex'; }
+function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
 
 function openModal(f, title) {
 	editing = f;
@@ -1324,6 +1501,72 @@ document.getElementById('save').onclick = async () => {
 	refresh();
 };
 
+function clearDragMarks() {
+	Array.prototype.forEach.call(document.querySelectorAll('#flows tr'), function(tr) {
+		tr.classList.remove('dragging', 'drop-above', 'drop-below');
+	});
+}
+
+function endDrag() {
+	dragging = false;
+	dragId = null;
+	clearDragMarks();
+}
+
+function dropBefore(e, tr) {
+	let rect = tr.getBoundingClientRect();
+	return e.clientY < rect.top + rect.height / 2;
+}
+
+let flowsBody = document.getElementById('flows');
+
+flowsBody.addEventListener('dragstart', function(e) {
+	let tr = e.target.closest('tr');
+	if (!tr) return;
+	dragging = true;
+	dragId = parseInt(tr.getAttribute('data-id'), 10);
+	e.dataTransfer.effectAllowed = 'move';
+	e.dataTransfer.setData('text/plain', String(dragId)); // Firefox needs data to start a drag
+	tr.classList.add('dragging');
+});
+
+flowsBody.addEventListener('dragover', function(e) {
+	if (!dragging) return;
+	let tr = e.target.closest('tr');
+	if (!tr) return;
+	e.preventDefault();
+	e.dataTransfer.dropEffect = 'move';
+	tr.classList.remove('drop-above', 'drop-below');
+	if (parseInt(tr.getAttribute('data-id'), 10) !== dragId) {
+		tr.classList.add(dropBefore(e, tr) ? 'drop-above' : 'drop-below');
+	}
+});
+
+flowsBody.addEventListener('dragleave', function(e) {
+	let tr = e.target.closest('tr');
+	if (tr) tr.classList.remove('drop-above', 'drop-below');
+});
+
+flowsBody.addEventListener('drop', async function(e) {
+	e.preventDefault();
+	let tr = e.target.closest('tr');
+	if (!tr || !dragging) { endDrag(); return; }
+	let targetId = parseInt(tr.getAttribute('data-id'), 10);
+	let before = dropBefore(e, tr);
+	let moved = dragId;
+	endDrag();
+	if (targetId === moved) return;
+	let ids = flows.map(function(f) { return f.id; }).filter(function(id) { return id !== moved; });
+	let at = ids.indexOf(targetId);
+	if (!before) at++;
+	ids.splice(at, 0, moved);
+	let d = await post('/api/flows/reorder', { ids: ids });
+	if (!d.ok) alert(d.error || 'Reorder failed');
+	refresh();
+});
+
+flowsBody.addEventListener('dragend', endDrag);
+
 refresh();
 setInterval(refresh, {{.RefreshInterval.Milliseconds}});
 </script>
@@ -1342,7 +1585,7 @@ func handleFlowsPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// setupFlows is the single entry point main.go needs: it creates/migrates the
+// setupFlows is the single entry point main.go needs: it creates the
 // flows table, registers the page and API routes on mux, and starts the scheduler.
 func setupFlows(mux *http.ServeMux) error {
 	if err := initFlows(); err != nil {
