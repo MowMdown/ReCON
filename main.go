@@ -629,7 +629,8 @@ func runLogged(src, command string, f func() (string, bool, error)) (string, boo
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quiet := r.Method == http.MethodGet && (r.URL.Path == "/health" || r.URL.Path == "/players" ||
-			r.URL.Path == "/bans" || r.URL.Path == "/api/players" || r.URL.Path == "/api/bans")
+			r.URL.Path == "/bans" || r.URL.Path == "/api/players" || r.URL.Path == "/api/bans" ||
+			r.URL.Path == "/flows" || r.URL.Path == "/api/flows")
 		if !quiet {
 			from := r.RemoteAddr
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
@@ -945,6 +946,9 @@ func main() {
 	mux.HandleFunc("/bans", handleBansPage)                 // bans web page
 	mux.HandleFunc("/api/bans", handleBansJSON)             // bans JSON list
 	mux.HandleFunc("/api/bans/", handleBanAction)           // per-ban actions
+	if err := setupFlows(mux); err != nil { // /flows page + /api/flows (see flows.go)
+		log.Fatalf("failed to initialize flows: %v", err)
+	}
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	srv := &http.Server{

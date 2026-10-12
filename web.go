@@ -139,6 +139,7 @@ func connectShared() (*persistentConnection, error) {
 		return nil, err
 	}
 	sharedConnection.connection = s
+	markServerUp() // lets flows detect that RCON is back after a restart
 	return s, nil
 }
 
@@ -372,6 +373,7 @@ func startBackgroundSync(interval time.Duration) {
 				// Server probably down: close open sessions once so
 				// playtime doesn't keep accruing while it's offline.
 				if fails == 3 {
+					markServerDown() // lets flows detect the server went down
 					if err := globalDatabase.SyncPlayers(nil); err != nil {
 						log.Printf("poller: close sessions: %v", err)
 					}
@@ -973,7 +975,7 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 </style>
 </head>
 <body>
-<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <h1>DayZ Players</h1>
 <div id="status">Connecting...</div>
 <table>
@@ -1179,7 +1181,7 @@ td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-ov
 </style>
 </head>
 <body>
-<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <h1>Server Bans</h1>
 <div id="status">Connecting...</div>
 <table>
