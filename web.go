@@ -139,7 +139,6 @@ func connectShared() (*persistentConnection, error) {
 		return nil, err
 	}
 	sharedConnection.connection = s
-	markServerUp() // lets flows detect that RCON is back after a restart
 	return s, nil
 }
 
@@ -373,7 +372,6 @@ func startBackgroundSync(interval time.Duration) {
 				// Server probably down: close open sessions once so
 				// playtime doesn't keep accruing while it's offline.
 				if fails == 3 {
-					markServerDown() // lets flows detect the server went down
 					if err := globalDatabase.SyncPlayers(nil); err != nil {
 						log.Printf("poller: close sessions: %v", err)
 					}
