@@ -40,6 +40,10 @@ import (
 //	0m     exactly on the cron time               units: s, m, h (none = seconds)
 //	cancel runs only if the flow is stopped before its cron time arrives
 //
+// A step command can also be "kickall [reason]" (or "#kickall"), which kicks every connected
+// player (the same sweep as POST /kickall); the reason defaults to
+// "Server restarting".
+//
 // $minutes / $seconds in a command become how long before the cron time that
 // step runs (0 for steps on or after it).
 //
@@ -717,6 +721,14 @@ func sleepUntil(ctx context.Context, t time.Time) bool {
 	}
 }
 
+// sharedRunner adapts the shared RCON session to the commandRunner interface
+// that kickAllUsing expects (single attempt per command, no retries).
+type sharedRunner struct{}
+
+func (sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
+	return runShared(command, wait, false)
+}
+
 // runFlowCommand sends one step's command. Only #lock/#unlock are retried
 // (repeating them is harmless); `say` must not be repeated, and #shutdown is
 // expected to go unanswered because the server dies.
@@ -728,6 +740,24 @@ func runFlowCommand(run *flowRun, command string, offsetSecs int) {
 	cmd := strings.NewReplacer("$minutes", strconv.Itoa(before/60), "$seconds", strconv.Itoa(before)).Replace(command)
 	cmd = cleanReason(cmd)
 	lower := strings.ToLower(cmd)
+	// kickall is this program's own command, not a BattlEye one: it lists the
+	// players and kicks each (see kickAllUsing in main.go). Usage: kickall [reason]
+	// Both "kickall" and "#kickall" are accepted.
+	bare := strings.TrimPrefix(cmd, "#")
+	lowerBare := strings.ToLower(bare)
+	if lowerBare == "kickall" || strings.HasPrefix(lowerBare, "kickall ") {
+		reason := strings.TrimSpace(bare[len("kickall"):])
+		if reason == "" {
+			reason = "Server restarting"
+		}
+		rep, err := kickAllUsing(sharedRunner{}, reason, false, false)
+		if err != nil {
+			run.logf("kickall failed: %v", err)
+			return
+		}
+		run.logf("kickall %q: kicked %v, no ack for %v, still connected %v", reason, rep.Order, rep.Unacked, rep.Remaining)
+		return
+	}
 	retry := lower == "#lock" || lower == "#unlock"
 	_, acked, err := runShared(cmd, 2*time.Second, retry)
 	run.logf("sent %q (acked=%v err=%v)", cmd, acked, err)
@@ -1109,7 +1139,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<b>-60m</b> runs 60 minutes before the schedule time, <b>0m</b> on it, <b>+90</b> 90 seconds after it
 			(units: s, m, h; no unit means seconds). <b>$minutes</b> and <b>$seconds</b> become how long before the
 			schedule time the step runs. <b>cancel | command</b> runs if the flow is stopped before the schedule time.
-			Lines starting with // are comments.
+			<b>kickall [reason]</b> (or <b>#kickall</b>) kicks everyone. Lines starting with // are comments.
 		</div>
 		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
 		<label>Schedule (cron: minute hour day-of-month month day-of-week)</label>
