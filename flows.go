@@ -47,6 +47,13 @@ import (
 // Supports * , - / lists, month/day names and @hourly @daily @weekly @monthly
 // @yearly. A flow only runs on its schedule while it is Enabled.
 //
+// Player-join flows: a flow whose schedule is blank or "* * * * *" has no
+// clock schedule. While it is Enabled it runs once for every player who
+// joins, with offsets counted from the moment the join was seen (so no
+// negative offsets). $player becomes the player's number and $name their
+// name, e.g.  0s | say $player Welcome to our server, $name!
+// Joins are spotted by the background poller (db.go) every 5 seconds.
+//
 // This file holds the flow logic only. Storage is in db.go, the HTTP API and
 // the /flows page are in web.go, and commands go out through rcon.go.
 //
@@ -489,6 +496,29 @@ func initFlows() error {
 	return globalDatabase.EnsureFlowsTable("Server restart", defaultRestartScript, "0 6 * * *")
 }
 
+// isJoinSchedule reports whether a schedule means "no clock schedule": blank
+// or "* * * * *". An Enabled flow with such a schedule runs each time a
+// player joins instead of on the clock.
+func isJoinSchedule(schedule string) bool {
+	s := strings.Join(strings.Fields(schedule), " ")
+	return s == "" || s == "* * * * *"
+}
+
+// playerVarRe finds the per-player variables only join flows can fill in.
+var playerVarRe = regexp.MustCompile(`\$(player|name)\b`)
+
+// usesPlayerVars reports whether a script uses $player or $name.
+func usesPlayerVars(script string) bool { return playerVarRe.MatchString(script) }
+
+// checkJoinSteps rejects steps a join flow can never run: the flow starts
+// when the player is seen joining, so nothing can happen before that.
+func checkJoinSteps(pf *parsedFlow) error {
+	if pf.Steps[0].OffsetSecs < 0 {
+		return errors.New("player-join flows start when the player joins, so steps can't have a - offset (use 0s or +)")
+	}
+	return nil
+}
+
 // flowsWithNextRun lists every flow and fills NextRun for enabled ones.
 func flowsWithNextRun() ([]Flow, error) {
 	flows, err := globalDatabase.ListFlows()
@@ -498,6 +528,10 @@ func flowsWithNextRun() ([]Flow, error) {
 	now := time.Now()
 	for i := range flows {
 		if !flows[i].ScheduleEnabled {
+			continue
+		}
+		if isJoinSchedule(flows[i].Schedule) {
+			flows[i].NextRun = "On player join"
 			continue
 		}
 		if c, err := parseCron(flows[i].Schedule); err == nil {
@@ -511,19 +545,40 @@ func flowsWithNextRun() ([]Flow, error) {
 
 // validateAndSaveFlow checks a flow from the edit dialog and stores it.
 // Every error it returns is a user-facing message (the API sends them as 400).
+//
+// If an edit switches a flow between a clock schedule and player-join (or
+// back), it is saved disabled, so clearing the schedule of an enabled restart
+// flow can never make it fire on every join.
 func validateAndSaveFlow(f Flow) (int64, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Schedule = strings.TrimSpace(f.Schedule)
 	if f.Name == "" {
 		return 0, errors.New("name is required")
 	}
-	if _, err := parseFlowScript(f.Script); err != nil {
+	pf, err := parseFlowScript(f.Script)
+	if err != nil {
 		return 0, err
 	}
-	if f.Schedule == "" {
-		f.ScheduleEnabled = false
-	} else if _, err := parseCron(f.Schedule); err != nil {
-		return 0, errors.New("schedule: " + err.Error())
+	join := isJoinSchedule(f.Schedule)
+	if !join {
+		if _, err := parseCron(f.Schedule); err != nil {
+			return 0, errors.New("schedule: " + err.Error())
+		}
+		if usesPlayerVars(f.Script) {
+			return 0, errors.New("$player and $name only work in player-join flows (leave the schedule blank or * * * * *)")
+		}
+	}
+	if f.ID == 0 && join {
+		f.ScheduleEnabled = false // a new join flow always starts disabled
+	} else if f.ID != 0 {
+		if old, err := globalDatabase.GetFlow(f.ID); err == nil && isJoinSchedule(old.Schedule) != join {
+			f.ScheduleEnabled = false
+		}
+	}
+	if join && f.ScheduleEnabled {
+		if err := checkJoinSteps(pf); err != nil {
+			return 0, err
+		}
 	}
 	id, err := globalDatabase.SaveFlow(f)
 	if err != nil {
@@ -532,17 +587,21 @@ func validateAndSaveFlow(f Flow) (int64, error) {
 	return id, nil
 }
 
-// checkFlowCanEnable reports why a flow's schedule can't be turned on, if it
-// can't. Errors are user-facing messages.
+// checkFlowCanEnable reports why a flow can't be enabled, if it can't.
+// Errors are user-facing messages.
 func checkFlowCanEnable(f Flow) error {
-	if strings.TrimSpace(f.Schedule) == "" {
-		return errors.New("set a schedule first (Edit)")
+	pf, err := parseFlowScript(f.Script)
+	if err != nil {
+		return err
+	}
+	if isJoinSchedule(f.Schedule) {
+		return checkJoinSteps(pf)
 	}
 	if _, err := parseCron(f.Schedule); err != nil {
 		return errors.New("schedule: " + err.Error())
 	}
-	if _, err := parseFlowScript(f.Script); err != nil {
-		return err
+	if usesPlayerVars(f.Script) {
+		return errors.New("$player and $name only work in player-join flows (leave the schedule blank or * * * * *)")
 	}
 	return nil
 }
@@ -558,8 +617,15 @@ func previewFlow(schedule, script string) map[string]any {
 		resp["span"] = pf.span()
 	}
 	sched := strings.TrimSpace(schedule)
-	if sched == "" {
-		resp["description"] = "No schedule - this flow only runs when you press Run."
+	if isJoinSchedule(sched) {
+		resp["description"] = "No clock schedule - while Enabled, this flow runs each time a player joins ($player = their number, $name = their name). While disabled it only runs when you press Run."
+		if perr == nil {
+			if err := checkJoinSteps(pf); err != nil {
+				resp["span"] = "Note: " + err.Error() + "."
+			} else {
+				resp["span"] = strings.Replace(pf.span(), "the scheduled time", "the moment the player joins", -1)
+			}
+		}
 		return resp
 	}
 	c, err := parseCron(sched)
@@ -601,6 +667,8 @@ type flowRun struct {
 	anchor time.Time // the cron time this run is built around
 	log    []string
 	cancel context.CancelFunc
+	ctx    context.Context // player-join runs only: shared by all players' jobs
+	jobs   int             // player-join runs only: players still being worked through
 }
 
 var flowRuns = struct {
@@ -659,6 +727,9 @@ func startFlow(f Flow, minutes int) error {
 	pf, err := parseFlowScript(f.Script)
 	if err != nil {
 		return err
+	}
+	if usesPlayerVars(f.Script) {
+		return errors.New("this flow uses $player or $name, so it only runs when a player joins")
 	}
 	lead := 0
 	if minutes > 0 {
@@ -732,12 +803,19 @@ func sleepUntil(ctx context.Context, t time.Time) bool {
 // runFlowCommand sends one step's command. Only #lock/#unlock are retried
 // (repeating them is harmless); `say` must not be repeated, and #shutdown is
 // expected to go unanswered because the server dies.
-func runFlowCommand(run *flowRun, command string, offsetSecs int) {
+//
+// p is the joining player for player-join flows (fills $player and $name),
+// nil for scheduled and manual runs.
+func runFlowCommand(run *flowRun, command string, offsetSecs int, p *Player) {
 	before := 0
 	if offsetSecs < 0 {
 		before = -offsetSecs
 	}
-	cmd := strings.NewReplacer("$minutes", strconv.Itoa(before/60), "$seconds", strconv.Itoa(before)).Replace(command)
+	vars := []string{"$minutes", strconv.Itoa(before / 60), "$seconds", strconv.Itoa(before)}
+	if p != nil {
+		vars = append(vars, "$player", strconv.Itoa(p.ID), "$name", p.Name)
+	}
+	cmd := strings.NewReplacer(vars...).Replace(command)
 	cmd = cleanReason(cmd)
 	lower := strings.ToLower(cmd)
 	// kickall is this program's own command, not a BattlEye one: it lists the
@@ -778,13 +856,13 @@ func executeFlow(ctx context.Context, run *flowRun, pf *parsedFlow, source strin
 			// Cancel commands undo a countdown that never reached its cron time.
 			if time.Now().Before(run.anchor) {
 				for _, c := range pf.OnCancel {
-					runFlowCommand(run, c, 0)
+					runFlowCommand(run, c, 0, nil)
 				}
 			}
 			run.set("stopped", false)
 			return
 		}
-		runFlowCommand(run, st.Command, st.OffsetSecs)
+		runFlowCommand(run, st.Command, st.OffsetSecs, nil)
 	}
 	run.logf("done")
 	run.set("done", false)
@@ -824,8 +902,8 @@ func runScheduleTick(now time.Time) {
 		return
 	}
 	for _, f := range flows {
-		if !f.ScheduleEnabled {
-			continue
+		if !f.ScheduleEnabled || isJoinSchedule(f.Schedule) {
+			continue // disabled, or a player-join flow (see startJoinFlows)
 		}
 		c, err := parseCron(f.Schedule)
 		if err != nil {
@@ -863,4 +941,119 @@ func runScheduleTick(now time.Time) {
 			delete(scheduleFired, k)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Player-join trigger
+// ---------------------------------------------------------------------------
+
+// joinWatch remembers who was online at the last successful poll, by GUID
+// (player numbers get reused). Only the background poller goroutine
+// (db.go) touches it.
+var joinWatch = struct {
+	seen   map[string]bool
+	primed bool // false until the first successful poll after startup
+}{seen: map[string]bool{}}
+
+// playersPolled is called by the poller with every successful `players`
+// result and starts the player-join flows for anyone who wasn't online last
+// time. The first call after startup only records who is online, so
+// restarting this program doesn't greet everybody again.
+func playersPolled(players []Player) {
+	if joined := newArrivals(players); len(joined) > 0 {
+		startJoinFlows(joined)
+	}
+}
+
+// newArrivals updates joinWatch with this poll's players and returns the ones
+// who weren't online at the previous poll.
+func newArrivals(players []Player) []Player {
+	online := map[string]bool{}
+	var joined []Player
+	for _, p := range players {
+		if p.GUID == "" {
+			continue
+		}
+		online[p.GUID] = true
+		if joinWatch.primed && !joinWatch.seen[p.GUID] {
+			joined = append(joined, p)
+		}
+	}
+	joinWatch.seen, joinWatch.primed = online, true
+	return joined
+}
+
+// playersLost is called when the game server stops answering (the poller's
+// third failed poll in a row). Everyone is forgotten, so players are greeted
+// again when they reconnect after the server comes back.
+func playersLost() {
+	joinWatch.seen = map[string]bool{}
+}
+
+// startJoinFlows runs every enabled player-join flow once for each player.
+func startJoinFlows(joined []Player) {
+	flows, err := globalDatabase.ListFlows()
+	if err != nil {
+		log.Printf("join flows: %v", err)
+		return
+	}
+	for _, f := range flows {
+		if !f.ScheduleEnabled || !isJoinSchedule(f.Schedule) {
+			continue
+		}
+		pf, err := parseFlowScript(f.Script)
+		if err != nil || checkJoinSteps(pf) != nil {
+			continue
+		}
+		for _, p := range joined {
+			launchJoinRun(f, pf, p)
+		}
+	}
+}
+
+// launchJoinRun works through a join flow's steps for one player. Unlike a
+// scheduled flow, several players can be in progress at once: they share one
+// flowRun (one log on the page, one Stop button), which stays active until
+// the last player's steps are done.
+func launchJoinRun(f Flow, pf *parsedFlow, p Player) {
+	flowRuns.Lock()
+	run := flowRuns.byFlow[f.ID]
+	if run == nil || !run.active {
+		ctx, cancel := context.WithCancel(context.Background())
+		run = &flowRun{flowID: f.ID, name: f.Name, status: "running", active: true, anchor: time.Now(), ctx: ctx, cancel: cancel}
+		flowRuns.byFlow[f.ID] = run
+	}
+	run.jobs++
+	flowRuns.Unlock()
+	go executeJoinFlow(run, pf, p)
+}
+
+// executeJoinFlow runs the steps for one joining player, with offsets counted
+// from the moment the join was seen. Cancel steps never apply here: there is
+// no countdown to undo.
+func executeJoinFlow(run *flowRun, pf *parsedFlow, p Player) {
+	joinedAt := time.Now()
+	run.logf("player %d (%s) joined", p.ID, p.Name)
+	stopped := false
+	for _, st := range pf.Steps {
+		if !sleepUntil(run.ctx, joinedAt.Add(time.Duration(st.OffsetSecs)*time.Second)) {
+			stopped = true
+			break
+		}
+		runFlowCommand(run, st.Command, st.OffsetSecs, &p)
+	}
+	if stopped {
+		run.logf("stopped for player %d (%s)", p.ID, p.Name)
+	}
+	flowRuns.Lock()
+	run.jobs--
+	if run.jobs == 0 && run.active {
+		run.active = false
+		run.status = "done"
+		if stopped {
+			run.status = "stopped"
+		}
+		run.cancel() // release the context
+	}
+	flowRuns.Unlock()
 }

@@ -355,6 +355,44 @@ func (db *Database) OfflinePlayers() ([]Player, error) {
 	return players, rows.Err()
 }
 
+// KnownPlayers returns every player ever seen, sorted by name. Offline is
+// false for players with an open session (online as of the last poll).
+func (db *Database) KnownPlayers() ([]Player, error) {
+	rows, err := db.Query(`
+		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen,
+			EXISTS (SELECT 1 FROM active_sessions a WHERE a.guid = p.guid)
+		FROM players p
+		ORDER BY p.username COLLATE NOCASE
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	players := []Player{}
+	for rows.Next() {
+		var p Player
+		var lastSeen time.Time
+		var online int
+		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen, &online); err != nil {
+			return nil, err
+		}
+		p.LastSeenUnix = lastSeen.Unix()
+		p.Offline = online == 0
+		players = append(players, p)
+	}
+	return players, rows.Err()
+}
+
+// PlayerByGUID returns the stored name and last IP for a GUID
+// (case-insensitive), or sql.ErrNoRows if that GUID was never seen.
+func (db *Database) PlayerByGUID(guid string) (Player, error) {
+	var p Player
+	err := db.QueryRow("SELECT username, last_ip, guid FROM players WHERE lower(guid) = lower(?)", guid).
+		Scan(&p.Name, &p.IP, &p.GUID)
+	return p, err
+}
+
 // ---------------------------------------------------------------------------
 // Bans
 // ---------------------------------------------------------------------------
@@ -637,7 +675,8 @@ func syncBanList() ([]Ban, error) {
 //   - On failure, count consecutive failures. At exactly 3 in a row the server
 //     is assumed down and SyncPlayers(nil) closes all open sessions once, so
 //     playtime stops accruing while it's offline.
-//   - On success, reset the failure counter and sync the parsed list into the DB.
+//   - On success, reset the failure counter, sync the parsed list into the DB
+//     and pass it to playersPolled, which starts player-join flows.
 //   - On the 1st poll and every 6th after (~30s at a 5s interval), also
 //     reconcile the ban list, since it changes rarely.
 func startBackgroundSync(interval time.Duration) {
@@ -657,13 +696,16 @@ func startBackgroundSync(interval time.Duration) {
 					if err := globalDatabase.SyncPlayers(nil); err != nil {
 						log.Printf("poller: close sessions: %v", err)
 					}
+					playersLost() // greet everyone again when they reconnect (flows.go)
 				}
 				continue
 			}
 			fails = 0
-			if err := globalDatabase.SyncPlayers(parsePlayers(out)); err != nil {
+			players := parsePlayers(out)
+			if err := globalDatabase.SyncPlayers(players); err != nil {
 				log.Printf("poller: sync: %v", err)
 			}
+			playersPolled(players) // starts player-join flows for new arrivals (flows.go)
 			// Ban list changes rarely: reconcile at start and every 6th poll (~30s).
 			if n%6 == 1 {
 				if _, err := syncBanList(); err != nil {

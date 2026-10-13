@@ -26,12 +26,14 @@ import (
 //   Players
 //       GET  /players                        page
 //       GET  /api/players                    online + offline players
+//       GET  /api/players/all                every player ever seen (no RCON needed)
 //       POST /api/players/<id>/message       private message to a player
 //       POST /api/players/<id>/kick          kick a player
 //       POST /api/players/<id>/ban           ban a player by GUID (+kick)
 //   Bans
 //       GET  /bans                           page
 //       GET  /api/bans                       list GUID bans (also syncs to DB)
+//       POST /api/bans                       ban a known player by GUID, online or not
 //       POST /api/bans/<guid>/unban          remove every ban entry for a GUID
 //   Flows
 //       GET  /flows                          page
@@ -60,9 +62,10 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("/kickall", handleKickAll)           // kick everyone (optionally lock/shutdown)
 	mux.HandleFunc("/players", handlePlayersPage)       // players web page
 	mux.HandleFunc("/api/players", handlePlayersJSON)   // players JSON list
-	mux.HandleFunc("/api/players/", handlePlayerAction) // per-player actions (trailing slash = subtree)
+	mux.HandleFunc("/api/players/all", handleAllPlayersJSON) // every known player, for the Ban Player picker
+	mux.HandleFunc("/api/players/", handlePlayerAction)      // per-player actions (trailing slash = subtree)
 	mux.HandleFunc("/bans", handleBansPage)             // bans web page
-	mux.HandleFunc("/api/bans", handleBansJSON)         // bans JSON list
+	mux.HandleFunc("/api/bans", handleBansJSON)         // bans JSON list (GET) / ban by GUID (POST)
 	mux.HandleFunc("/api/bans/", handleBanAction)       // per-ban actions
 	mux.HandleFunc("/flows", handleFlowsPage)           // flows web page
 	mux.HandleFunc("/api/flows", handleFlowsAPI)        // list / save flows
@@ -252,6 +255,22 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAllPlayersJSON serves GET /api/players/all: every player ever seen,
+// from the database only, so it works while RCON is down. "offline" is false
+// for players who were online at the last poll.
+func handleAllPlayersJSON(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		fail(w, http.StatusMethodNotAllowed, "use GET")
+		return
+	}
+	players, err := globalDatabase.KnownPlayers()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "players": players, "count": len(players)})
+}
+
 // actionRequest is the JSON body for the per-player action endpoints.
 // Which fields matter depends on the action:
 //
@@ -370,27 +389,28 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "minutes must be 0 or greater")
 			return
 		}
-		banPlayer(w, p, req)
+		banPlayer(w, p, true, req)
 		return
 	}
 
 	fail(w, http.StatusNotFound, "unknown action")
 }
 
-// banPlayer bans player p and writes the JSON response itself.
+// banPlayer bans player p and writes the JSON response itself. online says
+// whether p is connected right now (p.ID is only meaningful then).
 //
 // Steps:
 //  1. Lock the ban list.
 //  2. `addBan <guid> <minutes> <reason>` (GUID-only ban). Failure or no ack
 //     -> 502, nothing else happens.
-//  3. Kick the player immediately with the same reason. The ban already
-//     exists, so a failed kick is only logged and reported via "kicked".
+//  3. If online, kick the player immediately with the same reason. The ban
+//     already exists, so a failed kick is only logged and reported via "kicked".
 //  4. Record GUID/name/IP/reason/perm in SQLite. If this fails the response is
 //     500 with guid_ban=true, so the UI knows the in-game ban did succeed.
 //
 // BattlEye treats duration 0 as permanent. The IP is stored for reference
 // only and is NOT banned.
-func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
+func banPlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) {
 	banListLock.Lock()
 	defer banListLock.Unlock()
 	// BattlEye ban is GUID-only.
@@ -407,11 +427,13 @@ func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
 	// Disconnect the player now, using the ban reason as the kick reason.
 	// The ban is already in place, so a failed kick doesn't fail the request.
 	kicked := false
-	kickCmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
-	_, kickAck, kickErr := runShared(kickCmd, 1500*time.Millisecond, false)
-	kicked = kickErr == nil && kickAck
-	if !kicked {
-		log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
+	if online {
+		kickCmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
+		_, kickAck, kickErr := runShared(kickCmd, 1500*time.Millisecond, false)
+		kicked = kickErr == nil && kickAck
+		if !kicked {
+			log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
+		}
 	}
 	// BattlEye uses duration 0 for a permanent ban.
 	perm := 0
@@ -422,10 +444,10 @@ func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
 	// The IP is informational only and is NOT banned.
 	if err := globalDatabase.BanUser(p.GUID, p.Name, p.IP, req.Reason, perm); err != nil {
 		log.Printf("error recording ban in DB: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "guid_ban": true, "db_updated": false, "kicked": kicked, "error": "GUID ban succeeded but database update failed"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "guid_ban": true, "db_updated": false, "online": online, "kicked": kicked, "error": "GUID ban succeeded but database update failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "kicked": kicked, "perm": perm == 1})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "online": online, "kicked": kicked, "perm": perm == 1})
 }
 
 // ---------------------------------------------------------------------------
@@ -440,8 +462,12 @@ func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
 // BattlEye only stores GUIDs; unknown GUIDs show as "Unknown". BattlEye can
 // list one GUID multiple times, so duplicates are collapsed to the first.
 func handleBansJSON(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		handleBanGUID(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
-		fail(w, http.StatusMethodNotAllowed, "use GET")
+		fail(w, http.StatusMethodNotAllowed, "use GET or POST")
 		return
 	}
 	bans, err := syncBanList()
@@ -468,6 +494,60 @@ func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 		list = append(list, b)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": true, "bans": list, "count": len(list)})
+}
+
+// handleBanGUID serves POST /api/bans: the Bans page's "Ban Player" dialog.
+// Body: {"guid": "<32 hex>", "reason": "text", "minutes": 0}. minutes
+// defaults to 0, which is permanent.
+//
+// The player can be online or offline, but must be known (in the live
+// player list or the database), so the ban gets a name and IP on record.
+// An online player is kicked right away, the same as the Players page ban.
+func handleBanGUID(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		GUID    string `json:"guid"`
+		Reason  string `json:"reason"`
+		Minutes int    `json:"minutes"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	guid := strings.TrimSpace(body.GUID)
+	if !guidPattern.MatchString(guid) {
+		fail(w, http.StatusBadRequest, "guid must be 32 hex characters")
+		return
+	}
+	if body.Minutes < 0 {
+		fail(w, http.StatusBadRequest, "minutes must be 0 or greater")
+		return
+	}
+	req := actionRequest{Reason: cleanReason(body.Reason), Minutes: body.Minutes}
+	if req.Reason == "" {
+		req.Reason = "No reason specified"
+	}
+
+	// Online? Then we have the player number for the kick (retrying read).
+	out, _, err := runShared("players", 3*time.Second, true)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": "RCON unavailable"})
+		return
+	}
+	for _, p := range parsePlayers(out) {
+		if strings.EqualFold(p.GUID, guid) {
+			banPlayer(w, p, true, req)
+			return
+		}
+	}
+	p, err := globalDatabase.PlayerByGUID(guid)
+	if errors.Is(err, sql.ErrNoRows) {
+		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
+		return
+	} else if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	banPlayer(w, p, false, req)
 }
 
 // handleBanAction serves POST /api/bans/<guid>/unban.
@@ -1182,8 +1262,9 @@ setInterval(refresh, {{.RefreshInterval.Milliseconds}});
 </body>
 </html>`))
 
-// bansPage is the /bans page: a read-mostly table of GUID bans that polls
-// /api/bans every BansRefreshInterval, with an Unban button per row.
+// bansPage is the /bans page: a table of GUID bans that polls /api/bans every
+// BansRefreshInterval, with an Unban button per row and a "Ban Player" button
+// that opens a dialog to ban any known player (online or not) by GUID.
 //
 // Client-side script outline:
 //   - esc():         HTML-escapes server data before it's inserted
@@ -1193,6 +1274,9 @@ setInterval(refresh, {{.RefreshInterval.Milliseconds}});
 //   - unban():       confirms, disables the button to prevent double clicks,
 //                    POSTs to /api/bans/<guid>/unban, alerts on failure, and
 //                    refreshes either way
+//   - openBan():     loads every known player from /api/players/all into the
+//                    picker, leaving out GUIDs that are already banned
+//   - ban submit:    POSTs {guid, reason, minutes} to /api/bans
 var bansPage = template.Must(template.Must(baseTemplate.Clone()).New("bans").Parse(`<!doctype html>
 <html>
 <head>
@@ -1202,11 +1286,17 @@ var bansPage = template.Must(template.Must(baseTemplate.Clone()).New("bans").Par
 {{template "style" .}}
 <style>
 td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.top button { margin-right: 0; }
+select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.InputPadding}}; background: #111; color: #eee; border: 1px solid #555; }
 </style>
 </head>
 <body>
 <nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
-<h1>Server Bans</h1>
+<div class="top">
+	<h1>Server Bans</h1>
+	<button onclick="openBan()">Ban Player</button>
+</div>
 <div id="status">Connecting...</div>
 <table>
 	<colgroup>
@@ -1222,7 +1312,25 @@ td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-ov
 	</thead>
 	<tbody id="bans"></tbody>
 </table>
+
+<div id="banModal" class="modal" onclick="if (event.target === this) closeBan()">
+	<div class="box">
+		<h2>Ban Player</h2>
+		<label>Player</label>
+		<select id="banPlayer"></select>
+		<label>Duration (minutes, 0 = permanent)</label>
+		<input id="banMinutes" type="number" min="0" step="1" value="0">
+		<label>Reason</label>
+		<input id="banReason" type="text" maxlength="200" placeholder="Short message shown to the player">
+		<div class="buttons">
+			<button onclick="closeBan()">Cancel</button>
+			<button id="banSubmit">Ban</button>
+		</div>
+	</div>
+</div>
 <script>
+let banned = {}; // GUIDs on the current ban list, so the picker can skip them
+
 function esc(s) {
 	return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -1245,6 +1353,8 @@ async function refresh() {
 			return;
 		}
 		document.getElementById('status').textContent = 'Connected — ' + d.count + ' ban(s)';
+		banned = {};
+		d.bans.forEach(function(b) { banned[b.guid] = true; });
 		document.getElementById('bans').innerHTML = d.bans.map(function(b) {
 			let n = esc(b.name);
 			return '<tr>' +
@@ -1275,6 +1385,63 @@ async function unban(btn) {
 	}
 	refresh();
 }
+
+async function openBan() {
+	let sel = document.getElementById('banPlayer');
+	sel.innerHTML = '<option value="">Loading players...</option>';
+	document.getElementById('banMinutes').value = '0';
+	document.getElementById('banReason').value = '';
+	document.getElementById('banModal').style.display = 'flex';
+	try {
+		let r = await fetch('/api/players/all');
+		let d = await r.json();
+		if (!d.ok) throw new Error(d.error);
+		let list = d.players.filter(function(p) { return !banned[String(p.guid).toLowerCase()]; });
+		if (!list.length) {
+			sel.innerHTML = '<option value="">No players left to ban</option>';
+			return;
+		}
+		sel.innerHTML = '<option value="">Select a player...</option>' + list.map(function(p) {
+			return '<option value="' + esc(p.guid) + '">' + esc(p.name) + (p.offline ? '' : ' (online)') +
+				' — ' + esc(String(p.guid).slice(0, 8)) + '</option>';
+		}).join('');
+	} catch(e) {
+		sel.innerHTML = '<option value="">Could not load players</option>';
+	}
+}
+
+function closeBan() { document.getElementById('banModal').style.display = 'none'; }
+
+document.getElementById('banSubmit').onclick = async function() {
+	let btn = this;
+	let guid = document.getElementById('banPlayer').value;
+	let minutes = parseInt(document.getElementById('banMinutes').value, 10);
+	if (!guid) { alert('Select a player first.'); return; }
+	if (!Number.isInteger(minutes) || minutes < 0) {
+		alert('Duration must be a whole number of minutes (0 = permanent).');
+		return;
+	}
+	btn.disabled = true;
+	try {
+		let r = await fetch('/api/bans', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ guid: guid, reason: document.getElementById('banReason').value, minutes: minutes })
+		});
+		let d = await r.json();
+		if (!d.ok) {
+			alert(d.error || d.guid_error || 'Ban failed');
+			return;
+		}
+		closeBan();
+		if (d.online && !d.kicked) alert('Player was banned, but the kick was not confirmed.');
+	} catch(e) {
+		alert('Request failed');
+	} finally {
+		btn.disabled = false;
+		refresh();
+	}
+};
 
 refresh();
 setInterval(refresh, {{.BansRefreshInterval.Milliseconds}});
@@ -1356,8 +1523,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<label>Name</label>
 		<input id="name" type="text">
 		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
-		<label>Schedule (cron: minute hour day-of-month month day-of-week)</label>
-		<input id="sched" type="text" placeholder="* * * * *" spellcheck="false">
+		<label>Schedule (cron: minute hour day-of-month month day-of-week; blank or * * * * * = run when a player joins)</label>
+		<input id="sched" type="text" placeholder="0 6 * * *" spellcheck="false">
 		<div id="schedHelp" class="help"></div>
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
@@ -1398,6 +1565,18 @@ cancel | say -1 Server restart cancelled.</pre>
 			<li><code>cancel | command</code> lines run only if you press Stop before the schedule time arrives. Use them to undo a countdown, for example a "restart cancelled" message.</li>
 		</ul>
 
+		<h3>Player-join flows</h3>
+		<p>Leave the schedule blank (or use <code>* * * * *</code>) and <b>Enable</b> the flow, and it runs once for every player who joins instead of on the clock. Joins are checked every 5 seconds.</p>
+<pre>0s   | say $player Welcome to our server, $name!
++60  | say $player Type /help for the rules.</pre>
+		<ul>
+			<li><code>$player</code> becomes the joining player's number (what <code>say</code> and <code>kick</code> need) and <code>$name</code> their name.</li>
+			<li>Offsets count from when the join was seen, so use <code>0s</code> or <code>+</code> offsets only.</li>
+			<li>A player who is still loading in may miss a <code>0s</code> message; <code>+30</code> or so is more reliable.</li>
+			<li>Players already online when the app starts are not greeted. After the server restarts, everyone who reconnects is.</li>
+			<li>Flows using <code>$player</code> or <code>$name</code> can't be started with Run or given a clock schedule.</li>
+		</ul>
+
 		<h3>Commands you can use</h3>
 		<ul>
 			<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
@@ -1416,7 +1595,7 @@ cancel | say -1 Server restart cancelled.</pre>
 
 		<h3>Buttons</h3>
 		<ul>
-			<li><b>Enable / Disable</b> turns the schedule on or off. Enable needs a schedule.</li>
+			<li><b>Enable / Disable</b> turns the flow on or off. An enabled flow with a schedule runs on the clock; one without runs when a player joins.</li>
 			<li><b>Run / Stop</b> switches with the flow's state. Run starts the flow immediately: the earliest step fires right away and the rest follow at their offsets. Stop halts a running flow.</li>
 			<li><b>Edit</b> changes the steps or schedule. <b>Delete</b> removes the flow (not while it is running).</li>
 			<li>Drag a row up or down to reorder the list.</li>
@@ -1516,8 +1695,15 @@ async function refresh() {
 
 function find(id) { return flows.find(function(x) { return x.id === id; }); }
 
+function isJoinFlow(f) {
+	let s = (f.schedule || '').trim().split(/\s+/).join(' ');
+	return s === '' || s === '* * * * *';
+}
+
 async function toggleFlow(id) {
 	let f = find(id);
+	if (!f.scheduleEnabled && isJoinFlow(f) &&
+		!confirm('"' + f.name + '" has no clock schedule, so it will run every time a player joins. Enable it?')) return;
 	let d = await post('/api/flows/' + id + '/' + (f.scheduleEnabled ? 'disable' : 'enable'));
 	if (!d.ok) alert(d.error || 'Failed');
 	refresh();
