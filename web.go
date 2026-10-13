@@ -1014,7 +1014,7 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 </style>
 </head>
 <body>
-<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <h1>DayZ Players</h1>
 <div id="status">Connecting...</div>
 <table>
@@ -1205,7 +1205,7 @@ td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-ov
 </style>
 </head>
 <body>
-<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <h1>Server Bans</h1>
 <div id="status">Connecting...</div>
 <table>
