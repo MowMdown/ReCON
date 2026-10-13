@@ -1,395 +1,220 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 // ============================================================================
 // web.go overview
 // ----------------------------------------------------------------------------
-// This file is the "management UI + JSON API" layer that sits on top of the
-// RCON plumbing in main.go. It provides:
+// The HTTP layer. It turns requests into calls on the logic (db.go, flows.go)
+// and on the game server (rcon.go), and turns the results into JSON or pages.
 //
-//   - Two HTML pages (/players and /bans) rendered from Go templates
-//   - JSON endpoints the pages poll and call:
-//       GET  /api/players                  list connected players
-//       POST /api/players/<id>/message     private message to a player
-//       POST /api/players/<id>/kick        kick a player
-//       POST /api/players/<id>/ban         ban a player by GUID (+kick)
-//       GET  /api/bans                     list GUID bans (also syncs to DB)
-//       POST /api/bans/<guid>/unban        remove every ban entry for a GUID
-//   - A shared, auto-reconnecting RCON session (runShared) for all of the above
-//   - A background poller that keeps the SQLite DB in sync with the server
+//   Raw RCON (for schedulers / scripts)
+//       GET/POST /rcon                       run any RCON command
+//       POST     /kickall                    kick everyone (optional lock/shutdown)
+//   Players
+//       GET  /players                        page
+//       GET  /api/players                    online + offline players
+//       POST /api/players/<id>/message       private message to a player
+//       POST /api/players/<id>/kick          kick a player
+//       POST /api/players/<id>/ban           ban a player by GUID (+kick)
+//   Bans
+//       GET  /bans                           page
+//       GET  /api/bans                       list GUID bans (also syncs to DB)
+//       POST /api/bans/<guid>/unban          remove every ban entry for a GUID
+//   Flows
+//       GET  /flows                          page
+//       GET  /api/flows                      flows + current/last run of each
+//       POST /api/flows                      create/update {id, name, script, schedule, scheduleEnabled}
+//       POST /api/flows/<id>/run             optional body {"minutes": N} = minutes until the cron time
+//       POST /api/flows/<id>/stop
+//       POST /api/flows/<id>/enable          (needs a schedule)   /disable
+//       POST /api/flows/<id>/delete
+//       POST /api/flows/preview              {schedule, script} -> plain-English description
+//       POST /api/flows/reorder              {ids: [...]} saves the order shown on the page
+//       POST /api/flows/command              {command: lock|unlock|shutdown|kickall} the page's quick buttons
+//   GET /health
 //
 // Concurrency note: everything that mutates or mirrors the ban list takes
-// banListLock, so a background sync can never act on a stale list.
+// banListLock (db.go), so a background sync can never act on a stale list.
 // ============================================================================
 
-// Player is one row of the BattlEye `players` output, also the JSON shape
-// returned by /api/players.
-type Player struct {
-	ID                int    `json:"id"`
-	IP                string `json:"ip"`
-	Port              string `json:"port"`
-	Ping              int    `json:"ping"`
-	GUID              string `json:"guid"`
-	Name              string `json:"name"`
-	Offline           bool   `json:"offline"`
-	TotalPlaytimeSecs int64  `json:"totalPlaytimeSeconds"`
-	LastSeenUnix      int64  `json:"lastSeenUnix"` // offline players: when they were last seen (Unix seconds)
-}
+// runWebServer registers every route and serves until the listener fails.
+func runWebServer(addr string) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/rcon", handleRcon)                 // run any RCON command
+	mux.HandleFunc("/kickall", handleKickAll)           // kick everyone (optionally lock/shutdown)
+	mux.HandleFunc("/players", handlePlayersPage)       // players web page
+	mux.HandleFunc("/api/players", handlePlayersJSON)   // players JSON list
+	mux.HandleFunc("/api/players/", handlePlayerAction) // per-player actions (trailing slash = subtree)
+	mux.HandleFunc("/bans", handleBansPage)             // bans web page
+	mux.HandleFunc("/api/bans", handleBansJSON)         // bans JSON list
+	mux.HandleFunc("/api/bans/", handleBanAction)       // per-ban actions
+	mux.HandleFunc("/flows", handleFlowsPage)           // flows web page
+	mux.HandleFunc("/api/flows", handleFlowsAPI)        // list / save flows
+	mux.HandleFunc("/api/flows/", handleFlowAction)     // per-flow actions, preview, reorder, quick commands
 
-// Ban is one entry of the GUID section of the BattlEye `bans` output, also the
-// JSON shape returned by /api/bans.
-type Ban struct {
-	Index   int    `json:"index"`   // position in the BattlEye list (shifts after each removal!)
-	GUID    string `json:"guid"`    // banned GUID, lower-cased
-	Name    string `json:"name"`    // last-known player name, filled from the DB (BattlEye doesn't store it)
-	Minutes string `json:"minutes"` // minutes left as text, or "perm"
-	Perm    bool   `json:"perm"`    // true for permanent bans
-	Reason  string `json:"reason"`
-}
-
-// pageSettings holds every tweakable layout value used by the HTML templates
-// (widths, paddings, font sizes) plus the browser polling intervals. It's
-// passed to the templates as their data object, so editing a value here
-// changes the page without touching the HTML.
-var pageSettings = struct {
-	PageMargin          string
-	TableWidth          string
-	CellPadding         string
-	RowHeight           string
-	HeaderFontSize      string
-	BodyFontSize        string
-	IDWidth             string
-	PlayerWidth         string
-	IPWidth             string
-	GUIDWidth           string
-	PingWidth           string
-	ActionsWidth        string
-	ModalWidth          string
-	ModalPadding        string
-	InputPadding        string
-	ButtonPadding       string
-	RefreshInterval     time.Duration // how often the players page polls /api/players
-	BansRefreshInterval time.Duration // how often the bans page polls /api/bans
-}{
-	PageMargin:          "24px",
-	TableWidth:          "100%",
-	CellPadding:         "9px",
-	RowHeight:           "42px",
-	HeaderFontSize:      "14px",
-	BodyFontSize:        "14px",
-	IDWidth:             "60px",
-	PlayerWidth:         "220px",
-	IPWidth:             "150px",
-	GUIDWidth:           "280px",
-	PingWidth:           "80px",
-	ActionsWidth:        "240px",
-	ModalWidth:          "420px",
-	ModalPadding:        "20px",
-	InputPadding:        "9px",
-	ButtonPadding:       "6px 10px",
-	RefreshInterval:     5 * time.Second,
-	BansRefreshInterval: 10 * time.Second,
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           logRequests(mux),
+		ReadHeaderTimeout: 5 * time.Second, // guards against slowloris-style header stalls
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      120 * time.Second, // generous: kickall can take a while
+	}
+	return srv.ListenAndServe()
 }
 
 // ---------------------------------------------------------------------------
-// Shared RCON session
+// Shared HTTP helpers
 // ---------------------------------------------------------------------------
 
-// sharedConnection is the single long-lived RCON session used by the web
-// layer and the background poller. The embedded Mutex protects the pointer
-// (not the commands themselves; persistentConnection serialises those).
-// Keepalive is disabled for it (see connectShared) because the 5s poller
-// already generates traffic well inside BattlEye's idle timeout.
-var sharedConnection = struct {
-	sync.Mutex
-	connection *persistentConnection
-}{}
+// logRequests is HTTP middleware that logs each request (method, path+query,
+// remote address, X-Forwarded-For if behind a proxy, user agent) before
+// passing it on. Health checks and the pages' routine GET polling are skipped
+// to keep the log readable.
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		quiet := r.Method == http.MethodGet && (r.URL.Path == "/health" || r.URL.Path == "/players" ||
+			r.URL.Path == "/bans" || r.URL.Path == "/api/players" || r.URL.Path == "/api/bans" ||
+			r.URL.Path == "/flows" || r.URL.Path == "/api/flows")
+		if !quiet {
+			from := r.RemoteAddr
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				from += " (xff " + xff + ")"
+			}
+			target := r.URL.Path
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			log.Printf("http %s %s from %s ua=%q", r.Method, target, from, r.UserAgent())
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
-// connectShared returns the shared session, creating or replacing it as needed:
-//   - healthy existing session -> returned as is
-//   - existing but dead        -> closed, cleared, and a new one dialed
-//   - none                     -> a new one is dialed
-//
-// The lock is held during dialing, so concurrent callers wait for one login
-// rather than each opening their own.
-func connectShared() (*persistentConnection, error) {
-	sharedConnection.Lock()
-	defer sharedConnection.Unlock()
-	if sharedConnection.connection != nil && !sharedConnection.connection.isClosed() {
-		return sharedConnection.connection, nil
+// fail writes a JSON error body: {"ok": false, "error": msg} with status `code`.
+func fail(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]any{"ok": false, "error": msg})
+}
+
+// writeJSON sets the JSON content type, writes the status code, then encodes
+// `v` as the response body. (Header must be set before WriteHeader.)
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(v)
+}
+
+// decodeBody decodes a JSON request body (capped at 16 KiB) into dst.
+func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(dst)
+}
+
+// ---------------------------------------------------------------------------
+// Raw RCON endpoints
+// ---------------------------------------------------------------------------
+
+// runCommand executes a single RCON command for an HTTP caller and writes the
+// JSON result.
+//   - empty command -> 400
+//   - RCON failure  -> 502 (the upstream game server is the problem, not the request)
+//   - success       -> 200 with {ok, command, acked, output}
+func runCommand(w http.ResponseWriter, command string) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		fail(w, 400, "no command")
+		return
 	}
-	if sharedConnection.connection != nil {
-		sharedConnection.connection.close()
-		sharedConnection.connection = nil
-	}
-	s, err := dialPersistent("web", false)
+	out, acked, err := sendOneShot("http", command, 2*time.Second)
 	if err != nil {
-		return nil, err
-	}
-	sharedConnection.connection = s
-	return s, nil
-}
-
-// runShared runs a command on the shared session with optional retry/reconnect.
-//
-//   - allowRetry=false: one attempt. Used for state-changing commands (kick,
-//     ban, say, ...) so a slow-but-successful command is never repeated.
-//   - allowRetry=true: up to 3 attempts with 1s pauses. Used for read-only
-//     commands (players, bans) where repeating is harmless.
-//
-// After a failed attempt, if there was an error or the session no longer
-// answers a probe (isResponsive), the session is discarded so the next
-// attempt (or caller) logs in fresh. The pointer comparison under the lock
-// avoids discarding a newer session another goroutine already created.
-//
-// Success means err == nil AND the server acknowledged the command.
-func runShared(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
-	maxAttempts := 1
-	if allowRetry {
-		maxAttempts = 3
-	}
-	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		s, err := connectShared()
-		if err != nil {
-			lastErr = err
-			time.Sleep(1 * time.Second)
-			continue
-		}
-		out, acked, err := s.run(command, wait)
-		if err == nil && acked {
-			return out, acked, nil
-		}
-		if err != nil {
-			lastErr = err
-		}
-		// Drop the session if it errored or has gone silent.
-		if err != nil || !s.isResponsive() {
-			sharedConnection.Lock()
-			if sharedConnection.connection == s {
-				s.close()
-				sharedConnection.connection = nil
-			}
-			sharedConnection.Unlock()
-		}
-		if allowRetry {
-			time.Sleep(1 * time.Second)
-		}
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("RCON command unacknowledged")
-	}
-	return "", false, lastErr
-}
-
-// ---------------------------------------------------------------------------
-// Parsing helpers
-// ---------------------------------------------------------------------------
-
-// parsePlayers turns the text output of the `players` command into Player
-// structs. Each data line looks like:
-//
-//	12   203.0.113.5:2304   47   a1b2c3...(OK)   Some Name
-//
-// Fields are whitespace-separated: id, ip:port, ping, guid(status), then the
-// name (which may itself contain spaces, so all remaining fields are rejoined).
-// The "(OK)"/"(?)" verification suffix is stripped from the GUID. Header lines,
-// separators and the footer fail one of the checks and are skipped.
-func parsePlayers(out string) []Player {
-	players := []Player{}
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-		id, err := strconv.Atoi(fields[0])
-		if err != nil {
-			continue
-		}
-		host, port, ok := strings.Cut(fields[1], ":")
-		if !ok {
-			continue
-		}
-		ping, err := strconv.Atoi(fields[2])
-		if err != nil {
-			continue
-		}
-		guid := fields[3]
-		if idx := strings.IndexByte(guid, '('); idx != -1 {
-			guid = guid[:idx]
-		}
-		name := strings.Join(fields[4:], " ")
-		players = append(players, Player{ID: id, IP: host, Port: port, Ping: ping, GUID: guid, Name: name})
-	}
-	return players
-}
-
-// findPlayer parses `players` output and returns the player with the given ID.
-// The bool is false if that ID isn't connected.
-func findPlayer(out string, id int) (Player, bool) {
-	for _, p := range parsePlayers(out) {
-		if p.ID == id {
-			return p, true
-		}
-	}
-	return Player{}, false
-}
-
-// cleanReason trims whitespace and replaces CR/LF with spaces so user-supplied
-// text can't break out of a single RCON command line.
-func cleanReason(s string) string {
-	return strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(s))
-}
-
-// ---------------------------------------------------------------------------
-// Banning
-// ---------------------------------------------------------------------------
-
-// banListLock serialises everything that changes or mirrors the ban list
-// (ban, unban, and BattlEye->DB sync) so a sync can't act on a stale
-// list and delete a ban that was just added.
-var banListLock sync.Mutex
-
-// banPlayer bans player p and writes the JSON response itself.
-//
-// Steps:
-//  1. Lock the ban list.
-//  2. `addBan <guid> <minutes> <reason>` (GUID-only ban). Failure or no ack
-//     -> 502, nothing else happens.
-//  3. Kick the player immediately with the same reason. The ban already
-//     exists, so a failed kick is only logged and reported via "kicked".
-//  4. Record GUID/name/IP/reason/perm in SQLite. If this fails the response is
-//     500 with guid_ban=true, so the UI knows the in-game ban did succeed.
-//
-// BattlEye treats duration 0 as permanent. The IP is stored for reference
-// only and is NOT banned.
-func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
-	banListLock.Lock()
-	defer banListLock.Unlock()
-	// BattlEye ban is GUID-only.
-	guidCmd := fmt.Sprintf("addBan %s %d %s", p.GUID, req.Minutes, req.Reason)
-	_, guidAck, guidErr := runShared(guidCmd, 1500*time.Millisecond, false)
-	if guidErr != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "guid_ban": false, "guid_error": guidErr.Error()})
+		fail(w, 502, err.Error())
 		return
 	}
-	if !guidAck {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "guid_ban": false, "error": "GUID ban was not acknowledged"})
-		return
-	}
-	// Disconnect the player now, using the ban reason as the kick reason.
-	// The ban is already in place, so a failed kick doesn't fail the request.
-	kicked := false
-	kickCmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
-	_, kickAck, kickErr := runShared(kickCmd, 1500*time.Millisecond, false)
-	kicked = kickErr == nil && kickAck
-	if !kicked {
-		log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
-	}
-	// BattlEye uses duration 0 for a permanent ban.
-	perm := 0
-	if req.Minutes == 0 {
-		perm = 1
-	}
-	// Record the GUID, player name, and current IP in SQLite.
-	// The IP is informational only and is NOT banned.
-	if err := globalDatabase.BanUser(p.GUID, p.Name, p.IP, req.Reason, perm); err != nil {
-		log.Printf("error recording ban in DB: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "guid_ban": true, "db_updated": false, "kicked": kicked, "error": "GUID ban succeeded but database update failed"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "kicked": kicked, "perm": perm == 1})
+	writeJSON(w, 200, map[string]any{"ok": true, "command": command, "acked": acked, "output": out})
 }
 
-// getOfflinePlayers returns all players from the database who are not currently connected.
-func getOfflinePlayers() ([]Player, error) {
-    rows, err := globalDatabase.Query(`
-        SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen
-        FROM players p
-        WHERE NOT EXISTS (
-            SELECT 1 FROM active_sessions a WHERE a.guid = p.guid
-        )
-        ORDER BY p.username COLLATE NOCASE
-    `)
-    if err != nil {
-        return nil, err
-    }
-    defer rows.Close()
-
-    players := []Player{}
-    for rows.Next() {
-        var p Player
-        var lastSeen time.Time
-        if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen); err != nil {
-            return nil, err
-        }
-        p.LastSeenUnix = lastSeen.Unix()
-        p.Offline = true
-        players = append(players, p)
-    }
-    return players, rows.Err()
-}
-
-// ---------------------------------------------------------------------------
-// Background sync
-// ---------------------------------------------------------------------------
-
-// startBackgroundSync tracks players (and periodically the ban list) in the
-// background so the DB stays current without any web page open.
-// It is the only caller of SyncPlayers.
+// handleRcon serves /rcon and accepts the command in three ways, which makes it
+// easy to call from simple tools (e.g. a scheduler's "POST to a URI" action):
 //
-// Every `interval`:
-//   - Poll `players` (single attempt, 3s wait).
-//   - On failure, count consecutive failures. At exactly 3 in a row the server
-//     is assumed down and SyncPlayers(nil) closes all open sessions once, so
-//     playtime stops accruing while it's offline.
-//   - On success, reset the failure counter and sync the parsed list into the DB.
-//   - On the 1st poll and every 6th after (~30s at a 5s interval), also
-//     reconcile the ban list, since it changes rarely.
-func startBackgroundSync(interval time.Duration) {
-	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		fails := 0
-		n := 0
-		for range t.C {
-			n++
-			out, acked, err := runShared("players", 3*time.Second, false)
-			if err != nil || !acked {
-				fails++
-				// Server probably down: close open sessions once so
-				// playtime doesn't keep accruing while it's offline.
-				if fails == 3 {
-					if err := globalDatabase.SyncPlayers(nil); err != nil {
-						log.Printf("poller: close sessions: %v", err)
-					}
-				}
-				continue
-			}
-			fails = 0
-			if err := globalDatabase.SyncPlayers(parsePlayers(out)); err != nil {
-				log.Printf("poller: sync: %v", err)
-			}
-			// Ban list changes rarely: reconcile at start and every 6th poll (~30s).
-			if n%6 == 1 {
-				if _, err := syncBanList(); err != nil {
-					log.Printf("poller: bans: %v", err)
-				}
-			}
+//	GET  /rcon?cmd=players
+//	POST /rcon                  body = raw command text
+//	POST /rcon (JSON)           body = {"command": "players"}
+//
+// JSON parsing kicks in when the Content-Type header contains "json".
+// Request bodies are capped at 4 KiB.
+func handleRcon(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		runCommand(w, r.URL.Query().Get("cmd"))
+	case http.MethodPost:
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+		if err != nil {
+			fail(w, 400, "bad body")
+			return
 		}
-	}()
+		cmd := string(raw)
+		if strings.Contains(r.Header.Get("Content-Type"), "json") {
+			var body struct {
+				Command string `json:"command"`
+			}
+			if err := json.Unmarshal(raw, &body); err != nil {
+				fail(w, 400, "bad JSON")
+				return
+			}
+			cmd = body.Command
+		}
+		runCommand(w, cmd)
+	default:
+		fail(w, 405, "method not allowed")
+	}
+}
+
+// handleKickAll serves POST /kickall. The optional JSON body is
+//
+//	{"reason": "...", "lock": true, "shutdown": true}
+//
+// An empty body is allowed (all defaults). `reason` defaults to
+// "Server restarting". The kickReport is returned under "result".
+func handleKickAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		fail(w, 405, "use POST")
+		return
+	}
+	var body struct {
+		Reason   string `json:"reason"`
+		Lock     bool   `json:"lock"`
+		Shutdown bool   `json:"shutdown"`
+	}
+	raw, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if len(strings.TrimSpace(string(raw))) > 0 {
+		if err := json.Unmarshal(raw, &body); err != nil {
+			fail(w, 400, "bad JSON")
+			return
+		}
+	}
+	if body.Reason == "" {
+		body.Reason = "Server restarting"
+	}
+	rep, err := kickAll("http-kickall", body.Reason, body.Lock, body.Shutdown)
+	if err != nil {
+		fail(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "result": rep})
 }
 
 // ---------------------------------------------------------------------------
@@ -412,7 +237,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	players := parsePlayers(out)
 
-	offlinePlayers, err := getOfflinePlayers()
+	offlinePlayers, err := globalDatabase.OfflinePlayers()
 	if err != nil {
 		log.Printf("error reading offline players from DB: %v", err)
 		offlinePlayers = []Player{}
@@ -552,115 +377,60 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	fail(w, http.StatusNotFound, "unknown action")
 }
 
-// ---------------------------------------------------------------------------
-// Ban list: parsing, reading, syncing
-// ---------------------------------------------------------------------------
-
-// parseBans parses BattlEye `bans` output, e.g.
+// banPlayer bans player p and writes the JSON response itself.
 //
-//	GUID Bans:
-//	[#] [GUID] [Minutes left] [Reason]
-//	----------------------------------------
-//	0  49aacf68461f67163d0a2ecb6a4cee94 perm testing
+// Steps:
+//  1. Lock the ban list.
+//  2. `addBan <guid> <minutes> <reason>` (GUID-only ban). Failure or no ack
+//     -> 502, nothing else happens.
+//  3. Kick the player immediately with the same reason. The ban already
+//     exists, so a failed kick is only logged and reported via "kicked".
+//  4. Record GUID/name/IP/reason/perm in SQLite. If this fails the response is
+//     500 with guid_ban=true, so the UI knows the in-game ban did succeed.
 //
-//	IP Bans:
-//	...
-//
-// Only the GUID section is read; IP bans are ignored. ok is false when the
-// "GUID Bans" header wasn't found, so callers never treat an unrecognised
-// reply as an empty ban list.
-//
-// The parser is a tiny state machine: `section` flips to "guid" or "ip" when
-// a header line is seen, and only lines in the "guid" section are parsed.
-// A data line needs: numeric index, a 32-hex GUID, then "perm" or a number
-// of minutes; everything after that is the reason. Lines failing any check
-// (column titles, dashes, blank lines) are skipped.
-func parseBans(out string) (bans []Ban, ok bool) {
-	bans = []Ban{}
-	section := ""
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		low := strings.ToLower(line)
-		switch {
-		case strings.HasPrefix(low, "guid bans"):
-			section, ok = "guid", true
-			continue
-		case strings.HasPrefix(low, "ip bans"):
-			section = "ip"
-			continue
-		}
-		if section != "guid" {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		idx, err := strconv.Atoi(fields[0])
-		if err != nil || !guidPattern.MatchString(fields[1]) {
-			continue
-		}
-		perm := strings.EqualFold(fields[2], "perm")
-		if !perm {
-			if _, err := strconv.Atoi(fields[2]); err != nil {
-				continue
-			}
-		}
-		bans = append(bans, Ban{
-			Index:   idx,
-			GUID:    strings.ToLower(fields[1]),
-			Minutes: strings.ToLower(fields[2]),
-			Perm:    perm,
-			Reason:  strings.Join(fields[3:], " "),
-		})
-	}
-	return bans, ok
-}
-
-// guidPattern matches a BattlEye GUID: exactly 32 hex characters. Used both to
-// recognise ban rows and to validate the GUID in unban URLs.
-var guidPattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
-
-// readBanList reads the live GUID ban list from BattlEye (retrying read,
-// 4s wait). An unrecognised reply is logged (first 500 chars) and returned
-// as an error rather than as an empty list.
-func readBanList() ([]Ban, error) {
-	out, acked, err := runShared("bans", 4*time.Second, true)
-	if err != nil {
-		return nil, err
-	}
-	if !acked {
-		return nil, fmt.Errorf("RCON unavailable")
-	}
-	bans, ok := parseBans(out)
-	if !ok {
-		if len(out) > 500 {
-			out = out[:500]
-		}
-		log.Printf("bans: unrecognised output: %q", out)
-		return nil, fmt.Errorf("could not parse bans output")
-	}
-	return bans, nil
-}
-
-// syncBanList reads the BattlEye list and mirrors it into the DB.
-// Holds banListLock for the whole read+mirror so it can't interleave with a
-// ban/unban. Return values matter to callers:
-//   - (nil, err)   -> couldn't read the live list at all
-//   - (bans, err)  -> list was read fine, but the DB mirror failed
-//   - (bans, nil)  -> fully synced
-func syncBanList() ([]Ban, error) {
+// BattlEye treats duration 0 as permanent. The IP is stored for reference
+// only and is NOT banned.
+func banPlayer(w http.ResponseWriter, p Player, req actionRequest) {
 	banListLock.Lock()
 	defer banListLock.Unlock()
-	bans, err := readBanList()
-	if err != nil {
-		return nil, err
+	// BattlEye ban is GUID-only.
+	guidCmd := fmt.Sprintf("addBan %s %d %s", p.GUID, req.Minutes, req.Reason)
+	_, guidAck, guidErr := runShared(guidCmd, 1500*time.Millisecond, false)
+	if guidErr != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "guid_ban": false, "guid_error": guidErr.Error()})
+		return
 	}
-	if err := globalDatabase.SyncBans(bans); err != nil {
-		return bans, err
+	if !guidAck {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "guid_ban": false, "error": "GUID ban was not acknowledged"})
+		return
 	}
-	return bans, nil
+	// Disconnect the player now, using the ban reason as the kick reason.
+	// The ban is already in place, so a failed kick doesn't fail the request.
+	kicked := false
+	kickCmd := fmt.Sprintf("kick %d %s", p.ID, req.Reason)
+	_, kickAck, kickErr := runShared(kickCmd, 1500*time.Millisecond, false)
+	kicked = kickErr == nil && kickAck
+	if !kicked {
+		log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
+	}
+	// BattlEye uses duration 0 for a permanent ban.
+	perm := 0
+	if req.Minutes == 0 {
+		perm = 1
+	}
+	// Record the GUID, player name, and current IP in SQLite.
+	// The IP is informational only and is NOT banned.
+	if err := globalDatabase.BanUser(p.GUID, p.Name, p.IP, req.Reason, perm); err != nil {
+		log.Printf("error recording ban in DB: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "guid_ban": true, "db_updated": false, "kicked": kicked, "error": "GUID ban succeeded but database update failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "kicked": kicked, "perm": perm == 1})
 }
+
+// ---------------------------------------------------------------------------
+// Ban API
+// ---------------------------------------------------------------------------
 
 // handleBansJSON serves GET /api/bans.
 //
@@ -780,13 +550,285 @@ func handleBanAction(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// HTML templates and page handlers
+// Flow API
 // ---------------------------------------------------------------------------
 
-// baseTemplate defines a reusable "style" block (the shared CSS) that both
-// pages include with {{template "style" .}}. Layout values come from
-// pageSettings. Each page template below is created from a Clone() of this
-// base so they share the "style" definition without affecting each other.
+// handleFlowsAPI serves GET (list) and POST (create/update) on /api/flows.
+func handleFlowsAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		flows, err := flowsWithNextRun()
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "flows": flows, "runs": snapshotRuns()})
+	case http.MethodPost:
+		var f Flow
+		if err := decodeBody(w, r, &f); err != nil {
+			fail(w, http.StatusBadRequest, "bad JSON")
+			return
+		}
+		id, err := validateAndSaveFlow(f)
+		if err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id})
+	default:
+		fail(w, http.StatusMethodNotAllowed, "use GET or POST")
+	}
+}
+
+// handleFlowPreview serves POST /api/flows/preview: a plain-English summary of
+// a schedule (and how the script's offsets fit around it) for the edit dialog.
+func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Schedule string `json:"schedule"`
+		Script   string `json:"script"`
+	}
+	if err := decodeBody(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	writeJSON(w, http.StatusOK, previewFlow(req.Schedule, req.Script))
+}
+
+// handleFlowReorder serves POST /api/flows/reorder: the body lists flow ids in
+// the order they should appear.
+func handleFlowReorder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := decodeBody(w, r, &req); err != nil || len(req.IDs) == 0 {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	if err := globalDatabase.ReorderFlows(req.IDs); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleQuickCommand serves POST /api/flows/command for the page's static
+// buttons. Only these four commands are accepted (not arbitrary RCON text).
+func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := decodeBody(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(req.Command), "#"))
+	switch name {
+	case "lock", "unlock":
+		_, acked, err := runShared("#"+name, 2*time.Second, true)
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if !acked {
+			fail(w, http.StatusBadGateway, "#"+name+" was not acknowledged")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "#" + name + " sent"})
+	case "shutdown":
+		// The server may die before it acknowledges, so only a transport error is a failure.
+		_, acked, err := runShared("#shutdown", 2*time.Second, false)
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": acked, "message": "#shutdown sent"})
+	case "kickall":
+		rep, err := kickAllUsing(sharedRunner{}, "Server restarting", false, false)
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		msg := fmt.Sprintf("Kicked %d player(s)", len(rep.Order))
+		if len(rep.Remaining) > 0 {
+			msg += fmt.Sprintf(", %d still connected", len(rep.Remaining))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg})
+	default:
+		fail(w, http.StatusBadRequest, "unknown command")
+	}
+}
+
+// handleFlowAction serves POST /api/flows/<id>/<run|stop|enable|disable|delete>
+// and the /api/flows/preview, /reorder and /command endpoints.
+func handleFlowAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		fail(w, http.StatusMethodNotAllowed, "use POST")
+		return
+	}
+	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/preview" {
+		handleFlowPreview(w, r)
+		return
+	}
+	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/command" {
+		handleQuickCommand(w, r)
+		return
+	}
+	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/reorder" {
+		handleFlowReorder(w, r)
+		return
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/flows/"), "/"), "/")
+	if len(parts) != 2 {
+		fail(w, http.StatusNotFound, "invalid flow action")
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || id <= 0 {
+		fail(w, http.StatusNotFound, "invalid flow id")
+		return
+	}
+	f, err := globalDatabase.GetFlow(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		fail(w, http.StatusNotFound, "flow not found")
+		return
+	} else if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	switch parts[1] {
+	case "run":
+		var body struct {
+			Minutes int `json:"minutes"`
+		}
+		if r.ContentLength != 0 {
+			if err := decodeBody(w, r, &body); err != nil && !errors.Is(err, io.EOF) {
+				fail(w, http.StatusBadRequest, "bad JSON")
+				return
+			}
+		}
+		if body.Minutes < 0 || body.Minutes > 10080 {
+			fail(w, http.StatusBadRequest, "minutes must be 0-10080")
+			return
+		}
+		if err := startFlow(f, body.Minutes); err != nil {
+			code := http.StatusBadRequest
+			if errors.Is(err, errFlowRunning) {
+				code = http.StatusConflict
+			}
+			fail(w, code, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "stop":
+		if err := stopFlow(id); err != nil {
+			fail(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "enable":
+		if err := checkFlowCanEnable(f); err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := globalDatabase.SetFlowScheduleEnabled(id, true); err != nil {
+			fail(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "disable":
+		if err := globalDatabase.SetFlowScheduleEnabled(id, false); err != nil {
+			fail(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "delete":
+		if err := deleteFlow(id); err != nil {
+			code := http.StatusInternalServerError
+			if errors.Is(err, errFlowBusy) {
+				code = http.StatusConflict
+			}
+			fail(w, code, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		fail(w, http.StatusNotFound, "unknown action")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Pages
+// ---------------------------------------------------------------------------
+
+// pageSettings holds every tweakable layout value used by the HTML templates
+// (widths, paddings, font sizes) plus the browser polling intervals. It's
+// passed to the templates as their data object, so editing a value here
+// changes the page without touching the HTML.
+var pageSettings = struct {
+	PageMargin          string
+	TableWidth          string
+	CellPadding         string
+	RowHeight           string
+	HeaderFontSize      string
+	BodyFontSize        string
+	IDWidth             string
+	PlayerWidth         string
+	IPWidth             string
+	GUIDWidth           string
+	PingWidth           string
+	ActionsWidth        string
+	ModalWidth          string
+	ModalPadding        string
+	InputPadding        string
+	ButtonPadding       string
+	RefreshInterval     time.Duration // how often the players and flows pages poll
+	BansRefreshInterval time.Duration // how often the bans page polls /api/bans
+}{
+	PageMargin:          "24px",
+	TableWidth:          "100%",
+	CellPadding:         "9px",
+	RowHeight:           "42px",
+	HeaderFontSize:      "14px",
+	BodyFontSize:        "14px",
+	IDWidth:             "60px",
+	PlayerWidth:         "220px",
+	IPWidth:             "150px",
+	GUIDWidth:           "280px",
+	PingWidth:           "80px",
+	ActionsWidth:        "240px",
+	ModalWidth:          "420px",
+	ModalPadding:        "20px",
+	InputPadding:        "9px",
+	ButtonPadding:       "6px 10px",
+	RefreshInterval:     5 * time.Second,
+	BansRefreshInterval: 10 * time.Second,
+}
+
+// renderPage serves a GET-only HTML page from a template with the layout
+// settings. Rendering errors become a plain 500. (If Execute fails midway,
+// part of the page may already have been sent.)
+func renderPage(w http.ResponseWriter, r *http.Request, page *template.Template) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := page.Execute(w, pageSettings); err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func handlePlayersPage(w http.ResponseWriter, r *http.Request) { renderPage(w, r, playersPage) }
+func handleBansPage(w http.ResponseWriter, r *http.Request)    { renderPage(w, r, bansPage) }
+func handleFlowsPage(w http.ResponseWriter, r *http.Request)   { renderPage(w, r, flowsPage) }
+
+// baseTemplate defines a reusable "style" block (the shared CSS) that every
+// page includes with {{template "style" .}}, plus the "reorder" script for
+// drag-to-reorder table columns. Layout values come from pageSettings. Each
+// page template below is created from a Clone() of this base so they share
+// these definitions without affecting each other.
 var baseTemplate = template.Must(template.New("base").Parse(`{{define "style"}}<style>
 body { font-family: system-ui, sans-serif; margin: {{.PageMargin}}; background: #111; color: #eee; }
 table { width: {{.TableWidth}}; border-collapse: collapse; table-layout: fixed; }
@@ -946,7 +988,7 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 
 // playersPage is the /players page: a table of connected players that polls
 // /api/players every RefreshInterval, with Message / Kick / Ban buttons that
-// open one shared modal dialog.
+// open one shared modal dialog, plus a table of offline players from the DB.
 //
 // Client-side script outline:
 //   - esc():              HTML-escapes any server data before it's put into innerHTML
@@ -958,7 +1000,6 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 //
 // Note: player data is passed through data-* attributes rather than inline JS
 // strings, which avoids quoting/injection problems with odd player names.
-
 var playersPage = template.Must(template.Must(baseTemplate.Clone()).New("players").Parse(`<!doctype html>
 <html>
 <head>
@@ -973,7 +1014,7 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 </style>
 </head>
 <body>
-<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="#" id="resetCols">Reset columns</a></nav>
 <h1>DayZ Players</h1>
 <div id="status">Connecting...</div>
 <table>
@@ -1141,21 +1182,6 @@ setInterval(refresh, {{.RefreshInterval.Milliseconds}});
 </body>
 </html>`))
 
-// handlePlayersPage serves GET /players by rendering playersPage with the
-// layout settings. Only GET is allowed. Rendering errors become a plain 500.
-// (If Execute fails midway, part of the page may already have been sent.)
-func handlePlayersPage(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := playersPage.Execute(w, pageSettings); err != nil {
-		http.Error(w, "template error", http.StatusInternalServerError)
-		return
-	}
-}
-
 // bansPage is the /bans page: a read-mostly table of GUID bans that polls
 // /api/bans every BansRefreshInterval, with an Unban button per row.
 //
@@ -1179,7 +1205,7 @@ td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-ov
 </style>
 </head>
 <body>
-<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="#" id="resetCols">Reset columns</a></nav>
 <h1>Server Bans</h1>
 <div id="status">Connecting...</div>
 <table>
@@ -1257,16 +1283,434 @@ setInterval(refresh, {{.BansRefreshInterval.Milliseconds}});
 </body>
 </html>`))
 
-// handleBansPage serves GET /bans by rendering bansPage. Same rules as
-// handlePlayersPage: GET only, plain 500 on template errors.
-func handleBansPage(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+// flowsPage is the /flows page: the list of flows with Enable/Run/Edit/Delete
+// buttons, drag-to-reorder rows, the run logs, an edit dialog with a live
+// schedule preview, a help dialog, and quick #lock/#unlock/#shutdown/#kickall
+// buttons. It polls /api/flows every RefreshInterval.
+var flowsPage = template.Must(template.Must(baseTemplate.Clone()).New("flows").Parse(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DayZ Flows</title>
+{{template "style" .}}
+<style>
+.box.wide { width: min(760px, 95vw); }
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.top h1 { margin: 0 0 8px; }
+.quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.quick button { margin-right: 0; }
+#quickMsg { color: #aaa; font-size: 13px; margin-right: 8px; }
+.box.helpbox { width: min(820px, 95vw); max-height: 85vh; overflow-y: auto; }
+.helpbox h3 { margin: 18px 0 6px; font-size: 15px; }
+.helpbox p, .helpbox li { font-size: 13px; line-height: 1.6; color: #ccc; }
+.helpbox ul { margin: 4px 0; padding-left: 20px; }
+.helpbox code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #111; padding: 1px 5px; border-radius: 3px; }
+.helpbox pre { background: #111; padding: 10px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 6px 0; }
+textarea.script, #sched { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+textarea.script { white-space: pre; }
+.help { color: #aaa; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+.help.bad { color: #f28b82; }
+.run { margin-top: 24px; }
+pre.log { background: #1a1a1a; padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; }
+td.actions { white-space: nowrap; }
+button:disabled { opacity: 0.4; cursor: default; }
+#flows tr[draggable="true"] { cursor: grab; }
+#flows tr.dragging { opacity: 0.4; }
+#flows tr.drop-above td { box-shadow: inset 0 3px 0 #8ab4f8; }
+#flows tr.drop-below td { box-shadow: inset 0 -3px 0 #8ab4f8; }
+</style>
+</head>
+<body>
+<nav><a href="/players">Players</a><a href="/bans">Server Bans</a><a class="active" href="/flows">Flows</a></nav>
+<div class="top">
+	<h1>Flows</h1>
+	<div class="quick">
+		<span id="quickMsg"></span>
+		<button onclick="quick('lock')">#Lock</button>
+		<button onclick="quick('unlock')">#Unlock</button>
+		<button onclick="quick('shutdown')">#Shutdown</button>
+		<button onclick="quick('kickall')">#Kick All</button>
+	</div>
+</div>
+<div id="status">Connecting...</div>
+<p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button></p>
+<table>
+	<colgroup>
+		<col style="width: 200px">
+		<col style="width: 140px">
+		<col>
+		<col style="width: 190px">
+		<col style="width: 390px">
+	</colgroup>
+	<thead>
+		<tr><th>Flow</th><th>Schedule</th><th>Status</th><th>Next run</th><th>Actions</th></tr>
+	</thead>
+	<tbody id="flows"></tbody>
+</table>
+<div id="runs"></div>
+
+<div id="modal" class="modal">
+	<div class="box wide">
+		<h2 id="title"></h2>
+		<label>Name</label>
+		<input id="name" type="text">
+		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
+		<label>Schedule (cron: minute hour day-of-month month day-of-week)</label>
+		<input id="sched" type="text" placeholder="0 6 * * *" spellcheck="false">
+		<div id="schedHelp" class="help"></div>
+		<div class="buttons">
+			<button onclick="closeModal()">Cancel</button>
+			<button id="save">Save</button>
+		</div>
+	</div>
+</div>
+<div id="confirmModal" class="modal" onclick="if (event.target === this) closeConfirm()">
+	<div class="box">
+		<h2 id="confirmTitle"></h2>
+		<p id="confirmText"></p>
+		<div class="buttons">
+			<button onclick="closeConfirm()">Cancel</button>
+			<button id="confirmOk">Confirm</button>
+		</div>
+	</div>
+</div>
+<div id="helpModal" class="modal" onclick="if (event.target === this) closeHelp()">
+	<div class="box helpbox">
+		<h2>Flow help</h2>
+
+		<h3>What a flow is</h3>
+		<p>A flow is a saved list of steps that run around a schedule. When the schedule (a cron expression) fires, each step runs at its own offset from that time: before it, on it, or after it. Flows only run on their schedule while they are <b>Enabled</b>; <b>Run</b> starts one by hand.</p>
+
+		<h3>Writing steps</h3>
+		<p>One step per line: <code>offset | command</code>. Lines starting with <code>//</code> are comments.</p>
+<pre>-60m | say -1 Server is going to restart in $minutes minutes!
+-3m  | #lock
+-1m  | #kickall Restarting now
+0m   | #shutdown
++90  | #unlock
+cancel | say -1 Server restart cancelled.</pre>
+		<ul>
+			<li><code>-60m</code> runs 60 minutes <b>before</b> the schedule time, <code>0m</code> runs <b>on</b> it, <code>+90</code> runs 90 seconds <b>after</b> it.</li>
+			<li>Units are <code>s</code>, <code>m</code> and <code>h</code>. No unit means seconds, so <code>-90</code> is 90 seconds before.</li>
+			<li>Any offset other than 0 needs a <code>+</code> or <code>-</code> sign.</li>
+			<li><code>$minutes</code> and <code>$seconds</code> in a command become how long before the schedule time that step runs (0 for steps on or after it).</li>
+			<li><code>cancel | command</code> lines run only if you press Stop before the schedule time arrives. Use them to undo a countdown, for example a "restart cancelled" message.</li>
+		</ul>
+
+		<h3>Commands you can use</h3>
+		<ul>
+			<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
+			<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
+		</ul>
+
+		<h3>Schedule (cron)</h3>
+		<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone. The text under the field explains in plain English what you typed and shows the next runs. The schedule time is the <code>0m</code> point, so a flow starting at <code>-60m</code> begins its countdown an hour earlier.</p>
+		<ul>
+			<li><code>0 6 * * *</code> every day at 06:00</li>
+			<li><code>0 */6 * * *</code> every 6 hours (00:00, 06:00, 12:00, 18:00)</li>
+			<li><code>30 4 * * 1,4</code> Mondays and Thursdays at 04:30</li>
+			<li><code>0 5 * * 1-5</code> weekdays at 05:00</li>
+			<li><code>@daily</code>, <code>@hourly</code>, <code>@weekly</code>, <code>@monthly</code> shortcuts also work.</li>
+		</ul>
+
+		<h3>Buttons</h3>
+		<ul>
+			<li><b>Enable / Disable</b> turns the schedule on or off. Enable needs a schedule.</li>
+			<li><b>Run / Stop</b> switches with the flow's state. Run starts the flow immediately: the earliest step fires right away and the rest follow at their offsets. Stop halts a running flow.</li>
+			<li><b>Edit</b> changes the steps or schedule. <b>Delete</b> removes the flow (not while it is running).</li>
+			<li>Drag a row up or down to reorder the list.</li>
+			<li>The <b>#Lock</b>, <b>#Unlock</b>, <b>#Shutdown</b> and <b>#Kick All</b> buttons at the top right send that command to the server immediately. Shutdown and Kick All open a confirm/cancel dialog first.</li>
+		</ul>
+
+		<h3>Tips</h3>
+		<ul>
+			<li>Put <code>#kickall</code> at least a minute before <code>0m | #shutdown</code>, since the sweep takes a few seconds.</li>
+			<li>Set <code>+90</code> (or more) for <code>#unlock</code> to leave time for the server to restart and RCON to log in again.</li>
+			<li>Use <code>say -1</code> for messages to everyone; <code>say &lt;id&gt;</code> messages one player.</li>
+			<li>If the app restarts during a scheduled countdown it rejoins it and skips steps whose time has passed. Manually started runs are not resumed.</li>
+			<li>A flow runs one copy at a time. To start one from a task scheduler, POST to <code>/api/flows/&lt;id&gt;/run</code>.</li>
+		</ul>
+
+		<div class="buttons"><button onclick="closeHelp()">Close</button></div>
+	</div>
+</div>
+<script>
+let flows = [];
+let editing = null;
+let previewTimer = null;
+let dragging = false;
+let dragId = null;
+
+function esc(s) {
+	return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function post(url, body) {
+	let r = await fetch(url, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body || {})
+	});
+	return r.json();
+}
+
+function fmtRemaining(unix) {
+	let s = Math.round(unix - Date.now() / 1000);
+	if (s <= 0) return 'now';
+	let h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+	return (h ? h + 'h ' : '') + m + 'm ' + String(s % 60).padStart(2, '0') + 's';
+}
+
+function statusText(run) {
+	if (!run) return 'Idle';
+	if (run.active) {
+		if (run.anchorUnix > Date.now() / 1000) return 'Running - schedule time in ' + fmtRemaining(run.anchorUnix);
+		return 'Running - finishing up';
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := bansPage.Execute(w, pageSettings); err != nil {
-		http.Error(w, "template error", http.StatusInternalServerError)
-		return
+	return 'Last run: ' + run.status;
+}
+
+function btn(label, onclick, disabled) {
+	return '<button' + (disabled ? ' disabled' : '') + ' onclick="' + onclick + '">' + label + '</button>';
+}
+
+async function refresh() {
+	if (dragging) return; // do not rebuild rows under a drag in progress
+	try {
+		let r = await fetch('/api/flows');
+		let d = await r.json();
+		if (!d.ok) {
+			document.getElementById('status').textContent = (d.error || 'Server unavailable') + ' — retrying...';
+			return;
+		}
+		flows = d.flows || [];
+		let runs = {};
+		(d.runs || []).forEach(function(x) { runs[x.flowId] = x; });
+		document.getElementById('status').textContent = 'Connected — ' + flows.length + ' flow(s)';
+		document.getElementById('flows').innerHTML = flows.map(function(f) {
+			let run = runs[f.id];
+			let active = !!(run && run.active);
+			let hasCron = !!(f.schedule && f.schedule.trim());
+			let next = f.scheduleEnabled ? (f.nextRun || '-') : (hasCron ? 'Disabled' : '-');
+			let buttons =
+				btn(f.scheduleEnabled ? 'Disable' : 'Enable', 'toggleFlow(' + f.id + ')', false) +
+				(active ? btn('Stop', 'stopFlow(' + f.id + ')', false) : btn('Run', 'runFlow(' + f.id + ')', false)) +
+				btn('Edit', 'editFlow(' + f.id + ')', false) +
+				btn('Delete', 'deleteFlow(' + f.id + ')', active);
+			return '<tr draggable="true" data-id="' + f.id + '"><td>' + esc(f.name) + '</td>' +
+				'<td class="mono">' + (hasCron ? esc(f.schedule) : '-') + '</td>' +
+				'<td>' + esc(statusText(run)) + '</td>' +
+				'<td>' + esc(next) + '</td>' +
+				'<td class="actions">' + buttons + '</td></tr>';
+		}).join('');
+		document.getElementById('runs').innerHTML = flows.filter(function(f) { return runs[f.id]; }).map(function(f) {
+			let x = runs[f.id];
+			return '<div class="run"><b>' + esc(f.name) + '</b> - ' + esc(statusText(x)) +
+				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
+		}).join('');
+	} catch(e) {
+		document.getElementById('status').textContent = 'Server unavailable — retrying...';
 	}
 }
+
+function find(id) { return flows.find(function(x) { return x.id === id; }); }
+
+async function toggleFlow(id) {
+	let f = find(id);
+	let d = await post('/api/flows/' + id + '/' + (f.scheduleEnabled ? 'disable' : 'enable'));
+	if (!d.ok) alert(d.error || 'Failed');
+	refresh();
+}
+
+async function runFlow(id) {
+	let d = await post('/api/flows/' + id + '/run');
+	if (!d.ok) alert(d.error || 'Run failed');
+	refresh();
+}
+
+async function stopFlow(id) {
+	if (!confirm('Stop the running flow?')) return;
+	let d = await post('/api/flows/' + id + '/stop');
+	if (!d.ok) alert(d.error || 'Stop failed');
+	refresh();
+}
+
+async function deleteFlow(id) {
+	let f = find(id);
+	if (!confirm('Delete flow "' + f.name + '"?')) return;
+	let d = await post('/api/flows/' + id + '/delete');
+	if (!d.ok) alert(d.error || 'Delete failed');
+	refresh();
+}
+
+let quickTimer = null;
+
+const quickConfirm = {
+	shutdown: { title: 'Shut down server?', text: 'This sends #shutdown to the server immediately.', ok: 'Shut down' },
+	kickall: { title: 'Kick all players?', text: 'This kicks every connected player immediately.', ok: 'Kick all' }
+};
+
+function quick(cmd) {
+	let c = quickConfirm[cmd];
+	if (!c) { sendQuick(cmd); return; }
+	document.getElementById('confirmTitle').textContent = c.title;
+	document.getElementById('confirmText').textContent = c.text;
+	let ok = document.getElementById('confirmOk');
+	ok.textContent = c.ok;
+	ok.onclick = function() { closeConfirm(); sendQuick(cmd); };
+	document.getElementById('confirmModal').style.display = 'flex';
+}
+
+function closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; }
+
+async function sendQuick(cmd) {
+	let msg = document.getElementById('quickMsg');
+	msg.textContent = 'Sending...';
+	try {
+		let d = await post('/api/flows/command', { command: cmd });
+		msg.textContent = d.ok ? (d.message || 'Sent') : (d.error || 'Failed');
+	} catch(e) {
+		msg.textContent = 'Request failed';
+	}
+	clearTimeout(quickTimer);
+	quickTimer = setTimeout(function() { msg.textContent = ''; }, 8000);
+	refresh();
+}
+
+function openHelp() { document.getElementById('helpModal').style.display = 'flex'; }
+function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
+
+function openModal(f, title) {
+	editing = f;
+	document.getElementById('title').textContent = title;
+	document.getElementById('name').value = f.name;
+	document.getElementById('script').value = f.script;
+	document.getElementById('sched').value = f.schedule || '';
+	document.getElementById('modal').style.display = 'flex';
+	updatePreview();
+}
+
+function newFlow() {
+	openModal({ id: 0, name: '', script: '-5m | say -1 Restarting in $minutes minutes!\n0m | #shutdown\n', schedule: '', scheduleEnabled: false }, 'New flow');
+}
+
+function editFlow(id) { openModal(find(id), 'Edit flow'); }
+
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+function queuePreview() {
+	clearTimeout(previewTimer);
+	previewTimer = setTimeout(updatePreview, 300);
+}
+
+async function updatePreview() {
+	let help = document.getElementById('schedHelp');
+	try {
+		let d = await post('/api/flows/preview', {
+			schedule: document.getElementById('sched').value,
+			script: document.getElementById('script').value
+		});
+		if (!d.ok) {
+			help.className = 'help bad';
+			help.textContent = d.error || 'Invalid schedule';
+			return;
+		}
+		help.className = 'help';
+		let html = '<b>' + esc(d.description) + '</b>';
+		if (d.next && d.next.length) html += '<br>Next runs: ' + d.next.map(esc).join(' &middot; ');
+		if (d.starts) html += '<br>Next countdown starts: ' + esc(d.starts);
+		if (d.span) html += '<br>' + esc(d.span);
+		help.innerHTML = html;
+	} catch(e) {
+		help.textContent = '';
+	}
+}
+
+document.getElementById('sched').addEventListener('input', queuePreview);
+document.getElementById('script').addEventListener('input', queuePreview);
+
+document.getElementById('save').onclick = async () => {
+	let d = await post('/api/flows', {
+		id: editing.id,
+		name: document.getElementById('name').value,
+		script: document.getElementById('script').value,
+		schedule: document.getElementById('sched').value,
+		scheduleEnabled: !!editing.scheduleEnabled
+	});
+	if (!d.ok) { alert(d.error || 'Save failed'); return; }
+	closeModal();
+	refresh();
+};
+
+function clearDragMarks() {
+	Array.prototype.forEach.call(document.querySelectorAll('#flows tr'), function(tr) {
+		tr.classList.remove('dragging', 'drop-above', 'drop-below');
+	});
+}
+
+function endDrag() {
+	dragging = false;
+	dragId = null;
+	clearDragMarks();
+}
+
+function dropBefore(e, tr) {
+	let rect = tr.getBoundingClientRect();
+	return e.clientY < rect.top + rect.height / 2;
+}
+
+let flowsBody = document.getElementById('flows');
+
+flowsBody.addEventListener('dragstart', function(e) {
+	let tr = e.target.closest('tr');
+	if (!tr) return;
+	dragging = true;
+	dragId = parseInt(tr.getAttribute('data-id'), 10);
+	e.dataTransfer.effectAllowed = 'move';
+	e.dataTransfer.setData('text/plain', String(dragId)); // Firefox needs data to start a drag
+	tr.classList.add('dragging');
+});
+
+flowsBody.addEventListener('dragover', function(e) {
+	if (!dragging) return;
+	let tr = e.target.closest('tr');
+	if (!tr) return;
+	e.preventDefault();
+	e.dataTransfer.dropEffect = 'move';
+	tr.classList.remove('drop-above', 'drop-below');
+	if (parseInt(tr.getAttribute('data-id'), 10) !== dragId) {
+		tr.classList.add(dropBefore(e, tr) ? 'drop-above' : 'drop-below');
+	}
+});
+
+flowsBody.addEventListener('dragleave', function(e) {
+	let tr = e.target.closest('tr');
+	if (tr) tr.classList.remove('drop-above', 'drop-below');
+});
+
+flowsBody.addEventListener('drop', async function(e) {
+	e.preventDefault();
+	let tr = e.target.closest('tr');
+	if (!tr || !dragging) { endDrag(); return; }
+	let targetId = parseInt(tr.getAttribute('data-id'), 10);
+	let before = dropBefore(e, tr);
+	let moved = dragId;
+	endDrag();
+	if (targetId === moved) return;
+	let ids = flows.map(function(f) { return f.id; }).filter(function(id) { return id !== moved; });
+	let at = ids.indexOf(targetId);
+	if (!before) at++;
+	ids.splice(at, 0, moved);
+	let d = await post('/api/flows/reorder', { ids: ids });
+	if (!d.ok) alert(d.error || 'Reorder failed');
+	refresh();
+});
+
+flowsBody.addEventListener('dragend', endDrag);
+
+refresh();
+setInterval(refresh, {{.RefreshInterval.Milliseconds}});
+</script>
+</body>
+</html>`))

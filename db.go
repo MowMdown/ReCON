@@ -3,11 +3,28 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+// ============================================================================
+// db.go overview
+// ----------------------------------------------------------------------------
+// Every SQL statement in the program lives in this file:
+//
+//   - schema setup (OpenDatabase) and the flows table (EnsureFlowsTable)
+//   - players / sessions / IP history (SyncPlayers, OfflinePlayers, ...)
+//   - bans (BanUser, SyncBans, BanNames, DeleteBan)
+//   - flows storage (ListFlows, GetFlow, SaveFlow, ...)
+//
+// The bottom section keeps the database in step with the game server: the
+// background poller and the BattlEye -> DB ban mirror. Those are the only
+// parts here that call into rcon.go.
+// ============================================================================
 
 type Database struct {
 	*sql.DB
@@ -147,6 +164,17 @@ func OpenDatabase(filepath string) (*Database, error) {
 		return nil, fmt.Errorf("failed to seed player_ips: %w", err)
 	}
 	return &Database{db}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Players and sessions
+// ---------------------------------------------------------------------------
+
+// ClearActiveSessions drops sessions left open by a previous run so restart
+// gaps aren't counted as playtime. Called once at server start.
+func (db *Database) ClearActiveSessions() error {
+	_, err := db.Exec("DELETE FROM active_sessions")
+	return err
 }
 
 func (db *Database) SyncPlayers(currentPlayers []Player) error {
@@ -298,6 +326,39 @@ func (db *Database) SyncPlayers(currentPlayers []Player) error {
 	return tx.Commit()
 }
 
+// OfflinePlayers returns all players from the database who are not currently connected.
+func (db *Database) OfflinePlayers() ([]Player, error) {
+	rows, err := db.Query(`
+		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen
+		FROM players p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM active_sessions a WHERE a.guid = p.guid
+		)
+		ORDER BY p.username COLLATE NOCASE
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	players := []Player{}
+	for rows.Next() {
+		var p Player
+		var lastSeen time.Time
+		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen); err != nil {
+			return nil, err
+		}
+		p.LastSeenUnix = lastSeen.Unix()
+		p.Offline = true
+		players = append(players, p)
+	}
+	return players, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
+// Bans
+// ---------------------------------------------------------------------------
+
 func (db *Database) BanUser(
 	guid string,
 	playerName string,
@@ -420,4 +481,195 @@ func (db *Database) BanNames() (map[string]string, error) {
 func (db *Database) DeleteBan(guid string) error {
 	_, err := db.Exec("DELETE FROM bans WHERE lower(guid) = lower(?)", guid)
 	return err
+}
+
+// ---------------------------------------------------------------------------
+// Flows storage (the Flow type and all flow logic live in flows.go)
+// ---------------------------------------------------------------------------
+
+// EnsureFlowsTable creates the flows table and, if it is empty, seeds one
+// flow with the given name, script and schedule (left disabled).
+func (db *Database) EnsureFlowsTable(seedName, seedScript, seedSchedule string) error {
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS flows (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			script TEXT NOT NULL,
+			schedule TEXT NOT NULL DEFAULT '',
+			schedule_enabled INTEGER NOT NULL DEFAULT 0,
+			position INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+		return err
+	}
+	var n int
+	if err := db.QueryRow("SELECT COUNT(*) FROM flows").Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		_, err := db.Exec("INSERT INTO flows (name, script, schedule, position) VALUES (?, ?, ?, 1)",
+			seedName, seedScript, seedSchedule)
+		return err
+	}
+	return nil
+}
+
+// ListFlows returns every flow in display order.
+func (db *Database) ListFlows() ([]Flow, error) {
+	rows, err := db.Query("SELECT id, name, script, schedule, schedule_enabled FROM flows ORDER BY position, id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	flows := []Flow{}
+	for rows.Next() {
+		var f Flow
+		var en int
+		if err := rows.Scan(&f.ID, &f.Name, &f.Script, &f.Schedule, &en); err != nil {
+			return nil, err
+		}
+		f.ScheduleEnabled = en != 0
+		flows = append(flows, f)
+	}
+	return flows, rows.Err()
+}
+
+// GetFlow returns one flow, or sql.ErrNoRows.
+func (db *Database) GetFlow(id int64) (Flow, error) {
+	var f Flow
+	var en int
+	err := db.QueryRow("SELECT id, name, script, schedule, schedule_enabled FROM flows WHERE id = ?", id).
+		Scan(&f.ID, &f.Name, &f.Script, &f.Schedule, &en)
+	f.ScheduleEnabled = en != 0
+	return f, err
+}
+
+// SaveFlow inserts a new flow (ID 0, placed last) or updates an existing one.
+// Updating a missing ID returns sql.ErrNoRows.
+func (db *Database) SaveFlow(f Flow) (int64, error) {
+	en := 0
+	if f.ScheduleEnabled {
+		en = 1
+	}
+	if f.ID == 0 {
+		res, err := db.Exec("INSERT INTO flows (name, script, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
+			f.Name, f.Script, f.Schedule, en)
+		if err != nil {
+			return 0, err
+		}
+		return res.LastInsertId()
+	}
+	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, schedule = ?, schedule_enabled = ? WHERE id = ?",
+		f.Name, f.Script, f.Schedule, en, f.ID)
+	if err != nil {
+		return 0, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return 0, sql.ErrNoRows
+	}
+	return f.ID, nil
+}
+
+// SetFlowScheduleEnabled turns a flow's schedule on or off.
+func (db *Database) SetFlowScheduleEnabled(id int64, on bool) error {
+	en := 0
+	if on {
+		en = 1
+	}
+	_, err := db.Exec("UPDATE flows SET schedule_enabled = ? WHERE id = ?", en, id)
+	return err
+}
+
+// ReorderFlows stores the display order: ids[0] becomes position 1, and so on.
+func (db *Database) ReorderFlows(ids []int64) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for i, id := range ids {
+		if _, err := tx.Exec("UPDATE flows SET position = ? WHERE id = ?", i+1, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// DeleteFlow removes a flow row.
+func (db *Database) DeleteFlow(id int64) error {
+	_, err := db.Exec("DELETE FROM flows WHERE id = ?", id)
+	return err
+}
+
+// ---------------------------------------------------------------------------
+// Keeping the database in step with the game server
+// ---------------------------------------------------------------------------
+
+// banListLock serialises everything that changes or mirrors the ban list
+// (ban, unban, and BattlEye->DB sync) so a sync can't act on a stale
+// list and delete a ban that was just added.
+var banListLock sync.Mutex
+
+// syncBanList reads the BattlEye list and mirrors it into the DB.
+// Holds banListLock for the whole read+mirror so it can't interleave with a
+// ban/unban. Return values matter to callers:
+//   - (nil, err)   -> couldn't read the live list at all
+//   - (bans, err)  -> list was read fine, but the DB mirror failed
+//   - (bans, nil)  -> fully synced
+func syncBanList() ([]Ban, error) {
+	banListLock.Lock()
+	defer banListLock.Unlock()
+	bans, err := readBanList()
+	if err != nil {
+		return nil, err
+	}
+	if err := globalDatabase.SyncBans(bans); err != nil {
+		return bans, err
+	}
+	return bans, nil
+}
+
+// startBackgroundSync tracks players (and periodically the ban list) in the
+// background so the DB stays current without any web page open.
+// It is the only caller of SyncPlayers.
+//
+// Every `interval`:
+//   - Poll `players` (single attempt, 3s wait).
+//   - On failure, count consecutive failures. At exactly 3 in a row the server
+//     is assumed down and SyncPlayers(nil) closes all open sessions once, so
+//     playtime stops accruing while it's offline.
+//   - On success, reset the failure counter and sync the parsed list into the DB.
+//   - On the 1st poll and every 6th after (~30s at a 5s interval), also
+//     reconcile the ban list, since it changes rarely.
+func startBackgroundSync(interval time.Duration) {
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		fails := 0
+		n := 0
+		for range t.C {
+			n++
+			out, acked, err := runShared("players", 3*time.Second, false)
+			if err != nil || !acked {
+				fails++
+				// Server probably down: close open sessions once so
+				// playtime doesn't keep accruing while it's offline.
+				if fails == 3 {
+					if err := globalDatabase.SyncPlayers(nil); err != nil {
+						log.Printf("poller: close sessions: %v", err)
+					}
+				}
+				continue
+			}
+			fails = 0
+			if err := globalDatabase.SyncPlayers(parsePlayers(out)); err != nil {
+				log.Printf("poller: sync: %v", err)
+			}
+			// Ban list changes rarely: reconcile at start and every 6th poll (~30s).
+			if n%6 == 1 {
+				if _, err := syncBanList(); err != nil {
+					log.Printf("poller: bans: %v", err)
+				}
+			}
+		}
+	}()
 }
