@@ -33,7 +33,7 @@ import (
 //   Bans
 //       GET  /bans                           page
 //       GET  /api/bans                       list GUID bans (also syncs to DB)
-//       POST /api/bans                       ban a known player by GUID, online or not
+//       POST /api/bans/<guid>/ban            ban a known player by GUID, online or not
 //       POST /api/bans/<guid>/unban          remove every ban entry for a GUID
 //   Flows
 //       GET  /flows                          page
@@ -65,8 +65,8 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("/api/players/all", handleAllPlayersJSON) // every known player, for the Ban Player picker
 	mux.HandleFunc("/api/players/", handlePlayerAction)      // per-player actions (trailing slash = subtree)
 	mux.HandleFunc("/bans", handleBansPage)             // bans web page
-	mux.HandleFunc("/api/bans", handleBansJSON)         // bans JSON list (GET) / ban by GUID (POST)
-	mux.HandleFunc("/api/bans/", handleBanAction)       // per-ban actions
+	mux.HandleFunc("/api/bans", handleBansJSON)         // bans JSON list
+	mux.HandleFunc("/api/bans/", handleBanAction)       // per-GUID ban / unban
 	mux.HandleFunc("/flows", handleFlowsPage)           // flows web page
 	mux.HandleFunc("/api/flows", handleFlowsAPI)        // list / save flows
 	mux.HandleFunc("/api/flows/", handleFlowAction)     // per-flow actions, preview, reorder, quick commands
@@ -462,12 +462,8 @@ func banPlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) 
 // BattlEye only stores GUIDs; unknown GUIDs show as "Unknown". BattlEye can
 // list one GUID multiple times, so duplicates are collapsed to the first.
 func handleBansJSON(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		handleBanGUID(w, r)
-		return
-	}
 	if r.Method != http.MethodGet {
-		fail(w, http.StatusMethodNotAllowed, "use GET or POST")
+		fail(w, http.StatusMethodNotAllowed, "use GET")
 		return
 	}
 	bans, err := syncBanList()
@@ -496,26 +492,21 @@ func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": true, "bans": list, "count": len(list)})
 }
 
-// handleBanGUID serves POST /api/bans: the Bans page's "Ban Player" dialog.
-// Body: {"guid": "<32 hex>", "reason": "text", "minutes": 0}. minutes
-// defaults to 0, which is permanent.
+// handleBanGUID serves POST /api/bans/<guid>/ban (routed by handleBanAction,
+// which has already validated the GUID): the Bans page's "Ban Player" dialog.
+// Optional body: {"reason": "text", "minutes": 0}. minutes defaults to 0,
+// which is permanent; an empty body is a permanent ban with no reason given.
 //
 // The player can be online or offline, but must be known (in the live
 // player list or the database), so the ban gets a name and IP on record.
 // An online player is kicked right away, the same as the Players page ban.
-func handleBanGUID(w http.ResponseWriter, r *http.Request) {
+func handleBanGUID(w http.ResponseWriter, r *http.Request, guid string) {
 	var body struct {
-		GUID    string `json:"guid"`
 		Reason  string `json:"reason"`
 		Minutes int    `json:"minutes"`
 	}
-	if err := decodeBody(w, r, &body); err != nil {
+	if err := decodeBody(w, r, &body); err != nil && !errors.Is(err, io.EOF) {
 		fail(w, http.StatusBadRequest, "bad JSON")
-		return
-	}
-	guid := strings.TrimSpace(body.GUID)
-	if !guidPattern.MatchString(guid) {
-		fail(w, http.StatusBadRequest, "guid must be 32 hex characters")
 		return
 	}
 	if body.Minutes < 0 {
@@ -550,8 +541,10 @@ func handleBanGUID(w http.ResponseWriter, r *http.Request) {
 	banPlayer(w, p, false, req)
 }
 
-// handleBanAction serves POST /api/bans/<guid>/unban.
+// handleBanAction serves POST /api/bans/<guid>/ban (see handleBanGUID) and
+// POST /api/bans/<guid>/unban.
 //
+// Unban:
 // BattlEye removes bans by list index, and indexes shift after every removal;
 // the same GUID can also appear more than once. So the handler loops:
 //
@@ -570,11 +563,15 @@ func handleBanAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/bans/"), "/"), "/")
-	if len(parts) != 2 || parts[1] != "unban" || !guidPattern.MatchString(parts[0]) {
+	if len(parts) != 2 || (parts[1] != "ban" && parts[1] != "unban") || !guidPattern.MatchString(parts[0]) {
 		fail(w, http.StatusNotFound, "invalid ban action")
 		return
 	}
 	guid := strings.ToLower(parts[0])
+	if parts[1] == "ban" {
+		handleBanGUID(w, r, guid)
+		return
+	}
 
 	banListLock.Lock()
 	defer banListLock.Unlock()
@@ -1276,7 +1273,7 @@ setInterval(refresh, {{.RefreshInterval.Milliseconds}});
 //                    refreshes either way
 //   - openBan():     loads every known player from /api/players/all into the
 //                    picker, leaving out GUIDs that are already banned
-//   - ban submit:    POSTs {guid, reason, minutes} to /api/bans
+//   - ban submit:    POSTs {reason, minutes} to /api/bans/<guid>/ban
 var bansPage = template.Must(template.Must(baseTemplate.Clone()).New("bans").Parse(`<!doctype html>
 <html>
 <head>
@@ -1423,10 +1420,10 @@ document.getElementById('banSubmit').onclick = async function() {
 	}
 	btn.disabled = true;
 	try {
-		let r = await fetch('/api/bans', {
+		let r = await fetch('/api/bans/' + encodeURIComponent(guid) + '/ban', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ guid: guid, reason: document.getElementById('banReason').value, minutes: minutes })
+			body: JSON.stringify({ reason: document.getElementById('banReason').value, minutes: minutes })
 		});
 		let d = await r.json();
 		if (!d.ok) {

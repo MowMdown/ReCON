@@ -288,7 +288,7 @@ The response lists who was kicked (`order`) and who is still connected (`remaini
 | Method | Path                       | Description                        |
 | ------ | -------------------------- | ---------------------------------- |
 | GET    | `/api/bans`                | List the GUID bans                 |
-| POST   | `/api/bans`                | Ban a known player by GUID: `{"guid": "...", "reason": "text", "minutes": 0}`. `minutes` defaults to 0 (permanent). Online players are kicked too |
+| POST   | `/api/bans/<guid>/ban`     | Ban a known player by GUID, online or not. Optional body `{"reason": "text", "minutes": 0}`; `minutes` defaults to 0 (permanent). Online players are kicked too |
 | POST   | `/api/bans/<guid>/unban`   | Remove every ban for that GUID     |
 
 #### Flows
