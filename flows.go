@@ -478,16 +478,17 @@ type Flow struct {
 }
 
 const defaultRestartScript = `// Server restart. Offsets are relative to the cron time:
-// -60m = 60 minutes before, 0m = on the cron time, +90 = 90 seconds after.
+// -60m = 60 minutes before, 0s = on the cron time, +90s = 90 seconds after.
 -60m | say -1 Server is going to restart in $minutes minutes!
 -30m | say -1 Server is going to restart in $minutes minutes!
 -15m | say -1 Server is going to restart in $minutes minutes!
 -10m | say -1 Server is going to restart in $minutes minutes!
 -5m  | say -1 Server is going to restart in $minutes minutes!
 -3m  | say -1 Server is going to restart in $minutes minutes!
--3m  | #lock
-0m   | #shutdown
-+90  | #unlock
+-2m  | #lock
+-1m  | #kickall Server Restart
+0s   | #shutdown
++90s | #unlock
 cancel | say -1 Server restart cancelled.
 `
 
@@ -947,6 +948,16 @@ func runScheduleTick(now time.Time) {
 // Player-join trigger
 // ---------------------------------------------------------------------------
 
+// lobbySuffix is what BattlEye appends to a name while the player is still on
+// the loading screen. It is not part of their name.
+const lobbySuffix = "(Lobby)"
+
+// inLobby reports whether BattlEye still lists the player as loading in.
+func inLobby(p Player) bool {
+	f := strings.Fields(p.Name)
+	return len(f) > 0 && strings.EqualFold(f[len(f)-1], lobbySuffix)
+}
+
 // joinWatch remembers who was online at the last successful poll, by GUID
 // (player numbers get reused). Only the background poller goroutine
 // (db.go) touches it.
@@ -966,13 +977,19 @@ func playersPolled(players []Player) {
 }
 
 // newArrivals updates joinWatch with this poll's players and returns the ones
-// who weren't online at the previous poll.
+// who have just finished joining. A player listed as "(Lobby)" is still on the
+// loading screen, so they are left out and look new again on the next poll;
+// they count as joined once the suffix is gone. A player who was already
+// counted stays counted if they show "(Lobby)" again.
 func newArrivals(players []Player) []Player {
 	online := map[string]bool{}
 	var joined []Player
 	for _, p := range players {
 		if p.GUID == "" {
 			continue
+		}
+		if inLobby(p) && !joinWatch.seen[p.GUID] {
+			continue // still loading in: not joined yet
 		}
 		online[p.GUID] = true
 		if joinWatch.primed && !joinWatch.seen[p.GUID] {
