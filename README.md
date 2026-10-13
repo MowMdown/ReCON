@@ -6,6 +6,8 @@ A small web server that manages a DayZ server over BattlEye RCON. It gives you:
 - an **HTTP API** that any tool or task scheduler can call,
 - a **console** for running RCON commands from inside the container.
 
+> **No authentication.** Anyone who can reach the port can run any RCON command. Keep it on a trusted local network and never expose it to the internet.
+
 ---
 
 ## 1. Build, install and run
@@ -130,14 +132,22 @@ Below that, **Offline Players** lists everyone who has played before, with their
 
 Lists the server's GUID bans with the player name, time left and reason, refreshed every 10 seconds. **Unban** removes the ban.
 
+**Ban Player** (top right) bans anyone who has ever played on the server, online or not:
+
+1. Pick the player by name. Online players are marked `(online)`, and the first 8 characters of each GUID tell apart players with the same name. Players who are already banned aren't listed.
+2. Enter a short reason. This is the message the player sees.
+3. Leave the duration at **0 for a permanent ban**, or enter a number of minutes.
+
+The ban is placed on the player's GUID. If they're online, they're kicked right away.
+
 #### Flows: `/flows`
 
-A flow is a saved list of RCON commands that run on a schedule, such as a restart countdown. A default "Server restart" flow is created on first start, disabled.
+A flow is a saved list of RCON commands that runs on a schedule (such as a restart countdown) or each time a player joins (such as a welcome message). A default "Server restart" flow is created on first start, disabled.
 
 | Button           | What it does                                                                     |
 | ---------------- | -------------------------------------------------------------------------------- |
-| Enable / Disable | Turns the flow's schedule on or off                                              |
-| Run / Stop       | Starts the flow right now, or stops a running one                                |
+| Enable / Disable | Turns the flow on or off                                                         |
+| Run / Stop       | Starts a flow right now, or stops a running one                                  |
 | Edit             | Changes the name, steps or schedule                                              |
 | Delete           | Removes the flow (stop it first if it's running)                                 |
 | New flow         | Creates a flow                                                                   |
@@ -171,6 +181,21 @@ cancel | say -1 Server restart cancelled.
 | `0 */6 * * *` | Every 6 hours              |
 | `30 4 * * 1,4`| Mondays and Thursdays 04:30 |
 | `@daily`      | Every day at midnight      |
+
+**Player-join flows.** Leave the schedule blank (or enter `* * * * *`) and press **Enable**. The flow then runs once for every player who joins, instead of on the clock:
+
+```text
+Flow name: Welcome player!
+Schedule:  * * * * *
+Steps:     0s | say $player Welcome to our server!
+```
+
+- `$player` becomes the joining player's number, which is what `say` and `kick` need. `$name` becomes their name.
+- Offsets count from when the join is seen (joins are checked every 5 seconds), so use `0s` or `+` offsets only.
+- A player still loading in can miss a `0s` message. Use `+30` or so if messages go unseen.
+- Players already online when the container starts aren't greeted. After a server restart, everyone who reconnects is.
+- A flow that uses `$player` or `$name` can't be started with Run or given a clock schedule.
+- A flow with a blank schedule that stays disabled can still be started by hand with Run.
 
 ### Console
 
@@ -251,6 +276,7 @@ The response lists who was kicked (`order`) and who is still connected (`remaini
 | Method | Path                         | Body                                   | Description                         |
 | ------ | ---------------------------- | -------------------------------------- | ----------------------------------- |
 | GET    | `/api/players`               |                                        | Online and offline players          |
+| GET    | `/api/players/all`           |                                        | Every player ever seen, from the saved player list (works while RCON is down) |
 | POST   | `/api/players/<id>/message`  | `{"message": "text"}`                  | Private message to one player       |
 | POST   | `/api/players/<id>/kick`     | `{"reason": "text"}`                   | Kick one player                     |
 | POST   | `/api/players/<id>/ban`      | `{"reason": "text", "minutes": 0}`     | Ban by GUID (0 = permanent) and kick |
@@ -262,6 +288,7 @@ The response lists who was kicked (`order`) and who is still connected (`remaini
 | Method | Path                       | Description                        |
 | ------ | -------------------------- | ---------------------------------- |
 | GET    | `/api/bans`                | List the GUID bans                 |
+| POST   | `/api/bans`                | Ban a known player by GUID: `{"guid": "...", "reason": "text", "minutes": 0}`. `minutes` defaults to 0 (permanent). Online players are kicked too |
 | POST   | `/api/bans/<guid>/unban`   | Remove every ban for that GUID     |
 
 #### Flows
