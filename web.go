@@ -1521,7 +1521,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<input id="name" type="text">
 		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
 		<label>Schedule (cron: minute hour day-of-month month day-of-week; blank or * * * * * = run when a player joins)</label>
-		<input id="sched" type="text" placeholder="0 6 * * *" spellcheck="false">
+		<input id="sched" type="text" placeholder="* * * * *" spellcheck="false">
 		<div id="schedHelp" class="help"></div>
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
