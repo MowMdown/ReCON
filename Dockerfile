@@ -5,6 +5,8 @@ WORKDIR /src
 COPY go.mod ./
 COPY go.sum* ./
 COPY *.go ./
+# HTML pages, embedded into the binary by //go:embed in web.go
+COPY templates ./templates
 RUN go mod tidy
 
 RUN CGO_ENABLED=0 GOOS=linux \
@@ -16,7 +18,7 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     sqlite
-    
+
 RUN addgroup -g 100 users 2>/dev/null || true && \
     mkdir -p /data && \
     chown -R 99:100 /data

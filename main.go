@@ -100,21 +100,27 @@ func main() {
 //
 // Exits with status 1 on failure.
 func runCommandLine(args []string) {
+	if args[0] == "-i" {
+		runConsole()
+		return
+	}
+	l, err := dialPersistent("cli", false)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	var ok bool
 	if args[0] == "kickall" {
-		rep, err := kickAll("cli", strings.Join(args[1:], " "), false, false)
-		if !printKickReport(rep, err) {
-			os.Exit(1)
-		}
-		return
+		rep, err := kickAllUsing(l, strings.Join(args[1:], " "), false, false)
+		ok = printKickReport(rep, err)
+	} else {
+		out, acked, err := l.run(strings.Join(args, " "), 2*time.Second)
+		ok = printResult(out, acked, err)
 	}
-	if args[0] != "-i" {
-		out, acked, err := sendOneShot("cli", strings.Join(args, " "), 2*time.Second)
-		if !printResult(out, acked, err) {
-			os.Exit(1)
-		}
-		return
+	l.close()
+	if !ok {
+		os.Exit(1)
 	}
-	runConsole()
 }
 
 // runConsole is the interactive REPL. It logs in once and keeps the session

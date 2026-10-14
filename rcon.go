@@ -21,13 +21,12 @@ import (
 // Everything that talks to the game server lives here:
 //
 //   - the BattlEye packet format and login
-//   - three kinds of session:
-//       one-shot     dial, log in, run, close (HTTP /rcon, CLI)
-//       persistent   stays logged in, background reader, optional keepalive (console)
-//       shared       one auto-reconnecting persistent session for the web
-//                    layer, the background poller and flows (runShared)
+//   - persistentConnection: a logged-in session with a background reader and
+//     an optional keepalive. The CLI and console dial their own; everything in
+//     server mode (web, poller, flows) goes through one shared session that
+//     reconnects on its own (runShared).
 //   - parsing what the server sends back (`players`, `bans`)
-//   - multi-command sequences built from those pieces (kickall, reading bans)
+//   - kickall, built from those pieces
 //
 // Nothing in this file knows about HTTP or the database.
 // ============================================================================
@@ -56,8 +55,6 @@ import (
 
 // buildPacket wraps a payload into a complete BattlEye packet:
 // 'B' 'E' + CRC32(body) + body, where body = 0xFF + ptype + payload.
-// The 4 checksum bytes start as zero placeholders and are filled in once the
-// body is known, because the CRC covers only the body, not the header.
 func buildPacket(ptype byte, payload []byte) []byte {
 	body := append([]byte{0xFF, ptype}, payload...)
 	pkt := []byte{'B', 'E', 0, 0, 0, 0}
@@ -66,9 +63,7 @@ func buildPacket(ptype byte, payload []byte) []byte {
 }
 
 // parsePacket validates a raw datagram and splits it into (type, payload).
-// It returns ok=false for anything malformed: too short, missing the 'BE'
-// magic, a CRC mismatch, or a body that doesn't start with the 0xFF marker.
-// Callers simply ignore packets that fail to parse.
+// ok is false for anything malformed (too short, no 'BE', bad CRC, no 0xFF).
 func parsePacket(data []byte) (ptype byte, payload []byte, ok bool) {
 	if len(data) < 8 || data[0] != 'B' || data[1] != 'E' {
 		return 0, nil, false
@@ -80,9 +75,7 @@ func parsePacket(data []byte) (ptype byte, payload []byte, ok bool) {
 	return body[1], body[2:], true
 }
 
-// isTimeout reports whether err is a network timeout (e.g. a read deadline
-// expiring). Timeouts are an expected, normal way for read loops to end,
-// so callers treat them differently from real I/O errors.
+// isTimeout reports whether err is a network timeout (a read deadline expiring).
 func isTimeout(err error) bool {
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
@@ -92,15 +85,8 @@ func isTimeout(err error) bool {
 // "failed". Usually a wrong password or the client IP not being whitelisted.
 var errLoginRejected = errors.New("RCON login rejected (wrong password or IP not allowed)")
 
-// login authenticates on an already-dialed UDP connection.
-// UDP is lossy, so it sends the login packet up to 3 times, waiting 1 second
-// for a reply after each send. `buf` is a caller-provided scratch buffer for reads.
-//
-// Outcomes:
-//   - login accepted           -> nil
-//   - explicit rejection       -> errLoginRejected
-//   - real network error       -> that error
-//   - silence after 3 attempts -> descriptive error (RCon disabled, wrong port, UDP blocked)
+// login authenticates on an already-dialed UDP connection. UDP is lossy, so it
+// sends the login packet up to 3 times, waiting 1 second for a reply each time.
 func login(conn net.Conn, buf []byte) error {
 	for attempt := 0; attempt < 3; attempt++ {
 		if _, err := conn.Write(buildPacket(0, []byte(rconPassword))); err != nil {
@@ -128,156 +114,46 @@ func login(conn net.Conn, buf []byte) error {
 	return errors.New("no reply to RCON login after 3 tries: RCon not enabled (no RConPassword), wrong port, or UDP blocked")
 }
 
-// runLogged runs an RCON command and logs it to stdout with its source
-// ("web", "console", "cli", "http", "http-kickall") and whether the server
-// acknowledged it. The web poller's routine `players`/`bans` reads and empty
-// keepalive probes are skipped so the log only shows real actions.
-// `f` performs the actual command; its result is returned unchanged.
-func runLogged(src, command string, f func() (string, bool, error)) (string, bool, error) {
-	out, acked, err := f()
-	if command != "" && !(src == "web" && (command == "players" || command == "bans")) {
-		log.Printf("rcon[%s] > %q (acked=%v err=%v)", src, command, acked, err)
+// addPart stores one command-reply body (the payload after the seq byte) and
+// reports whether the reply is complete. Long replies arrive as
+// 0x00, <total parts>, <part index>, data...
+func addPart(parts map[byte][]byte, body []byte) bool {
+	if len(body) >= 3 && body[0] == 0 {
+		parts[body[2]] = append([]byte(nil), body[3:]...)
+		return len(parts) == int(body[1])
 	}
-	return out, acked, err
+	parts[0] = append([]byte(nil), body...)
+	return true
 }
 
-// ---------------------------------------------------------------------------
-// One-shot connection: simple, single-threaded, used for short-lived work
-// (HTTP /rcon and CLI calls). Login -> run commands -> close.
-// ---------------------------------------------------------------------------
-
-// oneShotConnection is a logged-in RCON session used synchronously by one
-// caller at a time. It does no background reading and no keepalive.
-type oneShotConnection struct {
-	conn net.Conn // UDP connection to the server
-	buf  []byte   // reusable 64 KiB read buffer
-	seq  byte     // next command sequence number (wraps naturally at 255)
-	src  string   // who is using it ("http", "cli", ...), only used for log lines
-}
-
-// dialOneShot opens a UDP connection to rconAddress and logs in.
-// On login failure the socket is closed before the error is returned.
-func dialOneShot(src string) (*oneShotConnection, error) {
-	conn, err := net.Dial("udp", rconAddress)
-	if err != nil {
-		return nil, err
-	}
-	s := &oneShotConnection{conn: conn, buf: make([]byte, 65535), src: src}
-	if err := login(conn, s.buf); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return s, nil
-}
-
-// close releases the underlying UDP socket.
-func (s *oneShotConnection) close() { s.conn.Close() }
-
-// run executes a command and logs it (with its source and ack status) via
-// runLogged. This is the method that satisfies the commandRunner interface.
-func (s *oneShotConnection) run(command string, wait time.Duration) (string, bool, error) {
-	return runLogged(s.src, command, func() (string, bool, error) { return s.runRaw(command, wait) })
-}
-
-// runRaw sends one command and collects the reply, without logging.
-//
-// Returns (output, acked, err):
-//   - output: the reassembled reply text (may be empty)
-//   - acked:  true if the server sent any reply carrying our sequence number,
-//     which is how we know the server actually received the command
-//   - err:    only for real I/O errors; a timeout just ends the wait
-//
-// `wait` is the total read deadline for the reply.
-func (s *oneShotConnection) runRaw(command string, wait time.Duration) (string, bool, error) {
-	seq := s.seq
-	s.seq++
-	if _, err := s.conn.Write(buildPacket(1, append([]byte{seq}, command...))); err != nil {
-		return "", false, err
-	}
-	s.conn.SetReadDeadline(time.Now().Add(wait))
-
-	// Replies may be split over several packets; collect them keyed by part index.
-	parts := map[byte][]byte{}
-	acked := false
-	for {
-		n, err := s.conn.Read(s.buf)
-		if err != nil {
-			if isTimeout(err) {
-				break // deadline hit: return whatever we've gathered
-			}
-			return "", false, err
-		}
-		t, p, ok := parsePacket(s.buf[:n])
-		if !ok {
-			continue
-		}
-		// Server-pushed message (chat, join/leave, ...): must be acked or the
-		// server keeps resending it. Echo back its sequence byte.
-		if t == 2 && len(p) > 0 {
-			s.conn.Write(buildPacket(2, p[:1]))
-			continue
-		}
-		// A command reply whose first byte matches the seq we sent.
-		if t == 1 && len(p) > 0 && p[0] == seq {
-			acked = true
-			body := p[1:]
-			if len(body) >= 3 && body[0] == 0 {
-				// Multi-packet reply: body[1] = total parts, body[2] = this part's index.
-				parts[body[2]] = append([]byte(nil), body[3:]...)
-				if len(parts) == int(body[1]) {
-					break // all parts received
-				}
-			} else {
-				// Single-packet reply (or empty ack).
-				parts[0] = append([]byte(nil), body...)
-				break
-			}
-		}
-	}
-
-	// Stitch the parts back together in index order.
-	idx := make([]int, 0, len(parts))
-	for k := range parts {
-		idx = append(idx, int(k))
-	}
-	sort.Ints(idx)
+// joinParts stitches a reply back together in part order.
+func joinParts(parts map[byte][]byte) string {
 	var sb strings.Builder
-	for _, i := range idx {
-		sb.Write(parts[byte(i)])
+	for i := 0; i < 256 && len(parts) > 0; i++ {
+		if p, ok := parts[byte(i)]; ok {
+			sb.Write(p)
+			delete(parts, byte(i))
+		}
 	}
-	return sb.String(), acked, nil
-}
-
-// sendOneShot is the convenience wrapper: dial, log in, run exactly one
-// command, close. Used by the HTTP /rcon endpoint and the CLI.
-func sendOneShot(src, command string, wait time.Duration) (string, bool, error) {
-	s, err := dialOneShot(src)
-	if err != nil {
-		return "", false, err
-	}
-	defer s.close()
-	return s.run(command, wait)
+	return sb.String()
 }
 
 // ---------------------------------------------------------------------------
-// Persistent connection: stays logged in, a background goroutine reads all
-// traffic, and an optional keepalive goroutine prevents the server from
-// dropping the session. Used by the interactive console and (via
-// connectShared) by the web layer, poller and flows.
+// Persistent connection
 // ---------------------------------------------------------------------------
 
 // keepaliveEvery is how often an empty command is sent to keep the session
 // alive. It's a var (not const) so tests can shorten it.
 var keepaliveEvery = 30 * time.Second
 
-// persistentConnection is a long-lived RCON session that is safe to use from
-// multiple goroutines.
+// persistentConnection is a logged-in RCON session that is safe to use from
+// multiple goroutines. One goroutine (reader) owns the socket's reads.
 type persistentConnection struct {
-	src         string        // label for log lines
+	src         string        // label for log lines ("web", "console", "cli")
 	conn        net.Conn      // UDP connection
 	writeLock   sync.Mutex    // serialises socket writes and seq allocation
 	commandLock sync.Mutex    // ensures only one command is in flight at a time
-	seq         byte          // next command sequence number
+	seq         byte          // next command sequence number (wraps at 255)
 	replies     chan []byte   // command replies (seq byte + body) handed from reader() to runRaw()
 	done        chan struct{} // closed by reader() when the socket dies
 	stop        chan struct{} // closed by close() to stop the keepalive goroutine
@@ -285,46 +161,18 @@ type persistentConnection struct {
 	err         error         // the error that killed the reader (valid once done is closed)
 }
 
-// write sends one raw packet, holding writeLock so the reader goroutine
-// (acking server messages), keepalive and command senders never interleave.
-func (l *persistentConnection) write(pkt []byte) error {
-	l.writeLock.Lock()
-	defer l.writeLock.Unlock()
-	_, err := l.conn.Write(pkt)
-	return err
-}
-
-// dialPersistent connects, logs in, and starts the background goroutines.
-// It parses rconAddress manually so it can use DialUDP with an explicit
-// UDPAddr. If enableKeepalive is true, an empty-command heartbeat is sent
-// every keepaliveEvery.
+// dialPersistent connects, logs in, and starts the background reader (and
+// the keepalive heartbeat when enableKeepalive is true).
 func dialPersistent(src string, enableKeepalive bool) (*persistentConnection, error) {
-	host, portStr, err := net.SplitHostPort(rconAddress)
+	conn, err := net.Dial("udp", rconAddress) // resolves hostnames, e.g. a compose service name
 	if err != nil {
 		return nil, err
 	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return nil, err
-	}
-
-	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{
-		IP:   net.ParseIP(host),
-		Port: port,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	buf := make([]byte, 4096)
-
-	if err := login(conn, buf); err != nil {
+	if err := login(conn, make([]byte, 4096)); err != nil {
 		conn.Close()
 		return nil, err
 	}
-
-	// login() left a 1s read deadline on the socket; clear it so the
-	// background reader can block indefinitely.
+	// login() left a 1s read deadline; clear it so reader() can block.
 	_ = conn.SetReadDeadline(time.Time{})
 
 	l := &persistentConnection{
@@ -334,18 +182,33 @@ func dialPersistent(src string, enableKeepalive bool) (*persistentConnection, er
 		done:    make(chan struct{}),
 		stop:    make(chan struct{}),
 	}
-
 	go l.reader()
-
 	if enableKeepalive {
 		go l.keepalive()
 	}
-
 	return l, nil
 }
 
-// close shuts the session down exactly once: signals the keepalive goroutine
-// to stop and closes the socket (which in turn makes reader() exit).
+// write sends one raw packet. Holding writeLock keeps the reader (acking
+// server messages), keepalive and command senders from interleaving.
+func (l *persistentConnection) write(pkt []byte) error {
+	l.writeLock.Lock()
+	defer l.writeLock.Unlock()
+	_, err := l.conn.Write(pkt)
+	return err
+}
+
+// nextSeq hands out the next command sequence number.
+func (l *persistentConnection) nextSeq() byte {
+	l.writeLock.Lock()
+	defer l.writeLock.Unlock()
+	s := l.seq
+	l.seq++
+	return s
+}
+
+// close shuts the session down exactly once: stops keepalive and closes the
+// socket (which makes reader() exit).
 func (l *persistentConnection) close() {
 	l.once.Do(func() {
 		close(l.stop)
@@ -363,14 +226,9 @@ func (l *persistentConnection) isClosed() bool {
 	}
 }
 
-// reader is the single goroutine that reads the socket for the lifetime of the
-// connection. It:
-//   - acknowledges server messages (type 2) immediately,
-//   - forwards command replies (type 1) to the replies channel,
-//   - drops anything it can't parse.
-//
-// On a read error it records the error and closes `done`, which wakes up
-// anybody waiting in runRaw/keepalive.
+// reader reads the socket for the lifetime of the connection: it acks server
+// messages (type 2) and forwards command replies (type 1) to runRaw. On a read
+// error it records the error and closes `done`.
 func (l *persistentConnection) reader() {
 	buf := make([]byte, 65535)
 	for {
@@ -386,11 +244,9 @@ func (l *persistentConnection) reader() {
 		}
 		switch t {
 		case 2:
-			// Server message: ack it with the same seq byte.
 			l.write(buildPacket(2, p[:1]))
 		case 1:
-			// Command reply: hand a copy to runRaw. Non-blocking send so a
-			// slow consumer can't stall the reader; excess replies are dropped.
+			// Non-blocking so a slow consumer can't stall the reader.
 			select {
 			case l.replies <- append([]byte(nil), p...):
 			default:
@@ -399,20 +255,15 @@ func (l *persistentConnection) reader() {
 	}
 }
 
-// keepalive sends an empty command (just a seq byte) on a timer so the server
-// doesn't time the session out while the console sits idle. The reply, if any,
-// is ignored by runRaw's seq filter. Exits when the connection is closed or dies.
+// keepalive sends an empty command on a timer so the server doesn't drop an
+// idle session. runRaw's seq filter ignores the replies.
 func (l *persistentConnection) keepalive() {
 	t := time.NewTicker(keepaliveEvery)
 	defer t.Stop()
 	for {
 		select {
 		case <-t.C:
-			l.writeLock.Lock()
-			seq := l.seq
-			l.seq++
-			l.writeLock.Unlock()
-			l.write(buildPacket(1, []byte{seq}))
+			l.write(buildPacket(1, []byte{l.nextSeq()}))
 		case <-l.stop:
 			return
 		case <-l.done:
@@ -422,45 +273,39 @@ func (l *persistentConnection) keepalive() {
 }
 
 // isResponsive probes the session with an empty command and reports whether
-// the server acknowledged it within 2 seconds. Used to decide whether a
-// session needs replacing after a failed command.
+// the server acknowledged it within 2 seconds.
 func (l *persistentConnection) isResponsive() bool {
 	_, acked, err := l.run("", 2*time.Second)
 	return err == nil && acked
 }
 
-// run executes a command with logging; satisfies the commandRunner interface.
+// run executes a command and logs it with its source and ack status. The
+// poller's routine `players`/`bans` reads and empty probes aren't logged.
+// It satisfies the commandRunner interface.
 func (l *persistentConnection) run(command string, wait time.Duration) (string, bool, error) {
-	return runLogged(l.src, command, func() (string, bool, error) { return l.runRaw(command, wait) })
+	out, acked, err := l.runRaw(command, wait)
+	if command != "" && !(l.src == "web" && (command == "players" || command == "bans")) {
+		log.Printf("rcon[%s] > %q (acked=%v err=%v)", l.src, command, acked, err)
+	}
+	return out, acked, err
 }
 
 // runRaw sends one command and waits for its (possibly multi-part) reply.
-// Same return contract as oneShotConnection.runRaw, but replies arrive via
-// the replies channel from reader() instead of reading the socket directly.
 //
-// Steps:
-//  1. Take commandLock so only one command is in flight.
-//  2. Drain stale replies (e.g. late answers to an earlier timed-out command
-//     or a keepalive) and allocate a seq under writeLock.
-//  3. Send the command.
-//  4. Collect replies matching our seq until all parts arrive, the timer
-//     fires, or the connection dies.
-//  5. Reassemble parts in order.
+// Returns (output, acked, err):
+//   - output: the reassembled reply text (may be empty)
+//   - acked:  true if any reply carried our sequence number
+//   - err:    only for real I/O errors; running out of time just ends the wait
 func (l *persistentConnection) runRaw(command string, wait time.Duration) (string, bool, error) {
 	l.commandLock.Lock()
 	defer l.commandLock.Unlock()
 	if l.isClosed() {
 		return "", false, l.err
 	}
-
-	l.writeLock.Lock()
 	for len(l.replies) > 0 {
-		<-l.replies // discard stale replies
+		<-l.replies // discard late answers to an earlier command or keepalive
 	}
-	seq := l.seq
-	l.seq++
-	l.writeLock.Unlock()
-
+	seq := l.nextSeq()
 	if err := l.write(buildPacket(1, append([]byte{seq}, command...))); err != nil {
 		return "", false, err
 	}
@@ -469,7 +314,6 @@ func (l *persistentConnection) runRaw(command string, wait time.Duration) (strin
 	defer timer.Stop()
 	parts := map[byte][]byte{}
 	acked := false
-loop:
 	for {
 		select {
 		case p := <-l.replies:
@@ -477,63 +321,37 @@ loop:
 				continue // reply to some other command (e.g. keepalive)
 			}
 			acked = true
-			body := p[1:]
-			if len(body) >= 3 && body[0] == 0 {
-				// Multi-packet reply: [0, total, index, data...]
-				parts[body[2]] = append([]byte(nil), body[3:]...)
-				if len(parts) == int(body[1]) {
-					break loop
-				}
-			} else {
-				// Single-packet reply.
-				parts[0] = append([]byte(nil), body...)
-				break loop
+			if addPart(parts, p[1:]) {
+				return joinParts(parts), true, nil
 			}
 		case <-timer.C:
-			break loop // out of time: return what we have
+			return joinParts(parts), acked, nil // out of time: return what we have
 		case <-l.done:
 			return "", false, l.err // connection died while waiting
 		}
 	}
-	idx := make([]int, 0, len(parts))
-	for k := range parts {
-		idx = append(idx, int(k))
-	}
-	sort.Ints(idx)
-	var sb strings.Builder
-	for _, i := range idx {
-		sb.Write(parts[byte(i)])
-	}
-	return sb.String(), acked, nil
 }
 
 // ---------------------------------------------------------------------------
-// Shared session: the one long-lived connection used by the web layer, the
-// background poller and flows.
+// Shared session (server mode: web layer, poller, flows)
 // ---------------------------------------------------------------------------
 
-// sharedConnection is the single long-lived RCON session used by the web
-// layer and the background poller. The embedded Mutex protects the pointer
-// (not the commands themselves; persistentConnection serialises those).
-// Keepalive is disabled for it (see connectShared) because the 5s poller
-// already generates traffic well inside BattlEye's idle timeout.
+// sharedConnection holds the one long-lived session. The Mutex protects the
+// pointer; persistentConnection serialises the commands themselves.
+// Keepalive is off because the 5s poller already keeps the session busy.
 var sharedConnection = struct {
 	sync.Mutex
 	connection *persistentConnection
 }{}
 
-// connectShared returns the shared session, creating or replacing it as needed:
-//   - healthy existing session -> returned as is
-//   - existing but dead        -> closed, cleared, and a new one dialed
-//   - none                     -> a new one is dialed
-//
-// The lock is held during dialing, so concurrent callers wait for one login
-// rather than each opening their own.
+// connectShared returns the shared session, dialing a new one if there is
+// none or the current one has died. The lock is held while dialing, so
+// concurrent callers wait for one login instead of each opening their own.
 func connectShared() (*persistentConnection, error) {
 	sharedConnection.Lock()
 	defer sharedConnection.Unlock()
-	if sharedConnection.connection != nil && !sharedConnection.connection.isClosed() {
-		return sharedConnection.connection, nil
+	if c := sharedConnection.connection; c != nil && !c.isClosed() {
+		return c, nil
 	}
 	if sharedConnection.connection != nil {
 		sharedConnection.connection.close()
@@ -547,19 +365,19 @@ func connectShared() (*persistentConnection, error) {
 	return s, nil
 }
 
-// runShared runs a command on the shared session with optional retry/reconnect.
+// runShared runs a command on the shared session.
 //
 //   - allowRetry=false: one attempt. Used for state-changing commands (kick,
 //     ban, say, ...) so a slow-but-successful command is never repeated.
-//   - allowRetry=true: up to 3 attempts with 1s pauses. Used for read-only
+//   - allowRetry=true: up to 3 attempts with 1s pauses, for read-only
 //     commands (players, bans) where repeating is harmless.
 //
-// After a failed attempt, if there was an error or the session no longer
-// answers a probe (isResponsive), the session is discarded so the next
-// attempt (or caller) logs in fresh. The pointer comparison under the lock
-// avoids discarding a newer session another goroutine already created.
+// err is only set for a connection/transport failure. A command the server
+// simply didn't acknowledge returns acked=false with err=nil, so callers can
+// tell "server never got it" from "server didn't answer" (e.g. #shutdown).
 //
-// Success means err == nil AND the server acknowledged the command.
+// After a failed attempt the session is dropped if it errored or no longer
+// answers a probe, so the next attempt (or caller) logs in fresh.
 func runShared(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
@@ -575,15 +393,12 @@ func runShared(command string, wait time.Duration, allowRetry bool) (string, boo
 		}
 		out, acked, err := s.run(command, wait)
 		if err == nil && acked {
-			return out, acked, nil
+			return out, true, nil
 		}
-		if err != nil {
-			lastErr = err
-		}
-		// Drop the session if it errored or has gone silent.
+		lastErr = err // nil when the command was merely unacknowledged
 		if err != nil || !s.isResponsive() {
 			sharedConnection.Lock()
-			if sharedConnection.connection == s {
+			if sharedConnection.connection == s { // don't drop a newer session
 				s.close()
 				sharedConnection.connection = nil
 			}
@@ -593,14 +408,11 @@ func runShared(command string, wait time.Duration, allowRetry bool) (string, boo
 			time.Sleep(1 * time.Second)
 		}
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("RCON command unacknowledged")
-	}
 	return "", false, lastErr
 }
 
-// sharedRunner adapts the shared RCON session to the commandRunner interface
-// that kickAllUsing expects (single attempt per command, no retries).
+// sharedRunner adapts runShared to the commandRunner interface (single
+// attempt per command).
 type sharedRunner struct{}
 
 func (sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
@@ -612,8 +424,7 @@ func (sharedRunner) run(command string, wait time.Duration) (string, bool, error
 // ---------------------------------------------------------------------------
 
 // Player is one row of the BattlEye `players` output, also the JSON shape
-// returned by /api/players (offline players come from the DB, see
-// Database.OfflinePlayers).
+// returned by /api/players (offline players come from the DB).
 type Player struct {
 	ID                int    `json:"id"`
 	IP                string `json:"ip"`
@@ -643,15 +454,12 @@ func cleanReason(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(s))
 }
 
-// parsePlayers turns the text output of the `players` command into Player
-// structs. Each data line looks like:
+// parsePlayers turns `players` output into Player structs. Each data line is
 //
 //	12   203.0.113.5:2304   47   a1b2c3...(OK)   Some Name
 //
-// Fields are whitespace-separated: id, ip:port, ping, guid(status), then the
-// name (which may itself contain spaces, so all remaining fields are rejoined).
-// The "(OK)"/"(?)" verification suffix is stripped from the GUID. Header lines,
-// separators and the footer fail one of the checks and are skipped.
+// i.e. id, ip:port, ping, guid(status), then the name (which may contain
+// spaces). Header, separator and footer lines fail a check and are skipped.
 func parsePlayers(out string) []Player {
 	players := []Player{}
 	for _, line := range strings.Split(out, "\n") {
@@ -671,18 +479,14 @@ func parsePlayers(out string) []Player {
 		if err != nil {
 			continue
 		}
-		guid := fields[3]
-		if idx := strings.IndexByte(guid, '('); idx != -1 {
-			guid = guid[:idx]
-		}
+		guid, _, _ := strings.Cut(fields[3], "(") // strip the (OK)/(?) suffix
 		name := strings.Join(fields[4:], " ")
 		players = append(players, Player{ID: id, IP: host, Port: port, Ping: ping, GUID: guid, Name: name})
 	}
 	return players
 }
 
-// findPlayer parses `players` output and returns the player with the given ID.
-// The bool is false if that ID isn't connected.
+// findPlayer returns the connected player with the given ID, if any.
 func findPlayer(out string, id int) (Player, bool) {
 	for _, p := range parsePlayers(out) {
 		if p.ID == id {
@@ -692,30 +496,18 @@ func findPlayer(out string, id int) (Player, bool) {
 	return Player{}, false
 }
 
-// playerRow matches one line of the `players` command output, e.g.
-//
-//	"12   203.0.113.5:2304   47   a1b2c3(OK)   SomeName"
-//
-// capturing the numeric player ID at the start of the line. It requires an
-// "ip:port" token right after the ID, which filters out the table header,
-// separator lines and the "(N players in total)" footer.
-var playerRow = regexp.MustCompile(`(?m)^\s*(\d+)\s+\S+:\d+\s`)
-
-// playerIDs extracts every player ID from `players` output and returns them
-// sorted from highest to lowest (the order kickAllUsing kicks in).
+// playerIDs returns every player ID in `players` output, highest first (the
+// order kickall kicks in).
 func playerIDs(out string) []int {
 	ids := []int{}
-	for _, m := range playerRow.FindAllStringSubmatch(out, -1) {
-		if id, err := strconv.Atoi(m[1]); err == nil {
-			ids = append(ids, id)
-		}
+	for _, p := range parsePlayers(out) {
+		ids = append(ids, p.ID)
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(ids)))
 	return ids
 }
 
-// guidPattern matches a BattlEye GUID: exactly 32 hex characters. Used both to
-// recognise ban rows and to validate the GUID in unban URLs.
+// guidPattern matches a BattlEye GUID: exactly 32 hex characters.
 var guidPattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
 
 // parseBans parses BattlEye `bans` output, e.g.
@@ -728,15 +520,8 @@ var guidPattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
 //	IP Bans:
 //	...
 //
-// Only the GUID section is read; IP bans are ignored. ok is false when the
-// "GUID Bans" header wasn't found, so callers never treat an unrecognised
-// reply as an empty ban list.
-//
-// The parser is a tiny state machine: `section` flips to "guid" or "ip" when
-// a header line is seen, and only lines in the "guid" section are parsed.
-// A data line needs: numeric index, a 32-hex GUID, then "perm" or a number
-// of minutes; everything after that is the reason. Lines failing any check
-// (column titles, dashes, blank lines) are skipped.
+// Only the GUID section is read. ok is false when the "GUID Bans" header
+// wasn't found, so an unrecognised reply is never mistaken for an empty list.
 func parseBans(out string) (bans []Ban, ok bool) {
 	bans = []Ban{}
 	section := ""
@@ -779,9 +564,8 @@ func parseBans(out string) (bans []Ban, ok bool) {
 	return bans, ok
 }
 
-// readBanList reads the live GUID ban list from BattlEye (retrying read,
-// 4s wait). An unrecognised reply is logged (first 500 chars) and returned
-// as an error rather than as an empty list.
+// readBanList reads the live GUID ban list from BattlEye (retrying read).
+// An unrecognised reply is logged and returned as an error, not an empty list.
 func readBanList() ([]Ban, error) {
 	out, acked, err := runShared("bans", 4*time.Second, true)
 	if err != nil {
@@ -805,8 +589,7 @@ func readBanList() ([]Ban, error) {
 // Kick everybody
 // ---------------------------------------------------------------------------
 
-// kickReport summarises what a kickall run did. It's JSON-serialisable so the
-// HTTP endpoint can return it directly.
+// kickReport summarises what a kickall run did (returned as JSON by /kickall).
 type kickReport struct {
 	Order         []int  `json:"order"`                    // IDs in the order they were kicked
 	Unacked       []int  `json:"unacked"`                  // kick commands the server never acknowledged
@@ -817,39 +600,22 @@ type kickReport struct {
 	ShutdownError string `json:"shutdown_error,omitempty"` // error text from #shutdown, if any
 }
 
-// commandRunner is the minimal interface kickAllUsing needs, so it works with
-// oneShotConnection, persistentConnection and sharedRunner (and is easy to
-// fake in tests).
+// commandRunner is what kickAllUsing needs: a persistentConnection (CLI,
+// console) or sharedRunner (server mode).
 type commandRunner interface {
 	run(command string, wait time.Duration) (string, bool, error)
 }
 
-// kickAll opens a one-shot connection and performs the kick-everyone sequence
-// on it. See kickAllUsing for what the flags do.
-func kickAll(src, reason string, lock, shutdown bool) (*kickReport, error) {
-	s, err := dialOneShot(src)
-	if err != nil {
-		return nil, err
-	}
-	defer s.close()
-	return kickAllUsing(s, reason, lock, shutdown)
-}
-
-// kickAllUsing kicks every connected player using an existing session.
+// kickAllUsing kicks every connected player:
+//  1. optionally "#lock" so nobody rejoins mid-sweep
+//  2. "players", then "kick <id> <reason>" for each, highest ID first
+//  3. wait 500ms and re-read "players" to report who is still connected
+//  4. optionally "#shutdown"
 //
-// Sequence:
-//  1. Sanitise `reason` (CR/LF would let a caller inject extra lines).
-//  2. If lock: send "#lock" first so nobody can rejoin mid-sweep.
-//  3. Run "players" and parse the IDs.
-//  4. "kick <id> <reason>" for each, highest ID first, recording any
-//     command that gets no acknowledgement.
-//  5. Wait 500ms and re-run "players" to report who is still connected.
-//  6. If shutdown: send "#shutdown" and record whether it was acked.
-//
-// A transport error in steps 2-4 aborts with an error. Failures in the final
-// verification or in #shutdown are reported inside the report instead.
+// A transport error in steps 1-2 aborts with an error. Unacknowledged kicks,
+// a failed verification and #shutdown problems are reported in the report.
 func kickAllUsing(s commandRunner, reason string, lock, shutdown bool) (*kickReport, error) {
-	reason = strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(reason))
+	reason = cleanReason(reason)
 	if lock {
 		if _, _, err := s.run("#lock", 2*time.Second); err != nil {
 			return nil, err
@@ -864,16 +630,15 @@ func kickAllUsing(s commandRunner, reason string, lock, shutdown bool) (*kickRep
 		rep.Raw = out // help the caller debug why nothing was parsed
 	}
 	for _, id := range rep.Order {
-		cmd := fmt.Sprintf("kick %d %s", id, reason)
-		if _, acked, err := s.run(strings.TrimSpace(cmd), 1000*time.Millisecond); err != nil {
+		cmd := strings.TrimSpace(fmt.Sprintf("kick %d %s", id, reason))
+		if _, acked, err := s.run(cmd, time.Second); err != nil {
 			return nil, err
 		} else if !acked {
 			rep.Unacked = append(rep.Unacked, id)
 		}
 	}
 	if len(rep.Order) > 0 {
-		// Give the server a moment to process the kicks, then verify.
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond) // let the server process the kicks
 		if out, _, err := s.run("players", 3*time.Second); err == nil {
 			rep.Remaining = playerIDs(out)
 		}
