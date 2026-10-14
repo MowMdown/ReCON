@@ -117,13 +117,10 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<h2>Flow help</h2>
 		<div class="tabs" id="helpTabs">
 			<button data-tab="overview">Overview</button>
-			<button data-tab="steps">Writing steps</button>
+			<button data-tab="commands">Commands</button>
+			<button data-tab="conditional">Conditional</button>
 			<button data-tab="triggers">Triggers</button>
 			<button data-tab="schedule">Schedule (cron)</button>
-			<button data-tab="join">Player join</button>
-			<button data-tab="commands">Commands</button>
-			<button data-tab="buttons">Buttons</button>
-			<button data-tab="tips">Tips</button>
 		</div>
 		<div class="helppanes">
 
@@ -140,15 +137,16 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<p>Any flow can also be started by hand with <b>Run</b>, unless it uses <code>$player</code> or <code>$name</code>.</p>
 			<h3>Making your first flow</h3>
 			<ul>
-				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and write its steps (see <i>Writing steps</i>).</li>
+				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and write its steps (see <i>Commands</i>).</li>
 				<li>Pick a trigger. For Schedule, type a cron expression; the text under it explains it in plain English.</li>
 				<li>Save. Schedule and player-join flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
 			</ul>
 		</div>
 
-		<div class="helppane" data-pane="steps">
+		<div class="helppane" data-pane="commands">
 			<h3>Step format</h3>
-			<p>One step per line: <code>offset | command</code>. Lines starting with <code>//</code> are comments.</p>
+			<p>A step starts with <code>offset | command</code>. Any line below it without an offset belongs to the same step and runs at the same time, so one step can send several commands or make a decision (see <i>Conditional</i>). Lines starting with <code>//</code> are comments.</p>
+			<p>Blank lines are removed when you save. To keep a visual gap between parts of a script, put a <code>//</code> line there instead.</p>
 <pre>-60m | say -1 Server is going to restart in $minutes minutes!
 -3m  | #lock
 -1m  | #kickall Restarting now
@@ -170,9 +168,75 @@ cancel | say -1 Server restart cancelled.</pre>
 			<h3>Variables and cancel steps</h3>
 			<ul>
 				<li><code>$minutes</code> and <code>$seconds</code> become how long before the 0 point that step runs (0 for steps on or after it).</li>
-				<li><code>$player</code> and <code>$name</code> only work in On player join flows (see <i>Player join</i>).</li>
+				<li><code>$player</code> and <code>$name</code> only work in On player join flows (see <i>Triggers</i>).</li>
+				<li><code>$players</code> is how many players are online right now, and you can set your own variables. See <i>Conditional</i>.</li>
 				<li><code>cancel | command</code> lines run only if you press Stop before the 0 point arrives. Use them to undo a countdown, for example a "restart cancelled" message.</li>
 			</ul>
+			<h3>Commands you can use in steps</h3>
+			<ul>
+				<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
+				<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
+			</ul>
+			<h3>Messages</h3>
+			<ul>
+				<li><code>say -1 text</code> messages everyone.</li>
+				<li><code>say &lt;id&gt; text</code> messages one player; in join flows use <code>say $player text</code>.</li>
+			</ul>
+			<h3>Retries</h3>
+			<p><code>#lock</code> and <code>#unlock</code> are retried if the server doesn't answer, since repeating them is harmless. Other commands are sent once so a message is never shown twice. <code>#shutdown</code> often goes unanswered because the server stops.</p>
+		</div>
+
+		<div class="helppane" data-pane="conditional">
+			<h3>If / else / end</h3>
+			<p>A step can make a decision. Everything from <code>if</code> to <code>end</code> belongs to the step it starts in and runs at that step's time.</p>
+<pre>0s  | if $name == survivor
+kick $player Name cannot be Survivor
+else
+say $player Welcome to my server $name
+end
+//
++5s | say $player Admins are active! Please play respectfully</pre>
+			<ul>
+				<li><code>else</code> and <code>end</code> go on lines of their own. <code>else</code> is optional.</li>
+				<li>An <code>if</code> can sit inside another one. There is no <code>else if</code>: put an <code>if</code> inside the <code>else</code>.</li>
+				<li>A step can also hold several plain commands, one per line; they run in order.</li>
+				<li>The run log shows each decision, e.g. <code>if $name == survivor -&gt; false</code>.</li>
+			</ul>
+			<h3>Operators</h3>
+			<table>
+				<thead><tr><th>Operator</th><th>Meaning</th><th>Example</th></tr></thead>
+				<tbody>
+					<tr><td><code>=</code></td><td>sets a variable</td><td><code>$msg = Restarting soon</code></td></tr>
+					<tr><td><code>==</code></td><td>equals</td><td><code>if $name == survivor</code></td></tr>
+					<tr><td><code>!=</code></td><td>does not equal</td><td><code>if $name != admin</code></td></tr>
+					<tr><td><code>&lt;</code> <code>&lt;=</code></td><td>less than / or equal</td><td><code>if $players &lt; 5</code></td></tr>
+					<tr><td><code>&gt;</code> <code>&gt;=</code></td><td>greater than / or equal</td><td><code>if $players &gt;= 10</code></td></tr>
+					<tr><td><code>&amp;&amp;</code></td><td>and: both must be true</td><td><code>if $players &gt; 0 &amp;&amp; $minutes &lt;= 5</code></td></tr>
+					<tr><td><code>||</code></td><td>or: either can be true</td><td><code>if $name == survivor || $name == player</code></td></tr>
+				</tbody>
+			</table>
+			<h3>How values compare</h3>
+			<ul>
+				<li>Text is compared in lower case, so <code>Survivor</code>, <code>SURVIVOR</code> and <code>survivor</code> are all equal.</li>
+				<li>When both sides are numbers they compare as numbers (<code>05 == 5</code> is true). <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code> only work on numbers; on text they count as false.</li>
+				<li><code>&amp;&amp;</code> is checked before <code>||</code>, so <code>a || b &amp;&amp; c</code> means a, or (b and c). There are no brackets.</li>
+				<li>Use <code>"quotes"</code> to compare against empty text or text with leading spaces: <code>if $msg == ""</code>.</li>
+			</ul>
+			<h3>Variables</h3>
+			<ul>
+				<li><code>$player</code>, <code>$name</code> - the joining player's number and name (On player join flows).</li>
+				<li><code>$minutes</code>, <code>$seconds</code> - how long before the 0 point the current step runs.</li>
+				<li><code>$players</code> - how many players are online right now, read from the server when it's used.</li>
+				<li><code>$anything = value</code> sets your own variable for the rest of the run (for one player, in a join flow). The value can use other variables. A condition can only use built-in variables and ones the script sets.</li>
+			</ul>
+			<h3>Mistakes are caught before saving</h3>
+			<p>The edit dialog shows script mistakes in red as you type, with the line number: an <code>if</code> with no <code>end</code>, an <code>else</code> without an <code>if</code>, a single <code>=</code> inside an <code>if</code>, a variable that's used but never set, or trying to set a built-in like <code>$players</code>.</p>
+			<h3>Example: skip the kick when nobody is on</h3>
+<pre>-5m | say -1 Server restart in $minutes minutes!
+-1m | if $players &gt; 0
+#kickall Server Restart
+end
+0s  | #shutdown</pre>
 		</div>
 
 		<div class="helppane" data-pane="triggers">
@@ -191,6 +255,23 @@ cancel | say -1 Server restart cancelled.</pre>
 				<li>Changing an existing flow's trigger saves it disabled too, so a restart flow can never start firing on every join by accident.</li>
 				<li>A blank or <code>* * * * *</code> schedule means "no schedule": pick the Manual trigger for that instead.</li>
 				<li>Run works with every trigger, so you can test a scheduled flow without waiting for its time. Flows that use <code>$player</code> or <code>$name</code> are the exception.</li>
+			</ul>
+			<h3>On player join: how joins are detected</h3>
+			<p>The app reads the player list every 5 seconds. While a player is still on the loading screen BattlEye shows <code>(Lobby)</code> after their name; they count as joined on the first check where that tag is gone, and every enabled On player join flow then runs once for them.</p>
+<pre>0s   | say $player Welcome to our server, $name!
++60  | say $player Type /help for the rules.</pre>
+			<h3>Join variables</h3>
+			<ul>
+				<li><code>$player</code> becomes the joining player's number (what <code>say</code> and <code>kick</code> need).</li>
+				<li><code>$name</code> becomes their name.</li>
+			</ul>
+			<h3>Join rules</h3>
+			<ul>
+				<li>Offsets count from when the join was seen, so use <code>0s</code> or <code>+</code> offsets only.</li>
+				<li>Several players can be in progress at once; they share one log and one Stop button, which stops all of them.</li>
+				<li>Players already online when the app starts are not greeted. After the game server restarts, everyone who reconnects is.</li>
+				<li>Flows using <code>$player</code> or <code>$name</code> can't be started with Run or given another trigger.</li>
+				<li>Cancel steps never run for join flows: there is no countdown to undo.</li>
 			</ul>
 		</div>
 
@@ -215,82 +296,6 @@ cancel | say -1 Server restart cancelled.</pre>
 			<ul>
 				<li>The cron time is the 0 point. A flow that starts at <code>-60m</code> with <code>0 6 * * *</code> begins at 05:00.</li>
 				<li>If the app restarts during a scheduled countdown it rejoins it and skips steps whose time has passed. Manually started runs are not resumed.</li>
-			</ul>
-		</div>
-
-		<div class="helppane" data-pane="join">
-			<h3>How joins are detected</h3>
-			<p>The app reads the player list every 5 seconds. While a player is still on the loading screen BattlEye shows <code>(Lobby)</code> after their name; they count as joined on the first check where that tag is gone, and every enabled On player join flow then runs once for them.</p>
-<pre>0s   | say $player Welcome to our server, $name!
-+60  | say $player Type /help for the rules.</pre>
-			<h3>Variables</h3>
-			<ul>
-				<li><code>$player</code> becomes the joining player's number (what <code>say</code> and <code>kick</code> need).</li>
-				<li><code>$name</code> becomes their name.</li>
-			</ul>
-			<h3>Rules</h3>
-			<ul>
-				<li>Offsets count from when the join was seen, so use <code>0s</code> or <code>+</code> offsets only.</li>
-				<li>Several players can be in progress at once; they share one log and one Stop button, which stops all of them.</li>
-				<li>Players already online when the app starts are not greeted. After the game server restarts, everyone who reconnects is.</li>
-				<li>Flows using <code>$player</code> or <code>$name</code> can't be started with Run or given another trigger.</li>
-				<li>Cancel steps never run for join flows: there is no countdown to undo.</li>
-			</ul>
-		</div>
-
-		<div class="helppane" data-pane="commands">
-			<h3>Commands you can use in steps</h3>
-			<ul>
-				<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
-				<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
-			</ul>
-			<h3>Messages</h3>
-			<ul>
-				<li><code>say -1 text</code> messages everyone.</li>
-				<li><code>say &lt;id&gt; text</code> messages one player; in join flows use <code>say $player text</code>.</li>
-			</ul>
-			<h3>Retries</h3>
-			<p><code>#lock</code> and <code>#unlock</code> are retried if the server doesn't answer, since repeating them is harmless. Other commands are sent once so a message is never shown twice. <code>#shutdown</code> often goes unanswered because the server stops.</p>
-		</div>
-
-		<div class="helppane" data-pane="buttons">
-			<h3>Flow buttons</h3>
-			<ul>
-				<li><b>Enable / Disable</b> turns a Schedule or On player join trigger on or off. Manual flows have nothing to enable, so the button is greyed out.</li>
-				<li><b>Run / Stop</b> switches with the flow's state. Run starts the flow immediately: the earliest step fires right away and the rest follow at their offsets. Stop halts a running flow.</li>
-				<li><b>Edit</b> changes the name, steps, trigger or schedule. <b>Delete</b> removes the flow (not while it is running).</li>
-				<li>Drag a row up or down to reorder the list.</li>
-			</ul>
-			<h3>Status, Last run and Next run</h3>
-			<ul>
-				<li><b>Idle</b> - waiting for its next trigger (never run, or the last run finished normally).</li>
-				<li><b>Running - 45m45s</b> - counting down to the flow's <code>0m</code> step. Once that step is reached, or if the flow has no <code>-</code> offsets, it just shows <b>Running</b>.</li>
-				<li><b>Error</b> - a command in the last run failed: RCON couldn't be reached or the server didn't answer. The other steps still ran; check the log under the list.</li>
-				<li><b>Stopped</b> - the last run was ended with the Stop button.</li>
-				<li><b>Last run</b> is when the flow was last started (for a join flow, the last player it ran for). It resets when the app restarts.</li>
-			</ul>
-			<h3>Export and import</h3>
-			<ul>
-				<li><b>Export</b> downloads every flow (name, schedule and steps) as <code>flows.json</code>. The <code>schedule</code> value holds the trigger: <code>"manual"</code>, <code>"on-join"</code> or a cron expression.</li>
-				<li><b>Import</b> adds the flows from such a file to the bottom of the list, disabled, even if they already exist. A blank or <code>* * * * *</code> schedule imports as Manual, and names longer than 48 characters are shortened.</li>
-			</ul>
-			<h3>Quick commands</h3>
-			<p>The <b>#Lock</b>, <b>#Unlock</b>, <b>#Shutdown</b> and <b>#Kick All</b> buttons at the top right send that command to the server immediately. Shutdown and Kick All ask for confirmation first.</p>
-		</div>
-
-		<div class="helppane" data-pane="tips">
-			<h3>Restart flows</h3>
-			<ul>
-				<li>Put <code>#kickall</code> at least a minute before <code>0m | #shutdown</code>, since the sweep takes a few seconds.</li>
-				<li>Set <code>+90</code> (or more) for <code>#unlock</code> to leave time for the server to restart and RCON to log in again.</li>
-				<li><code>#lock</code> a couple of minutes before the shutdown so nobody joins just to be kicked.</li>
-			</ul>
-			<h3>General</h3>
-			<ul>
-				<li>A flow runs one copy at a time; pressing Run on a running flow does nothing.</li>
-				<li>To start a flow from an outside task scheduler, POST to <code>/api/flows/&lt;id&gt;/run</code>. Add <code>{"minutes": 10}</code> to put the 0 point 10 minutes away; steps that would already be in the past are skipped.</li>
-				<li>Run a new restart flow on a test server first, or use a Manual copy with only <code>say</code> lines to check the timing.</li>
-				<li>Each flow's log appears under the list while it runs and stays there after it finishes.</li>
 			</ul>
 		</div>
 
