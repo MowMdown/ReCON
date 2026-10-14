@@ -1,0 +1,39 @@
+{
+  "flows": [
+    {
+      "name": "Welcome Player!",
+      "schedule": "",
+      "script": [
+        "+5s | say $player Welcome to my server $name!"
+      ]
+    },
+    {
+      "name": "MOTD",
+      "schedule": "*/15 * * * *",
+      "script": [
+        "0s  | say -1 Welcome to Harambe's Safari Island Adventure on DeerIsle!",
+        "+3s | say -1 Admins are active! Please play respectfully."
+      ]
+    },
+    {
+      "name": "Server restart",
+      "schedule": "0 */6 * * *",
+      "script": [
+        "// Server restart. Offsets are relative to the cron time:",
+        "// -60m = 60 minutes before, 0m = on the cron time, +90 = 90 seconds after.",
+        "-60m | say -1 Server is going to restart in $minutes minutes!",
+        "-30m | say -1 Server is going to restart in $minutes minutes!",
+        "-15m | say -1 Server is going to restart in $minutes minutes!",
+        "-10m | say -1 Server is going to restart in $minutes minutes!",
+        "-5m  | say -1 Server is going to restart in $minutes minutes!",
+        "-3m  | say -1 Server is going to restart in $minutes minutes!",
+        "-2m  | #lock",
+        "-1m  | say -1 Server is going down now, restart imminent, you will be kicked!",
+        "-30s | #kickall Server Restart",
+        "0m   | #shutdown",
+        "+90s  | #unlock",
+        "cancel | say -1 Server restart cancelled."
+      ]
+    }
+  ]
+}

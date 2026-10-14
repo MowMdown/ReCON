@@ -38,12 +38,12 @@ import (
 //   Flows
 //       GET  /flows                          page
 //       GET  /api/flows                      flows + current/last run of each
-//       POST /api/flows                      create/update {id, name, script, schedule, scheduleEnabled}
+//       POST /api/flows                      create/update {id, name, script, trigger, schedule, scheduleEnabled}
 //       POST /api/flows/<id>/run             optional body {"minutes": N} = minutes until the cron time
 //       POST /api/flows/<id>/stop
 //       POST /api/flows/<id>/enable          (needs a schedule)   /disable
 //       POST /api/flows/<id>/delete
-//       POST /api/flows/preview              {schedule, script} -> plain-English description
+//       POST /api/flows/preview              {trigger, schedule, script} -> plain-English description
 //       POST /api/flows/reorder              {ids: [...]} saves the order shown on the page
 //       GET  /api/flows/export               download all flows as flows.json
 //       POST /api/flows/import               {flows: [...]} append flows from a flows.json
@@ -689,6 +689,7 @@ func (s *scriptText) UnmarshalJSON(b []byte) error {
 
 type flowFileEntry struct {
 	Name     string     `json:"name"`
+	Trigger  string     `json:"trigger"` // schedule | join | manual (missing in files from before triggers existed)
 	Schedule string     `json:"schedule"`
 	Script   scriptText `json:"script"`
 }
@@ -707,7 +708,7 @@ func handleFlowExport(w http.ResponseWriter) {
 	}
 	out := flowFile{Flows: make([]flowFileEntry, 0, len(flows))}
 	for _, f := range flows {
-		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Schedule: f.Schedule, Script: scriptText(f.Script)})
+		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Trigger: f.Trigger, Schedule: f.Schedule, Script: scriptText(f.Script)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="flows.json"`)
@@ -753,7 +754,11 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 		for n := 2; taken[strings.ToLower(name)]; n++ {
 			name = fmt.Sprintf("%s (%d)", base, n)
 		}
-		if _, err := validateAndSaveFlow(Flow{Name: name, Script: string(e.Script), Schedule: e.Schedule}); err != nil {
+		trigger := e.Trigger
+		if trigger == "" { // a file exported before triggers existed
+			trigger = legacyTrigger(e.Schedule)
+		}
+		if _, err := validateAndSaveFlow(Flow{Name: name, Script: string(e.Script), Trigger: trigger, Schedule: e.Schedule}); err != nil {
 			skipped = append(skipped, base+": "+err.Error())
 			continue
 		}
@@ -767,6 +772,7 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 // a schedule (and how the script's offsets fit around it) for the edit dialog.
 func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Trigger  string `json:"trigger"`
 		Schedule string `json:"schedule"`
 		Script   string `json:"script"`
 	}
@@ -774,7 +780,7 @@ func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad JSON")
 		return
 	}
-	writeJSON(w, http.StatusOK, previewFlow(req.Schedule, req.Script))
+	writeJSON(w, http.StatusOK, previewFlow(req.Trigger, req.Schedule, req.Script))
 }
 
 // handleFlowReorder serves POST /api/flows/reorder: the body lists flow ids in
@@ -1579,12 +1585,19 @@ var flowsPage = template.Must(template.Must(baseTemplate.Clone()).New("flows").P
 .quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .quick button { margin-right: 0; }
 #quickMsg { color: #aaa; font-size: 13px; margin-right: 8px; }
-.box.helpbox { width: min(820px, 95vw); max-height: 85vh; overflow-y: auto; }
+.box.helpbox { width: min(820px, 95vw); }
+.helptabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid #444; margin: 10px 0 0; }
+.helptabs button { margin: 0; background: transparent; color: #aaa; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; }
+.helptabs button.active { background: #333; color: #eee; border-color: #444; }
+.helpbody { height: min(58vh, 540px); overflow-y: auto; padding-right: 8px; }
+.helppane { display: none; }
+.helppane.active { display: block; }
 .helpbox h3 { margin: 18px 0 6px; font-size: 15px; }
 .helpbox p, .helpbox li { font-size: 13px; line-height: 1.6; color: #ccc; }
 .helpbox ul { margin: 4px 0; padding-left: 20px; }
 .helpbox code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #111; padding: 1px 5px; border-radius: 3px; }
 .helpbox pre { background: #111; padding: 10px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 6px 0; }
+select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.InputPadding}}; background: #111; color: #eee; border: 1px solid #555; }
 textarea.script, #sched { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 textarea.script { white-space: pre; }
 .help { color: #aaa; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
@@ -1634,8 +1647,16 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<label>Name</label>
 		<input id="name" type="text">
 		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
-		<label>Schedule (cron: minute hour day-of-month month day-of-week; blank or * * * * * = run when a player joins)</label>
-		<input id="sched" type="text" placeholder="* * * * *" spellcheck="false">
+		<label>Flow Type</label>
+		<select id="trigger">
+			<option value="schedule">Schedule</option>
+			<option value="join">On Join</option>
+			<option value="manual">Manual</option>
+		</select>
+		<div id="schedWrap">
+			<label>Schedule (cron: minute hour day-of-month month day-of-week)</label>
+			<input id="sched" type="text" placeholder="0 6 * * *" spellcheck="false">
+		</div>
 		<div id="schedHelp" class="help"></div>
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
@@ -1656,10 +1677,28 @@ button:disabled { opacity: 0.4; cursor: default; }
 <div id="helpModal" class="modal" onclick="if (event.target === this) closeHelp()">
 	<div class="box helpbox">
 		<h2>Flow help</h2>
-
+		<div class="helptabs">
+			<button class="active" onclick="helpTab('overview', this)">Overview</button>
+			<button onclick="helpTab('steps', this)">Steps</button>
+			<button onclick="helpTab('schedule', this)">Schedule</button>
+			<button onclick="helpTab('join', this)">On Join</button>
+			<button onclick="helpTab('if', this)">If / Else</button>
+			<button onclick="helpTab('buttons', this)">Buttons &amp; Tips</button>
+		</div>
+		<div class="helpbody">
+		<div class="helppane active" id="help-overview">
 		<h3>What a flow is</h3>
-		<p>A flow is a saved list of steps that run around a schedule. When the schedule (a cron expression) fires, each step runs at its own offset from that time: before it, on it, or after it. Flows only run on their schedule while they are <b>Enabled</b>; <b>Run</b> starts one by hand.</p>
+		<p>A flow is a saved list of steps, each with a time offset: before, on or after a starting moment. What that moment is depends on the Flow Type below. Schedule and On Join flows only start by themselves while they are <b>Enabled</b>; <b>Run</b> starts any flow by hand.</p>
 
+		<h3>When a flow runs</h3>
+		<p>Each flow has a <b>Flow Type</b>, chosen when you create or edit it:</p>
+		<ul>
+			<li><b>Schedule</b>: a cron schedule (see below). Steps run around the schedule time while the flow is <b>Enabled</b>.</li>
+			<li><b>On Join</b>: while <b>Enabled</b>, it runs once for every player who joins, with offsets counted from the moment the join was seen.</li>
+			<li><b>Manual</b>: it runs only when you press <b>Run</b>. There is nothing to enable.</li>
+		</ul>
+		</div>
+		<div class="helppane" id="help-steps">
 		<h3>Writing steps</h3>
 		<p>One step per line: <code>offset | command</code>. Lines starting with <code>//</code> are comments.</p>
 <pre>-60m | say -1 Server is going to restart in $minutes minutes!
@@ -1676,24 +1715,13 @@ cancel | say -1 Server restart cancelled.</pre>
 			<li><code>cancel | command</code> lines run only if you press Stop before the schedule time arrives. Use them to undo a countdown, for example a "restart cancelled" message.</li>
 		</ul>
 
-		<h3>Player-join flows</h3>
-		<p>Leave the schedule blank (or use <code>* * * * *</code>) and <b>Enable</b> the flow, and it runs once for every player who joins instead of on the clock. Joins are checked every 5 seconds.</p>
-<pre>0s   | say $player Welcome to our server, $name!
-+60  | say $player Type /help for the rules.</pre>
-		<ul>
-			<li><code>$player</code> becomes the joining player's number (what <code>say</code> and <code>kick</code> need) and <code>$name</code> their name.</li>
-			<li>Offsets count from when the join was seen, so use <code>0s</code> or <code>+</code> offsets only.</li>
-			<li>A player who is still loading in may miss a <code>0s</code> message; <code>+30</code> or so is more reliable.</li>
-			<li>Players already online when the app starts are not greeted. After the server restarts, everyone who reconnects is.</li>
-			<li>Flows using <code>$player</code> or <code>$name</code> can't be started with Run or given a clock schedule.</li>
-		</ul>
-
 		<h3>Commands you can use</h3>
 		<ul>
 			<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
 			<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
 		</ul>
-
+		</div>
+		<div class="helppane" id="help-schedule">
 		<h3>Schedule (cron)</h3>
 		<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone. The text under the field explains in plain English what you typed and shows the next runs. The schedule time is the <code>0m</code> point, so a flow starting at <code>-60m</code> begins its countdown an hour earlier.</p>
 		<ul>
@@ -1703,10 +1731,44 @@ cancel | say -1 Server restart cancelled.</pre>
 			<li><code>0 5 * * 1-5</code> weekdays at 05:00</li>
 			<li><code>@daily</code>, <code>@hourly</code>, <code>@weekly</code>, <code>@monthly</code> shortcuts also work.</li>
 		</ul>
+		</div>
+		<div class="helppane" id="help-join">
+		<h3>On Join flows</h3>
+<pre>0s   | say $player Welcome to our server, $name!
++60  | say $player Type /help for the rules.</pre>
+		<ul>
+			<li><code>$player</code> is the joining player's number (what <code>say</code> and <code>kick</code> need), <code>$name</code> their name, <code>$guid</code> their BattlEye GUID, <code>$ip</code> their IP and <code>$ping</code> their ping.</li>
+			<li>A player counts as joined once they finish loading in (their name no longer ends in "(Lobby)"). Joins are checked every 5 seconds.</li>
+			<li>Offsets count from when the join was seen, so use <code>0s</code> or <code>+</code> offsets only.</li>
+			<li>A player who is still loading in may miss a <code>0s</code> message; <code>+30</code> or so is more reliable.</li>
+			<li>Players already online when the app starts are not greeted. After the server restarts, everyone who reconnects is.</li>
+			<li>Only On Join flows can use <code>$player</code>, <code>$name</code>, <code>$guid</code>, <code>$ip</code> and <code>$ping</code>.</li>
+		</ul>
+		</div>
+		<div class="helppane" id="help-if">
+		<h3>If / else</h3>
+		<p>A step can choose between commands. Put the offset on the <code>if</code> line; the lines inside are plain commands (no offsets) that all run at that moment. The condition is checked when that time arrives.</p>
+<pre>0s | if $name == Survivor
+kick $player Please change your name
+else
+say $player Welcome, $name!
+end
 
+-5m | if $players > 0
+say -1 Restart in 5 minutes!
+end</pre>
+		<ul>
+			<li>A condition is <code>value operator value</code> with spaces around the operator: <code>==</code> <code>!=</code> <code>&lt;</code> <code>&gt;</code> <code>&lt;=</code> <code>&gt;=</code> <code>contains</code> <code>!contains</code>.</li>
+			<li>Text ignores case. Two numbers compare as numbers. <code>&lt;</code> <code>&gt;</code> <code>&lt;=</code> <code>&gt;=</code> need numbers.</li>
+			<li><code>else</code> is optional. <code>end</code> and <code>fi</code> both close the block. Blocks can't be nested.</li>
+			<li><code>$players</code> is how many players are online right now (asked from the server, works in any flow). <code>$minutes</code> and <code>$seconds</code> work too.</li>
+			<li>If the condition can't be checked (for example the server doesn't answer), the block is skipped and the run log says why.</li>
+		</ul>
+		</div>
+		<div class="helppane" id="help-buttons">
 		<h3>Buttons</h3>
 		<ul>
-			<li><b>Enable / Disable</b> turns the flow on or off. An enabled flow with a schedule runs on the clock; one without runs when a player joins.</li>
+			<li><b>Enable / Disable</b> turns the flow on or off. An enabled Schedule flow runs on the clock; an enabled On Join flow runs for each player who joins.</li>
 			<li><b>Run / Stop</b> switches with the flow's state. Run starts the flow immediately: the earliest step fires right away and the rest follow at their offsets. Stop halts a running flow.</li>
 			<li><b>Edit</b> changes the steps or schedule. <b>Delete</b> removes the flow (not while it is running).</li>
 			<li>Drag a row up or down to reorder the list.</li>
@@ -1722,6 +1784,8 @@ cancel | say -1 Server restart cancelled.</pre>
 			<li>If the app restarts during a scheduled countdown it rejoins it and skips steps whose time has passed. Manually started runs are not resumed.</li>
 			<li>A flow runs one copy at a time. To start one from a task scheduler, POST to <code>/api/flows/&lt;id&gt;/run</code>.</li>
 		</ul>
+		</div>
+		</div>
 
 		<div class="buttons"><button onclick="closeHelp()">Close</button></div>
 	</div>
@@ -1782,15 +1846,16 @@ async function refresh() {
 		document.getElementById('flows').innerHTML = flows.map(function(f) {
 			let run = runs[f.id];
 			let active = !!(run && run.active);
-			let hasCron = !!(f.schedule && f.schedule.trim());
-			let next = f.scheduleEnabled ? (f.nextRun || '-') : (hasCron ? 'Disabled' : '-');
+			let manual = f.trigger === 'manual';
+			let sched = f.trigger === 'join' ? 'On Join' : (manual ? 'Manual' : f.schedule);
+			let next = manual ? '-' : (f.scheduleEnabled ? (f.nextRun || '-') : 'Disabled');
 			let buttons =
-				btn(f.scheduleEnabled ? 'Disable' : 'Enable', 'toggleFlow(' + f.id + ')', false) +
+				btn(f.scheduleEnabled ? 'Disable' : 'Enable', 'toggleFlow(' + f.id + ')', manual) +
 				(active ? btn('Stop', 'stopFlow(' + f.id + ')', false) : btn('Run', 'runFlow(' + f.id + ')', false)) +
 				btn('Edit', 'editFlow(' + f.id + ')', false) +
 				btn('Delete', 'deleteFlow(' + f.id + ')', active);
 			return '<tr draggable="true" data-id="' + f.id + '"><td>' + esc(f.name) + '</td>' +
-				'<td class="mono">' + (hasCron ? esc(f.schedule) : '-') + '</td>' +
+				'<td class="mono">' + esc(sched || '-') + '</td>' +
 				'<td>' + esc(statusText(run)) + '</td>' +
 				'<td>' + esc(next) + '</td>' +
 				'<td class="actions">' + buttons + '</td></tr>';
@@ -1807,15 +1872,10 @@ async function refresh() {
 
 function find(id) { return flows.find(function(x) { return x.id === id; }); }
 
-function isJoinFlow(f) {
-	let s = (f.schedule || '').trim().split(/\s+/).join(' ');
-	return s === '' || s === '* * * * *';
-}
-
 async function toggleFlow(id) {
 	let f = find(id);
-	if (!f.scheduleEnabled && isJoinFlow(f) &&
-		!confirm('"' + f.name + '" has no clock schedule, so it will run every time a player joins. Enable it?')) return;
+	if (!f.scheduleEnabled && f.trigger === 'join' &&
+		!confirm('"' + f.name + '" will run every time a player joins. Enable it?')) return;
 	let d = await post('/api/flows/' + id + '/' + (f.scheduleEnabled ? 'disable' : 'enable'));
 	if (!d.ok) alert(d.error || 'Failed');
 	refresh();
@@ -1892,6 +1952,11 @@ async function importFlows(input) {
 	refresh();
 }
 
+function helpTab(id, btn) {
+	Array.prototype.forEach.call(document.querySelectorAll('.helppane'), function(p) { p.classList.toggle('active', p.id === 'help-' + id); });
+	Array.prototype.forEach.call(document.querySelectorAll('.helptabs button'), function(b) { b.classList.toggle('active', b === btn); });
+	document.querySelector('.helpbody').scrollTop = 0;
+}
 function openHelp() { document.getElementById('helpModal').style.display = 'flex'; }
 function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
 
@@ -1900,18 +1965,26 @@ function openModal(f, title) {
 	document.getElementById('title').textContent = title;
 	document.getElementById('name').value = f.name;
 	document.getElementById('script').value = f.script;
+	document.getElementById('trigger').value = f.trigger || 'schedule';
 	document.getElementById('sched').value = f.schedule || '';
+	showTrigger();
 	document.getElementById('modal').style.display = 'flex';
 	updatePreview();
 }
 
 function newFlow() {
-	openModal({ id: 0, name: '', script: '-5m | say -1 Restarting in $minutes minutes!\n0m | #shutdown\n', schedule: '', scheduleEnabled: false }, 'New flow');
+	openModal({ id: 0, name: '', script: '-5m | say -1 Restarting in $minutes minutes!\n0m | #shutdown\n', trigger: 'schedule', schedule: '0 6 * * *', scheduleEnabled: false }, 'New flow');
 }
 
 function editFlow(id) { openModal(find(id), 'Edit flow'); }
 
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+// The schedule field only applies to the Schedule flow type.
+function showTrigger() {
+	document.getElementById('schedWrap').style.display =
+		document.getElementById('trigger').value === 'schedule' ? 'block' : 'none';
+}
 
 function queuePreview() {
 	clearTimeout(previewTimer);
@@ -1922,6 +1995,7 @@ async function updatePreview() {
 	let help = document.getElementById('schedHelp');
 	try {
 		let d = await post('/api/flows/preview', {
+			trigger: document.getElementById('trigger').value,
 			schedule: document.getElementById('sched').value,
 			script: document.getElementById('script').value
 		});
@@ -1941,6 +2015,7 @@ async function updatePreview() {
 	}
 }
 
+document.getElementById('trigger').addEventListener('change', function() { showTrigger(); updatePreview(); });
 document.getElementById('sched').addEventListener('input', queuePreview);
 document.getElementById('script').addEventListener('input', queuePreview);
 
@@ -1949,6 +2024,7 @@ document.getElementById('save').onclick = async () => {
 		id: editing.id,
 		name: document.getElementById('name').value,
 		script: document.getElementById('script').value,
+		trigger: document.getElementById('trigger').value,
 		schedule: document.getElementById('sched').value,
 		scheduleEnabled: !!editing.scheduleEnabled
 	});
