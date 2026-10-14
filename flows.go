@@ -833,7 +833,8 @@ func previewFlow(trigger, schedule, script string) map[string]any {
 // ---------------------------------------------------------------------------
 
 // flowRun is the live (or last finished) run of one flow. Mutable fields are
-// guarded by flowRuns' mutex; anchor never changes after creation.
+// guarded by flowRuns' mutex; anchor only moves later, when a late step
+// pushes the rest of the run back (see stepClock).
 type flowRun struct {
 	flowID int64
 	name   string
@@ -986,7 +987,13 @@ func launchFlow(f Flow, pf *parsedFlow, anchor time.Time, source string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	run := &flowRun{flowID: f.ID, name: f.Name, status: "running", active: true, anchor: anchor, cancel: cancel}
 	flowRuns.byFlow[f.ID] = run
-	flowRuns.last[f.ID] = time.Now()
+	// Last run is when the first step is due: a scheduled run is started up
+	// to one tick early (see launchDue) and sleeps until then.
+	last := time.Now()
+	if firstAt := anchor.Add(time.Duration(pf.Steps[0].OffsetSecs) * time.Second); firstAt.After(last) {
+		last = firstAt
+	}
+	flowRuns.last[f.ID] = last
 	flowRuns.Unlock()
 	go executeFlow(ctx, run, pf, source)
 	return nil
@@ -1057,12 +1064,36 @@ func runFlowCommand(run *flowRun, command string, offsetSecs int, p *Player) {
 	}
 }
 
+// stepClock times a run's steps from its 0 point while keeping the spacing
+// the script asks for: when a step goes out late (a late start, a slow RCON
+// reply, a long kickall), the 0 point moves back by the same amount, so every
+// later step still comes its full offset gap after the one before it.
+type stepClock struct{ base time.Time }
+
+// stepSlack is how late a step can be before later steps are moved back.
+const stepSlack = 250 * time.Millisecond
+
+func (c *stepClock) at(offsetSecs int) time.Time {
+	return c.base.Add(time.Duration(offsetSecs) * time.Second)
+}
+
+// fired is called as a step goes out and returns how far the 0 point moved.
+func (c *stepClock) fired(offsetSecs int) time.Duration {
+	late := time.Since(c.at(offsetSecs))
+	if late <= stepSlack {
+		return 0
+	}
+	c.base = c.base.Add(late)
+	return late
+}
+
 func executeFlow(ctx context.Context, run *flowRun, pf *parsedFlow, source string) {
 	defer run.cancel()
 	started := time.Now()
 	run.logf("Started by %s", source)
+	clock := &stepClock{base: run.anchor}
 	for _, st := range pf.Steps {
-		fireAt := run.anchor.Add(time.Duration(st.OffsetSecs) * time.Second)
+		fireAt := clock.at(st.OffsetSecs)
 		if fireAt.Before(started.Add(-scheduleGrace)) {
 			run.logf("skipped %q (its time had already passed)", st.Command)
 			continue
@@ -1070,13 +1101,19 @@ func executeFlow(ctx context.Context, run *flowRun, pf *parsedFlow, source strin
 		if !sleepUntil(ctx, fireAt) {
 			run.logf("stopped")
 			// Cancel commands undo a countdown that never reached its 0 point.
-			if time.Now().Before(run.anchor) {
+			if time.Now().Before(clock.base) {
 				for _, c := range pf.OnCancel {
 					runFlowCommand(run, c, 0, nil)
 				}
 			}
 			run.set("stopped", false)
 			return
+		}
+		if late := clock.fired(st.OffsetSecs); late > 0 {
+			run.logf("%q is %.1fs late; later steps move back %.1fs to keep their spacing", st.Command, late.Seconds(), late.Seconds())
+			flowRuns.Lock()
+			run.anchor = clock.base // keeps the page's countdown right
+			flowRuns.Unlock()
 		}
 		runFlowCommand(run, st.Command, st.OffsetSecs, nil)
 	}
@@ -1097,9 +1134,21 @@ const scheduleGrace = 15 * time.Second
 // the scheduler goroutine.
 var scheduleFired = map[string]time.Time{}
 
+// scheduleTick is how often the scheduler checks for runs to start.
+const scheduleTick = 5 * time.Second
+
+// launchDue reports whether a run whose first step is due at firstAt should
+// be started at this tick. It looks one tick ahead: a run due before the next
+// tick is started now and its goroutine sleeps until the exact second
+// (sleepUntil). Without the look-ahead the first step ran up to one tick (5s)
+// late, and any step due in that gap fired at the same moment as it.
+func launchDue(now, firstAt time.Time) bool {
+	return !now.Add(scheduleTick).Before(firstAt)
+}
+
 func startScheduler() {
 	go func() {
-		t := time.NewTicker(5 * time.Second)
+		t := time.NewTicker(scheduleTick)
 		defer t.Stop()
 		for now := range t.C {
 			runScheduleTick(now)
@@ -1109,9 +1158,9 @@ func startScheduler() {
 
 // runScheduleTick starts, for every enabled schedule-triggered flow, the
 // first cron occurrence whose window (cron time + earliest offset ... cron
-// time + latest offset) is open and not yet started. If the app was down when
-// the window opened it joins the run in progress; steps already in the past
-// are skipped.
+// time + latest offset) is open, or opens before the next tick, and is not
+// yet started. If the app was down when the window opened it joins the run in
+// progress; steps already in the past are skipped.
 func runScheduleTick(now time.Time) {
 	flows, err := globalDatabase.ListFlows()
 	if err != nil {
@@ -1135,8 +1184,8 @@ func runScheduleTick(now time.Time) {
 		// First occurrence whose last step hasn't passed yet.
 		t, ok := c.next(now.Add(-last).Add(-scheduleGrace))
 		for i := 0; ok && i < 4; i++ {
-			if now.Before(t.Add(first)) {
-				break // this window (and every later one) hasn't opened yet
+			if !launchDue(now, t.Add(first)) {
+				break // this window (and every later one) opens after the next tick
 			}
 			key := fmt.Sprintf("%d@%d", f.ID, t.Unix())
 			if _, done := scheduleFired[key]; !done {
@@ -1273,10 +1322,14 @@ func executeJoinFlow(run *flowRun, pf *parsedFlow, p Player) {
 	joinedAt := time.Now()
 	run.logf("player %d (%s) joined", p.ID, p.Name)
 	stopped := false
+	clock := &stepClock{base: joinedAt}
 	for _, st := range pf.Steps {
-		if !sleepUntil(run.ctx, joinedAt.Add(time.Duration(st.OffsetSecs)*time.Second)) {
+		if !sleepUntil(run.ctx, clock.at(st.OffsetSecs)) {
 			stopped = true
 			break
+		}
+		if late := clock.fired(st.OffsetSecs); late > 0 {
+			run.logf("%q for player %d is %.1fs late; later steps move back to keep their spacing", st.Command, p.ID, late.Seconds())
 		}
 		runFlowCommand(run, st.Command, st.OffsetSecs, &p)
 	}
