@@ -18,16 +18,9 @@ import (
 // ============================================================================
 // flows.go overview
 // ----------------------------------------------------------------------------
-// A "flow" is a named, saved script of RCON steps. What starts it is its
-// Trigger:
-//
-//	schedule  a cron expression; each time it fires the flow runs, and every
-//	          step has an offset from that cron time (before, on or after it)
-//	join      runs once for every player who joins, offsets counted from the
-//	          moment the join was seen; $player, $name ... are that player
-//	manual    runs only when you press Run
-//
-// A schedule or join flow only runs by itself while it is Enabled.
+// A "flow" is a named, saved script of RCON steps timed around a cron schedule.
+// Each time the cron expression fires, the flow runs: every step has an offset
+// from that cron time, so steps can run before it, on it, or after it.
 //
 // Script syntax, one step per line:  <offset> | <command>
 //
@@ -46,34 +39,20 @@ import (
 // player (the same sweep as POST /kickall); the reason defaults to
 // "Server restarting".
 //
-// If / else: a step can be a block. The offset goes on the if line; the
-// lines inside are plain commands (no offsets) that all run at that moment:
-//
-//	0s | if $name == Survivor
-//	kick $player Please change your name
-//	else
-//	say $player Welcome, $name!
-//	end
-//
-// The condition is <value> <op> <value> with spaces around the operator.
-// Operators: == != < > <= >= contains !contains (text ignores case, two
-// numbers compare as numbers). It is checked when the step's time arrives.
-// "fi" works as well as "end". Blocks can't be nested.
-//
-// Variables (in commands and conditions):
-//
-//	$minutes $seconds      how long before the cron time the step runs (0 on/after it)
-//	$players               how many players are online right now (asks the server)
-//	$player $name $guid $ip $ping   the joining player (join flows only)
+// $minutes / $seconds in a command become how long before the cron time that
+// step runs (0 for steps on or after it).
 //
 // Schedule: a standard 5-field cron expression (minute hour day-of-month month
 // day-of-week) in the server's local time, so set TZ in the container.
 // Supports * , - / lists, month/day names and @hourly @daily @weekly @monthly
-// @yearly.
+// @yearly. A flow only runs on its schedule while it is Enabled.
 //
-// Join flows are started by the background poller (db.go) every 5 seconds. A
-// player counts as joined once they finish loading in (their name no longer
-// ends in "(Lobby)").
+// Player-join flows: a flow whose schedule is blank or "* * * * *" has no
+// clock schedule. While it is Enabled it runs once for every player who
+// joins, with offsets counted from the moment the join was seen (so no
+// negative offsets). $player becomes the player's number and $name their
+// name, e.g.  0s | say $player Welcome to our server, $name!
+// Joins are spotted by the background poller (db.go) every 5 seconds.
 //
 // This file holds the flow logic only. Storage is in db.go, the HTTP API and
 // the /flows page are in web.go, and commands go out through rcon.go.
@@ -86,25 +65,9 @@ import (
 // Script parsing
 // ---------------------------------------------------------------------------
 
-type flowCond struct {
-	LHS, Op, RHS string
-}
-
-// flowStep is one timed step: either a plain command, or (Cond != nil) an
-// if-block whose Then or Else commands run depending on the condition.
 type flowStep struct {
 	OffsetSecs int // negative = before the cron time, positive = after
 	Command    string
-	Cond       *flowCond
-	Then, Else []string
-}
-
-// label is the step as shown in the run log.
-func (s flowStep) label() string {
-	if s.Cond != nil {
-		return "if " + s.Cond.String()
-	}
-	return s.Command
 }
 
 type parsedFlow struct {
@@ -147,183 +110,31 @@ func parseOffset(when string) (int, error) {
 	return 0, fmt.Errorf("time %q needs a sign: -%s runs before the cron time, +%s after it", when, m[2]+m[3], m[2]+m[3])
 }
 
-// Every variable a script may use. Anything else starting with $ in a
-// condition is reported as a typo.
-var knownVars = map[string]bool{
-	"$minutes": true, "$seconds": true, "$players": true,
-	"$player": true, "$name": true, "$guid": true, "$ip": true, "$ping": true,
-}
-
-var (
-	condRe    = regexp.MustCompile(`^(\S+)\s+(==|!=|<=|>=|<|>|contains|!contains)\s+(.+)$`)
-	condVarRe = regexp.MustCompile(`\$[A-Za-z]+`)
-)
-
-// parseCond reads "<value> <op> <value>". The operator needs spaces around
-// it; the right-hand side is the rest of the line (optional "quotes").
-func parseCond(s string) (*flowCond, error) {
-	s = strings.TrimSpace(s)
-	m := condRe.FindStringSubmatch(s)
-	if m == nil {
-		return nil, fmt.Errorf("bad condition %q (write: <value> <op> <value>, with spaces around the operator; operators: == != < > <= >= contains !contains)", s)
-	}
-	rhs := strings.TrimSpace(m[3])
-	if len(rhs) >= 2 && rhs[0] == '"' && rhs[len(rhs)-1] == '"' {
-		rhs = rhs[1 : len(rhs)-1]
-	}
-	c := &flowCond{LHS: m[1], Op: strings.ToLower(m[2]), RHS: rhs}
-	for _, v := range condVarRe.FindAllString(c.LHS+" "+c.RHS, -1) {
-		if !knownVars[v] {
-			return nil, fmt.Errorf("unknown variable %s in condition (known: $name $player $guid $ip $ping $players $minutes $seconds)", v)
-		}
-	}
-	return c, nil
-}
-
-func (c *flowCond) String() string { return c.LHS + " " + c.Op + " " + c.RHS }
-
-// eval checks the condition. expand fills in the variables of one side. The
-// returned text is the condition with the variables filled in, for the log.
-// Two whole numbers compare as numbers; otherwise text compares ignoring case.
-func (c *flowCond) eval(expand func(string) (string, error)) (bool, string, error) {
-	l, err := expand(c.LHS)
-	if err != nil {
-		return false, "", err
-	}
-	r, err := expand(c.RHS)
-	if err != nil {
-		return false, "", err
-	}
-	l, r = strings.TrimSpace(l), strings.TrimSpace(r)
-	shown := fmt.Sprintf("%q %s %q", l, c.Op, r)
-	ln, lerr := strconv.Atoi(l)
-	rn, rerr := strconv.Atoi(r)
-	numeric := lerr == nil && rerr == nil
-	switch c.Op {
-	case "==":
-		if numeric {
-			return ln == rn, shown, nil
-		}
-		return strings.EqualFold(l, r), shown, nil
-	case "!=":
-		if numeric {
-			return ln != rn, shown, nil
-		}
-		return !strings.EqualFold(l, r), shown, nil
-	case "contains":
-		return strings.Contains(strings.ToLower(l), strings.ToLower(r)), shown, nil
-	case "!contains":
-		return !strings.Contains(strings.ToLower(l), strings.ToLower(r)), shown, nil
-	}
-	if !numeric {
-		return false, shown, fmt.Errorf("%s needs two numbers", c.Op)
-	}
-	switch c.Op {
-	case "<":
-		return ln < rn, shown, nil
-	case ">":
-		return ln > rn, shown, nil
-	case "<=":
-		return ln <= rn, shown, nil
-	case ">=":
-		return ln >= rn, shown, nil
-	}
-	return false, shown, fmt.Errorf("unknown operator %s", c.Op)
-}
-
 func parseFlowScript(script string) (*parsedFlow, error) {
 	pf := &parsedFlow{}
-	var blk *flowStep // the open if-block, if any
-	inElse := false
-	blkLine := 0
 	for i, raw := range strings.Split(script, "\n") {
-		n := i + 1
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
-		lower := strings.ToLower(line)
-
-		// Inside an if-block: plain commands up to else / end.
-		if blk != nil {
-			switch lower {
-			case "else":
-				if inElse {
-					return nil, fmt.Errorf("line %d: an if can only have one else", n)
-				}
-				inElse = true
-				continue
-			case "end", "fi":
-				if len(blk.Then)+len(blk.Else) == 0 {
-					return nil, fmt.Errorf("line %d: the if on line %d has no commands", n, blkLine)
-				}
-				pf.Steps = append(pf.Steps, *blk)
-				blk = nil
-				continue
-			}
-			if lower == "if" || strings.HasPrefix(lower, "if ") {
-				return nil, fmt.Errorf("line %d: if blocks can't be nested", n)
-			}
-			if when, _, ok := strings.Cut(line, "|"); ok {
-				w := strings.ToLower(strings.ReplaceAll(when, " ", ""))
-				if w == "cancel" || offsetRe.MatchString(w) {
-					return nil, fmt.Errorf("line %d: lines inside an if have no offset (the if line's offset is used)", n)
-				}
-			}
-			cmd := cleanReason(line)
-			if inElse {
-				blk.Else = append(blk.Else, cmd)
-			} else {
-				blk.Then = append(blk.Then, cmd)
-			}
-			continue
-		}
-
-		if lower == "else" || lower == "end" || lower == "fi" {
-			return nil, fmt.Errorf("line %d: %q without an if", n, lower)
-		}
-		if lower == "if" || strings.HasPrefix(lower, "if ") {
-			return nil, fmt.Errorf("line %d: put the offset before the if, like \"0s | if $name == Bob\"", n)
-		}
 		when, cmd, ok := strings.Cut(line, "|")
 		if !ok {
-			return nil, fmt.Errorf("line %d: expected \"<offset> | <command>\"", n)
-		}
-		when = strings.ToLower(strings.TrimSpace(when))
-		trimmed := strings.TrimSpace(cmd)
-		isIf := strings.EqualFold(trimmed, "if") || strings.HasPrefix(strings.ToLower(trimmed), "if ")
-		if isIf {
-			if when == "cancel" {
-				return nil, fmt.Errorf("line %d: cancel lines can't use if", n)
-			}
-			off, err := parseOffset(when)
-			if err != nil {
-				return nil, fmt.Errorf("line %d: %v", n, err)
-			}
-			cond, err := parseCond(strings.TrimSpace(trimmed[2:]))
-			if err != nil {
-				return nil, fmt.Errorf("line %d: %v", n, err)
-			}
-			blk = &flowStep{OffsetSecs: off, Cond: cond}
-			inElse, blkLine = false, n
-			continue
+			return nil, fmt.Errorf("line %d: expected \"<offset> | <command>\"", i+1)
 		}
 		cmd = cleanReason(cmd)
 		if cmd == "" {
-			return nil, fmt.Errorf("line %d: command is empty", n)
+			return nil, fmt.Errorf("line %d: command is empty", i+1)
 		}
+		when = strings.ToLower(strings.TrimSpace(when))
 		if when == "cancel" {
 			pf.OnCancel = append(pf.OnCancel, cmd)
 			continue
 		}
 		off, err := parseOffset(when)
 		if err != nil {
-			return nil, fmt.Errorf("line %d: %v", n, err)
+			return nil, fmt.Errorf("line %d: %v", i+1, err)
 		}
 		pf.Steps = append(pf.Steps, flowStep{OffsetSecs: off, Command: cmd})
-	}
-	if blk != nil {
-		return nil, fmt.Errorf("line %d: this if is missing its end", blkLine)
 	}
 	if len(pf.Steps) == 0 {
 		return nil, errors.New("flow needs at least one step like \"0m | say -1 hello\"")
@@ -657,48 +468,27 @@ func fmtWhen(t time.Time) string { return t.Format("Mon 02 Jan 15:04 MST") }
 // Flow definitions (stored in the flows table, see db.go)
 // ---------------------------------------------------------------------------
 
-// The three ways a flow can be started.
-const (
-	trigSchedule = "schedule" // on a cron schedule
-	trigJoin     = "join"     // each time a player joins
-	trigManual   = "manual"   // only with the Run button
-)
-
-func validTrigger(t string) bool {
-	return t == trigSchedule || t == trigJoin || t == trigManual
-}
-
-// legacyTrigger guesses the trigger for a flow from a file exported before
-// triggers existed: no real schedule meant "when a player joins".
-func legacyTrigger(schedule string) string {
-	s := strings.Join(strings.Fields(schedule), " ")
-	if s == "" || s == "* * * * *" {
-		return trigJoin
-	}
-	return trigSchedule
-}
-
 type Flow struct {
 	ID              int64  `json:"id"`
 	Name            string `json:"name"`
 	Script          string `json:"script"`
-	Trigger         string `json:"trigger"`  // schedule | join | manual
-	Schedule        string `json:"schedule"` // cron expression, only for the schedule trigger
+	Schedule        string `json:"schedule"` // cron expression
 	ScheduleEnabled bool   `json:"scheduleEnabled"`
 	NextRun         string `json:"nextRun,omitempty"` // computed for the UI, not stored
 }
 
 const defaultRestartScript = `// Server restart. Offsets are relative to the cron time:
-// -60m = 60 minutes before, 0m = on the cron time, +90 = 90 seconds after.
+// -60m = 60 minutes before, 0s = on the cron time, +90s = 90 seconds after.
 -60m | say -1 Server is going to restart in $minutes minutes!
 -30m | say -1 Server is going to restart in $minutes minutes!
 -15m | say -1 Server is going to restart in $minutes minutes!
 -10m | say -1 Server is going to restart in $minutes minutes!
 -5m  | say -1 Server is going to restart in $minutes minutes!
 -3m  | say -1 Server is going to restart in $minutes minutes!
--3m  | #lock
-0m   | #shutdown
-+90  | #unlock
+-2m  | #lock
+-1m  | #kickall Server Restart
+0s   | #shutdown
++90s | #unlock
 cancel | say -1 Server restart cancelled.
 `
 
@@ -707,20 +497,25 @@ func initFlows() error {
 	return globalDatabase.EnsureFlowsTable("Server restart", defaultRestartScript, "0 6 * * *")
 }
 
+// isJoinSchedule reports whether a schedule means "no clock schedule": blank
+// or "* * * * *". An Enabled flow with such a schedule runs each time a
+// player joins instead of on the clock.
+func isJoinSchedule(schedule string) bool {
+	s := strings.Join(strings.Fields(schedule), " ")
+	return s == "" || s == "* * * * *"
+}
+
 // playerVarRe finds the per-player variables only join flows can fill in.
-// ($players, the online count, works anywhere and doesn't match.)
-var playerVarRe = regexp.MustCompile(`\$(player|name|guid|ip|ping)\b`)
+var playerVarRe = regexp.MustCompile(`\$(player|name)\b`)
 
-// usesPlayerVars reports whether a script uses a per-player variable.
+// usesPlayerVars reports whether a script uses $player or $name.
 func usesPlayerVars(script string) bool { return playerVarRe.MatchString(script) }
-
-const playerVarsOnlyJoin = "$player, $name, $guid, $ip and $ping only work in On Join flows"
 
 // checkJoinSteps rejects steps a join flow can never run: the flow starts
 // when the player is seen joining, so nothing can happen before that.
 func checkJoinSteps(pf *parsedFlow) error {
 	if pf.Steps[0].OffsetSecs < 0 {
-		return errors.New("On Join flows start when the player joins, so steps can't have a - offset (use 0s or +)")
+		return errors.New("player-join flows start when the player joins, so steps can't have a - offset (use 0s or +)")
 	}
 	return nil
 }
@@ -736,14 +531,13 @@ func flowsWithNextRun() ([]Flow, error) {
 		if !flows[i].ScheduleEnabled {
 			continue
 		}
-		switch flows[i].Trigger {
-		case trigJoin:
-			flows[i].NextRun = "On Join"
-		case trigSchedule:
-			if c, err := parseCron(flows[i].Schedule); err == nil {
-				if next, ok := c.next(now); ok {
-					flows[i].NextRun = fmtWhen(next)
-				}
+		if isJoinSchedule(flows[i].Schedule) {
+			flows[i].NextRun = "On player join"
+			continue
+		}
+		if c, err := parseCron(flows[i].Schedule); err == nil {
+			if next, ok := c.next(now); ok {
+				flows[i].NextRun = fmtWhen(next)
 			}
 		}
 	}
@@ -753,48 +547,38 @@ func flowsWithNextRun() ([]Flow, error) {
 // validateAndSaveFlow checks a flow from the edit dialog and stores it.
 // Every error it returns is a user-facing message (the API sends them as 400).
 //
-// Changing a flow's trigger saves it disabled, and a new player-join flow
-// always starts disabled, so an edit can never make a flow start firing in a
-// way you didn't see. Manual flows are never enabled (there is nothing to
-// enable); join and manual flows don't keep a schedule.
+// If an edit switches a flow between a clock schedule and player-join (or
+// back), it is saved disabled, so clearing the schedule of an enabled restart
+// flow can never make it fire on every join.
 func validateAndSaveFlow(f Flow) (int64, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Schedule = strings.TrimSpace(f.Schedule)
 	if f.Name == "" {
 		return 0, errors.New("name is required")
 	}
-	if !validTrigger(f.Trigger) {
-		return 0, errors.New("choose a flow type: Schedule, On Join or Manual")
-	}
 	pf, err := parseFlowScript(f.Script)
 	if err != nil {
 		return 0, err
 	}
-	switch f.Trigger {
-	case trigSchedule:
+	join := isJoinSchedule(f.Schedule)
+	if !join {
 		if _, err := parseCron(f.Schedule); err != nil {
 			return 0, errors.New("schedule: " + err.Error())
 		}
 		if usesPlayerVars(f.Script) {
-			return 0, errors.New(playerVarsOnlyJoin)
-		}
-	case trigJoin:
-		f.Schedule = ""
-		if err := checkJoinSteps(pf); err != nil {
-			return 0, err
-		}
-	case trigManual:
-		f.Schedule = ""
-		f.ScheduleEnabled = false
-		if usesPlayerVars(f.Script) {
-			return 0, errors.New(playerVarsOnlyJoin)
+			return 0, errors.New("$player and $name only work in player-join flows (leave the schedule blank or * * * * *)")
 		}
 	}
-	if f.ID == 0 && f.Trigger == trigJoin {
-		f.ScheduleEnabled = false
+	if f.ID == 0 && join {
+		f.ScheduleEnabled = false // a new join flow always starts disabled
 	} else if f.ID != 0 {
-		if old, err := globalDatabase.GetFlow(f.ID); err == nil && old.Trigger != f.Trigger {
+		if old, err := globalDatabase.GetFlow(f.ID); err == nil && isJoinSchedule(old.Schedule) != join {
 			f.ScheduleEnabled = false
+		}
+	}
+	if join && f.ScheduleEnabled {
+		if err := checkJoinSteps(pf); err != nil {
+			return 0, err
 		}
 	}
 	id, err := globalDatabase.SaveFlow(f)
@@ -811,34 +595,31 @@ func checkFlowCanEnable(f Flow) error {
 	if err != nil {
 		return err
 	}
-	switch f.Trigger {
-	case trigJoin:
+	if isJoinSchedule(f.Schedule) {
 		return checkJoinSteps(pf)
-	case trigSchedule:
-		if _, err := parseCron(f.Schedule); err != nil {
-			return errors.New("schedule: " + err.Error())
-		}
-		if usesPlayerVars(f.Script) {
-			return errors.New(playerVarsOnlyJoin)
-		}
-		return nil
 	}
-	return errors.New("this flow's type is Manual, so there is nothing to enable (use Run)")
+	if _, err := parseCron(f.Schedule); err != nil {
+		return errors.New("schedule: " + err.Error())
+	}
+	if usesPlayerVars(f.Script) {
+		return errors.New("$player and $name only work in player-join flows (leave the schedule blank or * * * * *)")
+	}
+	return nil
 }
 
 // previewFlow builds the plain-English summary the edit dialog shows under
-// the trigger: what it means, the next few run times, when the next
-// countdown starts, and how the script's offsets fit around it.
+// the schedule field: what the schedule means, the next few run times, when
+// the next countdown starts, and how the script's offsets fit around it.
 // The result is sent to the browser as-is.
-func previewFlow(trigger, schedule, script string) map[string]any {
+func previewFlow(schedule, script string) map[string]any {
 	resp := map[string]any{"ok": true}
 	pf, perr := parseFlowScript(script)
 	if perr == nil {
 		resp["span"] = pf.span()
 	}
-	switch trigger {
-	case trigJoin:
-		resp["description"] = "Runs each time a player joins, while Enabled ($player = their number, $name = their name). Press Run to start it by hand."
+	sched := strings.TrimSpace(schedule)
+	if isJoinSchedule(sched) {
+		resp["description"] = "No clock schedule - while Enabled, this flow runs each time a player joins ($player = their number, $name = their name). While disabled it only runs when you press Run."
 		if perr == nil {
 			if err := checkJoinSteps(pf); err != nil {
 				resp["span"] = "Note: " + err.Error() + "."
@@ -847,14 +628,8 @@ func previewFlow(trigger, schedule, script string) map[string]any {
 			}
 		}
 		return resp
-	case trigManual:
-		resp["description"] = "Runs only when you press Run."
-		if perr == nil {
-			resp["span"] = strings.Replace(pf.span(), "the scheduled time", "the moment you press Run", -1)
-		}
-		return resp
 	}
-	c, err := parseCron(strings.TrimSpace(schedule))
+	c, err := parseCron(sched)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
@@ -955,7 +730,7 @@ func startFlow(f Flow, minutes int) error {
 		return err
 	}
 	if usesPlayerVars(f.Script) {
-		return errors.New("this flow uses $player, $name, $guid, $ip or $ping, so it only runs as an On Join flow")
+		return errors.New("this flow uses $player or $name, so it only runs when a player joins")
 	}
 	lead := 0
 	if minutes > 0 {
@@ -1026,80 +801,22 @@ func sleepUntil(ctx context.Context, t time.Time) bool {
 	}
 }
 
-// onlineCount asks the server how many players are connected. A var so tests
-// can replace it.
-var onlineCount = func() (int, error) {
-	out, acked, err := runShared("players", 3*time.Second, true)
-	if err != nil {
-		return 0, err
-	}
-	if !acked {
-		return 0, errors.New("no answer from the server")
-	}
-	return len(parsePlayers(out)), nil
-}
-
-// expandVars fills the $variables of a command or condition side.
-// offsetSecs is the step's offset ($minutes/$seconds); p is the joining
-// player for player-join flows (fills $player $name $guid $ip $ping), nil
-// otherwise. $players asks the server, and fails if it can't answer.
-func expandVars(text string, offsetSecs int, p *Player) (string, error) {
+// runFlowCommand sends one step's command. Only #lock/#unlock are retried
+// (repeating them is harmless); `say` must not be repeated, and #shutdown is
+// expected to go unanswered because the server dies.
+//
+// p is the joining player for player-join flows (fills $player and $name),
+// nil for scheduled and manual runs.
+func runFlowCommand(run *flowRun, command string, offsetSecs int, p *Player) {
 	before := 0
 	if offsetSecs < 0 {
 		before = -offsetSecs
 	}
-	var vars []string
-	// $players must come before $player: the replacer tries them in order.
-	if strings.Contains(text, "$players") {
-		n, err := onlineCount()
-		if err != nil {
-			return "", fmt.Errorf("could not read the player count: %v", err)
-		}
-		vars = append(vars, "$players", strconv.Itoa(n))
-	}
-	vars = append(vars, "$minutes", strconv.Itoa(before/60), "$seconds", strconv.Itoa(before))
+	vars := []string{"$minutes", strconv.Itoa(before / 60), "$seconds", strconv.Itoa(before)}
 	if p != nil {
-		vars = append(vars, "$player", strconv.Itoa(p.ID), "$name", p.Name,
-			"$guid", p.GUID, "$ip", p.IP, "$ping", strconv.Itoa(p.Ping))
+		vars = append(vars, "$player", strconv.Itoa(p.ID), "$name", p.Name)
 	}
-	return strings.NewReplacer(vars...).Replace(text), nil
-}
-
-// runFlowStep runs one step: a plain command, or the Then / Else commands of
-// an if-block, chosen when the step's time arrives.
-func runFlowStep(run *flowRun, st flowStep, p *Player) {
-	if st.Cond == nil {
-		runFlowCommand(run, st.Command, st.OffsetSecs, p)
-		return
-	}
-	expand := func(s string) (string, error) { return expandVars(s, st.OffsetSecs, p) }
-	ok, shown, err := st.Cond.eval(expand)
-	if err != nil {
-		run.logf("skipped if %s: %v", st.Cond, err)
-		return
-	}
-	branch := st.Else
-	if ok {
-		branch = st.Then
-	}
-	run.logf("if %s -> %v", shown, ok)
-	for _, c := range branch {
-		runFlowCommand(run, c, st.OffsetSecs, p)
-	}
-}
-
-// runFlowCommand sends one command. Only #lock/#unlock are retried
-// (repeating them is harmless); `say` must not be repeated, and #shutdown is
-// expected to go unanswered because the server dies.
-//
-// p is the joining player for player-join flows (fills $player and friends),
-// nil for scheduled and manual runs.
-func runFlowCommand(run *flowRun, command string, offsetSecs int, p *Player) {
-	cmd, err := expandVars(command, offsetSecs, p)
-	if err != nil {
-		run.logf("skipped %q: %v", command, err)
-		return
-	}
+	cmd := strings.NewReplacer(vars...).Replace(command)
 	cmd = cleanReason(cmd)
 	lower := strings.ToLower(cmd)
 	// kickall is this program's own command, not a BattlEye one: it lists the
@@ -1132,7 +849,7 @@ func executeFlow(ctx context.Context, run *flowRun, pf *parsedFlow, source strin
 	for _, st := range pf.Steps {
 		fireAt := run.anchor.Add(time.Duration(st.OffsetSecs) * time.Second)
 		if fireAt.Before(started.Add(-scheduleGrace)) {
-			run.logf("skipped %q (its time had already passed)", st.label())
+			run.logf("skipped %q (its time had already passed)", st.Command)
 			continue
 		}
 		if !sleepUntil(ctx, fireAt) {
@@ -1146,7 +863,7 @@ func executeFlow(ctx context.Context, run *flowRun, pf *parsedFlow, source strin
 			run.set("stopped", false)
 			return
 		}
-		runFlowStep(run, st, nil)
+		runFlowCommand(run, st.Command, st.OffsetSecs, nil)
 	}
 	run.logf("done")
 	run.set("done", false)
@@ -1175,10 +892,10 @@ func startScheduler() {
 	}()
 }
 
-// runScheduleTick starts, for every enabled schedule flow, the first cron
-// occurrence whose window (cron time + earliest offset ... cron time + latest
-// offset) is open and not yet started. If the app was down when the window
-// opened it joins the run in progress; steps already in the past are skipped.
+// runScheduleTick starts, for every enabled flow, the first cron occurrence
+// whose window (cron time + earliest offset ... cron time + latest offset) is
+// open and not yet started. If the app was down when the window opened it
+// joins the run in progress; steps already in the past are skipped.
 func runScheduleTick(now time.Time) {
 	flows, err := globalDatabase.ListFlows()
 	if err != nil {
@@ -1186,8 +903,8 @@ func runScheduleTick(now time.Time) {
 		return
 	}
 	for _, f := range flows {
-		if !f.ScheduleEnabled || f.Trigger != trigSchedule {
-			continue // disabled, or started some other way (see startJoinFlows)
+		if !f.ScheduleEnabled || isJoinSchedule(f.Schedule) {
+			continue // disabled, or a player-join flow (see startJoinFlows)
 		}
 		c, err := parseCron(f.Schedule)
 		if err != nil {
@@ -1231,6 +948,16 @@ func runScheduleTick(now time.Time) {
 // Player-join trigger
 // ---------------------------------------------------------------------------
 
+// lobbySuffix is what BattlEye appends to a name while the player is still on
+// the loading screen. It is not part of their name.
+const lobbySuffix = "(Lobby)"
+
+// inLobby reports whether BattlEye still lists the player as loading in.
+func inLobby(p Player) bool {
+	f := strings.Fields(p.Name)
+	return len(f) > 0 && strings.EqualFold(f[len(f)-1], lobbySuffix)
+}
+
 // joinWatch remembers who was online at the last successful poll, by GUID
 // (player numbers get reused). Only the background poller goroutine
 // (db.go) touches it.
@@ -1249,21 +976,11 @@ func playersPolled(players []Player) {
 	}
 }
 
-// lobbySuffix is what the server appends to a player's name while they are
-// still on the loading screen. It isn't part of their name.
-const lobbySuffix = "(Lobby)"
-
-// inLobby reports whether a player is still loading in.
-func inLobby(p Player) bool {
-	f := strings.Fields(p.Name)
-	return len(f) > 0 && strings.EqualFold(f[len(f)-1], lobbySuffix)
-}
-
 // newArrivals updates joinWatch with this poll's players and returns the ones
-// who weren't online at the previous poll. A player still in the lobby isn't
-// counted as joined yet and isn't recorded, so they arrive on the first poll
-// where the suffix is gone. A player already seen who shows (Lobby) again
-// stays seen.
+// who have just finished joining. A player listed as "(Lobby)" is still on the
+// loading screen, so they are left out and look new again on the next poll;
+// they count as joined once the suffix is gone. A player who was already
+// counted stays counted if they show "(Lobby)" again.
 func newArrivals(players []Player) []Player {
 	online := map[string]bool{}
 	var joined []Player
@@ -1272,7 +989,7 @@ func newArrivals(players []Player) []Player {
 			continue
 		}
 		if inLobby(p) && !joinWatch.seen[p.GUID] {
-			continue
+			continue // still loading in: not joined yet
 		}
 		online[p.GUID] = true
 		if joinWatch.primed && !joinWatch.seen[p.GUID] {
@@ -1298,7 +1015,7 @@ func startJoinFlows(joined []Player) {
 		return
 	}
 	for _, f := range flows {
-		if !f.ScheduleEnabled || f.Trigger != trigJoin {
+		if !f.ScheduleEnabled || !isJoinSchedule(f.Schedule) {
 			continue
 		}
 		pf, err := parseFlowScript(f.Script)
@@ -1340,7 +1057,7 @@ func executeJoinFlow(run *flowRun, pf *parsedFlow, p Player) {
 			stopped = true
 			break
 		}
-		runFlowStep(run, st, &p)
+		runFlowCommand(run, st.Command, st.OffsetSecs, &p)
 	}
 	if stopped {
 		run.logf("stopped for player %d (%s)", p.ID, p.Name)
