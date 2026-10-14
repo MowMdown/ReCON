@@ -45,6 +45,8 @@ import (
 //       POST /api/flows/<id>/delete
 //       POST /api/flows/preview              {schedule, script} -> plain-English description
 //       POST /api/flows/reorder              {ids: [...]} saves the order shown on the page
+//       GET  /api/flows/export               download all flows as flows.json
+//       POST /api/flows/import               {flows: [...]} append flows from a flows.json
 //       POST /api/flows/command              {command: lock|unlock|shutdown|kickall} the page's quick buttons
 //   GET /health
 //
@@ -657,6 +659,110 @@ func handleFlowsAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// scriptText is a flow script inside an export/import file: an array of lines
+// (what Export writes) or one string with \n line breaks.
+type scriptText string
+
+func (s scriptText) MarshalJSON() ([]byte, error) {
+	var sb strings.Builder
+	enc := json.NewEncoder(&sb)
+	enc.SetEscapeHTML(false) // keep & < > readable in the file
+	if err := enc.Encode(strings.Split(strings.ReplaceAll(string(s), "\r\n", "\n"), "\n")); err != nil {
+		return nil, err
+	}
+	return []byte(strings.TrimSpace(sb.String())), nil
+}
+
+func (s *scriptText) UnmarshalJSON(b []byte) error {
+	var lines []string
+	if err := json.Unmarshal(b, &lines); err == nil {
+		*s = scriptText(strings.Join(lines, "\n"))
+		return nil
+	}
+	var one string
+	if err := json.Unmarshal(b, &one); err != nil {
+		return errors.New("script must be an array of lines or a string")
+	}
+	*s = scriptText(one)
+	return nil
+}
+
+type flowFileEntry struct {
+	Name     string     `json:"name"`
+	Schedule string     `json:"schedule"`
+	Script   scriptText `json:"script"`
+}
+
+type flowFile struct {
+	Flows []flowFileEntry `json:"flows"`
+}
+
+// handleFlowExport serves GET /api/flows/export: every flow, in list order, as
+// a downloadable flows.json. Enabled/disabled state is not exported.
+func handleFlowExport(w http.ResponseWriter) {
+	flows, err := globalDatabase.ListFlows()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := flowFile{Flows: make([]flowFileEntry, 0, len(flows))}
+	for _, f := range flows {
+		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Schedule: f.Schedule, Script: scriptText(f.Script)})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="flows.json"`)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	enc.Encode(out)
+}
+
+// handleFlowImport serves POST /api/flows/import with the body of a flows.json
+// file. Every flow is appended to the bottom of the list, disabled, whether or
+// not one with that name already exists (a taken name gets " (2)", " (3)", ...
+// because flow names must be unique). Flows that fail the usual checks are
+// skipped and reported.
+func handleFlowImport(w http.ResponseWriter, r *http.Request) {
+	var in flowFile
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&in); err != nil {
+		fail(w, http.StatusBadRequest, "not a valid flows file: "+err.Error())
+		return
+	}
+	if len(in.Flows) == 0 {
+		fail(w, http.StatusBadRequest, "no flows in file")
+		return
+	}
+	existing, err := globalDatabase.ListFlows()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	taken := map[string]bool{}
+	for _, f := range existing {
+		taken[strings.ToLower(f.Name)] = true
+	}
+	added := 0
+	skipped := []string{}
+	for i, e := range in.Flows {
+		base := strings.TrimSpace(e.Name)
+		if base == "" {
+			skipped = append(skipped, fmt.Sprintf("flow #%d: name is required", i+1))
+			continue
+		}
+		name := base
+		for n := 2; taken[strings.ToLower(name)]; n++ {
+			name = fmt.Sprintf("%s (%d)", base, n)
+		}
+		if _, err := validateAndSaveFlow(Flow{Name: name, Script: string(e.Script), Schedule: e.Schedule}); err != nil {
+			skipped = append(skipped, base+": "+err.Error())
+			continue
+		}
+		taken[strings.ToLower(name)] = true
+		added++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "added": added, "skipped": skipped})
+}
+
 // handleFlowPreview serves POST /api/flows/preview: a plain-English summary of
 // a schedule (and how the script's offsets fit around it) for the edit dialog.
 func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
@@ -738,6 +844,10 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 // handleFlowAction serves POST /api/flows/<id>/<run|stop|enable|disable|delete>
 // and the /api/flows/preview, /reorder and /command endpoints.
 func handleFlowAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/export" {
+		handleFlowExport(w)
+		return
+	}
 	if r.Method != http.MethodPost {
 		fail(w, http.StatusMethodNotAllowed, "use POST")
 		return
@@ -748,6 +858,10 @@ func handleFlowAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/command" {
 		handleQuickCommand(w, r)
+		return
+	}
+	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/import" {
+		handleFlowImport(w, r)
 		return
 	}
 	if strings.TrimSuffix(r.URL.Path, "/") == "/api/flows/reorder" {
@@ -1498,7 +1612,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 	</div>
 </div>
 <div id="status">Connecting...</div>
-<p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button></p>
+<p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></p>
 <table>
 	<colgroup>
 		<col style="width: 200px">
@@ -1596,6 +1710,7 @@ cancel | say -1 Server restart cancelled.</pre>
 			<li><b>Run / Stop</b> switches with the flow's state. Run starts the flow immediately: the earliest step fires right away and the rest follow at their offsets. Stop halts a running flow.</li>
 			<li><b>Edit</b> changes the steps or schedule. <b>Delete</b> removes the flow (not while it is running).</li>
 			<li>Drag a row up or down to reorder the list.</li>
+			<li><b>Export</b> downloads every flow as <code>flows.json</code>. <b>Import</b> adds the flows from such a file to the bottom of the list, disabled, even if they already exist.</li>
 			<li>The <b>#Lock</b>, <b>#Unlock</b>, <b>#Shutdown</b> and <b>#Kick All</b> buttons at the top right send that command to the server immediately. Shutdown and Kick All open a confirm/cancel dialog first.</li>
 		</ul>
 
@@ -1758,6 +1873,22 @@ async function sendQuick(cmd) {
 	}
 	clearTimeout(quickTimer);
 	quickTimer = setTimeout(function() { msg.textContent = ''; }, 8000);
+	refresh();
+}
+
+function exportFlows() { location.href = '/api/flows/export'; }
+
+async function importFlows(input) {
+	let file = input.files[0];
+	input.value = '';
+	if (!file) return;
+	let data;
+	try { data = JSON.parse(await file.text()); } catch(e) { alert('That file is not valid JSON.'); return; }
+	let d = await post('/api/flows/import', data);
+	if (!d.ok) { alert(d.error || 'Import failed'); return; }
+	let msg = 'Imported ' + d.added + ' flow(s) at the bottom of the list. They start disabled.';
+	if (d.skipped && d.skipped.length) msg += '\n\nSkipped:\n' + d.skipped.join('\n');
+	alert(msg);
 	refresh();
 }
 
