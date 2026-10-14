@@ -527,6 +527,9 @@ func (db *Database) DeleteBan(guid string) error {
 
 // EnsureFlowsTable creates the flows table and, if it is empty, seeds one
 // flow with the given name, script and schedule (left disabled).
+//
+// The schedule column also holds the flow's trigger: "manual", "on-join" or
+// a cron expression (see triggerOf in flows.go).
 func (db *Database) EnsureFlowsTable(seedName, seedScript, seedSchedule string) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS flows (
@@ -551,7 +554,8 @@ func (db *Database) EnsureFlowsTable(seedName, seedScript, seedSchedule string) 
 	return nil
 }
 
-// ListFlows returns every flow in display order.
+// ListFlows returns every flow in display order, with Trigger filled in from
+// the schedule column.
 func (db *Database) ListFlows() ([]Flow, error) {
 	rows, err := db.Query("SELECT id, name, script, schedule, schedule_enabled FROM flows ORDER BY position, id")
 	if err != nil {
@@ -566,23 +570,26 @@ func (db *Database) ListFlows() ([]Flow, error) {
 			return nil, err
 		}
 		f.ScheduleEnabled = en != 0
+		fillTrigger(&f)
 		flows = append(flows, f)
 	}
 	return flows, rows.Err()
 }
 
-// GetFlow returns one flow, or sql.ErrNoRows.
+// GetFlow returns one flow (Trigger filled in), or sql.ErrNoRows.
 func (db *Database) GetFlow(id int64) (Flow, error) {
 	var f Flow
 	var en int
 	err := db.QueryRow("SELECT id, name, script, schedule, schedule_enabled FROM flows WHERE id = ?", id).
 		Scan(&f.ID, &f.Name, &f.Script, &f.Schedule, &en)
 	f.ScheduleEnabled = en != 0
+	fillTrigger(&f)
 	return f, err
 }
 
 // SaveFlow inserts a new flow (ID 0, placed last) or updates an existing one.
-// Updating a missing ID returns sql.ErrNoRows.
+// f.Schedule must already be in stored form ("manual", "on-join" or cron);
+// f.Trigger is not stored. Updating a missing ID returns sql.ErrNoRows.
 func (db *Database) SaveFlow(f Flow) (int64, error) {
 	en := 0
 	if f.ScheduleEnabled {
@@ -607,7 +614,7 @@ func (db *Database) SaveFlow(f Flow) (int64, error) {
 	return f.ID, nil
 }
 
-// SetFlowScheduleEnabled turns a flow's schedule on or off.
+// SetFlowScheduleEnabled turns a flow's trigger (schedule or join) on or off.
 func (db *Database) SetFlowScheduleEnabled(id int64, on bool) error {
 	en := 0
 	if on {

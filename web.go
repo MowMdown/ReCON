@@ -38,12 +38,14 @@ import (
 //   Flows
 //       GET  /flows                          page
 //       GET  /api/flows                      flows + current/last run of each
-//       POST /api/flows                      create/update {id, name, script, schedule, scheduleEnabled}
-//       POST /api/flows/<id>/run             optional body {"minutes": N} = minutes until the cron time
+//       POST /api/flows                      create/update {id, name, script, trigger, schedule, scheduleEnabled}
+//                                            trigger = manual | schedule | join; if omitted, schedule
+//                                            decides: "manual", "on-join" or a cron expression
+//       POST /api/flows/<id>/run             optional body {"minutes": N} = minutes until the 0 point
 //       POST /api/flows/<id>/stop
-//       POST /api/flows/<id>/enable          (needs a schedule)   /disable
+//       POST /api/flows/<id>/enable          (schedule and join flows only)   /disable
 //       POST /api/flows/<id>/delete
-//       POST /api/flows/preview              {schedule, script} -> plain-English description
+//       POST /api/flows/preview              {trigger, schedule, script} -> plain-English description
 //       POST /api/flows/reorder              {ids: [...]} saves the order shown on the page
 //       GET  /api/flows/export               download all flows as flows.json
 //       POST /api/flows/import               {flows: [...]} append flows from a flows.json
@@ -60,18 +62,18 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("/rcon", handleRcon)                 // run any RCON command
-	mux.HandleFunc("/kickall", handleKickAll)           // kick everyone (optionally lock/shutdown)
-	mux.HandleFunc("/players", handlePlayersPage)       // players web page
-	mux.HandleFunc("/api/players", handlePlayersJSON)   // players JSON list
+	mux.HandleFunc("/rcon", handleRcon)                      // run any RCON command
+	mux.HandleFunc("/kickall", handleKickAll)                // kick everyone (optionally lock/shutdown)
+	mux.HandleFunc("/players", handlePlayersPage)            // players web page
+	mux.HandleFunc("/api/players", handlePlayersJSON)        // players JSON list
 	mux.HandleFunc("/api/players/all", handleAllPlayersJSON) // every known player, for the Ban Player picker
 	mux.HandleFunc("/api/players/", handlePlayerAction)      // per-player actions (trailing slash = subtree)
-	mux.HandleFunc("/bans", handleBansPage)             // bans web page
-	mux.HandleFunc("/api/bans", handleBansJSON)         // bans JSON list
-	mux.HandleFunc("/api/bans/", handleBanAction)       // per-GUID ban / unban
-	mux.HandleFunc("/flows", handleFlowsPage)           // flows web page
-	mux.HandleFunc("/api/flows", handleFlowsAPI)        // list / save flows
-	mux.HandleFunc("/api/flows/", handleFlowAction)     // per-flow actions, preview, reorder, quick commands
+	mux.HandleFunc("/bans", handleBansPage)                  // bans web page
+	mux.HandleFunc("/api/bans", handleBansJSON)              // bans JSON list
+	mux.HandleFunc("/api/bans/", handleBanAction)            // per-GUID ban / unban
+	mux.HandleFunc("/flows", handleFlowsPage)                // flows web page
+	mux.HandleFunc("/api/flows", handleFlowsAPI)             // list / save flows
+	mux.HandleFunc("/api/flows/", handleFlowAction)          // per-flow actions, preview, reorder, quick commands
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -689,7 +691,7 @@ func (s *scriptText) UnmarshalJSON(b []byte) error {
 
 type flowFileEntry struct {
 	Name     string     `json:"name"`
-	Schedule string     `json:"schedule"`
+	Schedule string     `json:"schedule"` // "manual", "on-join" or a cron expression
 	Script   scriptText `json:"script"`
 }
 
@@ -720,8 +722,11 @@ func handleFlowExport(w http.ResponseWriter) {
 // handleFlowImport serves POST /api/flows/import with the body of a flows.json
 // file. Every flow is appended to the bottom of the list, disabled, whether or
 // not one with that name already exists (a taken name gets " (2)", " (3)", ...
-// because flow names must be unique). Flows that fail the usual checks are
-// skipped and reported.
+// because flow names must be unique). A name longer than maxFlowNameLen is
+// shortened. Flows that fail the usual checks are skipped and reported.
+//
+// Each entry's schedule says its trigger: "manual", "on-join" or a cron
+// expression. A blank or "* * * * *" schedule imports as manual.
 func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 	var in flowFile
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&in); err != nil {
@@ -749,9 +754,13 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 			skipped = append(skipped, fmt.Sprintf("flow #%d: name is required", i+1))
 			continue
 		}
+		// Names over the limit are shortened rather than skipped, and the
+		// " (2)" suffix for a taken name is kept within the limit too.
+		base = clipName(base, maxFlowNameLen)
 		name := base
 		for n := 2; taken[strings.ToLower(name)]; n++ {
-			name = fmt.Sprintf("%s (%d)", base, n)
+			suffix := fmt.Sprintf(" (%d)", n)
+			name = clipName(base, maxFlowNameLen-len(suffix)) + suffix
 		}
 		if _, err := validateAndSaveFlow(Flow{Name: name, Script: string(e.Script), Schedule: e.Schedule}); err != nil {
 			skipped = append(skipped, base+": "+err.Error())
@@ -764,9 +773,11 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFlowPreview serves POST /api/flows/preview: a plain-English summary of
-// a schedule (and how the script's offsets fit around it) for the edit dialog.
+// a trigger and schedule (and how the script's offsets fit around it) for the
+// edit dialog.
 func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Trigger  string `json:"trigger"`
 		Schedule string `json:"schedule"`
 		Script   string `json:"script"`
 	}
@@ -774,7 +785,7 @@ func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad JSON")
 		return
 	}
-	writeJSON(w, http.StatusOK, previewFlow(req.Schedule, req.Script))
+	writeJSON(w, http.StatusOK, previewFlow(req.Trigger, req.Schedule, req.Script))
 }
 
 // handleFlowReorder serves POST /api/flows/reorder: the body lists flow ids in
@@ -1562,9 +1573,10 @@ setInterval(refresh, {{.BansRefreshInterval.Milliseconds}});
 </html>`))
 
 // flowsPage is the /flows page: the list of flows with Enable/Run/Edit/Delete
-// buttons, drag-to-reorder rows, the run logs, an edit dialog with a live
-// schedule preview, a help dialog, and quick #lock/#unlock/#shutdown/#kickall
-// buttons. It polls /api/flows every RefreshInterval.
+// buttons, drag-to-reorder rows, the run logs, an edit dialog with a trigger
+// picker and a live preview, a tabbed help dialog, and quick
+// #lock/#unlock/#shutdown/#kickall buttons. It polls /api/flows every
+// RefreshInterval.
 var flowsPage = template.Must(template.Must(baseTemplate.Clone()).New("flows").Parse(`<!doctype html>
 <html>
 <head>
@@ -1579,19 +1591,36 @@ var flowsPage = template.Must(template.Must(baseTemplate.Clone()).New("flows").P
 .quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .quick button { margin-right: 0; }
 #quickMsg { color: #aaa; font-size: 13px; margin-right: 8px; }
-.box.helpbox { width: min(820px, 95vw); max-height: 85vh; overflow-y: auto; }
+select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.InputPadding}}; background: #111; color: #eee; border: 1px solid #555; }
+.box.helpbox { width: min(860px, 95vw); height: min(680px, 88vh); display: flex; flex-direction: column; box-sizing: border-box; }
+.helpbox h2 { margin: 0 0 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid #444; flex: none; }
+.tabs button { margin: 0 0 -1px; padding: 7px 12px; font-size: 13px; color: #aaa; background: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; }
+.tabs button:hover { color: #eee; }
+.tabs button.active { color: #eee; background: #222; border-color: #444; border-bottom: 1px solid #222; }
+.helppanes { flex: 1; overflow-y: auto; padding: 0 6px 0 2px; min-height: 0; }
+.helppane { display: none; }
+.helppane.active { display: block; }
 .helpbox h3 { margin: 18px 0 6px; font-size: 15px; }
+.helppane > h3:first-child { margin-top: 14px; }
 .helpbox p, .helpbox li { font-size: 13px; line-height: 1.6; color: #ccc; }
 .helpbox ul { margin: 4px 0; padding-left: 20px; }
 .helpbox code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #111; padding: 1px 5px; border-radius: 3px; }
 .helpbox pre { background: #111; padding: 10px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 6px 0; }
+.helpbox .buttons { margin-top: 12px; flex: none; }
+.helpbox table { table-layout: auto; margin: 6px 0; }
+.helpbox th, .helpbox td { height: auto; font-size: 13px; color: #ccc; vertical-align: top; padding: 7px 9px; }
+.helpbox th { color: #eee; }
 textarea.script, #sched { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 textarea.script { white-space: pre; }
 .help { color: #aaa; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
-.help.bad { color: #f28b82; }
+.help.bad { color: #f28b82; white-space: pre-line; }
 .run { margin-top: 24px; }
 pre.log { background: #1a1a1a; padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; }
 td.actions { white-space: nowrap; }
+/* Flow names are capped at 48 characters, which fits the 340px column in
+   normal mixed case; anything wider (all caps) ends in an ellipsis. */
+#flows td:first-child { white-space: nowrap; text-overflow: ellipsis; }
 button:disabled { opacity: 0.4; cursor: default; }
 #flows tr[draggable="true"] { cursor: grab; }
 #flows tr.dragging { opacity: 0.4; }
@@ -1615,14 +1644,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 <p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></p>
 <table>
 	<colgroup>
-		<col style="width: 200px">
+		<col style="width: 340px">
 		<col style="width: 140px">
 		<col>
 		<col style="width: 190px">
-		<col style="width: 390px">
+		<col style="width: 190px">
+		<col style="width: 290px">
 	</colgroup>
 	<thead>
-		<tr><th>Flow</th><th>Schedule</th><th>Status</th><th>Next run</th><th>Actions</th></tr>
+		<tr><th>Flow</th><th>Trigger</th><th>Status</th><th>Last run</th><th>Next run</th><th>Actions</th></tr>
 	</thead>
 	<tbody id="flows"></tbody>
 </table>
@@ -1632,10 +1662,18 @@ button:disabled { opacity: 0.4; cursor: default; }
 	<div class="box wide">
 		<h2 id="title"></h2>
 		<label>Name</label>
-		<input id="name" type="text">
+		<input id="name" type="text" maxlength="48">
 		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
-		<label>Schedule (cron: minute hour day-of-month month day-of-week; blank or * * * * * = run when a player joins)</label>
-		<input id="sched" type="text" placeholder="* * * * *" spellcheck="false">
+		<label>Trigger</label>
+		<select id="trigger">
+			<option value="manual">Manual</option>
+			<option value="schedule">Schedule</option>
+			<option value="join">On Player Join</option>
+		</select>
+		<div id="schedWrap">
+			<label>Schedule (cron: minute hour day-of-month month day-of-week)</label>
+			<input id="sched" type="text" placeholder="* * * * *" spellcheck="false">
+		</div>
 		<div id="schedHelp" class="help"></div>
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
@@ -1656,73 +1694,186 @@ button:disabled { opacity: 0.4; cursor: default; }
 <div id="helpModal" class="modal" onclick="if (event.target === this) closeHelp()">
 	<div class="box helpbox">
 		<h2>Flow help</h2>
+		<div class="tabs" id="helpTabs">
+			<button data-tab="overview">Overview</button>
+			<button data-tab="steps">Writing steps</button>
+			<button data-tab="triggers">Triggers</button>
+			<button data-tab="schedule">Schedule (cron)</button>
+			<button data-tab="join">Player join</button>
+			<button data-tab="commands">Commands</button>
+			<button data-tab="buttons">Buttons</button>
+			<button data-tab="tips">Tips</button>
+		</div>
+		<div class="helppanes">
 
-		<h3>What a flow is</h3>
-		<p>A flow is a saved list of steps that run around a schedule. When the schedule (a cron expression) fires, each step runs at its own offset from that time: before it, on it, or after it. Flows only run on their schedule while they are <b>Enabled</b>; <b>Run</b> starts one by hand.</p>
+		<div class="helppane" data-pane="overview">
+			<h3>What a flow is</h3>
+			<p>A flow is a saved list of RCON steps. Every step runs at its own offset from the flow's <b>0 point</b>: before it, on it, or after it. A restart flow, for example, counts down with warnings before the 0 point, shuts the server down on it, and unlocks it afterwards.</p>
+			<h3>How a flow starts</h3>
+			<p>Each flow has one <b>trigger</b>, picked in the edit dialog:</p>
+			<ul>
+				<li><b>Manual</b> - only when you press <b>Run</b>.</li>
+				<li><b>Schedule</b> - on a cron schedule, while the flow is <b>Enabled</b>.</li>
+				<li><b>On player join</b> - once for each player who joins, while the flow is <b>Enabled</b>.</li>
+			</ul>
+			<p>Any flow can also be started by hand with <b>Run</b>, unless it uses <code>$player</code> or <code>$name</code>.</p>
+			<h3>Making your first flow</h3>
+			<ul>
+				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and write its steps (see <i>Writing steps</i>).</li>
+				<li>Pick a trigger. For Schedule, type a cron expression; the text under it explains it in plain English.</li>
+				<li>Save. Schedule and player-join flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
+			</ul>
+		</div>
 
-		<h3>Writing steps</h3>
-		<p>One step per line: <code>offset | command</code>. Lines starting with <code>//</code> are comments.</p>
+		<div class="helppane" data-pane="steps">
+			<h3>Step format</h3>
+			<p>One step per line: <code>offset | command</code>. Lines starting with <code>//</code> are comments.</p>
 <pre>-60m | say -1 Server is going to restart in $minutes minutes!
 -3m  | #lock
 -1m  | #kickall Restarting now
 0m   | #shutdown
 +90  | #unlock
 cancel | say -1 Server restart cancelled.</pre>
-		<ul>
-			<li><code>-60m</code> runs 60 minutes <b>before</b> the schedule time, <code>0m</code> runs <b>on</b> it, <code>+90</code> runs 90 seconds <b>after</b> it.</li>
-			<li>Units are <code>s</code>, <code>m</code> and <code>h</code>. No unit means seconds, so <code>-90</code> is 90 seconds before.</li>
-			<li>Any offset other than 0 needs a <code>+</code> or <code>-</code> sign.</li>
-			<li><code>$minutes</code> and <code>$seconds</code> in a command become how long before the schedule time that step runs (0 for steps on or after it).</li>
-			<li><code>cancel | command</code> lines run only if you press Stop before the schedule time arrives. Use them to undo a countdown, for example a "restart cancelled" message.</li>
-		</ul>
+			<h3>Offsets</h3>
+			<ul>
+				<li><code>-60m</code> runs 60 minutes <b>before</b> the 0 point, <code>0m</code> runs <b>on</b> it, <code>+90</code> runs 90 seconds <b>after</b> it.</li>
+				<li>Units are <code>s</code>, <code>m</code> and <code>h</code>. No unit means seconds, so <code>-90</code> is 90 seconds before.</li>
+				<li>Any offset other than 0 needs a <code>+</code> or <code>-</code> sign. The largest offset is 7 days.</li>
+			</ul>
+			<h3>Where the 0 point is</h3>
+			<ul>
+				<li><b>Schedule</b>: the cron time. A flow starting at <code>-60m</code> begins its countdown an hour earlier.</li>
+				<li><b>Run</b> (any trigger): placed so the earliest step fires the moment you press Run, and the rest follow at their offsets.</li>
+				<li><b>On player join</b>: the moment the player finished joining, so only <code>0s</code> and <code>+</code> offsets are allowed.</li>
+			</ul>
+			<h3>Variables and cancel steps</h3>
+			<ul>
+				<li><code>$minutes</code> and <code>$seconds</code> become how long before the 0 point that step runs (0 for steps on or after it).</li>
+				<li><code>$player</code> and <code>$name</code> only work in On player join flows (see <i>Player join</i>).</li>
+				<li><code>cancel | command</code> lines run only if you press Stop before the 0 point arrives. Use them to undo a countdown, for example a "restart cancelled" message.</li>
+			</ul>
+		</div>
 
-		<h3>Player-join flows</h3>
-		<p>Leave the schedule blank (or use <code>* * * * *</code>) and <b>Enable</b> the flow, and it runs once for every player who joins instead of on the clock. Joins are checked every 5 seconds.</p>
+		<div class="helppane" data-pane="triggers">
+			<h3>The three triggers</h3>
+			<table>
+				<thead><tr><th>Trigger</th><th>Starts when</th><th>Needs Enable</th><th>Schedule field</th></tr></thead>
+				<tbody>
+					<tr><td><b>Manual</b></td><td>You press Run, or something POSTs to <code>/api/flows/&lt;id&gt;/run</code></td><td>No (the Enable button is greyed out)</td><td>Ignored</td></tr>
+					<tr><td><b>Schedule</b></td><td>The cron expression fires</td><td>Yes</td><td>Required</td></tr>
+					<tr><td><b>On player join</b></td><td>A new player finishes loading in</td><td>Yes</td><td>Ignored</td></tr>
+				</tbody>
+			</table>
+			<h3>Rules worth knowing</h3>
+			<ul>
+				<li>New schedule and player-join flows are saved <b>disabled</b>. Press Enable to switch them on.</li>
+				<li>Changing an existing flow's trigger saves it disabled too, so a restart flow can never start firing on every join by accident.</li>
+				<li>A blank or <code>* * * * *</code> schedule means "no schedule": pick the Manual trigger for that instead.</li>
+				<li>Run works with every trigger, so you can test a scheduled flow without waiting for its time. Flows that use <code>$player</code> or <code>$name</code> are the exception.</li>
+			</ul>
+		</div>
+
+		<div class="helppane" data-pane="schedule">
+			<h3>Cron expressions</h3>
+			<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone (set <code>TZ</code> on the container). The text under the field explains what you typed in plain English, shows the next three runs, and when the next countdown starts.</p>
+			<ul>
+				<li><code>0 6 * * *</code> every day at 06:00</li>
+				<li><code>0 */6 * * *</code> every 6 hours (00:00, 06:00, 12:00, 18:00)</li>
+				<li><code>30 4 * * 1,4</code> Mondays and Thursdays at 04:30</li>
+				<li><code>0 5 * * 1-5</code> weekdays at 05:00</li>
+				<li><code>0 3 1 * *</code> the 1st of every month at 03:00</li>
+				<li><code>@daily</code>, <code>@hourly</code>, <code>@weekly</code>, <code>@monthly</code> shortcuts also work.</li>
+			</ul>
+			<h3>Field syntax</h3>
+			<ul>
+				<li><code>*</code> any value, <code>1,4</code> a list, <code>1-5</code> a range, <code>*/15</code> every 15th.</li>
+				<li>Months and weekdays accept names: <code>jan</code>-<code>dec</code>, <code>sun</code>-<code>sat</code>. Sunday is 0 or 7.</li>
+				<li>If both day-of-month and day-of-week are restricted, a day matches when <b>either</b> does (standard cron).</li>
+			</ul>
+			<h3>Countdowns and app restarts</h3>
+			<ul>
+				<li>The cron time is the 0 point. A flow that starts at <code>-60m</code> with <code>0 6 * * *</code> begins at 05:00.</li>
+				<li>If the app restarts during a scheduled countdown it rejoins it and skips steps whose time has passed. Manually started runs are not resumed.</li>
+			</ul>
+		</div>
+
+		<div class="helppane" data-pane="join">
+			<h3>How joins are detected</h3>
+			<p>The app reads the player list every 5 seconds. While a player is still on the loading screen BattlEye shows <code>(Lobby)</code> after their name; they count as joined on the first check where that tag is gone, and every enabled On player join flow then runs once for them.</p>
 <pre>0s   | say $player Welcome to our server, $name!
 +60  | say $player Type /help for the rules.</pre>
-		<ul>
-			<li><code>$player</code> becomes the joining player's number (what <code>say</code> and <code>kick</code> need) and <code>$name</code> their name.</li>
-			<li>Offsets count from when the join was seen, so use <code>0s</code> or <code>+</code> offsets only.</li>
-			<li>A player who is still loading in may miss a <code>0s</code> message; <code>+30</code> or so is more reliable.</li>
-			<li>Players already online when the app starts are not greeted. After the server restarts, everyone who reconnects is.</li>
-			<li>Flows using <code>$player</code> or <code>$name</code> can't be started with Run or given a clock schedule.</li>
-		</ul>
+			<h3>Variables</h3>
+			<ul>
+				<li><code>$player</code> becomes the joining player's number (what <code>say</code> and <code>kick</code> need).</li>
+				<li><code>$name</code> becomes their name.</li>
+			</ul>
+			<h3>Rules</h3>
+			<ul>
+				<li>Offsets count from when the join was seen, so use <code>0s</code> or <code>+</code> offsets only.</li>
+				<li>Several players can be in progress at once; they share one log and one Stop button, which stops all of them.</li>
+				<li>Players already online when the app starts are not greeted. After the game server restarts, everyone who reconnects is.</li>
+				<li>Flows using <code>$player</code> or <code>$name</code> can't be started with Run or given another trigger.</li>
+				<li>Cancel steps never run for join flows: there is no countdown to undo.</li>
+			</ul>
+		</div>
 
-		<h3>Commands you can use</h3>
-		<ul>
-			<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
-			<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
-		</ul>
+		<div class="helppane" data-pane="commands">
+			<h3>Commands you can use in steps</h3>
+			<ul>
+				<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
+				<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
+			</ul>
+			<h3>Messages</h3>
+			<ul>
+				<li><code>say -1 text</code> messages everyone.</li>
+				<li><code>say &lt;id&gt; text</code> messages one player; in join flows use <code>say $player text</code>.</li>
+			</ul>
+			<h3>Retries</h3>
+			<p><code>#lock</code> and <code>#unlock</code> are retried if the server doesn't answer, since repeating them is harmless. Other commands are sent once so a message is never shown twice. <code>#shutdown</code> often goes unanswered because the server stops.</p>
+		</div>
 
-		<h3>Schedule (cron)</h3>
-		<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone. The text under the field explains in plain English what you typed and shows the next runs. The schedule time is the <code>0m</code> point, so a flow starting at <code>-60m</code> begins its countdown an hour earlier.</p>
-		<ul>
-			<li><code>0 6 * * *</code> every day at 06:00</li>
-			<li><code>0 */6 * * *</code> every 6 hours (00:00, 06:00, 12:00, 18:00)</li>
-			<li><code>30 4 * * 1,4</code> Mondays and Thursdays at 04:30</li>
-			<li><code>0 5 * * 1-5</code> weekdays at 05:00</li>
-			<li><code>@daily</code>, <code>@hourly</code>, <code>@weekly</code>, <code>@monthly</code> shortcuts also work.</li>
-		</ul>
+		<div class="helppane" data-pane="buttons">
+			<h3>Flow buttons</h3>
+			<ul>
+				<li><b>Enable / Disable</b> turns a Schedule or On player join trigger on or off. Manual flows have nothing to enable, so the button is greyed out.</li>
+				<li><b>Run / Stop</b> switches with the flow's state. Run starts the flow immediately: the earliest step fires right away and the rest follow at their offsets. Stop halts a running flow.</li>
+				<li><b>Edit</b> changes the name, steps, trigger or schedule. <b>Delete</b> removes the flow (not while it is running).</li>
+				<li>Drag a row up or down to reorder the list.</li>
+			</ul>
+			<h3>Status, Last run and Next run</h3>
+			<ul>
+				<li><b>Idle</b> - waiting for its next trigger (never run, or the last run finished normally).</li>
+				<li><b>Running - 45m45s</b> - counting down to the flow's <code>0m</code> step. Once that step is reached, or if the flow has no <code>-</code> offsets, it just shows <b>Running</b>.</li>
+				<li><b>Error</b> - a command in the last run failed: RCON couldn't be reached or the server didn't answer. The other steps still ran; check the log under the list.</li>
+				<li><b>Stopped</b> - the last run was ended with the Stop button.</li>
+				<li><b>Last run</b> is when the flow was last started (for a join flow, the last player it ran for). It resets when the app restarts.</li>
+			</ul>
+			<h3>Export and import</h3>
+			<ul>
+				<li><b>Export</b> downloads every flow (name, schedule and steps) as <code>flows.json</code>. The <code>schedule</code> value holds the trigger: <code>"manual"</code>, <code>"on-join"</code> or a cron expression.</li>
+				<li><b>Import</b> adds the flows from such a file to the bottom of the list, disabled, even if they already exist. A blank or <code>* * * * *</code> schedule imports as Manual, and names longer than 48 characters are shortened.</li>
+			</ul>
+			<h3>Quick commands</h3>
+			<p>The <b>#Lock</b>, <b>#Unlock</b>, <b>#Shutdown</b> and <b>#Kick All</b> buttons at the top right send that command to the server immediately. Shutdown and Kick All ask for confirmation first.</p>
+		</div>
 
-		<h3>Buttons</h3>
-		<ul>
-			<li><b>Enable / Disable</b> turns the flow on or off. An enabled flow with a schedule runs on the clock; one without runs when a player joins.</li>
-			<li><b>Run / Stop</b> switches with the flow's state. Run starts the flow immediately: the earliest step fires right away and the rest follow at their offsets. Stop halts a running flow.</li>
-			<li><b>Edit</b> changes the steps or schedule. <b>Delete</b> removes the flow (not while it is running).</li>
-			<li>Drag a row up or down to reorder the list.</li>
-			<li><b>Export</b> downloads every flow as <code>flows.json</code>. <b>Import</b> adds the flows from such a file to the bottom of the list, disabled, even if they already exist.</li>
-			<li>The <b>#Lock</b>, <b>#Unlock</b>, <b>#Shutdown</b> and <b>#Kick All</b> buttons at the top right send that command to the server immediately. Shutdown and Kick All open a confirm/cancel dialog first.</li>
-		</ul>
+		<div class="helppane" data-pane="tips">
+			<h3>Restart flows</h3>
+			<ul>
+				<li>Put <code>#kickall</code> at least a minute before <code>0m | #shutdown</code>, since the sweep takes a few seconds.</li>
+				<li>Set <code>+90</code> (or more) for <code>#unlock</code> to leave time for the server to restart and RCON to log in again.</li>
+				<li><code>#lock</code> a couple of minutes before the shutdown so nobody joins just to be kicked.</li>
+			</ul>
+			<h3>General</h3>
+			<ul>
+				<li>A flow runs one copy at a time; pressing Run on a running flow does nothing.</li>
+				<li>To start a flow from an outside task scheduler, POST to <code>/api/flows/&lt;id&gt;/run</code>. Add <code>{"minutes": 10}</code> to put the 0 point 10 minutes away; steps that would already be in the past are skipped.</li>
+				<li>Run a new restart flow on a test server first, or use a Manual copy with only <code>say</code> lines to check the timing.</li>
+				<li>Each flow's log appears under the list while it runs and stays there after it finishes.</li>
+			</ul>
+		</div>
 
-		<h3>Tips</h3>
-		<ul>
-			<li>Put <code>#kickall</code> at least a minute before <code>0m | #shutdown</code>, since the sweep takes a few seconds.</li>
-			<li>Set <code>+90</code> (or more) for <code>#unlock</code> to leave time for the server to restart and RCON to log in again.</li>
-			<li>Use <code>say -1</code> for messages to everyone; <code>say &lt;id&gt;</code> messages one player.</li>
-			<li>If the app restarts during a scheduled countdown it rejoins it and skips steps whose time has passed. Manually started runs are not resumed.</li>
-			<li>A flow runs one copy at a time. To start one from a task scheduler, POST to <code>/api/flows/&lt;id&gt;/run</code>.</li>
-		</ul>
-
+		</div>
 		<div class="buttons"><button onclick="closeHelp()">Close</button></div>
 	</div>
 </div>
@@ -1746,24 +1897,54 @@ async function post(url, body) {
 	return r.json();
 }
 
+// fmtRemaining turns seconds-to-go into 1h05m09s / 45m45s / 0m09s.
 function fmtRemaining(unix) {
-	let s = Math.round(unix - Date.now() / 1000);
-	if (s <= 0) return 'now';
+	let s = Math.max(0, Math.ceil(unix - Date.now() / 1000));
 	let h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-	return (h ? h + 'h ' : '') + m + 'm ' + String(s % 60).padStart(2, '0') + 's';
+	let ss = String(s % 60).padStart(2, '0');
+	return h ? h + 'h' + String(m).padStart(2, '0') + 'm' + ss + 's' : m + 'm' + ss + 's';
 }
 
+// statusText is the Status column:
+//   Idle               never run, or the last run finished normally
+//   Running - 45m45s   counting down to the 0m step
+//   Running            no countdown (past the 0m step, no negative offsets, or a join run)
+//   Error              a command failed (no reply or RCON error)
+//   Stopped            the Stop button was pressed
 function statusText(run) {
 	if (!run) return 'Idle';
 	if (run.active) {
-		if (run.anchorUnix > Date.now() / 1000) return 'Running - schedule time in ' + fmtRemaining(run.anchorUnix);
-		return 'Running - finishing up';
+		if (run.anchorUnix > Date.now() / 1000) return 'Running - ' + fmtRemaining(run.anchorUnix);
+		return 'Running';
 	}
-	return 'Last run: ' + run.status;
+	if (run.status === 'error') return 'Error';
+	if (run.status === 'stopped') return 'Stopped';
+	return 'Idle';
 }
 
-function btn(label, onclick, disabled) {
-	return '<button' + (disabled ? ' disabled' : '') + ' onclick="' + onclick + '">' + label + '</button>';
+// statusCell wraps the status so the 1-second ticker can update a countdown
+// between polls.
+function statusCell(run) {
+	let attr = run && run.active ? ' data-anchor="' + run.anchorUnix + '"' : '';
+	return '<span class="status"' + attr + '>' + esc(statusText(run)) + '</span>';
+}
+
+function tickCountdowns() {
+	document.querySelectorAll('.status[data-anchor]').forEach(function(el) {
+		el.textContent = statusText({ active: true, anchorUnix: Number(el.getAttribute('data-anchor')) });
+	});
+}
+
+function btn(label, onclick, disabled, title) {
+	return '<button' + (disabled ? ' disabled' : '') + (title ? ' title="' + esc(title) + '"' : '') +
+		' onclick="' + onclick + '">' + label + '</button>';
+}
+
+// triggerCell is what the Trigger column shows for a flow.
+function triggerCell(f) {
+	if (f.trigger === 'schedule') return '<span class="mono">' + esc(f.schedule) + '</span>';
+	if (f.trigger === 'join') return 'On player join';
+	return 'Manual';
 }
 
 async function refresh() {
@@ -1782,22 +1963,24 @@ async function refresh() {
 		document.getElementById('flows').innerHTML = flows.map(function(f) {
 			let run = runs[f.id];
 			let active = !!(run && run.active);
-			let hasCron = !!(f.schedule && f.schedule.trim());
-			let next = f.scheduleEnabled ? (f.nextRun || '-') : (hasCron ? 'Disabled' : '-');
+			let manual = f.trigger === 'manual';
+			let next = manual ? (f.nextRun || 'Manual only') : (f.scheduleEnabled ? (f.nextRun || '-') : 'Disabled');
 			let buttons =
-				btn(f.scheduleEnabled ? 'Disable' : 'Enable', 'toggleFlow(' + f.id + ')', false) +
+				btn(f.scheduleEnabled ? 'Disable' : 'Enable', 'toggleFlow(' + f.id + ')', manual,
+					manual ? 'Manual flows only run when you press Run' : '') +
 				(active ? btn('Stop', 'stopFlow(' + f.id + ')', false) : btn('Run', 'runFlow(' + f.id + ')', false)) +
 				btn('Edit', 'editFlow(' + f.id + ')', false) +
 				btn('Delete', 'deleteFlow(' + f.id + ')', active);
-			return '<tr draggable="true" data-id="' + f.id + '"><td>' + esc(f.name) + '</td>' +
-				'<td class="mono">' + (hasCron ? esc(f.schedule) : '-') + '</td>' +
-				'<td>' + esc(statusText(run)) + '</td>' +
+			return '<tr draggable="true" data-id="' + f.id + '"><td title="' + esc(f.name) + '">' + esc(f.name) + '</td>' +
+				'<td>' + triggerCell(f) + '</td>' +
+				'<td>' + statusCell(run) + '</td>' +
+				'<td>' + esc(f.lastRun || '-') + '</td>' +
 				'<td>' + esc(next) + '</td>' +
 				'<td class="actions">' + buttons + '</td></tr>';
 		}).join('');
 		document.getElementById('runs').innerHTML = flows.filter(function(f) { return runs[f.id]; }).map(function(f) {
 			let x = runs[f.id];
-			return '<div class="run"><b>' + esc(f.name) + '</b> - ' + esc(statusText(x)) +
+			return '<div class="run"><b>' + esc(f.name) + '</b> - ' + statusCell(x) +
 				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
 		}).join('');
 	} catch(e) {
@@ -1807,15 +1990,10 @@ async function refresh() {
 
 function find(id) { return flows.find(function(x) { return x.id === id; }); }
 
-function isJoinFlow(f) {
-	let s = (f.schedule || '').trim().split(/\s+/).join(' ');
-	return s === '' || s === '* * * * *';
-}
-
 async function toggleFlow(id) {
 	let f = find(id);
-	if (!f.scheduleEnabled && isJoinFlow(f) &&
-		!confirm('"' + f.name + '" has no clock schedule, so it will run every time a player joins. Enable it?')) return;
+	if (!f.scheduleEnabled && f.trigger === 'join' &&
+		!confirm('"' + f.name + '" will run every time a player joins. Enable it?')) return;
 	let d = await post('/api/flows/' + id + '/' + (f.scheduleEnabled ? 'disable' : 'enable'));
 	if (!d.ok) alert(d.error || 'Failed');
 	refresh();
@@ -1892,21 +2070,55 @@ async function importFlows(input) {
 	refresh();
 }
 
-function openHelp() { document.getElementById('helpModal').style.display = 'flex'; }
+// Help dialog: one pane per tab. The last tab viewed is reopened next time.
+let helpTab = 'overview';
+
+function showHelpTab(name) {
+	helpTab = name;
+	document.querySelectorAll('#helpTabs button').forEach(function(b) {
+		b.classList.toggle('active', b.getAttribute('data-tab') === name);
+	});
+	document.querySelectorAll('#helpModal .helppane').forEach(function(p) {
+		p.classList.toggle('active', p.getAttribute('data-pane') === name);
+	});
+	document.querySelector('#helpModal .helppanes').scrollTop = 0;
+}
+
+document.querySelectorAll('#helpTabs button').forEach(function(b) {
+	b.addEventListener('click', function() { showHelpTab(b.getAttribute('data-tab')); });
+});
+
+function openHelp() {
+	showHelpTab(helpTab);
+	document.getElementById('helpModal').style.display = 'flex';
+}
 function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
+
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape' && document.getElementById('helpModal').style.display === 'flex') closeHelp();
+});
+
+// The schedule field only matters for the Schedule trigger.
+function syncTrigger() {
+	let t = document.getElementById('trigger').value;
+	document.getElementById('schedWrap').style.display = t === 'schedule' ? 'block' : 'none';
+}
 
 function openModal(f, title) {
 	editing = f;
 	document.getElementById('title').textContent = title;
 	document.getElementById('name').value = f.name;
 	document.getElementById('script').value = f.script;
-	document.getElementById('sched').value = f.schedule || '';
+	document.getElementById('trigger').value = f.trigger || 'manual';
+	// For manual and join flows the stored schedule is just "manual"/"on-join".
+	document.getElementById('sched').value = f.trigger === 'schedule' ? (f.schedule || '') : '';
+	syncTrigger();
 	document.getElementById('modal').style.display = 'flex';
 	updatePreview();
 }
 
 function newFlow() {
-	openModal({ id: 0, name: '', script: '-5m | say -1 Restarting in $minutes minutes!\n0m | #shutdown\n', schedule: '', scheduleEnabled: false }, 'New flow');
+	openModal({ id: 0, name: '', script: '-5m | say -1 Restarting in $minutes minutes!\n0m | #shutdown\n', trigger: 'manual', schedule: '', scheduleEnabled: false }, 'New flow');
 }
 
 function editFlow(id) { openModal(find(id), 'Edit flow'); }
@@ -1922,6 +2134,7 @@ async function updatePreview() {
 	let help = document.getElementById('schedHelp');
 	try {
 		let d = await post('/api/flows/preview', {
+			trigger: document.getElementById('trigger').value,
 			schedule: document.getElementById('sched').value,
 			script: document.getElementById('script').value
 		});
@@ -1943,13 +2156,16 @@ async function updatePreview() {
 
 document.getElementById('sched').addEventListener('input', queuePreview);
 document.getElementById('script').addEventListener('input', queuePreview);
+document.getElementById('trigger').addEventListener('change', function() { syncTrigger(); updatePreview(); });
 
 document.getElementById('save').onclick = async () => {
+	let trigger = document.getElementById('trigger').value;
 	let d = await post('/api/flows', {
 		id: editing.id,
 		name: document.getElementById('name').value,
 		script: document.getElementById('script').value,
-		schedule: document.getElementById('sched').value,
+		trigger: trigger,
+		schedule: trigger === 'schedule' ? document.getElementById('sched').value : '',
 		scheduleEnabled: !!editing.scheduleEnabled
 	});
 	if (!d.ok) { alert(d.error || 'Save failed'); return; }
@@ -2025,6 +2241,7 @@ flowsBody.addEventListener('dragend', endDrag);
 
 refresh();
 setInterval(refresh, {{.RefreshInterval.Milliseconds}});
+setInterval(tickCountdowns, 1000);
 </script>
 </body>
 </html>`))
