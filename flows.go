@@ -19,13 +19,20 @@ import (
 // ============================================================================
 // flows.go overview
 // ----------------------------------------------------------------------------
-// A "flow" is a named script of RCON steps, one per line, each timed by an
-// offset from the flow's "0 point":   <offset> | <command>
+// A "flow" is a named script of RCON steps, each timed by an offset from the
+// flow's "0 point":   <offset> | <command>
 //
 //	-60m | say -1 Restart in $minutes minutes!    (60 minutes before the 0 point)
+//	-1m  | if $players > 0                        (lines below a step belong to it)
+//	#kickall Server Restart
+//	end
 //	0m   | #shutdown                              (on it)
 //	+90  | #unlock                                (90 seconds after; no unit = seconds)
 //	cancel | say -1 Restart cancelled.            (only if stopped before the 0 point)
+//
+// Sections: the script language (parsing, if/else, $variables, sending
+// commands), cron, flow definitions and validation, the runner, the
+// scheduler, and the player-join trigger.
 //
 // Triggers (stored in the schedule column: "manual", "on-join" or a cron
 // expression): manual = Run button only; schedule = cron time is the 0 point;
@@ -37,20 +44,53 @@ import (
 // ============================================================================
 
 // ---------------------------------------------------------------------------
-// Script parsing
+// Script language: parsing, if/else/end, conditions and $variables
 // ---------------------------------------------------------------------------
 
-type flowStep struct {
-	OffsetSecs int // negative = before the 0 point, positive = after
-	Command    string
+type nodeKind int
+
+const (
+	nodeCmd nodeKind = iota // an RCON command
+	nodeSet                 // $var = value
+	nodeIf                  // if / else / end block
+)
+
+type flowNode struct {
+	kind   nodeKind
+	line   int
+	text   string    // the command, or the value of a $var = value line
+	name   string    // the variable, for nodeSet
+	cond   *flowCond // for nodeIf
+	then   []flowNode
+	els    []flowNode
+	inElse bool // parse-time: lines now go to els
 }
+
+type flowStep struct {
+	OffsetSecs int    // negative = before the 0 point, positive = after
+	When       string // the offset as written ("-60m", "cancel"), for log lines
+	Line       int
+	Body       []flowNode
+}
+
+// label names a step in log lines, e.g. `step -60m (line 3)`.
+func (st flowStep) label() string { return fmt.Sprintf("step %s (line %d)", st.When, st.Line) }
 
 type parsedFlow struct {
 	Steps    []flowStep // sorted by offset, earliest first (script order kept for ties)
-	OnCancel []string
+	OnCancel []flowStep
 }
 
-var offsetRe = regexp.MustCompile(`^([+-]?)(\d+)([smh]?)$`)
+// Variables the program fills in; a script can't set these.
+var builtinVars = map[string]bool{"player": true, "name": true, "minutes": true, "seconds": true, "players": true}
+
+var (
+	offsetRe   = regexp.MustCompile(`^([+-]?)(\d+)([smh]?)$`)
+	stepLikeRe = regexp.MustCompile(`^(cancel|[+-]?\s*\d[\d\s]*[a-z]*)$`)
+	assignRe   = regexp.MustCompile(`^\$([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$`)
+	varRe      = regexp.MustCompile(`\$([A-Za-z_][A-Za-z0-9_]*)`)
+	numberRe   = regexp.MustCompile(`^-?\d+(\.\d+)?$`)
+)
 
 const maxOffsetSecs = 7 * 86400
 
@@ -82,38 +122,416 @@ func parseOffset(when string) (int, error) {
 	return 0, fmt.Errorf("time %q needs a sign: -%s runs before the 0 point, +%s after it", when, m[2]+m[3], m[2]+m[3])
 }
 
+// normalizeScript is applied before a script is saved: blank lines are
+// dropped (a "//" line is the way to keep a visual separator) and trailing
+// spaces trimmed. Indentation is kept.
+func normalizeScript(s string) string {
+	var out []string
+	for _, l := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+		l = strings.TrimRight(l, " \t\r")
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}
+
+// parseFlowScript turns a script into steps. Every error names the line.
 func parseFlowScript(script string) (*parsedFlow, error) {
 	pf := &parsedFlow{}
+	var cur *flowStep
+	var curCancel bool
+	var stack []*flowNode // open if blocks, innermost last
+	assigned := map[string]bool{}
+	type varUse struct {
+		name string
+		line int
+	}
+	var condVars []varUse
+
+	// add appends a node where lines are currently going and returns it.
+	add := func(n flowNode) *flowNode {
+		if len(stack) == 0 {
+			cur.Body = append(cur.Body, n)
+			return &cur.Body[len(cur.Body)-1]
+		}
+		top := stack[len(stack)-1]
+		if top.inElse {
+			top.els = append(top.els, n)
+			return &top.els[len(top.els)-1]
+		}
+		top.then = append(top.then, n)
+		return &top.then[len(top.then)-1]
+	}
+
+	finish := func() error {
+		if cur == nil {
+			return nil
+		}
+		if len(stack) > 0 {
+			return fmt.Errorf("line %d: this \"if\" has no \"end\"", stack[len(stack)-1].line)
+		}
+		if len(cur.Body) == 0 {
+			return fmt.Errorf("line %d: step has no command", cur.Line)
+		}
+		if curCancel {
+			pf.OnCancel = append(pf.OnCancel, *cur)
+		} else {
+			pf.Steps = append(pf.Steps, *cur)
+		}
+		cur = nil
+		return nil
+	}
+
+	body := func(text string, ln int) error {
+		low := strings.ToLower(text)
+		switch {
+		case low == "if" || strings.HasPrefix(low, "if "):
+			c, err := parseCond(strings.TrimSpace(text[2:]))
+			if err != nil {
+				return fmt.Errorf("line %d: %v", ln, err)
+			}
+			for _, and := range c.any {
+				for _, cmp := range and {
+					for _, side := range []string{cmp.left, cmp.right} {
+						for _, m := range varRe.FindAllStringSubmatch(side, -1) {
+							condVars = append(condVars, varUse{strings.ToLower(m[1]), ln})
+						}
+					}
+				}
+			}
+			stack = append(stack, add(flowNode{kind: nodeIf, line: ln, cond: c}))
+		case low == "else":
+			if len(stack) == 0 {
+				return fmt.Errorf("line %d: \"else\" without an \"if\"", ln)
+			}
+			top := stack[len(stack)-1]
+			if top.inElse {
+				return fmt.Errorf("line %d: second \"else\" for the \"if\" on line %d", ln, top.line)
+			}
+			top.inElse = true
+		case low == "end":
+			if len(stack) == 0 {
+				return fmt.Errorf("line %d: \"end\" without an \"if\"", ln)
+			}
+			stack = stack[:len(stack)-1]
+		case strings.HasPrefix(low, "else "):
+			return fmt.Errorf("line %d: \"else\" goes on a line of its own (for else-if, put an if inside the else)", ln)
+		case strings.HasPrefix(low, "end "):
+			return fmt.Errorf("line %d: \"end\" goes on a line of its own", ln)
+		default:
+			if m := assignRe.FindStringSubmatch(text); m != nil {
+				name := strings.ToLower(m[1])
+				if strings.HasPrefix(m[2], "=") {
+					return fmt.Errorf("line %d: == compares, so it goes in an if (use a single = to set a variable)", ln)
+				}
+				if builtinVars[name] {
+					return fmt.Errorf("line %d: $%s is filled in automatically and can't be set", ln, name)
+				}
+				assigned[name] = true
+				add(flowNode{kind: nodeSet, line: ln, name: name, text: strings.TrimSpace(m[2])})
+				return nil
+			}
+			add(flowNode{kind: nodeCmd, line: ln, text: cleanReason(text)})
+		}
+		return nil
+	}
+
 	for i, raw := range strings.Split(script, "\n") {
+		ln := i + 1
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
-		when, cmd, ok := strings.Cut(line, "|")
-		if !ok {
-			return nil, fmt.Errorf("line %d: expected \"<offset> | <command>\"", i+1)
+		// A step line: "<offset> | ..." or "cancel | ...". A "||" inside a
+		// condition never looks like this, because what's before it isn't an
+		// offset.
+		if when, rest, ok := strings.Cut(line, "|"); ok {
+			w := strings.ToLower(strings.TrimSpace(when))
+			if stepLikeRe.MatchString(w) {
+				if err := finish(); err != nil {
+					return nil, err
+				}
+				cur = &flowStep{Line: ln, When: strings.ReplaceAll(w, " ", "")}
+				curCancel = w == "cancel"
+				if !curCancel {
+					off, err := parseOffset(w)
+					if err != nil {
+						return nil, fmt.Errorf("line %d: %v", ln, err)
+					}
+					cur.OffsetSecs = off
+				}
+				if rest = strings.TrimSpace(rest); rest != "" {
+					if err := body(rest, ln); err != nil {
+						return nil, err
+					}
+				}
+				continue
+			}
 		}
-		cmd = cleanReason(cmd)
-		if cmd == "" {
-			return nil, fmt.Errorf("line %d: command is empty", i+1)
+		if cur == nil {
+			return nil, fmt.Errorf("line %d: expected \"<offset> | <command>\" (a script starts with a step such as 0s | say -1 hello)", ln)
 		}
-		when = strings.ToLower(strings.TrimSpace(when))
-		if when == "cancel" {
-			pf.OnCancel = append(pf.OnCancel, cmd)
-			continue
+		if err := body(line, ln); err != nil {
+			return nil, err
 		}
-		off, err := parseOffset(when)
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %v", i+1, err)
-		}
-		pf.Steps = append(pf.Steps, flowStep{OffsetSecs: off, Command: cmd})
+	}
+	if err := finish(); err != nil {
+		return nil, err
 	}
 	if len(pf.Steps) == 0 {
 		return nil, errors.New("flow needs at least one step like \"0m | say -1 hello\"")
 	}
+	for _, v := range condVars {
+		if !builtinVars[v.name] && !assigned[v.name] {
+			return nil, fmt.Errorf("line %d: unknown variable $%s (set it first with $%s = ...)", v.line, v.name, v.name)
+		}
+	}
 	sort.SliceStable(pf.Steps, func(a, b int) bool { return pf.Steps[a].OffsetSecs < pf.Steps[b].OffsetSecs })
 	return pf, nil
 }
+
+// ---------------------------------------------------------------------------
+// Conditions
+// ---------------------------------------------------------------------------
+
+type flowCmp struct{ left, op, right string }
+
+// flowCond is any of several all-of groups: (a && b) || (c) ...
+type flowCond struct {
+	text string
+	any  [][]flowCmp
+}
+
+var cmpOps = []string{"==", "!=", "<=", ">=", "<", ">"}
+
+func parseCond(s string) (*flowCond, error) {
+	if s == "" {
+		return nil, errors.New("\"if\" needs a condition, e.g. if $name == survivor")
+	}
+	c := &flowCond{text: s}
+	for _, orPart := range strings.Split(s, "||") {
+		var and []flowCmp
+		for _, part := range strings.Split(orPart, "&&") {
+			cmp, err := parseCmp(strings.TrimSpace(part))
+			if err != nil {
+				return nil, err
+			}
+			and = append(and, cmp)
+		}
+		c.any = append(c.any, and)
+	}
+	return c, nil
+}
+
+func parseCmp(s string) (flowCmp, error) {
+	if s == "" {
+		return flowCmp{}, errors.New("missing comparison next to && or ||")
+	}
+	for i := 0; i < len(s); i++ {
+		for _, op := range cmpOps {
+			if strings.HasPrefix(s[i:], op) {
+				l, r := strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+len(op):])
+				if l == "" || r == "" {
+					return flowCmp{}, fmt.Errorf("%q needs something on both sides of %s", s, op)
+				}
+				return flowCmp{l, op, r}, nil
+			}
+		}
+		if s[i] == '=' {
+			return flowCmp{}, fmt.Errorf("%q: use == to compare (a single = sets a variable)", s)
+		}
+	}
+	return flowCmp{}, fmt.Errorf("%q needs a comparison: == != < <= > >=", s)
+}
+
+// unquote drops one pair of surrounding double quotes.
+func unquote(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// ---------------------------------------------------------------------------
+// Running steps
+// ---------------------------------------------------------------------------
+
+// runCtx is one job's variables: one run of a scheduled or manual flow, or
+// one player in a join flow.
+type runCtx struct {
+	run    *flowRun
+	p      *Player           // the joining player, join flows only
+	vars   map[string]string // set by $var = value
+	offset int               // the current step's offset, for $minutes/$seconds
+}
+
+func newRunCtx(run *flowRun, p *Player) *runCtx {
+	return &runCtx{run: run, p: p, vars: map[string]string{}}
+}
+
+// lookup returns a variable's value; ok is false if it has none, and then
+// the "$name" text is left as typed.
+func (x *runCtx) lookup(name string) (string, bool) {
+	before := 0
+	if x.offset < 0 {
+		before = -x.offset
+	}
+	switch name {
+	case "minutes":
+		return strconv.Itoa(before / 60), true
+	case "seconds":
+		return strconv.Itoa(before), true
+	case "player":
+		if x.p != nil {
+			return strconv.Itoa(x.p.ID), true
+		}
+		return "", false
+	case "name":
+		if x.p != nil {
+			return x.p.Name, true
+		}
+		return "", false
+	case "players":
+		out, acked, err := runShared("players", 3*time.Second, true)
+		if err != nil || !acked {
+			x.run.logf("couldn't read the player count (err=%v)", err)
+			x.run.markFailed()
+			return "", false
+		}
+		return strconv.Itoa(len(parsePlayers(out))), true
+	}
+	v, ok := x.vars[name]
+	return v, ok
+}
+
+// expand fills in every $variable that has a value. Values are not expanded
+// again, so a player named "$players" stays literal text.
+func (x *runCtx) expand(s string) string {
+	return varRe.ReplaceAllStringFunc(s, func(m string) string {
+		if v, ok := x.lookup(strings.ToLower(m[1:])); ok {
+			return v
+		}
+		return m
+	})
+}
+
+func (x *runCtx) evalCond(c *flowCond) bool {
+	for _, and := range c.any {
+		all := true
+		for _, cmp := range and {
+			if !x.evalCmp(cmp) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
+func (x *runCtx) evalCmp(c flowCmp) bool {
+	l := strings.ToLower(strings.TrimSpace(unquote(x.expand(c.left))))
+	r := strings.ToLower(strings.TrimSpace(unquote(x.expand(c.right))))
+	if numberRe.MatchString(l) && numberRe.MatchString(r) {
+		a, _ := strconv.ParseFloat(l, 64)
+		b, _ := strconv.ParseFloat(r, 64)
+		switch c.op {
+		case "==":
+			return a == b
+		case "!=":
+			return a != b
+		case "<":
+			return a < b
+		case "<=":
+			return a <= b
+		case ">":
+			return a > b
+		case ">=":
+			return a >= b
+		}
+	}
+	switch c.op {
+	case "==":
+		return l == r
+	case "!=":
+		return l != r
+	}
+	x.run.logf("can't use %s on %q and %q: both sides must be numbers (counted as false)", c.op, l, r)
+	return false
+}
+
+// runStep runs one step's lines at its offset.
+func (x *runCtx) runStep(st flowStep) {
+	x.offset = st.OffsetSecs
+	x.exec(st.Body)
+}
+
+func (x *runCtx) exec(nodes []flowNode) {
+	for _, n := range nodes {
+		switch n.kind {
+		case nodeCmd:
+			runFlowCommand(x.run, cleanReason(x.expand(n.text)))
+		case nodeSet:
+			v := strings.TrimSpace(x.expand(n.text))
+			x.vars[n.name] = v
+			x.run.logf("set $%s = %q", n.name, v)
+		case nodeIf:
+			ok := x.evalCond(n.cond)
+			x.run.logf("if %s -> %v", n.cond.text, ok)
+			if ok {
+				x.exec(n.then)
+			} else {
+				x.exec(n.els)
+			}
+		}
+	}
+}
+
+// runFlowCommand sends one command (variables already filled in). Only
+// #lock/#unlock are retried (repeating them is harmless); `say` must not be
+// repeated, and #shutdown is expected to go unanswered because the server
+// dies.
+//
+// An RCON error, or no reply (except to #shutdown), marks the run as failed;
+// the remaining steps still run, and the run ends with status "error".
+func runFlowCommand(run *flowRun, cmd string) {
+	if cmd == "" {
+		return
+	}
+	lower := strings.ToLower(cmd)
+
+	// kickall [reason] (or #kickall) is this program's own command, not a
+	// BattlEye one: it lists the players and kicks each (kickAllUsing).
+	if bare := strings.TrimPrefix(lower, "#"); bare == "kickall" || strings.HasPrefix(bare, "kickall ") {
+		reason := strings.TrimSpace(strings.TrimPrefix(cmd, "#")[len("kickall"):])
+		if reason == "" {
+			reason = "Server restarting"
+		}
+		rep, err := kickAllUsing(sharedRunner{}, reason, false, false)
+		if err != nil {
+			run.logf("kickall failed: %v", err)
+			run.markFailed()
+			return
+		}
+		run.logf("kickall %q: kicked %v, no ack for %v, still connected %v", reason, rep.Order, rep.Unacked, rep.Remaining)
+		return
+	}
+
+	retry := lower == "#lock" || lower == "#unlock"
+	_, acked, err := runShared(cmd, 2*time.Second, retry)
+	run.logf("sent %q (acked=%v err=%v)", cmd, acked, err)
+	if err != nil || (!acked && lower != "#shutdown") {
+		run.markFailed()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Describing a script's timing (for the edit dialog)
+// ---------------------------------------------------------------------------
 
 func fmtDur(secs int) string {
 	unit, n := "second", secs
@@ -661,6 +1079,7 @@ func validateAndSaveFlow(f Flow) (int64, error) {
 		return 0, err
 	}
 	f.Trigger = trig
+	f.Script = normalizeScript(f.Script)
 	pf, err := parseFlowScript(f.Script)
 	if err != nil {
 		return 0, err
@@ -701,8 +1120,13 @@ func previewFlow(trigger, schedule, script string) map[string]any {
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
-	resp := map[string]any{"ok": true}
+	// Script mistakes (an if with no end, a variable never set, ...) show in
+	// red while typing, with the line number.
 	pf, perr := parseFlowScript(script)
+	if perr != nil && strings.TrimSpace(script) != "" {
+		return map[string]any{"ok": false, "error": "Script: " + perr.Error()}
+	}
+	resp := map[string]any{"ok": true}
 	playerNote := "Note: " + errPlayerVarsText + "."
 
 	switch trig {
@@ -980,16 +1404,20 @@ func (c *stepClock) fired(offsetSecs int) time.Duration {
 // Steps whose time had already passed when the job started are skipped (a
 // scheduled run joined mid-window). Cancel steps run only when a countdown is
 // stopped before its 0 point, which can't happen for a join job.
+//
+// What each step does is in the script-language section above; the job's
+// variables live in one runCtx for the whole job.
 func runSteps(run *flowRun, pf *parsedFlow, anchor time.Time, p *Player) (stopped bool) {
 	if p != nil {
 		run.logf("player %d (%s) joined", p.ID, p.Name)
 	}
+	x := newRunCtx(run, p)
 	started := time.Now()
 	clock := &stepClock{base: anchor}
 	for _, st := range pf.Steps {
 		fireAt := clock.at(st.OffsetSecs)
 		if fireAt.Before(started.Add(-scheduleGrace)) {
-			run.logf("skipped %q (its time had already passed)", st.Command)
+			run.logf("skipped %s (its time had already passed)", st.label())
 			continue
 		}
 		if !sleepUntil(run.ctx, fireAt) {
@@ -1000,70 +1428,25 @@ func runSteps(run *flowRun, pf *parsedFlow, anchor time.Time, p *Player) (stoppe
 			run.logf("stopped")
 			if time.Now().Before(clock.base) {
 				for _, c := range pf.OnCancel {
-					runFlowCommand(run, c, 0, nil)
+					x.runStep(c)
 				}
 			}
 			return true
 		}
 		if late := clock.fired(st.OffsetSecs); late > 0 {
-			run.logf("%q is %.1fs late; later steps move back %.1fs to keep their spacing", st.Command, late.Seconds(), late.Seconds())
+			run.logf("%s is %.1fs late; later steps move back %.1fs to keep their spacing", st.label(), late.Seconds(), late.Seconds())
 			if p == nil {
 				flowRuns.Lock()
 				run.anchor = clock.base // keeps the page's countdown right
 				flowRuns.Unlock()
 			}
 		}
-		runFlowCommand(run, st.Command, st.OffsetSecs, p)
+		x.runStep(st)
 	}
 	if p == nil {
 		run.logf("done")
 	}
 	return false
-}
-
-// runFlowCommand sends one step's command. Only #lock/#unlock are retried
-// (repeating them is harmless); `say` must not be repeated, and #shutdown is
-// expected to go unanswered because the server dies.
-//
-// An RCON error, or no reply (except to #shutdown), marks the run as failed;
-// the remaining steps still run.
-//
-// p is the joining player for join flows (fills $player and $name).
-func runFlowCommand(run *flowRun, command string, offsetSecs int, p *Player) {
-	before := 0
-	if offsetSecs < 0 {
-		before = -offsetSecs
-	}
-	vars := []string{"$minutes", strconv.Itoa(before / 60), "$seconds", strconv.Itoa(before)}
-	if p != nil {
-		vars = append(vars, "$player", strconv.Itoa(p.ID), "$name", p.Name)
-	}
-	cmd := cleanReason(strings.NewReplacer(vars...).Replace(command))
-	lower := strings.ToLower(cmd)
-
-	// kickall [reason] (or #kickall) is this program's own command, not a
-	// BattlEye one: it lists the players and kicks each (kickAllUsing).
-	if bare := strings.TrimPrefix(lower, "#"); bare == "kickall" || strings.HasPrefix(bare, "kickall ") {
-		reason := strings.TrimSpace(strings.TrimPrefix(cmd, "#")[len("kickall"):])
-		if reason == "" {
-			reason = "Server restarting"
-		}
-		rep, err := kickAllUsing(sharedRunner{}, reason, false, false)
-		if err != nil {
-			run.logf("kickall failed: %v", err)
-			run.markFailed()
-			return
-		}
-		run.logf("kickall %q: kicked %v, no ack for %v, still connected %v", reason, rep.Order, rep.Unacked, rep.Remaining)
-		return
-	}
-
-	retry := lower == "#lock" || lower == "#unlock"
-	_, acked, err := runShared(cmd, 2*time.Second, retry)
-	run.logf("sent %q (acked=%v err=%v)", cmd, acked, err)
-	if err != nil || (!acked && lower != "#shutdown") {
-		run.markFailed()
-	}
 }
 
 // ---------------------------------------------------------------------------
