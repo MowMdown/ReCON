@@ -702,7 +702,8 @@ var (
 //   - Poll `players` (single attempt, 3s wait).
 //   - On failure, count consecutive failures. At exactly 3 in a row the server
 //     is assumed down and SyncPlayers(nil) closes all open sessions once, so
-//     playtime stops accruing while it's offline.
+//     playtime stops accruing while it's offline. From the 3rd miss on, each
+//     round logs in again on the same RCON socket (reloginShared, rcon.go).
 //   - On success, reset the failure counter, sync the parsed list into the DB
 //     and pass it to playersPolled, which starts player-join flows.
 //   - On the 1st poll and every 6th after (~30s at a 5s interval), also
@@ -727,6 +728,12 @@ func startBackgroundSync(interval time.Duration) {
 						log.Printf("poller: close sessions: %v", err)
 					}
 					playersLost() // greet everyone again when they reconnect (flows.go)
+				}
+				// From the 3rd miss on, log in again on the same socket each
+				// round: the server may have restarted and forgotten us. This
+				// is the only place that decides the server isn't answering.
+				if fails >= 3 {
+					reloginShared()
 				}
 				continue
 			}

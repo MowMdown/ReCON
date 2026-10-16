@@ -23,8 +23,10 @@ import (
 //   - the BattlEye packet format and login
 //   - persistentConnection: a logged-in session with a background reader and
 //     an optional keepalive. The CLI and console dial their own; everything in
-//     server mode (web, poller, flows) goes through one shared session that
-//     reconnects on its own (runShared).
+//     server mode (web, poller, flows) goes through one shared session
+//     (runShared). It opens a new socket only when the old one has died;
+//     when the server stops answering, the poller logs in again on the same
+//     socket (reloginShared), so BattlEye keeps the same admin slot.
 //   - parsing what the server sends back (`players`, `bans`)
 //   - kickall, built from those pieces
 //
@@ -155,6 +157,7 @@ type persistentConnection struct {
 	commandLock sync.Mutex    // ensures only one command is in flight at a time
 	seq         byte          // next command sequence number (wraps at 255)
 	replies     chan []byte   // command replies (seq byte + body) handed from reader() to runRaw()
+	logins      chan byte     // login replies (1 = accepted) handed from reader() to relogin()
 	done        chan struct{} // closed by reader() when the socket dies
 	stop        chan struct{} // closed by close() to stop the keepalive goroutine
 	once        sync.Once     // makes close() idempotent
@@ -179,6 +182,7 @@ func dialPersistent(src string, enableKeepalive bool) (*persistentConnection, er
 		src:     src,
 		conn:    conn,
 		replies: make(chan []byte, 32),
+		logins:  make(chan byte, 4),
 		done:    make(chan struct{}),
 		stop:    make(chan struct{}),
 	}
@@ -243,6 +247,11 @@ func (l *persistentConnection) reader() {
 			continue
 		}
 		switch t {
+		case 0:
+			select { // a reply to relogin()
+			case l.logins <- p[0]:
+			default:
+			}
 		case 2:
 			l.write(buildPacket(2, p[:1]))
 		case 1:
@@ -270,6 +279,38 @@ func (l *persistentConnection) keepalive() {
 			return
 		}
 	}
+}
+
+// relogin logs in again on this same socket. BattlEye keys admin slots by
+// IP and port, so the server keeps the slot it already gave this socket
+// instead of opening a new one (and leaving the old one behind until it
+// times out). Like login(), it sends the login packet up to 3 times, 1s
+// apart. On success the command sequence starts again at 0.
+func (l *persistentConnection) relogin() error {
+	l.commandLock.Lock() // no command in flight while logging in
+	defer l.commandLock.Unlock()
+	for len(l.logins) > 0 {
+		<-l.logins // late answers to an earlier login
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := l.write(buildPacket(0, []byte(rconPassword))); err != nil {
+			return err
+		}
+		select {
+		case ok := <-l.logins:
+			if ok != 1 {
+				return errLoginRejected
+			}
+			l.writeLock.Lock()
+			l.seq = 0
+			l.writeLock.Unlock()
+			return nil
+		case <-time.After(time.Second):
+		case <-l.done:
+			return l.err
+		}
+	}
+	return errors.New("no reply to RCON login after 3 tries")
 }
 
 // isResponsive probes the session with an empty command and reports whether
@@ -375,6 +416,25 @@ func connectShared() (*persistentConnection, error) {
 	return s, nil
 }
 
+// reloginShared is called by the poller when the server has missed 3 checks
+// in a row (it may have restarted and forgotten us). It logs in again on the
+// same socket, so the server keeps our admin slot, then sends #unlock as a
+// new login does. If there is no live session, the next command opens one.
+func reloginShared() {
+	sharedConnection.Lock()
+	c := sharedConnection.connection
+	sharedConnection.Unlock()
+	if c == nil || c.isClosed() {
+		return
+	}
+	if err := c.relogin(); err != nil {
+		log.Printf("rcon: no reply from the server; logging in again failed (%v), will retry", err)
+		return
+	}
+	_, acked, uerr := c.runRaw("#unlock", 2*time.Second)
+	log.Printf("rcon: no reply from the server; logged in again on the same connection, sent #unlock (acked=%v err=%v)", acked, uerr)
+}
+
 // runShared runs a command on the shared session.
 //
 //   - allowRetry=false: one attempt. Used for state-changing commands (kick,
@@ -390,8 +450,9 @@ func connectShared() (*persistentConnection, error) {
 // simply didn't acknowledge returns acked=false with err=nil, so callers can
 // tell "server never got it" from "server didn't answer" (e.g. #shutdown).
 //
-// After a failed attempt the session is dropped (and logged) if it errored or
-// no longer answers a probe, so the next attempt (or caller) logs in fresh.
+// A missed reply never drops the session here: retries reuse it, and only
+// the poller decides the server has stopped answering (see reloginShared).
+// A socket that has died is replaced by connectShared on the next call.
 func runShared(command string, wait time.Duration, allowRetry bool, logAs string) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
@@ -413,15 +474,6 @@ func runShared(command string, wait time.Duration, allowRetry bool, logAs string
 			return out, true, nil
 		}
 		lastErr = err // nil when the command was merely unacknowledged
-		if err != nil || !s.isResponsive() {
-			sharedConnection.Lock()
-			if sharedConnection.connection == s { // don't drop a newer session
-				log.Printf("rcon: connection dropped (no reply to %q, err=%v)", command, err)
-				s.close()
-				sharedConnection.connection = nil
-			}
-			sharedConnection.Unlock()
-		}
 		if allowRetry {
 			time.Sleep(1 * time.Second)
 		}
