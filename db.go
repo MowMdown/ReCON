@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -685,6 +686,14 @@ func syncBanList() ([]Ban, error) {
 	return bans, nil
 }
 
+// rconPolled and rconFails let the status bar show what the poller saw:
+// whether it has checked the game server yet, and how many checks in a row
+// have failed (see rconStatus in web.go).
+var (
+	rconPolled atomic.Bool
+	rconFails  atomic.Int32
+)
+
 // startBackgroundSync tracks players (and periodically the ban list) in the
 // background so the DB stays current without any web page open.
 // It is the only caller of SyncPlayers.
@@ -707,8 +716,10 @@ func startBackgroundSync(interval time.Duration) {
 		for range t.C {
 			n++
 			out, acked, err := runShared("players", 3*time.Second, false, "")
+			rconPolled.Store(true)
 			if err != nil || !acked {
 				fails++
+				rconFails.Store(int32(fails))
 				// Server probably down: close open sessions once so
 				// playtime doesn't keep accruing while it's offline.
 				if fails == 3 {
@@ -720,6 +731,7 @@ func startBackgroundSync(interval time.Duration) {
 				continue
 			}
 			fails = 0
+			rconFails.Store(0)
 			players := parsePlayers(out)
 			if err := globalDatabase.SyncPlayers(players); err != nil {
 				log.Printf("poller: sync: %v", err)

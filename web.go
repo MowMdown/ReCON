@@ -33,6 +33,10 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
+	// The status bar on every page: {"rcon": "connected" | "retrying" | "unavailable"}.
+	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"ok": true, "rcon": rconStatus()})
+	})
 
 	// Raw RCON, for schedulers and scripts.
 	mux.HandleFunc("/rcon", handleRcon)            // GET ?cmd=... or POST (raw text or {"command": ...})
@@ -82,7 +86,7 @@ func runWebServer(addr string) error {
 // quietPaths are the pages' routine GET polls, left out of the request log.
 var quietPaths = map[string]bool{
 	"/health": true, "/players": true, "/bans": true, "/flows": true,
-	"/api/players": true, "/api/bans": true, "/api/flows": true,
+	"/api/players": true, "/api/bans": true, "/api/flows": true, "/api/status": true,
 }
 
 // logRequests logs each request (method, path+query, remote address,
@@ -110,6 +114,22 @@ func fail(w http.ResponseWriter, code int, msg string) {
 }
 
 // rconUnavailable is the 503 the pages read as "retrying...".
+// rconStatus is the game server connection as the 5-second poller last saw
+// it: connected, retrying (one or two failed checks, or none done yet), or
+// unavailable (3 or more failed checks in a row, the point where the poller
+// treats the server as down).
+func rconStatus() string {
+	switch f := rconFails.Load(); {
+	case !rconPolled.Load():
+		return "retrying"
+	case f == 0:
+		return "connected"
+	case f >= 3:
+		return "unavailable"
+	}
+	return "retrying"
+}
+
 func rconUnavailable(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": msg})
 }
