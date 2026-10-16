@@ -530,7 +530,7 @@ func (db *Database) DeleteBan(guid string) error {
 //
 // The schedule column also holds the flow's trigger: "manual", "on-join" or
 // a cron expression (see triggerOf in flows.go).
-func (db *Database) EnsureFlowsTable(seedName, seedScript, seedSchedule string) error {
+func (db *Database) EnsureFlowsTable(seed Flow) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS flows (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -542,13 +542,25 @@ func (db *Database) EnsureFlowsTable(seedName, seedScript, seedSchedule string) 
 		)`); err != nil {
 		return err
 	}
+	// Columns added by flows v2: the Cancel field, the Timer and its mode.
+	for _, col := range []string{"cancel", "timer", "timer_mode"} {
+		var has int
+		if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name = ?", col).Scan(&has); err != nil {
+			return err
+		}
+		if has == 0 {
+			if _, err := db.Exec("ALTER TABLE flows ADD COLUMN " + col + " TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+		}
+	}
 	var n int
 	if err := db.QueryRow("SELECT COUNT(*) FROM flows").Scan(&n); err != nil {
 		return err
 	}
 	if n == 0 {
-		_, err := db.Exec("INSERT INTO flows (name, script, schedule, position) VALUES (?, ?, ?, 1)",
-			seedName, seedScript, seedSchedule)
+		_, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, timer_mode, schedule, position) VALUES (?, ?, ?, ?, ?, ?, 1)",
+			seed.Name, seed.Script, seed.Cancel, seed.Timer, seed.TimerMode, seed.Schedule)
 		return err
 	}
 	return nil
@@ -557,7 +569,7 @@ func (db *Database) EnsureFlowsTable(seedName, seedScript, seedSchedule string) 
 // ListFlows returns every flow in display order, with Trigger filled in from
 // the schedule column.
 func (db *Database) ListFlows() ([]Flow, error) {
-	rows, err := db.Query("SELECT id, name, script, schedule, schedule_enabled FROM flows ORDER BY position, id")
+	rows, err := db.Query("SELECT id, name, script, cancel, timer, timer_mode, schedule, schedule_enabled FROM flows ORDER BY position, id")
 	if err != nil {
 		return nil, err
 	}
@@ -566,7 +578,7 @@ func (db *Database) ListFlows() ([]Flow, error) {
 	for rows.Next() {
 		var f Flow
 		var en int
-		if err := rows.Scan(&f.ID, &f.Name, &f.Script, &f.Schedule, &en); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Script, &f.Cancel, &f.Timer, &f.TimerMode, &f.Schedule, &en); err != nil {
 			return nil, err
 		}
 		f.ScheduleEnabled = en != 0
@@ -580,8 +592,8 @@ func (db *Database) ListFlows() ([]Flow, error) {
 func (db *Database) GetFlow(id int64) (Flow, error) {
 	var f Flow
 	var en int
-	err := db.QueryRow("SELECT id, name, script, schedule, schedule_enabled FROM flows WHERE id = ?", id).
-		Scan(&f.ID, &f.Name, &f.Script, &f.Schedule, &en)
+	err := db.QueryRow("SELECT id, name, script, cancel, timer, timer_mode, schedule, schedule_enabled FROM flows WHERE id = ?", id).
+		Scan(&f.ID, &f.Name, &f.Script, &f.Cancel, &f.Timer, &f.TimerMode, &f.Schedule, &en)
 	f.ScheduleEnabled = en != 0
 	fillTrigger(&f)
 	return f, err
@@ -596,15 +608,15 @@ func (db *Database) SaveFlow(f Flow) (int64, error) {
 		en = 1
 	}
 	if f.ID == 0 {
-		res, err := db.Exec("INSERT INTO flows (name, script, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
-			f.Name, f.Script, f.Schedule, en)
+		res, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, timer_mode, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
+			f.Name, f.Script, f.Cancel, f.Timer, f.TimerMode, f.Schedule, en)
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
-	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, schedule = ?, schedule_enabled = ? WHERE id = ?",
-		f.Name, f.Script, f.Schedule, en, f.ID)
+	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, timer_mode = ?, schedule = ?, schedule_enabled = ? WHERE id = ?",
+		f.Name, f.Script, f.Cancel, f.Timer, f.TimerMode, f.Schedule, en, f.ID)
 	if err != nil {
 		return 0, err
 	}

@@ -561,7 +561,8 @@ func withFlow(h func(http.ResponseWriter, *http.Request, Flow)) http.HandlerFunc
 	}
 }
 
-// handleFlowRun: optional body {"minutes": N} puts the 0 point N minutes away.
+// handleFlowRun: optional body {"minutes": N} replaces the flow's Timer for
+// this run (a countdown of N minutes, or an N minute delay).
 func handleFlowRun(w http.ResponseWriter, r *http.Request, f Flow) {
 	var body struct {
 		Minutes int `json:"minutes"`
@@ -654,9 +655,12 @@ func (s *scriptText) UnmarshalJSON(b []byte) error {
 }
 
 type flowFileEntry struct {
-	Name     string     `json:"name"`
-	Schedule string     `json:"schedule"` // "manual", "on-join" or a cron expression
-	Script   scriptText `json:"script"`
+	Name      string     `json:"name"`
+	Schedule  string     `json:"schedule"`            // "manual", "on-join" or a cron expression
+	Timer     string     `json:"timer,omitempty"`     // e.g. "60m"
+	TimerMode string     `json:"timerMode,omitempty"` // "before" or "after" (scheduled flows)
+	Script    scriptText `json:"script"`
+	Cancel    scriptText `json:"cancel,omitempty"`
 }
 
 type flowFile struct {
@@ -673,7 +677,8 @@ func handleFlowExport(w http.ResponseWriter, r *http.Request) {
 	}
 	out := flowFile{Flows: make([]flowFileEntry, 0, len(flows))}
 	for _, f := range flows {
-		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Schedule: f.Schedule, Script: scriptText(f.Script)})
+		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Schedule: f.Schedule, Timer: f.Timer,
+			TimerMode: f.TimerMode, Script: scriptText(f.Script), Cancel: scriptText(f.Cancel)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="flows.json"`)
@@ -719,7 +724,8 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 			suffix := fmt.Sprintf(" (%d)", n)
 			name = clipName(base, maxFlowNameLen-len(suffix)) + suffix
 		}
-		if _, err := validateAndSaveFlow(Flow{Name: name, Script: string(e.Script), Schedule: e.Schedule}); err != nil {
+		if _, err := validateAndSaveFlow(Flow{Name: name, Script: string(e.Script), Cancel: string(e.Cancel),
+			Timer: e.Timer, TimerMode: e.TimerMode, Schedule: e.Schedule}); err != nil {
 			skipped = append(skipped, base+": "+err.Error())
 			continue
 		}
@@ -731,16 +737,12 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 
 // handleFlowPreview returns the edit dialog's plain-English summary.
 func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Trigger  string `json:"trigger"`
-		Schedule string `json:"schedule"`
-		Script   string `json:"script"`
-	}
-	if err := decodeBody(w, r, &req); err != nil {
+	var f Flow // trigger, schedule, timer, timerMode, script, cancel
+	if err := decodeBody(w, r, &f); err != nil {
 		fail(w, http.StatusBadRequest, "bad JSON")
 		return
 	}
-	writeJSON(w, http.StatusOK, previewFlow(req.Trigger, req.Schedule, req.Script))
+	writeJSON(w, http.StatusOK, previewFlow(f))
 }
 
 // handleFlowReorder saves the order of the flows list: {"ids": [...]}.
