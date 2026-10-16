@@ -111,7 +111,7 @@ func runCommandLine(args []string) {
 	}
 	var ok bool
 	if args[0] == "kickall" {
-		rep, err := kickAllUsing(l, strings.Join(args[1:], " "), false, false)
+		rep, err := kickAll(l, strings.Join(args[1:], " "))
 		ok = printKickReport(rep, err)
 	} else {
 		out, acked, err := l.run(strings.Join(args, " "), 2*time.Second)
@@ -175,7 +175,7 @@ func runConsole() {
 		var err error
 		if line == "kickall" || strings.HasPrefix(line, "kickall ") {
 			var rep *kickReport
-			rep, err = kickAllUsing(l, strings.TrimPrefix(line, "kickall"), false, false)
+			rep, err = kickAll(l, strings.TrimPrefix(line, "kickall"))
 			printKickReport(rep, err)
 			acked = err == nil
 		} else {

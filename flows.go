@@ -394,7 +394,7 @@ func (x *runCtx) lookup(name string) (string, bool) {
 		}
 		return "", false
 	case "players":
-		out, acked, err := runShared("players", 3*time.Second, true)
+		out, acked, err := runShared("players", 3*time.Second, true, "")
 		if err != nil || !acked {
 			x.run.logf("couldn't read the player count (err=%v)", err)
 			x.run.markFailed()
@@ -505,13 +505,13 @@ func runFlowCommand(run *flowRun, cmd string) {
 	lower := strings.ToLower(cmd)
 
 	// kickall [reason] (or #kickall) is this program's own command, not a
-	// BattlEye one: it lists the players and kicks each (kickAllUsing).
+	// BattlEye one: it lists the players and kicks each (kickAll).
 	if bare := strings.TrimPrefix(lower, "#"); bare == "kickall" || strings.HasPrefix(bare, "kickall ") {
 		reason := strings.TrimSpace(strings.TrimPrefix(cmd, "#")[len("kickall"):])
 		if reason == "" {
 			reason = "Server restarting"
 		}
-		rep, err := kickAllUsing(sharedRunner{}, reason, false, false)
+		rep, err := kickAll(sharedRunner{logAs: run.name}, reason)
 		if err != nil {
 			run.logf("kickall failed: %v", err)
 			run.markFailed()
@@ -522,8 +522,8 @@ func runFlowCommand(run *flowRun, cmd string) {
 	}
 
 	retry := lower == "#lock" || lower == "#unlock"
-	_, acked, err := runShared(cmd, 2*time.Second, retry)
-	run.logf("sent %q (acked=%v err=%v)", cmd, acked, err)
+	_, acked, err := runShared(cmd, 2*time.Second, retry, run.name) // logs rcon[<flow name>]
+	run.addToRunLog(fmt.Sprintf("sent %q (acked=%v err=%v)", cmd, acked, err))
 	if err != nil || (!acked && lower != "#shutdown") {
 		run.markFailed()
 	}
@@ -1226,9 +1226,17 @@ const (
 	sourceJoin     = "player join trigger"
 )
 
+// logf writes a line to the container log as flow[name] and to the run log
+// shown on the Flows page.
 func (r *flowRun) logf(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
 	log.Printf("flow[%s] %s", r.name, msg)
+	r.addToRunLog(msg)
+}
+
+// addToRunLog adds a line to the Flows page's run log only. Used for sent
+// commands, which runShared already logs to the container as rcon[name].
+func (r *flowRun) addToRunLog(msg string) {
 	flowRuns.Lock()
 	r.log = append(r.log, time.Now().Format("15:04:05")+"  "+msg)
 	flowRuns.Unlock()

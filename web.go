@@ -36,7 +36,7 @@ func runWebServer(addr string) error {
 
 	// Raw RCON, for schedulers and scripts.
 	mux.HandleFunc("/rcon", handleRcon)            // GET ?cmd=... or POST (raw text or {"command": ...})
-	mux.HandleFunc("POST /kickall", handleKickAll) // {"reason", "lock", "shutdown"}, all optional
+	mux.HandleFunc("POST /kickall", handleKickAll) // optional {"reason": ...}
 
 	// Players.
 	mux.HandleFunc("GET /players", pageHandler(playersPage))
@@ -173,7 +173,7 @@ func handleRcon(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "no command")
 		return
 	}
-	out, acked, err := runShared(cmd, 2*time.Second, false)
+	out, acked, err := runShared(cmd, 2*time.Second, false, "web")
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
@@ -181,14 +181,12 @@ func handleRcon(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "command": cmd, "acked": acked, "output": out})
 }
 
-// handleKickAll serves POST /kickall. Optional body:
-// {"reason": "...", "lock": true, "shutdown": true}. reason defaults to
-// "Server restarting". The kickReport is returned under "result".
+// handleKickAll serves POST /kickall: kicks every player and nothing else.
+// Optional body {"reason": "..."}; reason defaults to "Server restarting".
+// The kickReport is returned under "result".
 func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Reason   string `json:"reason"`
-		Lock     bool   `json:"lock"`
-		Shutdown bool   `json:"shutdown"`
+		Reason string `json:"reason"`
 	}
 	if err := decodeBody(w, r, &body); err != nil {
 		fail(w, 400, "bad JSON")
@@ -197,7 +195,7 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	if body.Reason == "" {
 		body.Reason = "Server restarting"
 	}
-	rep, err := kickAllUsing(sharedRunner{}, body.Reason, body.Lock, body.Shutdown)
+	rep, err := kickAll(sharedRunner{logAs: "web"}, body.Reason)
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
@@ -212,7 +210,7 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 // livePlayers reads the connected players (retrying read). ok is false when
 // RCON can't be reached; the 503 has already been written in that case.
 func livePlayers(w http.ResponseWriter) ([]Player, bool) {
-	out, acked, err := runShared("players", 3*time.Second, true)
+	out, acked, err := runShared("players", 3*time.Second, true, "")
 	if err != nil || !acked {
 		rconUnavailable(w, "RCON unavailable")
 		return nil, false
@@ -285,7 +283,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "message is required")
 			return
 		}
-		_, acked, err := runShared(fmt.Sprintf("say %d %s", id, msg), 2*time.Second, false)
+		_, acked, err := runShared(fmt.Sprintf("say %d %s", id, msg), 2*time.Second, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -316,7 +314,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if action == "kick" {
-		_, acked, err := runShared(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false)
+		_, acked, err := runShared(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -341,7 +339,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 func banPlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) {
 	banListLock.Lock()
 	defer banListLock.Unlock()
-	_, guidAck, guidErr := runShared(fmt.Sprintf("addBan %s %d %s", p.GUID, req.Minutes, req.Reason), 1500*time.Millisecond, false)
+	_, guidAck, guidErr := runShared(fmt.Sprintf("addBan %s %d %s", p.GUID, req.Minutes, req.Reason), 1500*time.Millisecond, false, "web")
 	if guidErr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "guid_ban": false, "guid_error": guidErr.Error()})
 		return
@@ -352,7 +350,7 @@ func banPlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) 
 	}
 	kicked := false
 	if online {
-		_, kickAck, kickErr := runShared(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false)
+		_, kickAck, kickErr := runShared(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
 		kicked = kickErr == nil && kickAck
 		if !kicked {
 			log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
@@ -490,7 +488,7 @@ func handleUnban(w http.ResponseWriter, r *http.Request) {
 		if idx < 0 {
 			break // GUID no longer listed: done
 		}
-		_, acked, err := runShared(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false)
+		_, acked, err := runShared(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false, "web")
 		if err == nil && !acked {
 			err = errors.New("removeBan was not acknowledged")
 		}
@@ -504,7 +502,7 @@ func handleUnban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, saved, _ := runShared("writeBans", 1500*time.Millisecond, false) // persist bans.txt, best effort
+	_, saved, _ := runShared("writeBans", 1500*time.Millisecond, false, "web") // persist bans.txt, best effort
 
 	if err := globalDatabase.DeleteBan(guid); err != nil {
 		log.Printf("error deleting ban from DB: %v", err)
@@ -772,7 +770,7 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	switch name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(req.Command), "#")); name {
 	case "lock", "unlock":
-		_, acked, err := runShared("#"+name, 2*time.Second, true)
+		_, acked, err := runShared("#"+name, 2*time.Second, true, "web")
 		if err == nil && !acked {
 			err = errors.New("#" + name + " was not acknowledged")
 		}
@@ -783,14 +781,14 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "#" + name + " sent"})
 	case "shutdown":
 		// The server may die before it acknowledges, so only a transport error is a failure.
-		_, acked, err := runShared("#shutdown", 2*time.Second, false)
+		_, acked, err := runShared("#shutdown", 2*time.Second, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": acked, "message": "#shutdown sent"})
 	case "kickall":
-		rep, err := kickAllUsing(sharedRunner{}, "Server restarting", false, false)
+		rep, err := kickAll(sharedRunner{logAs: "web"}, "Server restarting")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return

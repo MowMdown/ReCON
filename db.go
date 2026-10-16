@@ -694,7 +694,7 @@ func startBackgroundSync(interval time.Duration) {
 		n := 0
 		for range t.C {
 			n++
-			out, acked, err := runShared("players", 3*time.Second, false)
+			out, acked, err := runShared("players", 3*time.Second, false, "")
 			if err != nil || !acked {
 				fails++
 				// Server probably down: close open sessions once so

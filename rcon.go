@@ -279,12 +279,13 @@ func (l *persistentConnection) isResponsive() bool {
 	return err == nil && acked
 }
 
-// run executes a command and logs it with its source and ack status. The
-// poller's routine `players`/`bans` reads and empty probes aren't logged.
-// It satisfies the commandRunner interface.
+// run executes a command and logs it with its source and ack status (empty
+// probes aren't logged). The CLI and console use it; the shared session logs
+// in runShared instead, only when asked to. It satisfies the commandRunner
+// interface.
 func (l *persistentConnection) run(command string, wait time.Duration) (string, bool, error) {
 	out, acked, err := l.runRaw(command, wait)
-	if command != "" && !(l.src == "web" && (command == "players" || command == "bans")) {
+	if command != "" {
 		log.Printf("rcon[%s] > %q (acked=%v err=%v)", l.src, command, acked, err)
 	}
 	return out, acked, err
@@ -353,8 +354,9 @@ func connectShared() (*persistentConnection, error) {
 	if c := sharedConnection.connection; c != nil && !c.isClosed() {
 		return c, nil
 	}
-	if sharedConnection.connection != nil {
-		sharedConnection.connection.close()
+	if c := sharedConnection.connection; c != nil {
+		log.Printf("rcon: connection dropped (socket closed: %v), logging in again", c.err)
+		c.close()
 		sharedConnection.connection = nil
 	}
 	s, err := dialPersistent("web", false)
@@ -371,14 +373,18 @@ func connectShared() (*persistentConnection, error) {
 //     ban, say, ...) so a slow-but-successful command is never repeated.
 //   - allowRetry=true: up to 3 attempts with 1s pauses, for read-only
 //     commands (players, bans) where repeating is harmless.
+//   - logAs: the label for the "rcon[<logAs>] > ..." log line written for
+//     each attempt: "web" for POST actions from the pages and API, the flow's
+//     name for flow steps, or "" for no line at all (page refreshes, the
+//     poller and other routine reads).
 //
 // err is only set for a connection/transport failure. A command the server
 // simply didn't acknowledge returns acked=false with err=nil, so callers can
 // tell "server never got it" from "server didn't answer" (e.g. #shutdown).
 //
-// After a failed attempt the session is dropped if it errored or no longer
-// answers a probe, so the next attempt (or caller) logs in fresh.
-func runShared(command string, wait time.Duration, allowRetry bool) (string, bool, error) {
+// After a failed attempt the session is dropped (and logged) if it errored or
+// no longer answers a probe, so the next attempt (or caller) logs in fresh.
+func runShared(command string, wait time.Duration, allowRetry bool, logAs string) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
 		maxAttempts = 3
@@ -391,7 +397,10 @@ func runShared(command string, wait time.Duration, allowRetry bool) (string, boo
 			time.Sleep(1 * time.Second)
 			continue
 		}
-		out, acked, err := s.run(command, wait)
+		out, acked, err := s.runRaw(command, wait)
+		if logAs != "" {
+			log.Printf("rcon[%s] > %q (acked=%v err=%v)", logAs, command, acked, err)
+		}
 		if err == nil && acked {
 			return out, true, nil
 		}
@@ -399,6 +408,7 @@ func runShared(command string, wait time.Duration, allowRetry bool) (string, boo
 		if err != nil || !s.isResponsive() {
 			sharedConnection.Lock()
 			if sharedConnection.connection == s { // don't drop a newer session
+				log.Printf("rcon: connection dropped (no reply to %q, err=%v)", command, err)
 				s.close()
 				sharedConnection.connection = nil
 			}
@@ -412,11 +422,12 @@ func runShared(command string, wait time.Duration, allowRetry bool) (string, boo
 }
 
 // sharedRunner adapts runShared to the commandRunner interface (single
-// attempt per command).
-type sharedRunner struct{}
+// attempt per command). logAs is passed through to runShared: "web" for the
+// kickall endpoint and button, the flow's name for a flow's #kickall.
+type sharedRunner struct{ logAs string }
 
-func (sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
-	return runShared(command, wait, false)
+func (r sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
+	return runShared(command, wait, false, r.logAs)
 }
 
 // ---------------------------------------------------------------------------
@@ -567,7 +578,7 @@ func parseBans(out string) (bans []Ban, ok bool) {
 // readBanList reads the live GUID ban list from BattlEye (retrying read).
 // An unrecognised reply is logged and returned as an error, not an empty list.
 func readBanList() ([]Ban, error) {
-	out, acked, err := runShared("bans", 4*time.Second, true)
+	out, acked, err := runShared("bans", 4*time.Second, true, "")
 	if err != nil {
 		return nil, err
 	}
@@ -591,36 +602,27 @@ func readBanList() ([]Ban, error) {
 
 // kickReport summarises what a kickall run did (returned as JSON by /kickall).
 type kickReport struct {
-	Order         []int  `json:"order"`                    // IDs in the order they were kicked
-	Unacked       []int  `json:"unacked"`                  // kick commands the server never acknowledged
-	Remaining     []int  `json:"remaining"`                // IDs still connected after the sweep
-	Raw           string `json:"raw,omitempty"`            // raw `players` output, only set when nothing could be parsed
-	ShutdownSent  bool   `json:"shutdown_sent"`            // whether #shutdown was attempted
-	ShutdownAcked bool   `json:"shutdown_acked"`           // whether the server acked #shutdown
-	ShutdownError string `json:"shutdown_error,omitempty"` // error text from #shutdown, if any
+	Order     []int  `json:"order"`         // IDs in the order they were kicked
+	Unacked   []int  `json:"unacked"`       // kick commands the server never acknowledged
+	Remaining []int  `json:"remaining"`     // IDs still connected after the sweep
+	Raw       string `json:"raw,omitempty"` // raw `players` output, only set when nothing could be parsed
 }
 
-// commandRunner is what kickAllUsing needs: a persistentConnection (CLI,
+// commandRunner is what kickAll needs: a persistentConnection (CLI,
 // console) or sharedRunner (server mode).
 type commandRunner interface {
 	run(command string, wait time.Duration) (string, bool, error)
 }
 
-// kickAllUsing kicks every connected player:
-//  1. optionally "#lock" so nobody rejoins mid-sweep
-//  2. "players", then "kick <id> <reason>" for each, highest ID first
-//  3. wait 500ms and re-read "players" to report who is still connected
-//  4. optionally "#shutdown"
+// kickAll kicks every connected player and nothing else (#lock,
+// #shutdown and the like are separate commands, sent before or after):
+//  1. "players", then "kick <id> <reason>" for each, highest ID first
+//  2. wait 500ms and re-read "players" to report who is still connected
 //
-// A transport error in steps 1-2 aborts with an error. Unacknowledged kicks,
-// a failed verification and #shutdown problems are reported in the report.
-func kickAllUsing(s commandRunner, reason string, lock, shutdown bool) (*kickReport, error) {
+// A transport error in step 1 aborts with an error. Unacknowledged kicks and
+// a failed verification are reported in the report.
+func kickAll(s commandRunner, reason string) (*kickReport, error) {
 	reason = cleanReason(reason)
-	if lock {
-		if _, _, err := s.run("#lock", 2*time.Second); err != nil {
-			return nil, err
-		}
-	}
 	out, _, err := s.run("players", 3*time.Second)
 	if err != nil {
 		return nil, err
@@ -641,14 +643,6 @@ func kickAllUsing(s commandRunner, reason string, lock, shutdown bool) (*kickRep
 		time.Sleep(500 * time.Millisecond) // let the server process the kicks
 		if out, _, err := s.run("players", 3*time.Second); err == nil {
 			rep.Remaining = playerIDs(out)
-		}
-	}
-	if shutdown {
-		rep.ShutdownSent = true
-		_, acked, err := s.run("#shutdown", 1500*time.Millisecond)
-		rep.ShutdownAcked = acked
-		if err != nil {
-			rep.ShutdownError = err.Error()
 		}
 	}
 	return rep, nil
