@@ -348,6 +348,12 @@ var sharedConnection = struct {
 // connectShared returns the shared session, dialing a new one if there is
 // none or the current one has died. The lock is held while dialing, so
 // concurrent callers wait for one login instead of each opening their own.
+//
+// Every new login sends #unlock. The shared session logs in when ReCON starts
+// and after the session drops, most often because the server restarted, so a
+// restart flow's #lock never outlives the restart. (A lock set some other way
+// is undone if the session reconnects while it's in place; that's accepted.)
+// The CLI and console dial their own sessions and don't unlock.
 func connectShared() (*persistentConnection, error) {
 	sharedConnection.Lock()
 	defer sharedConnection.Unlock()
@@ -363,6 +369,8 @@ func connectShared() (*persistentConnection, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, acked, uerr := s.runRaw("#unlock", 2*time.Second)
+	log.Printf("rcon: logged in, sent #unlock (acked=%v err=%v)", acked, uerr)
 	sharedConnection.connection = s
 	return s, nil
 }
