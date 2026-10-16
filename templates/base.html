@@ -18,7 +18,67 @@ th[draggable="true"] { cursor: grab; user-select: none; }
 th.dragging { opacity: 0.4; }
 th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
 th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+.statusbar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; font-size: 13px; color: #aaa; }
+/* Every page's title row: the title, plus any buttons on the right. Same
+   spacing on every page: no title margins, 16px below the row. */
+.top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.top h1 { margin: 0; }
+.top button { margin-right: 0; }
+.statusbar b { font-weight: 600; }
+.st.connected { color: #81c995; }
+.st.retrying { color: #fdd663; }
+.st.unavailable { color: #f28b82; }
 </style>{{end}}
+
+{{define "statusbar"}}<div class="statusbar">
+	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b></span>
+	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
+</div>
+<script>
+// Status bar shown on every page. RCON is the game server as ReCON's
+// 5-second player check last saw it (GET /api/status). WebGUI is whether this
+// page can reach ReCON: Retrying after a failed check, Unavailable after 3
+// in a row. While ReCON can't be reached, RCON's state can't be known, so it
+// shows the same as WebGUI.
+//
+// A page puts its count after "Connected" with setStatusCount('rcon' or
+// 'web', text), e.g. "Connected - 2 player(s) online". The count is only
+// shown while that line is Connected; pass '' to clear it.
+var setStatusCount;
+(function () {
+	var fails = 0;
+	var text = { connected: 'Connected', retrying: 'Retrying ...', unavailable: 'Unavailable' };
+	var state = {}, count = {};
+	function show(id, s) {
+		if (s) state[id] = s;
+		var el = document.getElementById(id);
+		if (!state[id]) return;
+		el.textContent = (text[state[id]] || state[id]) +
+			(state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
+		el.className = 'st ' + state[id];
+	}
+	setStatusCount = function (which, t) {
+		var id = which === 'rcon' ? 'rconStatus' : 'webStatus';
+		count[id] = t;
+		show(id);
+	};
+	async function check() {
+		try {
+			var d = await (await fetch('/api/status', { cache: 'no-store' })).json();
+			fails = 0;
+			show('webStatus', 'connected');
+			show('rconStatus', d.rcon);
+		} catch (e) {
+			fails++;
+			var state = fails >= 3 ? 'unavailable' : 'retrying';
+			show('webStatus', state);
+			show('rconStatus', state);
+		}
+	}
+	check();
+	setInterval(check, {{.RefreshInterval.Milliseconds}});
+})();
+</script>{{end}}
 
 {{define "reorder"}}<script>
 // Drag-and-drop column reordering for every table on the page that has a

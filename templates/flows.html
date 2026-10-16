@@ -7,8 +7,6 @@
 {{template "style" .}}
 <style>
 .box.wide { width: min(760px, 95vw); }
-.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.top h1 { margin: 0 0 8px; }
 .quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .quick button { margin-right: 0; }
 #quickMsg { color: #aaa; font-size: 13px; margin-right: 8px; }
@@ -55,6 +53,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 </head>
 <body>
 <nav><a href="/players">Players</a><a href="/bans">Server Bans</a><a class="active" href="/flows">Flows</a></nav>
+{{template "statusbar" .}}
 <div class="top">
 	<h1>Flows</h1>
 	<div class="quick">
@@ -65,7 +64,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<button onclick="quick('kickall')">#Kick All</button>
 	</div>
 </div>
-<div id="status">Connecting...</div>
 <p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></p>
 <table>
 	<colgroup>
@@ -439,14 +437,11 @@ async function refresh() {
 	try {
 		let r = await fetch('/api/flows');
 		let d = await r.json();
-		if (!d.ok) {
-			document.getElementById('status').textContent = (d.error || 'Server unavailable') + ' — retrying...';
-			return;
-		}
+		if (!d.ok) { setStatusCount('web', ''); return; } // the status bar shows why
 		flows = d.flows || [];
 		let runs = {};
 		(d.runs || []).forEach(function(x) { runs[x.flowId] = x; });
-		document.getElementById('status').textContent = 'Connected — ' + flows.length + ' flow(s)';
+		setStatusCount('web', flows.length + ' flow(s)');
 		document.getElementById('flows').innerHTML = flows.map(function(f) {
 			let run = runs[f.id];
 			let active = !!(run && run.active);
@@ -471,7 +466,7 @@ async function refresh() {
 				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
 		}).join('');
 	} catch(e) {
-		document.getElementById('status').textContent = 'Server unavailable — retrying...';
+		setStatusCount('web', ''); // the status bar shows that ReCON can't be reached
 	}
 }
 

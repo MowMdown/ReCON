@@ -7,18 +7,16 @@
 {{template "style" .}}
 <style>
 td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
-.top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-.top button { margin-right: 0; }
 select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.InputPadding}}; background: #111; color: #eee; border: 1px solid #555; }
 </style>
 </head>
 <body>
 <nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+{{template "statusbar" .}}
 <div class="top">
 	<h1>Server Bans</h1>
 	<button onclick="openBan()">Ban Player</button>
 </div>
-<div id="status">Connecting...</div>
 <table>
 	<colgroup>
 		<col style="width: {{.IDWidth}}">
@@ -69,11 +67,8 @@ async function refresh() {
 	try {
 		let r = await fetch('/api/bans');
 		let d = await r.json();
-		if (!d.ok) {
-			document.getElementById('status').textContent = (d.error || 'Server unavailable') + ' — retrying...';
-			return;
-		}
-		document.getElementById('status').textContent = 'Connected — ' + d.count + ' ban(s)';
+		if (!d.ok) { setStatusCount('rcon', ''); return; } // the status bar shows why
+		setStatusCount('rcon', d.count + ' ban(s)');
 		banned = {};
 		d.bans.forEach(function(b) { banned[b.guid] = true; });
 		document.getElementById('bans').innerHTML = d.bans.map(function(b) {
@@ -88,7 +83,7 @@ async function refresh() {
 			'</tr>';
 		}).join('');
 	} catch(e) {
-		document.getElementById('status').textContent = 'Server unavailable — retrying...';
+		setStatusCount('rcon', ''); // the status bar shows that ReCON can't be reached
 	}
 }
 

@@ -13,8 +13,8 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 </head>
 <body>
 <nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
-<h1>DayZ Players</h1>
-<div id="status">Connecting...</div>
+{{template "statusbar" .}}
+<div class="top"><h1>DayZ Players</h1></div>
 <table>
 	<colgroup>
 		<col style="width: {{.IDWidth}}">
@@ -76,11 +76,8 @@ async function refresh() {
 	try {
 		let r = await api('/api/players');
 		let d = await r.json();
-		if (!d.ok) {
-			document.getElementById('status').textContent = 'Server unavailable — retrying...';
-			return;
-		}
-		document.getElementById('status').textContent = 'Connected — ' + d.count + ' player(s)';
+		if (!d.ok) { setStatusCount('rcon', ''); return; } // the status bar shows why
+		setStatusCount('rcon', d.count + ' player(s) online');
 		document.getElementById('players').innerHTML = d.players.map(function(p) {
 			let n = esc(p.name);
 			return '<tr>' +
@@ -114,7 +111,7 @@ async function refresh() {
 			'</tr>';
 		}).join('');
 	} catch(e) {
-		document.getElementById('status').textContent = 'Server unavailable — retrying...';
+		setStatusCount('rcon', ''); // the status bar shows that ReCON can't be reached
 	}
 }
 
