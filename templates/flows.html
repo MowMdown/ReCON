@@ -32,11 +32,14 @@ select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.In
 .helpbox table { table-layout: auto; margin: 6px 0; }
 .helpbox th, .helpbox td { height: auto; font-size: 13px; color: #ccc; vertical-align: top; padding: 7px 9px; }
 .helpbox th { color: #eee; }
-textarea.script, #sched { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+textarea.script, #sched, #timer { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 textarea.script { white-space: pre; }
 .help { color: #aaa; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
 .help.bad { color: #f28b82; white-space: pre-line; }
 .run { margin-top: 24px; }
+.sub { color: #aaa; font-size: 12px; }
+.row { display: flex; gap: 12px; }
+.row > div { flex: 1; min-width: 0; }
 pre.log { background: #1a1a1a; padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; }
 td.actions { white-space: nowrap; }
 /* Flow names are capped at 48 characters, which fits the 340px column in
@@ -84,7 +87,10 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<h2 id="title"></h2>
 		<label>Name</label>
 		<input id="name" type="text" maxlength="48">
+		<label>Script</label>
 		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
+		<label>Cancel (commands sent when Stop is pressed, optional)</label>
+		<textarea id="cancel" class="script" rows="3" spellcheck="false" placeholder="say -1 Server restart cancelled."></textarea>
 		<label>Trigger</label>
 		<select id="trigger">
 			<option value="manual">Manual</option>
@@ -93,7 +99,20 @@ button:disabled { opacity: 0.4; cursor: default; }
 		</select>
 		<div id="schedWrap">
 			<label>Schedule (cron: minute hour day-of-month month day-of-week)</label>
-			<input id="sched" type="text" placeholder="* * * * *" spellcheck="false">
+			<input id="sched" type="text" placeholder="0 6 * * *" spellcheck="false">
+		</div>
+		<div class="row">
+			<div>
+				<label id="timerLabel">Timer (optional, e.g. 5s, 60m, 1h30m)</label>
+				<input id="timer" type="text" placeholder="none" spellcheck="false">
+			</div>
+			<div id="modeWrap">
+				<label>Timer runs</label>
+				<select id="timerMode">
+					<option value="before">Before schedule (countdown)</option>
+					<option value="after">After schedule (delay)</option>
+				</select>
+			</div>
 		</div>
 		<div id="schedHelp" class="help"></div>
 		<div class="buttons">
@@ -117,7 +136,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<h2>Flow help</h2>
 		<div class="tabs" id="helpTabs">
 			<button data-tab="overview">Overview</button>
-			<button data-tab="commands">Commands</button>
+			<button data-tab="script">Script</button>
+			<button data-tab="timer">Timer</button>
 			<button data-tab="conditional">Conditional</button>
 			<button data-tab="triggers">Triggers</button>
 			<button data-tab="schedule">Schedule (cron)</button>
@@ -126,7 +146,10 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 		<div class="helppane" data-pane="overview">
 			<h3>What a flow is</h3>
-			<p>A flow is a saved list of RCON steps. Every step runs at its own offset from the flow's <b>0 point</b>: before it, on it, or after it. A restart flow, for example, counts down with warnings before the 0 point, shuts the server down on it, and unlocks it afterwards.</p>
+			<p>A flow is a small script of RCON commands. It runs one step per second (a <b>tick</b>): every command takes one tick, so a list of commands goes out one second apart. A restart flow, for example, counts down with warnings, locks the server, kicks everyone and shuts it down.</p>
+<pre>say -1 Kicking everyone in 10 seconds.
+wait 10s
+#kickall Maintenance</pre>
 			<h3>How a flow starts</h3>
 			<p>Each flow has one <b>trigger</b>, picked in the edit dialog:</p>
 			<ul>
@@ -134,74 +157,127 @@ button:disabled { opacity: 0.4; cursor: default; }
 				<li><b>Schedule</b> - on a cron schedule, while the flow is <b>Enabled</b>.</li>
 				<li><b>On player join</b> - once for each player who joins, while the flow is <b>Enabled</b>.</li>
 			</ul>
-			<p>Any flow can also be started by hand with <b>Run</b>, unless it uses <code>$player</code> or <code>$name</code>.</p>
+			<p>A flow can also have a <b>Timer</b>: a delay before the script starts, or, for a scheduled flow, a countdown to the scheduled time (see <i>Timer</i>). Commands in the <b>Cancel</b> field are sent if you press Stop.</p>
 			<h3>Making your first flow</h3>
 			<ul>
-				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and write its steps (see <i>Commands</i>).</li>
-				<li>Pick a trigger. For Schedule, type a cron expression; the text under it explains it in plain English.</li>
+				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and write its script (see <i>Script</i>).</li>
+				<li>Pick a trigger. For Schedule, type a cron expression; the text under the fields explains it in plain English and shows when the run starts and ends.</li>
 				<li>Save. Schedule and player-join flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
 			</ul>
 		</div>
 
-		<div class="helppane" data-pane="commands">
-			<h3>Step format</h3>
-			<p>A step starts with <code>offset | command</code>. Any line below it without an offset belongs to the same step and runs at the same time, so one step can send several commands or make a decision (see <i>Conditional</i>). Lines starting with <code>//</code> are comments.</p>
-			<p>Blank lines are removed when you save. To keep a visual gap between parts of a script, put a <code>//</code> line there instead.</p>
-<pre>-60m | say -1 Server is going to restart in $minutes minutes!
--3m  | #lock
--1m  | #kickall Restarting now
-0m   | #shutdown
-+90  | #unlock
-cancel | say -1 Server restart cancelled.</pre>
-			<h3>Offsets</h3>
+		<div class="helppane" data-pane="script">
+			<h3>Lines</h3>
 			<ul>
-				<li><code>-60m</code> runs 60 minutes <b>before</b> the 0 point, <code>0m</code> runs <b>on</b> it, <code>+90</code> runs 90 seconds <b>after</b> it.</li>
-				<li>Units are <code>s</code>, <code>m</code> and <code>h</code>. No unit means seconds, so <code>-90</code> is 90 seconds before.</li>
-				<li>Any offset other than 0 needs a <code>+</code> or <code>-</code> sign. The largest offset is 7 days.</li>
+				<li>One command per line. The script runs from the top, one command per tick.</li>
+				<li>Lines starting with <code>//</code> are comments. Blank lines are removed when you save; use a <code>//</code> line to keep a visual gap.</li>
+				<li><code>$name = value</code> lines set a variable and take no time.</li>
+				<li>The run ends after the last line (or, in a countdown, when the Timer reaches 0).</li>
 			</ul>
-			<h3>Where the 0 point is</h3>
-			<ul>
-				<li><b>Schedule</b>: the cron time. A flow starting at <code>-60m</code> begins its countdown an hour earlier.</li>
-				<li><b>Run</b> (any trigger): placed so the earliest step fires the moment you press Run, and the rest follow at their offsets.</li>
-				<li><b>On player join</b>: the moment the player finished joining, so only <code>0s</code> and <code>+</code> offsets are allowed.</li>
-			</ul>
-			<h3>Variables and cancel steps</h3>
-			<ul>
-				<li><code>$minutes</code> and <code>$seconds</code> become how long before the 0 point that step runs (0 for steps on or after it).</li>
-				<li><code>$player</code> and <code>$name</code> only work in On player join flows (see <i>Triggers</i>).</li>
-				<li><code>$players</code> is how many players are online right now, and you can set your own variables. See <i>Conditional</i>.</li>
-				<li><code>cancel | command</code> lines run only if you press Stop before the 0 point arrives. Use them to undo a countdown, for example a "restart cancelled" message.</li>
-			</ul>
-			<h3>Commands you can use in steps</h3>
+			<h3>Commands you can use</h3>
 			<ul>
 				<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
 				<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
+				<li><code>say -1 text</code> messages everyone; <code>say &lt;id&gt; text</code> messages one player (<code>say $player text</code> in a join flow).</li>
 			</ul>
-			<h3>Messages</h3>
+			<h3>wait and stop</h3>
 			<ul>
-				<li><code>say -1 text</code> messages everyone.</li>
-				<li><code>say &lt;id&gt; text</code> messages one player; in join flows use <code>say $player text</code>.</li>
+				<li><code>wait 10s</code> pauses for that many ticks and sends nothing. Above, the <code>say</code> goes out on tick 1 and <code>#kickall</code> on tick 12.</li>
+				<li><code>stop</code> ends the run straight away. The Cancel commands are not sent.</li>
 			</ul>
+			<h3>Times</h3>
+			<ul>
+				<li>Times need a unit: <code>30s</code>, <code>5m</code>, <code>1h</code>, and combinations largest first, such as <code>1m30s</code> or <code>1h3m15s</code>.</li>
+				<li>A number without a unit is an error (<code>wait 5</code> - did you mean 5s or 5m?). Only <code>0</code> needs no unit.</li>
+			</ul>
+			<h3>Variables</h3>
+			<table>
+				<thead><tr><th>Variable</th><th>Value</th></tr></thead>
+				<tbody>
+					<tr><td><code>$players</code></td><td>How many players are online (from the 5-second player check).</td></tr>
+					<tr><td><code>$timer</code></td><td>Seconds left in a countdown (see <i>Timer</i>).</td></tr>
+					<tr><td><code>$player</code> <code>$name</code> <code>$ip</code> <code>$guid</code> <code>$ping</code></td><td>The player's number, name, IP, GUID and ping, in On player join flows and inside <code>for each player</code>.</td></tr>
+					<tr><td><code>$anything</code></td><td>Your own variable: <code>$msg = Restarting soon</code>. Each run starts with none set.</td></tr>
+				</tbody>
+			</table>
+			<h3>Time left in messages: @ words</h3>
+			<p>These are replaced with the time left in a countdown when the command is sent.</p>
+			<table>
+				<thead><tr><th>Word</th><th>Means</th><th>At 1h 1m 5s left</th></tr></thead>
+				<tbody>
+					<tr><td><code>@hours</code> <code>@minutes</code> <code>@seconds</code></td><td>Total time left in that unit</td><td>1, 61, 3665</td></tr>
+					<tr><td><code>@hour</code> <code>@minute</code> <code>@second</code></td><td>Clock parts (minute and second are 2 digits)</td><td>1, 01, 05</td></tr>
+				</tbody>
+			</table>
+<pre>$warn | say -1 Server restarts in @minutes minutes!
+5m    | say -1 Time remaining @hour:@minute:@second</pre>
 			<h3>Retries</h3>
 			<p><code>#lock</code> and <code>#unlock</code> are retried if the server doesn't answer, since repeating them is harmless. Other commands are sent once so a message is never shown twice. <code>#shutdown</code> often goes unanswered because the server stops.</p>
 		</div>
 
+		<div class="helppane" data-pane="timer">
+			<h3>The Timer field</h3>
+			<table>
+				<thead><tr><th>Timer</th><th>What happens</th></tr></thead>
+				<tbody>
+					<tr><td>Empty</td><td>The script starts as soon as the flow is triggered.</td></tr>
+					<tr><td>Delay</td><td>The script starts the Timer's length after the trigger: after Run is pressed, after the player joins, or (<b>After schedule</b>) after the cron time. For Manual and On player join flows the field is called <b>Delay</b>.</td></tr>
+					<tr><td>Countdown</td><td>Scheduled flows only, set to <b>Before schedule</b>: the run starts the Timer's length before the cron time, and <code>$timer</code> counts the seconds down to 0 at it. The run ends at 0. Manual and join flows can't count down: they have no scheduled time.</td></tr>
+				</tbody>
+			</table>
+			<h3>Timed lines (countdown only)</h3>
+			<p><code>offset | command</code> sends a command when that much time is left. It is shorthand for <code>if $timer == offset</code>.</p>
+<pre>// Timer 60m, Before schedule, schedule 0 6 * * *
+$warn = 60m 30m 15m 10m 5m 3m
+$warn | say -1 Server is going to restart in @minutes minutes!
+2m    | #lock
+1m    | if $players &gt; 0
+  say -1 Server is going to restart in 1 minute!
+  #kickall Server Restart
+end
+0     | #shutdown</pre>
+			<ul>
+				<li>Offsets are time left, with no sign: <code>2m</code> is 2 minutes before the scheduled time, <code>0</code> is the scheduled time.</li>
+				<li>A list works as an offset: <code>$warn | ...</code> runs at every time in it. Lists are kept greatest first.</li>
+				<li>A time can start a block: <code>1m | if ...</code>, or <code>2m | do</code> for several lines with no condition. The lines go out one per tick from that time, so above, the warning goes out at 1m and <code>#kickall</code> at 59s.</li>
+				<li>Lines without a time run from the start of the run, one per tick.</li>
+				<li>Saving is refused if a time is longer than the Timer (it would never run), or a block would still be sending after 0.</li>
+			</ul>
+			<h3>Changing $timer</h3>
+			<p><code>$timer = 3m</code> moves the countdown, from the next tick. Moving it down skips everything in between; moving it up repeats the countdown from there. Inside an <code>if</code>, add a check that turns false afterwards (such as <code>&amp;&amp; $timer &gt; 3m</code>), because ifs in a countdown are checked every tick.</p>
+<pre>// Restart in 3 minutes if nobody is on
+if $players == 0 &amp;&amp; $timer &gt; 3m
+  $timer = 3m
+end</pre>
+			<h3>Cancel</h3>
+			<p>The <b>Cancel</b> field holds commands sent one after another when you press Stop, for example <code>say -1 Server restart cancelled.</code> and <code>#unlock</code>. A run that finishes, or ends at <code>stop</code>, doesn't send them.</p>
+			<h3>After a restart</h3>
+			<p>When the bridge logs in to the server again (after a restart), it sends <code>#unlock</code>, so a restart flow can end at <code>#shutdown</code>.</p>
+		</div>
+
 		<div class="helppane" data-pane="conditional">
 			<h3>If / else / end</h3>
-			<p>A step can make a decision. Everything from <code>if</code> to <code>end</code> belongs to the step it starts in and runs at that step's time.</p>
-<pre>0s  | if $name == survivor
-kick $player Name cannot be Survivor
+<pre>if $players &gt; 0
+  say -1 Locking the server now.
+  #lock
 else
-say $player Welcome to my server $name
-end
-//
-+5s | say $player Admins are active! Please play respectfully</pre>
+  #lock
+end</pre>
 			<ul>
 				<li><code>else</code> and <code>end</code> go on lines of their own. <code>else</code> is optional.</li>
 				<li>An <code>if</code> can sit inside another one. There is no <code>else if</code>: put an <code>if</code> inside the <code>else</code>.</li>
-				<li>A step can also hold several plain commands, one per line; they run in order.</li>
-				<li>The run log shows each decision, e.g. <code>if $name == survivor -&gt; false</code>.</li>
+				<li>The lines inside go out one per tick, like any others.</li>
+				<li>In a countdown, an <code>if</code> outside any block is checked <b>every tick</b>. In other flows it is checked once, when the script reaches it.</li>
+				<li>The run log shows each decision, e.g. <code>if $players &gt; 0 -&gt; true</code>.</li>
 			</ul>
+			<h3>do and for each player</h3>
+			<ul>
+				<li><code>do</code> ... <code>end</code> groups lines, mainly under a time: <code>2m | do</code>.</li>
+				<li><code>for each player</code> ... <code>end</code> runs its lines once for every player online, with <code>$player</code>, <code>$name</code> and the others set to that player.</li>
+			</ul>
+<pre>for each player
+  say $player Hi $name, your ping is $ping
+end</pre>
 			<h3>Operators</h3>
 			<table>
 				<thead><tr><th>Operator</th><th>Meaning</th><th>Example</th></tr></thead>
@@ -210,81 +286,61 @@ end
 					<tr><td><code>==</code></td><td>equals</td><td><code>if $name == survivor</code></td></tr>
 					<tr><td><code>!=</code></td><td>does not equal</td><td><code>if $name != admin</code></td></tr>
 					<tr><td><code>&lt;</code> <code>&lt;=</code></td><td>less than / or equal</td><td><code>if $players &lt; 5</code></td></tr>
-					<tr><td><code>&gt;</code> <code>&gt;=</code></td><td>greater than / or equal</td><td><code>if $players &gt;= 10</code></td></tr>
-					<tr><td><code>&amp;&amp;</code></td><td>and: both must be true</td><td><code>if $players &gt; 0 &amp;&amp; $minutes &lt;= 5</code></td></tr>
+					<tr><td><code>&gt;</code> <code>&gt;=</code></td><td>greater than / or equal</td><td><code>if $timer &gt;= 10m</code></td></tr>
+					<tr><td><code>&amp;&amp;</code></td><td>and: both must be true</td><td><code>if $players &gt; 0 &amp;&amp; $timer &lt;= 5m</code></td></tr>
 					<tr><td><code>||</code></td><td>or: either can be true</td><td><code>if $name == survivor || $name == player</code></td></tr>
+					<tr><td>(none)</td><td>true if set to true</td><td><code>if $quick</code></td></tr>
 				</tbody>
 			</table>
 			<h3>How values compare</h3>
 			<ul>
 				<li>Text is compared in lower case, so <code>Survivor</code>, <code>SURVIVOR</code> and <code>survivor</code> are all equal.</li>
-				<li>When both sides are numbers they compare as numbers (<code>05 == 5</code> is true). <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code> only work on numbers; on text they count as false.</li>
+				<li>Numbers and times compare as numbers (<code>05 == 5</code>, <code>$timer == 5m</code>). <code>&lt;</code>, <code>&gt;</code> and the others only work on numbers; on text they count as false.</li>
+				<li><code>$timer == $warn</code> is true when <code>$timer</code> is any time in the list.</li>
 				<li><code>&amp;&amp;</code> is checked before <code>||</code>, so <code>a || b &amp;&amp; c</code> means a, or (b and c). There are no brackets.</li>
-				<li>Use <code>"quotes"</code> to compare against empty text or text with leading spaces: <code>if $msg == ""</code>.</li>
-			</ul>
-			<h3>Variables</h3>
-			<ul>
-				<li><code>$player</code>, <code>$name</code> - the joining player's number and name (On player join flows).</li>
-				<li><code>$minutes</code>, <code>$seconds</code> - how long before the 0 point the current step runs.</li>
-				<li><code>$players</code> - how many players are online right now, read from the server when it's used.</li>
-				<li><code>$anything = value</code> sets your own variable for the rest of the run (for one player, in a join flow). The value can use other variables. A condition can only use built-in variables and ones the script sets.</li>
+				<li>Use <code>"quotes"</code> to compare against empty text: <code>if $msg == ""</code>.</li>
 			</ul>
 			<h3>Mistakes are caught before saving</h3>
-			<p>The edit dialog shows script mistakes in red as you type, with the line number: an <code>if</code> with no <code>end</code>, an <code>else</code> without an <code>if</code>, a single <code>=</code> inside an <code>if</code>, a variable that's used but never set, or trying to set a built-in like <code>$players</code>.</p>
-			<h3>Example: skip the kick when nobody is on</h3>
-<pre>-5m | say -1 Server restart in $minutes minutes!
--1m | if $players &gt; 0
-#kickall Server Restart
-end
-0s  | #shutdown</pre>
+			<p>The edit dialog shows script mistakes in red as you type, with the line number: a block with no <code>end</code>, a number without a unit, a variable that's used but never set, a timed line outside a countdown, or setting a built-in like <code>$players</code>.</p>
 		</div>
 
 		<div class="helppane" data-pane="triggers">
 			<h3>The three triggers</h3>
 			<table>
-				<thead><tr><th>Trigger</th><th>Starts when</th><th>Needs Enable</th><th>Schedule field</th></tr></thead>
+				<thead><tr><th>Trigger</th><th>Starts when</th><th>Needs Enable</th><th>Timer</th></tr></thead>
 				<tbody>
-					<tr><td><b>Manual</b></td><td>You press Run, or something POSTs to <code>/api/flows/&lt;id&gt;/run</code></td><td>No (the Enable button is greyed out)</td><td>Ignored</td></tr>
-					<tr><td><b>Schedule</b></td><td>The cron expression fires</td><td>Yes</td><td>Required</td></tr>
-					<tr><td><b>On player join</b></td><td>A new player finishes loading in</td><td>Yes</td><td>Ignored</td></tr>
+					<tr><td><b>Manual</b></td><td>You press Run, or something POSTs to <code>/api/flows/&lt;id&gt;/run</code></td><td>No (the Enable button is greyed out)</td><td>Delay after Run</td></tr>
+					<tr><td><b>Schedule</b></td><td>The cron expression fires</td><td>Yes</td><td>Delay after, or countdown before, the cron time</td></tr>
+					<tr><td><b>On player join</b></td><td>A player joins</td><td>Yes</td><td>Delay after the join</td></tr>
 				</tbody>
 			</table>
 			<h3>Rules worth knowing</h3>
 			<ul>
 				<li>New schedule and player-join flows are saved <b>disabled</b>. Press Enable to switch them on.</li>
 				<li>Changing an existing flow's trigger saves it disabled too, so a restart flow can never start firing on every join by accident.</li>
-				<li>A blank or <code>* * * * *</code> schedule means "no schedule": pick the Manual trigger for that instead.</li>
-				<li>Run works with every trigger, so you can test a scheduled flow without waiting for its time. Flows that use <code>$player</code> or <code>$name</code> are the exception.</li>
+				<li>Run works with every trigger, so you can test a scheduled flow without waiting for its time: a countdown starts at the full Timer. Flows that use <code>$player</code>, <code>$name</code>, <code>$ip</code>, <code>$guid</code> or <code>$ping</code> outside <code>for each player</code> are the exception.</li>
 			</ul>
-			<h3>On player join: how joins are detected</h3>
-			<p>The app reads the player list every 5 seconds. While a player is still on the loading screen BattlEye shows <code>(Lobby)</code> after their name; they count as joined on the first check where that tag is gone, and every enabled On player join flow then runs once for them.</p>
-<pre>0s   | say $player Welcome to our server, $name!
-+60  | say $player Type /help for the rules.</pre>
-			<h3>Join variables</h3>
+			<h3>On player join</h3>
+<pre>// Timer 5s
+say $player Welcome to our server, $name!
+wait 3s
+say $player Type /help for the rules.</pre>
 			<ul>
-				<li><code>$player</code> becomes the joining player's number (what <code>say</code> and <code>kick</code> need).</li>
-				<li><code>$name</code> becomes their name.</li>
-			</ul>
-			<h3>Join rules</h3>
-			<ul>
-				<li>Offsets count from when the join was seen, so use <code>0s</code> or <code>+</code> offsets only.</li>
+				<li>The flow runs once for each player who joins, with <code>$player</code>, <code>$name</code>, <code>$ip</code>, <code>$guid</code> and <code>$ping</code> set to them.</li>
 				<li>Several players can be in progress at once; they share one log and one Stop button, which stops all of them.</li>
 				<li>Players already online when the app starts are not greeted. After the game server restarts, everyone who reconnects is.</li>
-				<li>Flows using <code>$player</code> or <code>$name</code> can't be started with Run or given another trigger.</li>
-				<li>Cancel steps never run for join flows: there is no countdown to undo.</li>
 			</ul>
 		</div>
 
 		<div class="helppane" data-pane="schedule">
 			<h3>Cron expressions</h3>
-			<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone (set <code>TZ</code> on the container). The text under the field explains what you typed in plain English, shows the next three runs, and when the next countdown starts.</p>
+			<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone (set <code>TZ</code> on the container). The text under the field explains what you typed in plain English and shows the next three runs.</p>
 			<ul>
 				<li><code>0 6 * * *</code> every day at 06:00</li>
 				<li><code>0 */6 * * *</code> every 6 hours (00:00, 06:00, 12:00, 18:00)</li>
 				<li><code>30 4 * * 1,4</code> Mondays and Thursdays at 04:30</li>
 				<li><code>0 5 * * 1-5</code> weekdays at 05:00</li>
 				<li><code>0 3 1 * *</code> the 1st of every month at 03:00</li>
-				<li><code>@daily</code>, <code>@hourly</code>, <code>@weekly</code>, <code>@monthly</code> shortcuts also work.</li>
 			</ul>
 			<h3>Field syntax</h3>
 			<ul>
@@ -294,8 +350,8 @@ end
 			</ul>
 			<h3>Countdowns and app restarts</h3>
 			<ul>
-				<li>The cron time is the 0 point. A flow that starts at <code>-60m</code> with <code>0 6 * * *</code> begins at 05:00.</li>
-				<li>If the app restarts during a scheduled countdown it rejoins it and skips steps whose time has passed. Manually started runs are not resumed.</li>
+				<li>With a Timer set to <b>Before schedule</b>, the cron time is when the countdown reaches 0. A 60m Timer with <code>0 6 * * *</code> starts the run at 05:00.</li>
+				<li>If the app restarts during a countdown it joins it again with the time left; timed lines that already passed are skipped. Manually started runs are not resumed.</li>
 			</ul>
 		</div>
 
@@ -333,8 +389,8 @@ function fmtRemaining(unix) {
 
 // statusText is the Status column:
 //   Idle               never run, or the last run finished normally
-//   Running - 45m45s   counting down to the 0m step
-//   Running            no countdown (past the 0m step, no negative offsets, or a join run)
+//   Running - 45m45s   counting down: to 0 in a countdown, or to the end of a delay
+//   Running            the script is running (no countdown, or the delay is over)
 //   Error              a command failed (no reply or RCON error)
 //   Stopped            the Stop button was pressed
 function statusText(run) {
@@ -368,9 +424,13 @@ function btn(label, onclick, disabled, title) {
 
 // triggerCell is what the Trigger column shows for a flow.
 function triggerCell(f) {
-	if (f.trigger === 'schedule') return '<span class="mono">' + esc(f.schedule) + '</span>';
-	if (f.trigger === 'join') return 'On player join';
-	return 'Manual';
+	let t = f.trigger === 'schedule' ? '<span class="mono">' + esc(f.schedule) + '</span>' :
+		f.trigger === 'join' ? 'On player join' : 'Manual';
+	if (f.timer) {
+		let how = f.trigger === 'schedule' && f.timerMode === 'before' ? ' before' : ' delay';
+		t += '<br><span class="sub">' + esc(f.timer) + how + '</span>';
+	}
+	return t;
 }
 
 async function refresh() {
@@ -524,10 +584,19 @@ document.addEventListener('keydown', function(e) {
 	if (e.key === 'Escape' && document.getElementById('helpModal').style.display === 'flex') closeHelp();
 });
 
-// The schedule field only matters for the Schedule trigger.
+// The schedule field only matters for the Schedule trigger, and the Timer
+// mode only for a scheduled flow with a Timer.
 function syncTrigger() {
 	let t = document.getElementById('trigger').value;
+	let hasTimer = document.getElementById('timer').value.trim() !== '';
 	document.getElementById('schedWrap').style.display = t === 'schedule' ? 'block' : 'none';
+	// Only a scheduled flow can count down to its time, so for Manual and
+	// On player join the Timer is a plain delay and Before/After is hidden.
+	document.getElementById('modeWrap').style.display = t === 'schedule' ? 'block' : 'none';
+	document.getElementById('modeWrap').style.visibility = hasTimer ? 'visible' : 'hidden';
+	document.getElementById('timerLabel').textContent = t === 'schedule' ?
+		'Timer (optional, e.g. 5s, 60m, 1h30m)' :
+		'Delay before the script starts (optional, e.g. 5s, 2m)';
 }
 
 function openModal(f, title) {
@@ -535,6 +604,9 @@ function openModal(f, title) {
 	document.getElementById('title').textContent = title;
 	document.getElementById('name').value = f.name;
 	document.getElementById('script').value = f.script;
+	document.getElementById('cancel').value = f.cancel || '';
+	document.getElementById('timer').value = f.timer || '';
+	document.getElementById('timerMode').value = f.timerMode || 'before';
 	document.getElementById('trigger').value = f.trigger || 'manual';
 	// For manual and join flows the stored schedule is just "manual"/"on-join".
 	document.getElementById('sched').value = f.trigger === 'schedule' ? (f.schedule || '') : '';
@@ -544,7 +616,7 @@ function openModal(f, title) {
 }
 
 function newFlow() {
-	openModal({ id: 0, name: '', script: '-5m | say -1 Restarting in $minutes minutes!\n0m | #shutdown\n', trigger: 'manual', schedule: '', scheduleEnabled: false }, 'New flow');
+	openModal({ id: 0, name: '', script: 'say -1 Hello everyone!\n', cancel: '', timer: '', timerMode: 'before', trigger: 'manual', schedule: '', scheduleEnabled: false }, 'New flow');
 }
 
 function editFlow(id) { openModal(find(id), 'Edit flow'); }
@@ -559,11 +631,7 @@ function queuePreview() {
 async function updatePreview() {
 	let help = document.getElementById('schedHelp');
 	try {
-		let d = await post('/api/flows/preview', {
-			trigger: document.getElementById('trigger').value,
-			schedule: document.getElementById('sched').value,
-			script: document.getElementById('script').value
-		});
+		let d = await post('/api/flows/preview', formFlow());
 		if (!d.ok) {
 			help.className = 'help bad';
 			help.textContent = d.error || 'Invalid schedule';
@@ -580,20 +648,31 @@ async function updatePreview() {
 	}
 }
 
-document.getElementById('sched').addEventListener('input', queuePreview);
-document.getElementById('script').addEventListener('input', queuePreview);
-document.getElementById('trigger').addEventListener('change', function() { syncTrigger(); updatePreview(); });
-
-document.getElementById('save').onclick = async () => {
+// formFlow is the edit dialog's fields, as the preview and save APIs take them.
+function formFlow() {
 	let trigger = document.getElementById('trigger').value;
-	let d = await post('/api/flows', {
+	return {
 		id: editing.id,
 		name: document.getElementById('name').value,
 		script: document.getElementById('script').value,
+		cancel: document.getElementById('cancel').value,
 		trigger: trigger,
 		schedule: trigger === 'schedule' ? document.getElementById('sched').value : '',
+		timer: document.getElementById('timer').value,
+		timerMode: document.getElementById('timerMode').value,
 		scheduleEnabled: !!editing.scheduleEnabled
-	});
+	};
+}
+
+['sched', 'script', 'cancel'].forEach(function(id) {
+	document.getElementById(id).addEventListener('input', queuePreview);
+});
+document.getElementById('timer').addEventListener('input', function() { syncTrigger(); queuePreview(); });
+document.getElementById('timerMode').addEventListener('change', updatePreview);
+document.getElementById('trigger').addEventListener('change', function() { syncTrigger(); updatePreview(); });
+
+document.getElementById('save').onclick = async () => {
+	let d = await post('/api/flows', formFlow());
 	if (!d.ok) { alert(d.error || 'Save failed'); return; }
 	closeModal();
 	refresh();
