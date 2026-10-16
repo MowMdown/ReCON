@@ -511,13 +511,15 @@ func runFlowCommand(run *flowRun, cmd string) {
 		if reason == "" {
 			reason = "Server restarting"
 		}
-		rep, err := kickAll(sharedRunner{logAs: run.name}, reason)
+		rep, err := kickAll(sharedRunner{}, reason)
 		if err != nil {
 			run.logf("kickall failed: %v", err)
 			run.markFailed()
 			return
 		}
-		run.logf("kickall %q: kicked %v, no ack for %v, still connected %v", reason, rep.Order, rep.Unacked, rep.Remaining)
+		msg := rep.summary(reason)
+		log.Printf("rcon[%s] > %s", run.name, msg)
+		run.addToRunLog(msg)
 		return
 	}
 

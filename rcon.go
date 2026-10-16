@@ -422,12 +422,12 @@ func runShared(command string, wait time.Duration, allowRetry bool, logAs string
 }
 
 // sharedRunner adapts runShared to the commandRunner interface (single
-// attempt per command). logAs is passed through to runShared: "web" for the
-// kickall endpoint and button, the flow's name for a flow's #kickall.
-type sharedRunner struct{ logAs string }
+// attempt per command) for kickAll. It doesn't log the individual `players`
+// reads and kicks; the caller logs one kickReport.summary line instead.
+type sharedRunner struct{}
 
-func (r sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
-	return runShared(command, wait, false, r.logAs)
+func (sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
+	return runShared(command, wait, false, "")
 }
 
 // ---------------------------------------------------------------------------
@@ -606,6 +606,13 @@ type kickReport struct {
 	Unacked   []int  `json:"unacked"`       // kick commands the server never acknowledged
 	Remaining []int  `json:"remaining"`     // IDs still connected after the sweep
 	Raw       string `json:"raw,omitempty"` // raw `players` output, only set when nothing could be parsed
+}
+
+// summary is the one log line for a kickall, e.g.
+//
+//	kickall "Server restarting": kicked [3 0], no ack for [], still connected []
+func (rep *kickReport) summary(reason string) string {
+	return fmt.Sprintf("kickall %q: kicked %v, no ack for %v, still connected %v", cleanReason(reason), rep.Order, rep.Unacked, rep.Remaining)
 }
 
 // commandRunner is what kickAll needs: a persistentConnection (CLI,

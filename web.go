@@ -195,11 +195,12 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	if body.Reason == "" {
 		body.Reason = "Server restarting"
 	}
-	rep, err := kickAll(sharedRunner{logAs: "web"}, body.Reason)
+	rep, err := kickAll(sharedRunner{}, body.Reason)
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
 	}
+	log.Printf("rcon[web] > %s", rep.summary(body.Reason))
 	writeJSON(w, 200, map[string]any{"ok": true, "result": rep})
 }
 
@@ -788,11 +789,12 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": acked, "message": "#shutdown sent"})
 	case "kickall":
-		rep, err := kickAll(sharedRunner{logAs: "web"}, "Server restarting")
+		rep, err := kickAll(sharedRunner{}, "Server restarting")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		log.Printf("rcon[web] > %s", rep.summary("Server restarting"))
 		msg := fmt.Sprintf("Kicked %d player(s)", len(rep.Order))
 		if len(rep.Remaining) > 0 {
 			msg += fmt.Sprintf(", %d still connected", len(rep.Remaining))
