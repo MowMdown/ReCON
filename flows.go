@@ -1249,9 +1249,6 @@ func runJob(run *flowRun, pf *parsedFlow, cfg runCfg, p *Player) (stopped bool) 
 	if p != nil {
 		run.logf("player %d (%s) joined", p.ID, p.Name)
 	}
-	if d := time.Until(cfg.first); d > time.Second && !cfg.countdown {
-		run.logf("waiting %s before the first line", fmtLeft(int(d.Round(time.Second)/time.Second)))
-	}
 	stoppedNow := func() bool {
 		if p != nil {
 			run.logf("stopped for player %d (%s)", p.ID, p.Name)
@@ -1265,15 +1262,10 @@ func runJob(run *flowRun, pf *parsedFlow, cfg runCfg, p *Player) (stopped bool) 
 		return stoppedNow()
 	}
 	x := newJob(run, pf, p, cfg.countdown, cfg.timer)
-	lagged := false
 	for k := 0; ; k++ {
 		at := cfg.first.Add(time.Duration(k) * time.Second)
 		if !sleepUntil(run.ctx, at) {
 			return stoppedNow()
-		}
-		if late := time.Since(at); late > 5*time.Second && !lagged {
-			run.logf("running %.0fs behind; catching up", late.Seconds())
-			lagged = true
 		}
 		if k > maxTimeSecs {
 			run.logf("still running after 24 hours; stopped")
