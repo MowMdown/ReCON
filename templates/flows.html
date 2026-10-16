@@ -37,6 +37,7 @@ textarea.script { white-space: pre; }
 .help { color: #aaa; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
 .help.bad { color: #f28b82; white-space: pre-line; }
 .run { margin-top: 24px; }
+#confirmText { white-space: pre-line; }
 .sub { color: #aaa; font-size: 12px; }
 .row { display: flex; gap: 12px; }
 .row > div { flex: 1; min-width: 0; }
@@ -126,7 +127,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<h2 id="confirmTitle"></h2>
 		<p id="confirmText"></p>
 		<div class="buttons">
-			<button onclick="closeConfirm()">Cancel</button>
+			<button id="confirmCancel" onclick="closeConfirm()">Cancel</button>
 			<button id="confirmOk">Confirm</button>
 		</div>
 	</div>
@@ -478,32 +479,31 @@ function find(id) { return flows.find(function(x) { return x.id === id; }); }
 
 async function toggleFlow(id) {
 	let f = find(id);
-	if (!f.scheduleEnabled && f.trigger === 'join' &&
-		!confirm('"' + f.name + '" will run every time a player joins. Enable it?')) return;
 	let d = await post('/api/flows/' + id + '/' + (f.scheduleEnabled ? 'disable' : 'enable'));
-	if (!d.ok) alert(d.error || 'Failed');
+	if (!d.ok) showMessage((f.scheduleEnabled ? 'Disable' : 'Enable') + ' failed', d.error || 'Failed');
 	refresh();
 }
 
 async function runFlow(id) {
 	let d = await post('/api/flows/' + id + '/run');
-	if (!d.ok) alert(d.error || 'Run failed');
+	if (!d.ok) showMessage('Run failed', d.error || 'Run failed');
 	refresh();
 }
 
 async function stopFlow(id) {
-	if (!confirm('Stop the running flow?')) return;
 	let d = await post('/api/flows/' + id + '/stop');
-	if (!d.ok) alert(d.error || 'Stop failed');
+	if (!d.ok) showMessage('Stop failed', d.error || 'Stop failed');
 	refresh();
 }
 
-async function deleteFlow(id) {
+// deleteFlow is the only flow action that asks first.
+function deleteFlow(id) {
 	let f = find(id);
-	if (!confirm('Delete flow "' + f.name + '"?')) return;
-	let d = await post('/api/flows/' + id + '/delete');
-	if (!d.ok) alert(d.error || 'Delete failed');
-	refresh();
+	showConfirm('Delete flow?', '"' + f.name + '" will be deleted. This can\'t be undone.', 'Delete', async function() {
+		let d = await post('/api/flows/' + id + '/delete');
+		if (!d.ok) showMessage('Delete failed', d.error || 'Delete failed');
+		refresh();
+	});
 }
 
 let quickTimer = null;
@@ -516,12 +516,31 @@ const quickConfirm = {
 function quick(cmd) {
 	let c = quickConfirm[cmd];
 	if (!c) { sendQuick(cmd); return; }
-	document.getElementById('confirmTitle').textContent = c.title;
-	document.getElementById('confirmText').textContent = c.text;
+	showConfirm(c.title, c.text, c.ok, function() { sendQuick(cmd); });
+}
+
+// showConfirm and showMessage use the page's own dialog instead of the
+// browser's confirm()/alert(), which browsers can block or warn about.
+function showConfirm(title, text, okLabel, onOk) {
+	document.getElementById('confirmTitle').textContent = title;
+	document.getElementById('confirmText').textContent = text;
+	document.getElementById('confirmCancel').style.display = '';
 	let ok = document.getElementById('confirmOk');
-	ok.textContent = c.ok;
-	ok.onclick = function() { closeConfirm(); sendQuick(cmd); };
+	ok.textContent = okLabel;
+	ok.onclick = function() { closeConfirm(); onOk(); };
 	document.getElementById('confirmModal').style.display = 'flex';
+	ok.focus();
+}
+
+function showMessage(title, text) {
+	document.getElementById('confirmTitle').textContent = title;
+	document.getElementById('confirmText').textContent = text;
+	document.getElementById('confirmCancel').style.display = 'none';
+	let ok = document.getElementById('confirmOk');
+	ok.textContent = 'OK';
+	ok.onclick = closeConfirm;
+	document.getElementById('confirmModal').style.display = 'flex';
+	ok.focus();
 }
 
 function closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; }
@@ -547,12 +566,12 @@ async function importFlows(input) {
 	input.value = '';
 	if (!file) return;
 	let data;
-	try { data = JSON.parse(await file.text()); } catch(e) { alert('That file is not valid JSON.'); return; }
+	try { data = JSON.parse(await file.text()); } catch(e) { showMessage('Import failed', 'That file is not valid JSON.'); return; }
 	let d = await post('/api/flows/import', data);
-	if (!d.ok) { alert(d.error || 'Import failed'); return; }
+	if (!d.ok) { showMessage('Import failed', d.error || 'Import failed'); return; }
 	let msg = 'Imported ' + d.added + ' flow(s) at the bottom of the list. They start disabled.';
 	if (d.skipped && d.skipped.length) msg += '\n\nSkipped:\n' + d.skipped.join('\n');
-	alert(msg);
+	showMessage('Import', msg);
 	refresh();
 }
 
@@ -581,7 +600,9 @@ function openHelp() {
 function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
 
 document.addEventListener('keydown', function(e) {
-	if (e.key === 'Escape' && document.getElementById('helpModal').style.display === 'flex') closeHelp();
+	if (e.key !== 'Escape') return;
+	if (document.getElementById('confirmModal').style.display === 'flex') closeConfirm();
+	else if (document.getElementById('helpModal').style.display === 'flex') closeHelp();
 });
 
 // The schedule field only matters for the Schedule trigger, and the Timer
@@ -673,7 +694,7 @@ document.getElementById('trigger').addEventListener('change', function() { syncT
 
 document.getElementById('save').onclick = async () => {
 	let d = await post('/api/flows', formFlow());
-	if (!d.ok) { alert(d.error || 'Save failed'); return; }
+	if (!d.ok) { showMessage('Save failed', d.error || 'Save failed'); return; }
 	closeModal();
 	refresh();
 };
@@ -738,7 +759,7 @@ flowsBody.addEventListener('drop', async function(e) {
 	if (!before) at++;
 	ids.splice(at, 0, moved);
 	let d = await post('/api/flows/reorder', { ids: ids });
-	if (!d.ok) alert(d.error || 'Reorder failed');
+	if (!d.ok) showMessage('Reorder failed', d.error || 'Reorder failed');
 	refresh();
 });
 
