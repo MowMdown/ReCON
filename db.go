@@ -973,15 +973,14 @@ func (db *Database) storedBans() (map[string]banState, error) {
 // Flows storage (the Flow type and all flow logic live in flows.go)
 // ---------------------------------------------------------------------------
 
-// EnsureFlowsTable creates the flows table and, if it is empty, seeds one
-// flow (left disabled). script and cancel are the seed's steps and When
-// stopped steps as JSON (flows.go stepsJSON).
+// EnsureFlowsTable creates the flows table if it doesn't exist yet. A new
+// database starts with no flows.
 //
 // Columns: script holds the steps as JSON, cancel the When stopped steps,
 // timer the delay before step 1, and schedule the trigger: "manual",
 // "on-join", "on-chat" or a cron expression (see triggerOf in flows.go).
 // timer_mode is left over from the old script format and no longer used.
-func (db *Database) EnsureFlowsTable(seed Flow, script, cancel string) error {
+func (db *Database) EnsureFlowsTable() error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS flows (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1003,15 +1002,6 @@ func (db *Database) EnsureFlowsTable(seed Flow, script, cancel string) error {
 				return err
 			}
 		}
-	}
-	var n int
-	if err := db.QueryRow("SELECT COUNT(*) FROM flows").Scan(&n); err != nil {
-		return err
-	}
-	if n == 0 {
-		_, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, schedule, position) VALUES (?, ?, ?, ?, ?, 1)",
-			seed.Name, script, cancel, seed.Delay, seed.Schedule)
-		return err
 	}
 	return nil
 }

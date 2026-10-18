@@ -1316,32 +1316,10 @@ func checkFlow(f Flow) error {
 	return checkSteps(f.Trigger, f.Steps, f.OnStop)
 }
 
-// defaultRestart is the flow seeded on first start (disabled).
-func defaultRestart() Flow {
-	msg := func(t string) Step { return Step{Type: "message", To: "all", Text: t} }
-	wait := func(t string) Step { return Step{Type: "wait", Time: t} }
-	return Flow{Name: "Server restart", Trigger: triggerSchedule, Schedule: "0 6 * * *",
-		Steps: []Step{
-			msg("Server restart in 60 minutes."), wait("30m"),
-			msg("Server restart in 30 minutes."), wait("15m"),
-			msg("Server restart in 15 minutes."), wait("10m"),
-			msg("Server restart in 5 minutes. Find a safe spot!"), wait("3m"),
-			{Type: "lock"},
-			msg("Server locked. Restart in 2 minutes."), wait("1m"),
-			{Type: "if", Branches: []Branch{{Subject: "players_online", Op: "gt", Value: "0",
-				Steps: []Step{{Type: "kickAll", Reason: "Server restart"}, wait("1m")}}}},
-			{Type: "shutdown"},
-		},
-		OnStop: []Step{msg("Server restart cancelled."), {Type: "unlock"}},
-	}
-}
-
-// initFlows creates the table, seeds an example restart flow on first run,
-// and logs any saved flow that can't run.
+// initFlows creates the flows table (empty on a new database) and logs any
+// saved flow that can't run.
 func initFlows() error {
-	seed := defaultRestart()
-	seed.Schedule = storedSchedule(seed)
-	if err := globalDatabase.EnsureFlowsTable(seed, stepsJSON(seed.Steps), stepsJSON(seed.OnStop)); err != nil {
+	if err := globalDatabase.EnsureFlowsTable(); err != nil {
 		return err
 	}
 	flows, err := globalDatabase.ListFlows()
