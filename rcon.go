@@ -27,6 +27,9 @@ import (
 //     (runShared). It opens a new socket only when the old one has died;
 //     when the server stops answering, the poller logs in again on the same
 //     socket (reloginShared), so BattlEye keeps the same admin slot.
+//   - server messages: the lines BattlEye pushes to a logged-in session on
+//     its own (chat, connects, GUIDs, kicks). The reader ACKs them, parses
+//     them into ServerEvents, logs them and publishes them on serverEvents.
 //   - parsing what the server sends back (`players`, `bans`)
 //   - kickall, built from those pieces
 //
@@ -48,8 +51,10 @@ import (
 //	0x01 command  client -> server: payload = seq byte + command text
 //	              server -> client: payload = seq byte + response text
 //	              Long responses are split: body = 0x00, <total parts>, <part index>, data
-//	0x02 message  server -> client: unsolicited server message, payload = seq byte.
+//	0x02 message  server -> client: unsolicited server message, payload = seq byte + text.
 //	              The client MUST acknowledge it by sending a 0x02 packet with that seq.
+//	              If the ACK is lost the server resends the same seq, so a
+//	              client can see a message more than once.
 //
 // An empty command (seq byte only) works as a keepalive; the server drops
 // clients that stay silent for roughly 45 seconds.
@@ -148,6 +153,10 @@ func joinParts(parts map[byte][]byte) string {
 // alive. It's a var (not const) so tests can shorten it.
 var keepaliveEvery = 30 * time.Second
 
+// seenWindow is how many recent server-message seq numbers a session
+// remembers to drop resends. Seq wraps at 256, so this must stay well below it.
+const seenWindow = 32
+
 // persistentConnection is a logged-in RCON session that is safe to use from
 // multiple goroutines. One goroutine (reader) owns the socket's reads.
 type persistentConnection struct {
@@ -162,6 +171,7 @@ type persistentConnection struct {
 	stop        chan struct{} // closed by close() to stop the keepalive goroutine
 	once        sync.Once     // makes close() idempotent
 	err         error         // the error that killed the reader (valid once done is closed)
+	seen        []byte        // recent server-message seqs; only reader() touches it
 }
 
 // dialPersistent connects, logs in, and starts the background reader (and
@@ -230,9 +240,10 @@ func (l *persistentConnection) isClosed() bool {
 	}
 }
 
-// reader reads the socket for the lifetime of the connection: it acks server
-// messages (type 2) and forwards command replies (type 1) to runRaw. On a read
-// error it records the error and closes `done`.
+// reader reads the socket for the lifetime of the connection: it acks and
+// handles server messages (type 2), forwards command replies (type 1) to
+// runRaw and login replies (type 0) to relogin. On a read error it records
+// the error and closes `done`.
 func (l *persistentConnection) reader() {
 	buf := make([]byte, 65535)
 	for {
@@ -248,12 +259,23 @@ func (l *persistentConnection) reader() {
 		}
 		switch t {
 		case 0:
+			if p[0] == 1 {
+				// A fresh login (e.g. after a server restart) can start the
+				// message numbering again at 0, so forget the seqs seen so far.
+				l.seen = l.seen[:0]
+			}
 			select { // a reply to relogin()
 			case l.logins <- p[0]:
 			default:
 			}
 		case 2:
+			// ACK first, every time, even for a resend: a resend means our
+			// last ACK was lost, and BattlEye drops clients that don't ACK.
 			l.write(buildPacket(2, p[:1]))
+			if l.seenBefore(p[0]) {
+				continue // a resend of a message already handled
+			}
+			handleServerMessage(l.src, string(p[1:]))
 		case 1:
 			// Non-blocking so a slow consumer can't stall the reader.
 			select {
@@ -262,6 +284,21 @@ func (l *persistentConnection) reader() {
 			}
 		}
 	}
+}
+
+// seenBefore reports whether a server-message seq was handled recently, and
+// remembers it if not. Only reader() calls it, so it needs no lock.
+func (l *persistentConnection) seenBefore(seq byte) bool {
+	for _, s := range l.seen {
+		if s == seq {
+			return true
+		}
+	}
+	if len(l.seen) == seenWindow {
+		l.seen = l.seen[1:]
+	}
+	l.seen = append(l.seen, seq)
+	return false
 }
 
 // keepalive sends an empty command on a timer so the server doesn't drop an
@@ -381,6 +418,7 @@ func (l *persistentConnection) runRaw(command string, wait time.Duration) (strin
 // sharedConnection holds the one long-lived session. The Mutex protects the
 // pointer; persistentConnection serialises the commands themselves.
 // Keepalive is off because the 5s poller already keeps the session busy.
+// Being permanently logged in is also what lets it receive server messages.
 var sharedConnection = struct {
 	sync.Mutex
 	connection *persistentConnection
@@ -488,6 +526,156 @@ type sharedRunner struct{}
 
 func (sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
 	return runShared(command, wait, false, "")
+}
+
+// ---------------------------------------------------------------------------
+// Server messages (packet type 0x02)
+// ---------------------------------------------------------------------------
+//
+// While a session is logged in, BattlEye pushes lines to it without being
+// asked: chat, players connecting and disconnecting, verified GUIDs, kicks,
+// other RCon admins logging in. reader() ACKs each one and drops resends,
+// then handleServerMessage turns it into a ServerEvent, logs it as
+//
+//	rcon[web] < (Global) SomeName: hello
+//
+// and publishes it on serverEvents. Anything can subscribe (an HTTP feed,
+// flows reacting to chat, ...). Publishing never blocks the reader: a
+// subscriber that falls behind misses events instead.
+//
+// Messages sent while the server isn't talking to us (a restart, before
+// reloginShared gets in again) are lost; BattlEye keeps no backlog.
+
+// Server event kinds.
+const (
+	eventConnect    = "connect"    // Player #3 Name (1.2.3.4:2304) connected
+	eventGUID       = "guid"       // Verified GUID (...) of player #3 Name / Player #3 Name - BE GUID: ...
+	eventDisconnect = "disconnect" // Player #3 Name disconnected
+	eventKick       = "kick"       // Player #3 Name (guid) has been kicked by BattlEye: ...
+	eventChat       = "chat"       // (Global) Name: text
+	eventAdmin      = "admin"      // RCon admin #0 (1.2.3.4:5678) logged in
+	eventOther      = "other"      // anything not recognised; Text still has the line
+)
+
+// ServerEvent is one parsed server message. Fields a kind doesn't have stay
+// empty; PlayerID is -1 when the line names no player number (chat, admin,
+// other).
+type ServerEvent struct {
+	Time     time.Time `json:"time"`
+	Kind     string    `json:"kind"`
+	Text     string    `json:"text"` // the line exactly as BattlEye sent it
+	PlayerID int       `json:"playerId"`
+	Name     string    `json:"name,omitempty"`
+	IP       string    `json:"ip,omitempty"`
+	Port     string    `json:"port,omitempty"`
+	GUID     string    `json:"guid,omitempty"`    // lower-cased
+	Channel  string    `json:"channel,omitempty"` // chat: Global, Side, Direct, Vehicle, ...
+	Message  string    `json:"message,omitempty"` // chat text, or the kick reason
+}
+
+var (
+	connectRe    = regexp.MustCompile(`^Player #(\d+) (.+) \(([^()]+):(\d+)\) connected$`)
+	verifiedRe   = regexp.MustCompile(`^Verified GUID \(([0-9a-fA-F]{32})\) of player #(\d+) (.+)$`)
+	beGUIDRe     = regexp.MustCompile(`^Player #(\d+) (.+) - (?:BE )?GUID: ([0-9a-fA-F]{32})$`)
+	disconnectRe = regexp.MustCompile(`^Player #(\d+) (.+) disconnected$`)
+	kickRe       = regexp.MustCompile(`^Player #(\d+) (.+) \(([0-9a-fA-F]{32}|-)\) has been kicked by BattlEye: (.*)$`)
+	adminRe      = regexp.MustCompile(`^RCon admin #(\d+) \(([^()]+):(\d+)\) logged in$`)
+	chatRe       = regexp.MustCompile(`^\(([A-Za-z]+)\) (.+?): (.*)$`)
+)
+
+// parseServerMessage turns one server message into a ServerEvent. Lines it
+// doesn't recognise come back as eventOther with Text set, so nothing is lost
+// if BattlEye's wording differs from what's expected here.
+func parseServerMessage(text string, at time.Time) ServerEvent {
+	ev := ServerEvent{Time: at, Kind: eventOther, Text: text, PlayerID: -1}
+	id := func(s string) int { n, _ := strconv.Atoi(s); return n }
+	// Kick before disconnect/connect: its name part can contain anything.
+	if m := kickRe.FindStringSubmatch(text); m != nil {
+		ev.Kind, ev.PlayerID, ev.Name, ev.Message = eventKick, id(m[1]), m[2], m[4]
+		if m[3] != "-" {
+			ev.GUID = strings.ToLower(m[3])
+		}
+	} else if m := connectRe.FindStringSubmatch(text); m != nil {
+		ev.Kind, ev.PlayerID, ev.Name, ev.IP, ev.Port = eventConnect, id(m[1]), m[2], m[3], m[4]
+	} else if m := verifiedRe.FindStringSubmatch(text); m != nil {
+		ev.Kind, ev.GUID, ev.PlayerID, ev.Name = eventGUID, strings.ToLower(m[1]), id(m[2]), m[3]
+	} else if m := beGUIDRe.FindStringSubmatch(text); m != nil {
+		ev.Kind, ev.PlayerID, ev.Name, ev.GUID = eventGUID, id(m[1]), m[2], strings.ToLower(m[3])
+	} else if m := disconnectRe.FindStringSubmatch(text); m != nil {
+		ev.Kind, ev.PlayerID, ev.Name = eventDisconnect, id(m[1]), m[2]
+	} else if m := adminRe.FindStringSubmatch(text); m != nil {
+		ev.Kind, ev.IP, ev.Port = eventAdmin, m[2], m[3]
+	} else if m := chatRe.FindStringSubmatch(text); m != nil {
+		ev.Kind, ev.Channel, ev.Name, ev.Message = eventChat, m[1], m[2], m[3]
+	}
+	return ev
+}
+
+// handleServerMessage is called by reader() once per new server message.
+func handleServerMessage(src, text string) {
+	text = strings.TrimRight(text, "\r\n ")
+	if text == "" {
+		return
+	}
+	log.Printf("rcon[%s] < %s", src, text)
+	serverEvents.publish(parseServerMessage(text, time.Now()))
+}
+
+// recentEventsKept is how many events serverEvents keeps for late joiners
+// (e.g. a page that opens and wants the last few chat lines).
+const recentEventsKept = 200
+
+// eventHub fans server events out to subscribers and keeps the most recent
+// ones. Safe for concurrent use.
+type eventHub struct {
+	mu     sync.Mutex
+	recent []ServerEvent
+	subs   map[chan ServerEvent]struct{}
+}
+
+// serverEvents receives every server message from every session in this
+// process (in server mode, only the shared session exists).
+var serverEvents = &eventHub{subs: map[chan ServerEvent]struct{}{}}
+
+// publish records an event and hands it to every subscriber that has room.
+func (h *eventHub) publish(ev ServerEvent) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.recent = append(h.recent, ev)
+	if len(h.recent) > recentEventsKept {
+		h.recent = append([]ServerEvent(nil), h.recent[len(h.recent)-recentEventsKept:]...)
+	}
+	for ch := range h.subs {
+		select {
+		case ch <- ev:
+		default: // subscriber is behind: it misses this one
+		}
+	}
+}
+
+// subscribe returns a channel of new events (buffered by `buffer`) and a
+// cancel func that unsubscribes and closes the channel. Call cancel when done.
+func (h *eventHub) subscribe(buffer int) (<-chan ServerEvent, func()) {
+	ch := make(chan ServerEvent, buffer)
+	h.mu.Lock()
+	h.subs[ch] = struct{}{}
+	h.mu.Unlock()
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			h.mu.Lock()
+			delete(h.subs, ch)
+			h.mu.Unlock()
+			close(ch)
+		})
+	}
+}
+
+// recentEvents returns a copy of the kept events, oldest first.
+func (h *eventHub) recentEvents() []ServerEvent {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ServerEvent(nil), h.recent...)
 }
 
 // ---------------------------------------------------------------------------
