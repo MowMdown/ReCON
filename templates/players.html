@@ -10,6 +10,62 @@ td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
 .offline-section { margin-top: 42px; }
 .top .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+td { white-space: nowrap; }
+
+/* Tables keep their column widths and scroll sideways on narrow screens. */
+.tablewrap { overflow-x: auto; }
+#onlineTable { min-width: 1040px; }
+#offlineTable { min-width: 1230px; }
+/* Online table: Ping takes the spare width, so the Actions column (just wide
+   enough for its four buttons) sits at the right edge of the page, with its
+   header and buttons on its left. */
+td.act button:last-child { margin-right: 0; }
+td.act-left button { margin-right: 0; }
+.ban-on { color: #f28b82; font-weight: 600; }
+.ban-off { color: #888; }
+
+/* The Kick/Ban dialog can open on top of the Details dialog. */
+#modal { z-index: 20; }
+
+/* Details dialog */
+.dlg.details { width: min(860px, 94vw); }
+.badge { font-size: 12px; border-radius: 3px; padding: 1px 6px; color: #ccc; background: #333; }
+.badge.online { color: #111; background: #81c995; }
+.badge.banned { color: #111; background: #f28b82; }
+.dtabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid #444; }
+.dtabs button { margin: 0 0 -1px; padding: 7px 14px; font-size: 13px; color: #aaa; background: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; }
+.dtabs button:hover { color: #eee; }
+.dtabs button.active { color: #eee; background: #222; border-color: #444; border-bottom: 1px solid #222; }
+.dpanes { height: min(500px, 62vh); overflow-y: auto; padding-right: 4px; }
+.dpane { display: none; }
+.dpane.active { display: block; }
+.dpane .hint { color: #aaa; font-size: 13px; margin: 12px 0 8px; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0 18px; }
+.tile { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 12px; }
+.tile .k { font-size: 12px; color: #aaa; margin-bottom: 4px; }
+.tile .v { font-size: 16px; }
+.callout { border-radius: 6px; padding: 12px; font-size: 14px; line-height: 1.6; margin-top: 12px; }
+.callout.bad { background: #2a1716; border: 1px solid #5c2b29; }
+.callout.bad b { color: #f28b82; }
+.callout.warn { background: #2a2614; border: 1px solid #5c5224; }
+.callout.warn b { color: #fdd663; }
+.dt { table-layout: auto; }
+.dt th, .dt td { height: auto; padding: 7px 9px; font-size: 13px; }
+.linkbtn { background: none; border: none; padding: 0; margin: 0 8px 0 0; color: #fdd663; cursor: pointer; font-size: 13px; text-decoration: underline; }
+.dim { color: #888; }
+/* Fixed size: a long note scrolls inside the box instead of growing it. */
+#noteInput { margin: 0; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.4; height: 28em; resize: none; overflow-y: auto; }
+#detChat { height: min(300px, 38vh); margin-bottom: 10px; }
+#detChatInput:disabled { opacity: 0.5; }
+.notebar { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.notebar .count { font-size: 12px; color: #888; }
+.notebar .count.near { color: #fdd663; }
+.notebar .saved { font-size: 13px; color: #81c995; }
+.notebar .unsaved { font-size: 13px; color: #fdd663; }
+.notebar button { margin: 0 0 0 auto; }
+.dfoot { display: flex; justify-content: flex-end; border-top: 1px solid #333; padding-top: 12px; }
+.dfoot button { margin: 0; }
+@media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* Console and Message dialogs: wider boxes on the shared .modal overlay. */
 .dlg { display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
@@ -26,7 +82,6 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 #chatLog { height: min(260px, 45vh); }
 .log .ln { display: flex; gap: 12px; white-space: pre-wrap; word-break: break-word; }
 .log .t { color: #888; flex: none; min-width: 64px; }
-.log .src { color: #777; }
 .log .empty { color: #888; }
 /* One colour per kind of line. */
 .k-connect { color: #81c995; }
@@ -57,13 +112,14 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 		Console
 	</button>
 </div>
-<table>
+<div class="tablewrap">
+<table id="onlineTable">
 	<colgroup>
 		<col style="width: {{.IDWidth}}">
 		<col style="width: {{.PlayerWidth}}">
 		<col style="width: {{.IPWidth}}">
 		<col style="width: {{.GUIDWidth}}">
-		<col style="width: {{.PingWidth}}">
+		<col>
 		<col style="width: {{.ActionsWidth}}">
 	</colgroup>
 	<thead>
@@ -71,22 +127,85 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 	</thead>
 	<tbody id="players"></tbody>
 </table>
+</div>
 
 <div class="offline-section">
 	<h2>Offline Players</h2>
-	<table>
+	<div class="tablewrap">
+	<table id="offlineTable">
 		<colgroup>
 			<col style="width: {{.PlayerWidth}}">
 			<col style="width: {{.IPWidth}}">
 			<col style="width: {{.GUIDWidth}}">
 			<col style="width: 130px">
-			<col style="width: 210px">
+			<col style="width: 200px">
+			<col style="width: 170px">
+			<col>
 		</colgroup>
 		<thead>
-			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th></tr>
+			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Ban Status</th><th>Actions</th></tr>
 		</thead>
 		<tbody id="offlinePlayers"></tbody>
 	</table>
+	</div>
+</div>
+
+<!-- Details dialog: everything ReCON has logged about one player -->
+<div id="detailsModal" class="modal">
+	<div class="box dlg details" role="dialog" aria-labelledby="detName">
+		<div class="dlg-head">
+			<h2 id="detName">Player</h2>
+			<span id="detBadge" class="badge"></span>
+			<span id="detGuid" class="sub"></span>
+			<button type="button" id="detBan" class="close"></button>
+		</div>
+		<div class="dtabs" id="detTabs">
+			<button type="button" data-tab="overview">Overview</button>
+			<button type="button" data-tab="sessions">Sessions</button>
+			<button type="button" data-tab="ips">IPs</button>
+			<button type="button" data-tab="chat">Chat</button>
+			<button type="button" data-tab="notes" id="detNotesTab">Notes</button>
+		</div>
+		<div class="dpanes">
+			<div class="dpane" data-pane="overview">
+				<div class="tiles" id="detTiles"></div>
+				<div id="detBanBox"></div>
+				<div id="detShared"></div>
+			</div>
+			<div class="dpane" data-pane="sessions">
+				<div class="hint" id="detSessHint"></div>
+				<table class="dt">
+					<thead><tr><th>Connected</th><th>Disconnected</th><th>Duration</th><th>IP</th></tr></thead>
+					<tbody id="detSessions"></tbody>
+				</table>
+			</div>
+			<div class="dpane" data-pane="ips">
+				<div class="hint">Every IP this player has connected from, and anyone else seen on the same IP.</div>
+				<table class="dt">
+					<thead><tr><th>IP</th><th>First used</th><th>Last used</th><th>Also used by</th></tr></thead>
+					<tbody id="detIPs"></tbody>
+				</table>
+			</div>
+			<div class="dpane" data-pane="chat">
+				<div class="hint" id="detChatHint"></div>
+				<div id="detChat" class="log" aria-live="polite"></div>
+				<form id="detChatForm" class="cmdrow" autocomplete="off">
+					<input id="detChatInput" type="text" aria-label="Private message">
+					<button type="submit">Send</button>
+				</form>
+			</div>
+			<div class="dpane" data-pane="notes">
+				<label for="noteInput" class="hint" style="display: block">Admin notes about this player. Only admins see these, never the player.</label>
+				<textarea id="noteInput" rows="20" maxlength="500" placeholder="e.g. Warned for KOS at the airfield on 10-12. Plays with Marrow."></textarea>
+				<div class="notebar">
+					<span id="noteCount" class="count">0 / 500</span>
+					<span id="noteStatus"></span>
+				</div>
+			</div>
+		</div>
+		<div id="detErr" class="dlg-err"></div>
+		<div class="dfoot"><button type="button" onclick="closeDetails()">Close</button></div>
+	</div>
 </div>
 
 <!-- Kick / Ban dialog -->
@@ -165,16 +284,19 @@ async function refresh() {
 				'<td class="mono">' + esc(p.ip) + '</td>' +
 				'<td class="mono">' + g + '</td>' +
 				'<td>' + p.ping + '</td>' +
-				'<td>' +
+				'<td class="act">' +
 					'<button data-id="' + p.id + '" data-guid="' + g + '" data-action="message" data-name="' + n + '" onclick="handleActionClick(this)">Message</button>' +
 					'<button data-id="' + p.id + '" data-action="kick" data-name="' + n + '" onclick="handleActionClick(this)">Kick</button>' +
 					'<button data-id="' + p.id + '" data-action="ban" data-name="' + n + '" onclick="handleActionClick(this)">Ban</button>' +
+					'<button data-guid="' + g + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button>' +
 				'</td>' +
 			'</tr>';
 		}).join('');
 
 		// Render offline players returned by the database.
+		let bans = d.bans || {};
 		document.getElementById('offlinePlayers').innerHTML = (d.offlinePlayers || []).map(function(p) {
+			let ban = bans[String(p.guid).toLowerCase()];
 			let seconds = Math.max(0, Number(p.totalPlaytimeSeconds) || 0);
 			let days = Math.floor(seconds / 86400);
 			let hours = Math.floor((seconds % 86400) / 3600);
@@ -187,6 +309,8 @@ async function refresh() {
 				'<td class="mono">' + esc(p.guid) + '</td>' +
 				'<td>' + playtime + '</td>' +
 				'<td>' + fmtLastSeen(p.lastSeenUnix) + '</td>' +
+				'<td class="' + (ban ? 'ban-on' : 'ban-off') + '">' + esc(banText(ban)) + '</td>' +
+				'<td class="act-left"><button data-guid="' + esc(p.guid) + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button></td>' +
 			'</tr>';
 		}).join('');
 	} catch(e) {
@@ -194,17 +318,14 @@ async function refresh() {
 	}
 }
 
-// fmtLastSeen formats Unix seconds as MM-DD-YYYY - HH:MM am|pm in the
+// fmtLastSeen formats Unix seconds as MM-DD-YYYY - HH:MM (24-hour) in the
 // viewer's local time zone. Returns a dash when there is no timestamp.
 function fmtLastSeen(unix) {
 	if (!unix || unix <= 0) return '—';
 	let d = new Date(unix * 1000);
 	let pad = function(n) { return String(n).padStart(2, '0'); };
-	let h = d.getHours();
-	let ampm = h >= 12 ? 'pm' : 'am';
-	h = h % 12 || 12;
 	return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + d.getFullYear() +
-		' - ' + pad(h) + ':' + pad(d.getMinutes()) + ' ' + ampm;
+		' - ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
 function handleActionClick(btn) {
@@ -218,9 +339,27 @@ function handleActionClick(btn) {
 	openModal(id, a, name);
 }
 
-function openModal(id, a, name) {
+// banText is the Ban Status column: "-", "Banned", or "Banned - 2d 4h left"
+// for a timed ban.
+function banText(b) {
+	if (!b || !b.banned) return '-';
+	if (b.perm || b.minutesLeft < 0) return 'Banned';
+	return 'Banned - ' + fmtMinutesLeft(b.minutesLeft) + ' left';
+}
+
+function fmtMinutesLeft(min) {
+	let d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+	if (d) return h ? d + 'd ' + h + 'h' : d + 'd';
+	if (h) return m ? h + 'h ' + m + 'm' : h + 'h';
+	return m ? m + 'm' : 'under 1m';
+}
+
+let banGuid = null; // set when the Ban dialog was opened from Details (bans by GUID)
+
+function openModal(id, a, name, guid) {
 	current = id;
 	action = a;
+	banGuid = guid || null;
 	document.getElementById('title').textContent = a[0].toUpperCase() + a.slice(1) + ' ' + name;
 	document.getElementById('durationWrap').style.display = a === 'ban' ? 'block' : 'none';
 	document.getElementById('textLabel').textContent = 'Reason';
@@ -237,22 +376,35 @@ document.getElementById('submit').onclick = async () => {
 		alert('Duration must be a whole number of minutes (0 = permanent).');
 		return;
 	}
-	let r = await api('/api/players/' + current + '/' + action, {
+	// From the Details dialog a ban goes by GUID, so it works whether the
+	// player is online (they are kicked too) or offline.
+	let url = action === 'ban' && banGuid ?
+		'/api/bans/' + encodeURIComponent(banGuid) + '/ban' :
+		'/api/players/' + current + '/' + action;
+	let r = await api(url, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body)
 	});
 	let d = await r.json();
 	if (!d.ok) {
-		alert(d.error || 'Action failed');
+		alert(d.error || d.guid_error || 'Action failed');
 		return;
 	}
 	closeModal();
-	if (action === 'ban' && d.kicked === false) {
+	if (action === 'ban' && d.online !== false && d.kicked === false) {
 		alert('Player was banned, but the kick was not confirmed.');
 	}
+	if (action === 'ban') await bansChanged();
 	refresh();
 };
+
+// bansChanged re-reads the ban list (which updates the ban status ReCON
+// shows) and redraws the Details dialog if it is open.
+async function bansChanged() {
+	try { await fetch('/api/bans', { cache: 'no-store' }); } catch (e) {}
+	if (det) loadDetails(det.guid);
+}
 
 // ---------------------------------------------------------------------------
 // Log lines shared by the Console and Message dialogs
@@ -270,25 +422,26 @@ function logTime(iso) {
 	return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
-// logLine builds one row: time, then the text in its kind's colour, then
-// (for commands a flow or page sent) who sent it. Text is set with
-// textContent, so nothing from the server is ever parsed as HTML.
-function logLine(time, kind, text, source) {
+// chatTime is MM-DD HH:MM (24-hour), for the Details dialog's Chat tab.
+function chatTime(iso) {
+	let d = new Date(iso);
+	if (isNaN(d)) return '';
+	return pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
+// logLine builds one row: time (formatted by fmt, logTime by default), then
+// the text in its kind's colour. Text is set with textContent, so nothing
+// from the server is ever parsed as HTML.
+function logLine(time, kind, text, fmt) {
 	let row = document.createElement('div');
 	row.className = 'ln';
 	let t = document.createElement('span');
 	t.className = 't';
-	t.textContent = logTime(time);
+	t.textContent = (fmt || logTime)(time);
 	let x = document.createElement('span');
 	x.className = 'k-' + (kind || 'other');
 	x.textContent = text;
 	row.append(t, x);
-	if (source) {
-		let s = document.createElement('span');
-		s.className = 'src';
-		s.textContent = '[' + source + ']';
-		row.append(s);
-	}
 	return row;
 }
 
@@ -325,8 +478,7 @@ async function pollConsole() {
 				let empty = log.querySelector('.empty');
 				if (empty) empty.remove();
 				for (let ev of d.events) {
-					let src = ev.kind === 'sent' && ev.source && ev.source !== 'console' ? ev.source : '';
-					log.appendChild(logLine(ev.time, ev.kind, ev.text, src));
+					log.appendChild(logLine(ev.time, ev.kind, ev.text));
 				}
 				while (log.childElementCount > 1000) log.firstElementChild.remove();
 			} else if (!log.childElementCount) {
@@ -421,7 +573,7 @@ async function loadChat() {
 			log.appendChild(emptyLine('No chat from ' + chat.name + ' yet.'));
 		}
 		for (let m of msgs) {
-			log.appendChild(logLine(m.time, m.direction === 'out' ? 'out' : 'in', m.line, ''));
+			log.appendChild(logLine(m.time, m.direction === 'out' ? 'out' : 'in', m.line));
 		}
 		if (stick) log.scrollTop = log.scrollHeight;
 	} catch (e) {
@@ -481,12 +633,350 @@ document.getElementById('chatForm').onsubmit = async (e) => {
 	}
 };
 
-// Escape closes whichever dialog is open.
+// ---------------------------------------------------------------------------
+// Details dialog
+// ---------------------------------------------------------------------------
+
+let det = null;          // the details being shown (GET /api/players/<guid>/details)
+let detTab = 'overview'; // reopened on the last tab used
+let noteSaved = '';      // the note as stored, to tell saved from unsaved
+
+function fmtStamp(unix) { return fmtLastSeen(unix); }
+
+// fmtDuration: 1h 48m, 46m, 2d 4h 17m.
+function fmtDuration(secs) {
+	secs = Math.max(0, Number(secs) || 0);
+	let d = Math.floor(secs / 86400), h = Math.floor((secs % 86400) / 3600), m = Math.floor((secs % 3600) / 60);
+	if (!d && !h && !m) return secs ? '<1m' : '0m';
+	let parts = [];
+	if (d) parts.push(d + 'd');
+	if (h) parts.push(h + 'h');
+	if (m) parts.push(m + 'm');
+	return parts.join(' ');
+}
+
+function fmtDay(unix) {
+	if (!unix) return '—';
+	let d = new Date(unix * 1000);
+	return pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + '-' + d.getFullYear();
+}
+
+function showDetTab(name) {
+	detTab = name;
+	document.querySelectorAll('#detTabs button').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === name));
+	document.querySelectorAll('#detailsModal .dpane').forEach(p => p.classList.toggle('active', p.getAttribute('data-pane') === name));
+	document.querySelector('#detailsModal .dpanes').scrollTop = 0;
+	if (name === 'chat') {
+		loadDetChat();
+		let ci = document.getElementById('detChatInput');
+		if (!ci.disabled) ci.focus();
+	}
+	if (name === 'notes') document.getElementById('noteInput').focus();
+}
+
+document.querySelectorAll('#detTabs button').forEach(b => b.addEventListener('click', () => showDetTab(b.getAttribute('data-tab'))));
+
+// noteChanged reports whether the note box differs from the stored note.
+function noteChanged() {
+	return !!det && document.getElementById('noteInput').value !== noteSaved;
+}
+
+async function openDetails(guid) {
+	// Opening another player (an IP link) saves this player's note first.
+	if (noteChanged() && !(await saveNote())) return;
+	det = null;
+	document.getElementById('detName').textContent = 'Loading...';
+	document.getElementById('detBadge').textContent = '';
+	document.getElementById('detBadge').className = 'badge';
+	document.getElementById('detGuid').textContent = guid;
+	document.getElementById('detBan').style.visibility = 'hidden';
+	document.getElementById('detErr').textContent = '';
+	['detTiles', 'detBanBox', 'detShared', 'detSessions', 'detIPs', 'detChat'].forEach(id => document.getElementById(id).textContent = '');
+	document.getElementById('noteInput').value = '';
+	document.getElementById('detChatInput').value = '';
+	noteSaved = '';
+	updateNoteBar('');
+	document.getElementById('detailsModal').style.display = 'flex';
+	showDetTab(detTab === 'chat' || detTab === 'notes' ? 'overview' : detTab);
+	loadDetails(guid);
+}
+
+// closeDetails saves a changed note, then closes. If the save fails the
+// dialog stays open with the error, so the text isn't lost.
+let closing = false;
+async function closeDetails() {
+	if (closing) return;
+	closing = true;
+	try {
+		if (noteChanged() && !(await saveNote())) {
+			showDetTab('notes');
+			return;
+		}
+		document.getElementById('detailsModal').style.display = 'none';
+		det = null;
+	} finally {
+		closing = false;
+	}
+}
+
+// Leaving or reloading the page with the dialog open still saves the note.
+window.addEventListener('pagehide', () => {
+	if (!noteChanged()) return;
+	let body = new Blob([JSON.stringify({ note: document.getElementById('noteInput').value })], { type: 'application/json' });
+	navigator.sendBeacon('/api/players/' + encodeURIComponent(det.guid) + '/note', body);
+});
+
+async function loadDetails(guid) {
+	let err = document.getElementById('detErr');
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(guid) + '/details', { cache: 'no-store' });
+		let d = await r.json();
+		if (!d.ok) { err.textContent = d.error || 'Could not load this player.'; return; }
+		let keepDraft = det && det.guid === guid && document.getElementById('noteInput').value !== noteSaved;
+		det = Object.assign(d.details, { guid: d.details.player.guid });
+		renderDetails(keepDraft);
+	} catch (e) {
+		err.textContent = 'ReCON could not be reached.';
+	}
+}
+
+function renderDetails(keepDraft) {
+	let p = det.player, ban = det.ban, s = det.sessions;
+	document.getElementById('detName').textContent = p.name;
+	let badge = document.getElementById('detBadge');
+	badge.className = 'badge' + (ban.banned ? ' banned' : p.online ? ' online' : '');
+	badge.textContent = ban.banned ? 'Banned' : p.online ? 'Online #' + p.id : 'Offline';
+	let banBtn = document.getElementById('detBan');
+	banBtn.textContent = ban.banned ? 'Unban' : 'Ban';
+	banBtn.style.visibility = 'visible';
+
+	// Overview
+	let tiles = [
+		['First seen', fmtStamp(p.firstSeen)],
+		['Last seen', p.online ? 'Online now' : fmtStamp(p.lastSeen)],
+		['Time on server', fmtDuration(p.playtimeSeconds)],
+		['Sessions', String(s.count + (p.online ? 1 : 0))],
+		['Average session', s.count ? fmtDuration(s.avgSeconds) : '—'],
+		['Last IP', p.lastIp || '—']
+	];
+	let tl = document.getElementById('detTiles');
+	tl.textContent = '';
+	tiles.forEach(function (t) {
+		let el = document.createElement('div');
+		el.className = 'tile';
+		let k = document.createElement('div'); k.className = 'k'; k.textContent = t[0];
+		let v = document.createElement('div'); v.className = 'v'; v.textContent = t[1];
+		el.append(k, v);
+		tl.append(el);
+	});
+	let bb = document.getElementById('detBanBox');
+	bb.textContent = '';
+	if (ban.banned) {
+		let box = document.createElement('div');
+		box.className = 'callout bad';
+		let b = document.createElement('b'); b.textContent = banText(ban);
+		box.append(b, document.createTextNode('. Reason: ' + (ban.reason || 'none recorded')));
+		bb.append(box);
+	}
+	let others = {};
+	det.ips.forEach(i => i.others.forEach(o => { others[o.guid] = o.name; }));
+	let sh = document.getElementById('detShared');
+	sh.textContent = '';
+	let ids = Object.keys(others);
+	if (ids.length) {
+		let box = document.createElement('div');
+		box.className = 'callout warn';
+		let b = document.createElement('b');
+		b.textContent = 'Shares an IP with ' + ids.length + ' other player' + (ids.length > 1 ? 's' : '') + ': ';
+		box.append(b);
+		ids.forEach(g => box.append(playerLink(g, others[g])));
+		box.append(document.createTextNode('See the IPs tab.'));
+		sh.append(box);
+	}
+
+	// Sessions
+	let total = s.count + (p.online ? 1 : 0);
+	document.getElementById('detSessHint').textContent = total ?
+		total + ' session' + (total > 1 ? 's' : '') + ', ' + fmtDuration(p.playtimeSeconds) + ' in total.' +
+		(s.recent.length < total ? ' Showing the newest ' + s.recent.length + '.' : '') :
+		'No sessions recorded yet.';
+	let tb = document.getElementById('detSessions');
+	tb.textContent = '';
+	s.recent.forEach(function (x) {
+		let tr = document.createElement('tr');
+		[fmtStamp(x.connected), x.current ? 'Online now' : fmtStamp(x.disconnected), fmtDuration(x.seconds), x.ip].forEach(function (v, i) {
+			let td = document.createElement('td');
+			td.textContent = v;
+			if (i === 3) td.className = 'mono';
+			if (x.current && i === 1) td.style.color = '#81c995';
+			tr.append(td);
+		});
+		tb.append(tr);
+	});
+
+	// IPs
+	let ib = document.getElementById('detIPs');
+	ib.textContent = '';
+	det.ips.forEach(function (i) {
+		let tr = document.createElement('tr');
+		[i.ip, fmtDay(i.firstUsed), fmtDay(i.lastUsed)].forEach(function (v, n) {
+			let td = document.createElement('td');
+			td.textContent = v;
+			if (n === 0) td.className = 'mono';
+			tr.append(td);
+		});
+		let td = document.createElement('td');
+		if (i.others.length) i.others.forEach(o => td.append(playerLink(o.guid, o.name)));
+		else { td.className = 'dim'; td.textContent = 'No one else'; }
+		tr.append(td);
+		ib.append(tr);
+	});
+	if (!det.ips.length) {
+		let tr = document.createElement('tr');
+		let td = document.createElement('td');
+		td.colSpan = 4; td.className = 'dim'; td.textContent = 'No IPs recorded yet.';
+		tr.append(td);
+		ib.append(tr);
+	}
+
+	// Chat
+	document.getElementById('detChatHint').textContent = p.online ?
+		'Their chat and the private messages ReCON sent them. What you send here goes only to ' + p.name + '.' :
+		'Their chat and the private messages ReCON sent them. ' + p.name + ' is offline, so messages can’t be sent.';
+	let ci = document.getElementById('detChatInput');
+	ci.disabled = !p.online;
+	ci.placeholder = p.online ? 'Private message to ' + p.name : p.name + ' is offline';
+	ci.nextElementSibling.disabled = !p.online;
+	if (detTab === 'chat') loadDetChat();
+
+	// Notes
+	noteSaved = det.note.text || '';
+	if (!keepDraft) document.getElementById('noteInput').value = noteSaved;
+	updateNoteBar('');
+}
+
+// playerLink is another player's name as a link that opens their details.
+function playerLink(guid, name) {
+	let a = document.createElement('button');
+	a.type = 'button';
+	a.className = 'linkbtn';
+	a.textContent = name;
+	a.title = 'Open ' + name + '’s details';
+	a.onclick = () => openDetails(guid);
+	return a;
+}
+
+async function loadDetChat() {
+	if (!det) return;
+	let guid = det.guid;
+	let log = document.getElementById('detChat');
+	try {
+		let d = await (await fetch('/api/players/' + encodeURIComponent(guid) + '/chat', { cache: 'no-store' })).json();
+		if (!det || det.guid !== guid || !d.ok) return;
+		log.textContent = '';
+		let msgs = d.messages || [];
+		if (!msgs.length) log.append(emptyLine('No chat from ' + det.player.name + ' yet.'));
+		msgs.forEach(m => log.append(logLine(m.time, m.direction === 'out' ? 'out' : 'in', m.line, chatTime)));
+		log.scrollTop = log.scrollHeight;
+	} catch (e) {}
+}
+
+// The Chat tab's message line: sends `say <their number> <message>` through
+// POST /api/players/<guid>/chat, which looks their number up first.
+document.getElementById('detChatForm').onsubmit = async (e) => {
+	e.preventDefault();
+	if (!det || !det.player.online) return;
+	let input = document.getElementById('detChatInput');
+	let err = document.getElementById('detErr');
+	let msg = input.value.trim();
+	if (!msg) return;
+	err.textContent = '';
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(det.guid) + '/chat', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ message: msg })
+		});
+		let d = await r.json();
+		if (!d.ok) { err.textContent = d.error || 'Message not sent'; return; }
+		input.value = '';
+		loadDetChat();
+	} catch (e2) {
+		err.textContent = 'ReCON could not be reached; the message was not sent.';
+	}
+};
+
+function updateNoteBar(state) {
+	let v = document.getElementById('noteInput').value;
+	let count = document.getElementById('noteCount');
+	count.textContent = v.length + ' / 500';
+	count.className = 'count' + (v.length >= 450 ? ' near' : '');
+	let st = document.getElementById('noteStatus');
+	if (state === 'saving') { st.className = 'saved'; st.textContent = 'Saving...'; }
+	else if (v !== noteSaved) { st.className = 'unsaved'; st.textContent = 'Saves when you close'; }
+	else { st.className = ''; st.textContent = ''; }
+	document.getElementById('detNotesTab').textContent = noteSaved.trim() ? 'Notes •' : 'Notes';
+}
+
+document.getElementById('noteInput').addEventListener('input', () => updateNoteBar(''));
+
+// saveNote stores the note box for the open player. Returns false (with the
+// error shown) if it couldn't be saved.
+async function saveNote() {
+	if (!det) return true;
+	let text = document.getElementById('noteInput').value;
+	let err = document.getElementById('detErr');
+	err.textContent = '';
+	updateNoteBar('saving');
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(det.guid) + '/note', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ note: text })
+		});
+		let d = await r.json();
+		if (!d.ok) { err.textContent = 'Note not saved: ' + (d.error || 'unknown error'); updateNoteBar(''); return false; }
+		noteSaved = d.note;
+		document.getElementById('noteInput').value = d.note;
+		det.note.text = d.note;
+		updateNoteBar('');
+		return true;
+	} catch (e) {
+		err.textContent = 'ReCON could not be reached; the note was not saved.';
+		updateNoteBar('');
+		return false;
+	}
+}
+
+document.getElementById('detBan').onclick = async function () {
+	if (!det) return;
+	let p = det.player;
+	if (!det.ban.banned) {
+		openModal(p.online ? p.id : -1, 'ban', p.name, det.guid);
+		return;
+	}
+	if (!confirm('Unban ' + p.name + '?')) return;
+	let btn = this;
+	btn.disabled = true;
+	try {
+		let d = await (await fetch('/api/bans/' + encodeURIComponent(det.guid) + '/unban', { method: 'POST' })).json();
+		if (!d.ok) alert(d.error || 'Unban failed');
+	} catch (e) {
+		alert('ReCON could not be reached; the player was not unbanned.');
+	} finally {
+		btn.disabled = false;
+	}
+	await bansChanged();
+	refresh();
+};
+
+// Escape closes whichever dialog is on top.
 document.addEventListener('keydown', (e) => {
 	if (e.key !== 'Escape') return;
-	if (document.getElementById('chatModal').style.display === 'flex') closeChat();
+	if (document.getElementById('modal').style.display === 'flex') closeModal();
+	else if (document.getElementById('chatModal').style.display === 'flex') closeChat();
 	else if (document.getElementById('consoleModal').style.display === 'flex') closeConsole();
-	else if (document.getElementById('modal').style.display === 'flex') closeModal();
+	else if (document.getElementById('detailsModal').style.display === 'flex') closeDetails();
 });
 
 refresh();
