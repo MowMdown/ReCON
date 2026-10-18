@@ -6,11 +6,34 @@
 <title>DayZ Flows</title>
 {{template "style" .}}
 <style>
-.box.wide { width: min(760px, 95vw); }
+:root {
+	--panel: #1a1a1a; --box: #222; --line: #333; --line-strong: #555; --fg: #eee; --muted: #aaa; --faint: #777;
+	--accent: #8ab4f8; --ok: #81c995; --warn: #fdd663; --err: #f28b82;
+	--c-msg: #8ab4f8; --c-time: #fdd663; --c-server: #f28b82; --c-player: #fcad70; --c-logic: #c58af9; --c-adv: #9aa0a6;
+	--mono: ui-monospace, Consolas, monospace;
+}
+[hidden] { display: none !important; }
 .quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .quick button { margin-right: 0; }
 #quickMsg { color: #aaa; font-size: 13px; margin-right: 8px; }
-select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.InputPadding}}; background: #111; color: #eee; border: 1px solid #555; }
+.run { margin-top: 24px; }
+#confirmText { white-space: pre-line; }
+.sub { color: #aaa; font-size: 12px; }
+.bad-flow { color: #f28b82; }
+pre.log { background: #1a1a1a; padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; max-height: 320px; overflow-y: auto; }
+td.actions { white-space: nowrap; }
+/* Flow names are capped at 48 characters, which fits the 340px column in
+   normal mixed case; anything wider (all caps) ends in an ellipsis. */
+#flows td:first-child { white-space: nowrap; text-overflow: ellipsis; }
+button:disabled { opacity: 0.4; cursor: default; }
+#flows tr[draggable="true"] { cursor: grab; }
+#flows tr.dragging { opacity: 0.4; }
+#flows tr.drop-above td { box-shadow: inset 0 3px 0 #8ab4f8; }
+#flows tr.drop-below td { box-shadow: inset 0 -3px 0 #8ab4f8; }
+.modal { z-index: 10; padding: 12px; box-sizing: border-box; }
+#confirmModal { z-index: 30; }
+
+/* Help dialog */
 .box.helpbox { width: min(860px, 95vw); height: min(680px, 88vh); display: flex; flex-direction: column; box-sizing: border-box; }
 .helpbox h2 { margin: 0 0 12px; }
 .tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid #444; flex: none; }
@@ -24,31 +47,108 @@ select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.In
 .helppane > h3:first-child { margin-top: 14px; }
 .helpbox p, .helpbox li { font-size: 13px; line-height: 1.6; color: #ccc; }
 .helpbox ul { margin: 4px 0; padding-left: 20px; }
-.helpbox code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #111; padding: 1px 5px; border-radius: 3px; }
-.helpbox pre { background: #111; padding: 10px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 6px 0; }
+.helpbox code { font-family: var(--mono); font-size: 12px; background: #111; padding: 1px 5px; border-radius: 3px; }
 .helpbox .buttons { margin-top: 12px; flex: none; }
 .helpbox table { table-layout: auto; margin: 6px 0; }
 .helpbox th, .helpbox td { height: auto; font-size: 13px; color: #ccc; vertical-align: top; padding: 7px 9px; }
 .helpbox th { color: #eee; }
-textarea.script, #sched, #timer { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
-textarea.script { white-space: pre; }
-.help { color: #aaa; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
-.help.bad { color: #f28b82; white-space: pre-line; }
-.run { margin-top: 24px; }
-#confirmText { white-space: pre-line; }
-.sub { color: #aaa; font-size: 12px; }
-.row { display: flex; gap: 12px; }
-.row > div { flex: 1; min-width: 0; }
-pre.log { background: #1a1a1a; padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; }
-td.actions { white-space: nowrap; }
-/* Flow names are capped at 48 characters, which fits the 340px column in
-   normal mixed case; anything wider (all caps) ends in an ellipsis. */
-#flows td:first-child { white-space: nowrap; text-overflow: ellipsis; }
-button:disabled { opacity: 0.4; cursor: default; }
-#flows tr[draggable="true"] { cursor: grab; }
-#flows tr.dragging { opacity: 0.4; }
-#flows tr.drop-above td { box-shadow: inset 0 3px 0 #8ab4f8; }
-#flows tr.drop-below td { box-shadow: inset 0 -3px 0 #8ab4f8; }
+
+/* Flow editor. Inputs here are inline, not the full-width form fields the
+   other dialogs use. */
+.box.fb { width: min(1000px, 96vw); max-height: 92vh; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; overflow: hidden; }
+.fb-head { display: flex; align-items: center; gap: 12px; }
+.fb-head h2 { margin: 0; flex: 1; }
+.fb-scroll { overflow-y: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 16px; padding-right: 4px; }
+.fb input, .fb select { width: auto; margin: 0; padding: 5px 7px; box-sizing: border-box; background: #111; color: #eee; border: 1px solid #555; border-radius: 4px; font: inherit; font-size: 14px; min-width: 0; }
+.fb select:focus, .fb input:focus { border-color: var(--accent); }
+.fb input.bad { border-color: var(--err); }
+.fb button { margin-right: 0; }
+.fb #fName { width: 100%; }
+.fb label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+.fb .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.fb .sect { display: flex; flex-direction: column; gap: 8px; }
+.fb h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.fb .hd { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.fb .hint { color: var(--muted); font-size: 13px; margin: 0; line-height: 1.5; }
+.fb .hint b { color: var(--fg); font-weight: 600; }
+.fb .hint.bad { color: var(--err); white-space: pre-line; }
+.fb-foot { display: flex; align-items: center; gap: 10px; border-top: 1px solid #333; padding-top: 12px; }
+.fb-foot .msg { flex: 1; font-size: 13px; color: var(--err); white-space: pre-line; }
+.fb-foot button { margin: 0; }
+.tok { font-family: var(--mono); font-size: 12.5px; color: #d7e3fc; }
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; width: fit-content; max-width: 100%; }
+.seg button { border: 0; border-radius: 0; background: transparent; padding: 7px 14px; color: var(--muted); margin: 0; }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button[aria-pressed="true"] { background: #23324a; color: #e2ecff; }
+.steps { display: flex; flex-direction: column; gap: 6px; }
+.step { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 8px; align-items: center; background: var(--box); border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; }
+.step.dragging { opacity: .4; }
+.step.drop-above { box-shadow: 0 -3px 0 var(--accent); }
+.step.drop-below { box-shadow: 0 3px 0 var(--accent); }
+.step.has-err { border-color: #6b3632; }
+.step.joint { padding: 4px 8px; background: #1c1922; border-style: dashed; border-color: #3d3350; }
+.step.joint .num { visibility: hidden; }
+.step.hl { border-color: var(--c-logic); }
+.grip { cursor: grab; color: var(--faint); padding: 2px 4px; user-select: none; font-size: 15px; line-height: 1; }
+.num { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
+.body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.sentence .w { color: var(--muted); }
+.fb .sentence input.text { flex: 1 1 220px; }
+.fb .sentence input.dur { width: 96px; font-family: var(--mono); font-size: 13px; }
+.fb .sentence input.val { flex: 1 1 140px; max-width: 320px; }
+.pill { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; white-space: nowrap; border: 1px solid; }
+.pill.msg { color: var(--c-msg); border-color: #36507a; background: #1a2333; }
+.pill.time { color: var(--c-time); border-color: #5c5126; background: #2a2614; }
+.pill.server { color: var(--c-server); border-color: #6b3632; background: #2d1a19; }
+.pill.player { color: var(--c-player); border-color: #6b4a2c; background: #2d2117; }
+.pill.logic { color: var(--c-logic); border-color: #523a6e; background: #241b30; }
+.pill.adv { color: var(--c-adv); border-color: #4a4d52; background: #222428; }
+.sends { font: 12px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.err { font-size: 12px; color: var(--err); }
+.tools { display: flex; gap: 2px; }
+.fb .tools button { padding: 3px 7px; font-size: 13px; background: transparent; border: 1px solid transparent; color: var(--muted); }
+.fb .tools button:hover:not(:disabled) { background: #333; color: var(--fg); }
+.fb .tools button.addelse { font-size: 12px; color: var(--c-logic); }
+.empty { color: var(--faint); font-size: 13px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 6px; text-align: center; }
+.addrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; position: relative; }
+.menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; background: #1e1e1e; border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px; width: min(560px, calc(100vw - 48px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 14px; box-shadow: 0 10px 30px #000a; }
+.menu .grp { display: flex; flex-direction: column; gap: 3px; }
+.menu .gl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 2px; }
+.fb .menu button { text-align: left; background: transparent; border: 1px solid transparent; padding: 4px 6px; }
+.fb .menu button:hover:not(:disabled) { background: #2b2b2b; }
+.menu button small { display: block; color: var(--faint); font-size: 11px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.fb .chips button { font: 12px var(--mono); padding: 2px 7px; border-radius: 10px; }
+
+/* Chat commands dialog */
+.box.cmdbox { width: min(920px, 96vw); max-height: 90vh; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
+.cmdbox h2 { margin: 0; }
+.cmdbox .intro { color: #aaa; font-size: 13px; line-height: 1.55; margin: 0; }
+.cmdbox code, .ph code { font-family: var(--mono); font-size: 12px; background: #111; padding: 1px 4px; border-radius: 3px; color: #d7e3fc; }
+.cmdlist { flex: 1; min-height: 0; overflow-y: auto; border-top: 1px solid #333; border-bottom: 1px solid #333; }
+.cmd { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 12px 18px; padding: 14px 4px; border-bottom: 1px solid #2c2c2c; }
+.cmd:last-child { border-bottom: 0; }
+@media (max-width: 720px) { .cmd { grid-template-columns: minmax(0, 1fr); } }
+.cmd.off .fields { opacity: .45; }
+.cmdhead { display: flex; flex-direction: column; gap: 8px; }
+.cmdname { font: 600 15px var(--mono); }
+.cmdname .who { font: 400 11px system-ui, sans-serif; color: #fdd663; margin-left: 6px; letter-spacing: .03em; }
+.opt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc; }
+.cmdbox input { margin: 0; }
+.opt input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; }
+.opt input.dur { width: 84px; padding: 5px 7px; font-family: var(--mono); font-size: 13px; }
+.cmdbox input.bad { border-color: #f28b82; }
+.fields { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.field label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
+.field input { width: 100%; font-family: var(--mono); font-size: 13px; padding: 7px 9px; }
+.field .err { margin-top: 4px; }
+.ph { font-size: 12px; color: #888; margin-top: 3px; line-height: 1.6; }
+.cmdfoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cmdfoot .saved { color: #81c995; font-size: 13px; }
+.cmdfoot .bad { color: #f28b82; font-size: 13px; }
+.cmdfoot .spacer { flex: 1; }
+.cmdfoot button { margin: 0; }
 </style>
 </head>
 <body>
@@ -64,11 +164,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<button onclick="quick('kickall')">#Kick All</button>
 	</div>
 </div>
-<p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></p>
+<p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><button onclick="openCmds()">Chat commands</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></p>
 <table>
 	<colgroup>
 		<col style="width: 340px">
-		<col style="width: 140px">
+		<col style="width: 170px">
 		<col>
 		<col style="width: 190px">
 		<col style="width: 190px">
@@ -81,45 +181,60 @@ button:disabled { opacity: 0.4; cursor: default; }
 </table>
 <div id="runs"></div>
 
-<div id="modal" class="modal">
-	<div class="box wide">
-		<h2 id="title"></h2>
-		<label>Name</label>
-		<input id="name" type="text" maxlength="48">
-		<label>Script</label>
-		<textarea id="script" class="script" rows="14" spellcheck="false"></textarea>
-		<label>Cancel (commands sent when Stop is pressed, optional)</label>
-		<textarea id="cancel" class="script" rows="3" spellcheck="false" placeholder="say -1 Server restart cancelled."></textarea>
-		<label>Trigger</label>
-		<select id="trigger">
-			<option value="manual">Manual</option>
-			<option value="schedule">Schedule</option>
-			<option value="join">On Player Join</option>
-		</select>
-		<div id="schedWrap">
-			<label>Schedule (cron: minute hour day-of-month month day-of-week)</label>
-			<input id="sched" type="text" placeholder="0 6 * * *" spellcheck="false">
-		</div>
-		<div class="row">
-			<div>
-				<label id="timerLabel">Timer (optional, e.g. 5s, 60m, 1h30m)</label>
-				<input id="timer" type="text" placeholder="none" spellcheck="false">
+<!-- Flow editor -->
+<div id="editModal" class="modal">
+	<div class="box fb" role="dialog" aria-labelledby="edTitle">
+		<div class="fb-head"><h2 id="edTitle">Edit flow</h2></div>
+		<div class="fb-scroll">
+			<label class="f">Name<input id="fName" maxlength="48" autocomplete="off"></label>
+			<div class="sect">
+				<h3>Trigger</h3>
+				<div class="seg" role="group" aria-label="Trigger" id="trigSeg"></div>
+				<div class="grid" id="trigFields"></div>
+				<p class="hint" id="trigHint"></p>
 			</div>
-			<div id="modeWrap">
-				<label>Timer runs</label>
-				<select id="timerMode">
-					<option value="before">Before schedule (countdown)</option>
-					<option value="after">After schedule (delay)</option>
-				</select>
+			<div class="sect">
+				<div class="hd"><h3>Steps</h3><span class="hint">Run top to bottom. Drag <b>⋮⋮</b> or use the arrows to move a step; an If moves with everything inside it.</span></div>
+				<div class="steps" id="steps"></div>
+				<div class="addrow">
+					<button type="button" id="addBtn" aria-haspopup="true" aria-expanded="false">+ Add step</button>
+					<div class="chips" id="chips"></div>
+					<div class="menu" id="menu" hidden></div>
+				</div>
+			</div>
+			<div class="sect" id="stopSection">
+				<div class="hd"><h3>When stopped</h3><span class="hint">Sent if someone presses Stop before the run ends</span></div>
+				<div class="steps" id="onStop"></div>
+				<div class="addrow">
+					<button type="button" id="addStopBtn" aria-haspopup="true" aria-expanded="false">+ Add step</button>
+					<div class="menu" id="stopMenu" hidden></div>
+				</div>
 			</div>
 		</div>
-		<div id="schedHelp" class="help"></div>
-		<div class="buttons">
-			<button onclick="closeModal()">Cancel</button>
-			<button id="save">Save</button>
+		<div class="fb-foot">
+			<span class="msg" id="edMsg"></span>
+			<button type="button" id="edCancel">Cancel</button>
+			<button type="button" id="saveBtn">Save</button>
 		</div>
 	</div>
 </div>
+
+<!-- Chat commands settings -->
+<div id="cmdModal" class="modal">
+	<div class="box cmdbox" role="dialog" aria-labelledby="cmdTitle">
+		<h2 id="cmdTitle">Chat commands</h2>
+		<p class="intro">Built-in commands players type in game chat. Turn each on or off, set its cooldown (server-wide: after anyone uses it, it's ignored for everyone until the time is up; 0 = none; times are seconds, or h m s such as <code>1m30s</code>), and change the wording and order of what ReCON sends. Words in braces such as <code>{player_name}</code> are filled in when the message is sent. Who may use /kick and /ban is set on the Players page: Details, Permissions.</p>
+		<div class="cmdlist" id="cmdList"></div>
+		<div class="cmdfoot">
+			<button type="button" id="cmdReset">Reset to defaults</button>
+			<span class="spacer"></span>
+			<span id="cmdMsg"></span>
+			<button type="button" id="cmdCancel">Close</button>
+			<button type="button" id="cmdSave">Save</button>
+		</div>
+	</div>
+</div>
+
 <div id="confirmModal" class="modal" onclick="if (event.target === this) closeConfirm()">
 	<div class="box">
 		<h2 id="confirmTitle"></h2>
@@ -135,222 +250,143 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<h2>Flow help</h2>
 		<div class="tabs" id="helpTabs">
 			<button data-tab="overview">Overview</button>
-			<button data-tab="script">Script</button>
-			<button data-tab="timer">Timer</button>
-			<button data-tab="conditional">Conditional</button>
+			<button data-tab="steps">Steps</button>
+			<button data-tab="conditions">If / Else</button>
 			<button data-tab="triggers">Triggers</button>
 			<button data-tab="schedule">Schedule (cron)</button>
+			<button data-tab="chat">Chat commands</button>
 		</div>
 		<div class="helppanes">
 
 		<div class="helppane" data-pane="overview">
 			<h3>What a flow is</h3>
-			<p>A flow is a small script of RCON commands. It runs one step per second (a <b>tick</b>): every command takes one tick, so a list of commands goes out one second apart. A restart flow, for example, counts down with warnings, locks the server, kicks everyone and shuts it down.</p>
-<pre>say -1 Kicking everyone in 10 seconds.
-wait 10s
-#kickall Maintenance</pre>
-			<h3>How a flow starts</h3>
-			<p>Each flow has one <b>trigger</b>, picked in the edit dialog:</p>
+			<p>A flow is a list of steps ReCON runs for you: send a message, wait, lock the server, kick a player, and so on. Steps run from the top down; only <b>Wait</b> takes time, everything else goes out straight away.</p>
+			<h3>Making a flow</h3>
 			<ul>
-				<li><b>Manual</b> - only when you press <b>Run</b>.</li>
-				<li><b>Schedule</b> - on a cron schedule, while the flow is <b>Enabled</b>.</li>
-				<li><b>On player join</b> - once for each player who joins, while the flow is <b>Enabled</b>.</li>
-			</ul>
-			<p>A flow can also have a <b>Timer</b>: a delay before the script starts, or, for a scheduled flow, a countdown to the scheduled time (see <i>Timer</i>). Commands in the <b>Cancel</b> field are sent if you press Stop.</p>
-			<h3>Making your first flow</h3>
-			<ul>
-				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and write its script (see <i>Script</i>).</li>
-				<li>Pick a trigger. For Schedule, type a cron expression; the text under the fields explains it in plain English and shows when the run starts and ends.</li>
-				<li>Save. Schedule and player-join flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
-			</ul>
-		</div>
-
-		<div class="helppane" data-pane="script">
-			<h3>Lines</h3>
-			<ul>
-				<li>One command per line. The script runs from the top, one command per tick.</li>
-				<li>Lines starting with <code>//</code> are comments. Blank lines are removed when you save; use a <code>//</code> line to keep a visual gap.</li>
-				<li><code>$name = value</code> lines set a variable and take no time.</li>
-				<li>The run ends after the last line (or, in a countdown, when the Timer reaches 0).</li>
-			</ul>
-			<h3>Commands you can use</h3>
-			<ul>
-				<li>Any BattlEye RCON command, such as <code>say -1 text</code>, <code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code> or <code>kick 3 reason</code>.</li>
-				<li><code>kickall [reason]</code> or <code>#kickall [reason]</code> kicks every connected player. With no reason it uses "Server restarting".</li>
-				<li><code>say -1 text</code> messages everyone; <code>say &lt;id&gt; text</code> messages one player (<code>say $player text</code> in a join flow).</li>
-			</ul>
-			<h3>wait and stop</h3>
-			<ul>
-				<li><code>wait 10s</code> pauses for that many ticks and sends nothing. Above, the <code>say</code> goes out on tick 1 and <code>#kickall</code> on tick 12.</li>
-				<li><code>stop</code> ends the run straight away. The Cancel commands are not sent.</li>
+				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and pick a trigger.</li>
+				<li>Press <b>+ Add step</b> to add steps. Fill in each row; anything missing is shown in red under the row.</li>
+				<li>Move a step with its arrows, or drag it by the <b>⋮⋮</b> handle. Moving an If moves everything inside it.</li>
+				<li>Save. Schedule, On join and Player message flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
 			</ul>
 			<h3>Times</h3>
-			<ul>
-				<li>Times need a unit: <code>30s</code>, <code>5m</code>, <code>1h</code>, and combinations largest first, such as <code>1m30s</code> or <code>1h3m15s</code>.</li>
-				<li>A number without a unit is an error (<code>wait 5</code> - did you mean 5s or 5m?). Only <code>0</code> needs no unit.</li>
-			</ul>
-			<h3>Variables</h3>
-			<table>
-				<thead><tr><th>Variable</th><th>Value</th></tr></thead>
-				<tbody>
-					<tr><td><code>$players</code></td><td>How many players are online (from the 5-second player check).</td></tr>
-					<tr><td><code>$timer</code></td><td>Seconds left in a countdown (see <i>Timer</i>).</td></tr>
-					<tr><td><code>$player</code> <code>$name</code> <code>$ip</code> <code>$guid</code> <code>$ping</code></td><td>The player's number, name, IP, GUID and ping, in On player join flows and inside <code>for each player</code>.</td></tr>
-					<tr><td><code>$anything</code></td><td>Your own variable: <code>$msg = Restarting soon</code>. Each run starts with none set.</td></tr>
-				</tbody>
-			</table>
-			<h3>Time left in messages: @ words</h3>
-			<p>These are replaced with the time left in a countdown when the command is sent.</p>
-			<table>
-				<thead><tr><th>Word</th><th>Means</th><th>At 1h 1m 5s left</th></tr></thead>
-				<tbody>
-					<tr><td><code>@hours</code> <code>@minutes</code> <code>@seconds</code></td><td>Total time left in that unit</td><td>1, 61, 3665</td></tr>
-					<tr><td><code>@hour</code> <code>@minute</code> <code>@second</code></td><td>Clock parts (minute and second are 2 digits)</td><td>1, 01, 05</td></tr>
-				</tbody>
-			</table>
-<pre>$warn | say -1 Server restarts in @minutes minutes!
-5m    | say -1 Time remaining @hour:@minute:@second</pre>
-			<h3>Retries</h3>
-			<p><code>#lock</code> and <code>#unlock</code> are retried if the server doesn't answer, since repeating them is harmless. Other commands are sent once so a message is never shown twice. <code>#shutdown</code> often goes unanswered because the server stops.</p>
+			<p>Every time box (Wait, the delay, the chat command cooldowns) takes a number of seconds, or hours, minutes and seconds together: <code>30</code>, <code>90s</code>, <code>1m20s</code>, <code>2h 15m</code>.</p>
+			<h3>The player</h3>
+			<p>On join and Player message flows run for one player: the one who joined, or who typed the message. A message sent to <b>Player</b> goes only to them (<code>say &lt;their number&gt;</code>); <b>Everyone</b> is <code>say -1</code>. Schedule and Manual flows have no player, so they message everyone.</p>
 		</div>
 
-		<div class="helppane" data-pane="timer">
-			<h3>The Timer field</h3>
+		<div class="helppane" data-pane="steps">
+			<h3>Steps</h3>
 			<table>
-				<thead><tr><th>Timer</th><th>What happens</th></tr></thead>
+				<thead><tr><th>Step</th><th>Sends</th></tr></thead>
 				<tbody>
-					<tr><td>Empty</td><td>The script starts as soon as the flow is triggered.</td></tr>
-					<tr><td>Delay</td><td>The script starts the Timer's length after the trigger: after Run is pressed, after the player joins, or (<b>After schedule</b>) after the cron time. For Manual and On player join flows the field is called <b>Delay</b>.</td></tr>
-					<tr><td>Countdown</td><td>Scheduled flows only, set to <b>Before schedule</b>: the run starts the Timer's length before the cron time, and <code>$timer</code> counts the seconds down to 0 at it. The run ends at 0. Manual and join flows can't count down: they have no scheduled time.</td></tr>
+					<tr><td>Message</td><td><code>say -1 text</code> to Everyone, or <code>say &lt;number&gt; text</code> to the Player</td></tr>
+					<tr><td>Player list</td><td>The names of everyone online</td></tr>
+					<tr><td>Wait</td><td>Nothing: pauses before the next step</td></tr>
+					<tr><td>Lock / Unlock / Shut down server</td><td><code>#lock</code>, <code>#unlock</code>, <code>#shutdown</code></td></tr>
+					<tr><td>Kick / Ban</td><td>Kicks or bans (by GUID) the Player</td></tr>
+					<tr><td>Kick everyone</td><td>Kicks every player online</td></tr>
+					<tr><td>If</td><td>Runs its steps only when its condition is true (see <i>If / Else</i>)</td></tr>
+					<tr><td>Stop flow</td><td>Ends the run there</td></tr>
+					<tr><td>RCON command</td><td>Any command, as typed</td></tr>
 				</tbody>
 			</table>
-			<h3>Timed lines (countdown only)</h3>
-			<p><code>offset | command</code> sends a command when that much time is left. It is shorthand for <code>if $timer == offset</code>.</p>
-<pre>// Timer 60m, Before schedule, schedule 0 6 * * *
-$warn = 60m 30m 15m 10m 5m 3m
-$warn | say -1 Server is going to restart in @minutes minutes!
-2m    | #lock
-1m    | if $players &gt; 0
-  say -1 Server is going to restart in 1 minute!
-  #kickall Server Restart
-end
-0     | #shutdown</pre>
-			<ul>
-				<li>Offsets are time left, with no sign: <code>2m</code> is 2 minutes before the scheduled time, <code>0</code> is the scheduled time.</li>
-				<li>A list works as an offset: <code>$warn | ...</code> runs at every time in it. Lists are kept greatest first.</li>
-				<li>A time can start a block: <code>1m | if ...</code>, or <code>2m | do</code> for several lines with no condition. The lines go out one per tick from that time, so above, the warning goes out at 1m and <code>#kickall</code> at 59s.</li>
-				<li>Lines without a time run from the start of the run, one per tick.</li>
-				<li>Saving is refused if a time is longer than the Timer (it would never run), or a block would still be sending after 0.</li>
-			</ul>
-			<h3>Changing $timer</h3>
-			<p><code>$timer = 3m</code> moves the countdown, from the next tick. Moving it down skips everything in between; moving it up repeats the countdown from there. Inside an <code>if</code>, add a check that turns false afterwards (such as <code>&amp;&amp; $timer &gt; 3m</code>), because ifs in a countdown are checked every tick.</p>
-<pre>// Restart in 3 minutes if nobody is on
-if $players == 0 &amp;&amp; $timer &gt; 3m
-  $timer = 3m
-end</pre>
-			<h3>Cancel</h3>
-			<p>The <b>Cancel</b> field holds commands sent one after another when you press Stop, for example <code>say -1 Server restart cancelled.</code> and <code>#unlock</code>. A run that finishes, or ends at <code>stop</code>, doesn't send them.</p>
-			<h3>After a restart</h3>
-			<p>When the bridge logs in to the server again (after a restart), it sends <code>#unlock</code>, so a restart flow can end at <code>#shutdown</code>.</p>
+			<h3>Placeholders</h3>
+			<p>Click one under the steps to put it in the text box you were typing in. They are filled in when the step runs.</p>
+			<table>
+				<thead><tr><th>Placeholder</th><th>Is</th><th>Works in</th></tr></thead>
+				<tbody>
+					<tr><td><code>{players_online}</code></td><td>How many players are online</td><td>Every flow</td></tr>
+					<tr><td><code>{player_name}</code> <code>{player_id}</code></td><td>The player's name and number</td><td>On join, Player message</td></tr>
+					<tr><td><code>{player_ping}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td>Their ping, IP address and GUID</td><td>On join, Player message</td></tr>
+					<tr><td><code>{player_role}</code></td><td>Player, Mod or Admin (set on the Players page)</td><td>On join, Player message</td></tr>
+					<tr><td><code>{message}</code></td><td>Everything they typed</td><td>Player message</td></tr>
+				</tbody>
+			</table>
+			<h3>When stopped</h3>
+			<p>Schedule and Manual flows can have steps that are sent if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server.</p>
 		</div>
 
-		<div class="helppane" data-pane="conditional">
-			<h3>If / else / end</h3>
-<pre>if $players &gt; 0
-  say -1 Locking the server now.
-  #lock
-else
-  #lock
-end</pre>
-			<ul>
-				<li><code>else</code> and <code>end</code> go on lines of their own. <code>else</code> is optional.</li>
-				<li>An <code>if</code> can sit inside another one. There is no <code>else if</code>: put an <code>if</code> inside the <code>else</code>.</li>
-				<li>The lines inside go out one per tick, like any others.</li>
-				<li>In a countdown, an <code>if</code> outside any block is checked <b>every tick</b>. In other flows it is checked once, when the script reaches it.</li>
-				<li>The run log shows each decision, e.g. <code>if $players &gt; 0 -&gt; true</code>.</li>
-			</ul>
-			<h3>do and for each player</h3>
-			<ul>
-				<li><code>do</code> ... <code>end</code> groups lines, mainly under a time: <code>2m | do</code>.</li>
-				<li><code>for each player</code> ... <code>end</code> runs its lines once for every player online, with <code>$player</code>, <code>$name</code> and the others set to that player.</li>
-			</ul>
-<pre>for each player
-  say $player Hi $name, your ping is $ping
-end</pre>
-			<h3>Operators</h3>
+		<div class="helppane" data-pane="conditions">
+			<h3>If, Else if, Else</h3>
+			<p>An If compares one thing, such as <code>{player_ping}</code>, and runs its steps when the comparison is true. <b>+ Else if</b> adds more comparisons of the same thing, checked top to bottom: the first one that is true runs, and the rest are skipped. <b>+ Else</b> runs when none are true. Each If has its own End if, so they can't come apart, and Ifs can go inside other Ifs.</p>
+			<p>Reorder Else ifs with their arrows; moving one above the first makes it the If. Removing an Else if or the Else keeps its steps: they move below the End if.</p>
+			<h3>What you can compare</h3>
 			<table>
-				<thead><tr><th>Operator</th><th>Meaning</th><th>Example</th></tr></thead>
+				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
 				<tbody>
-					<tr><td><code>=</code></td><td>sets a variable</td><td><code>$msg = Restarting soon</code></td></tr>
-					<tr><td><code>==</code></td><td>equals</td><td><code>if $name == survivor</code></td></tr>
-					<tr><td><code>!=</code></td><td>does not equal</td><td><code>if $name != admin</code></td></tr>
-					<tr><td><code>&lt;</code> <code>&lt;=</code></td><td>less than / or equal</td><td><code>if $players &lt; 5</code></td></tr>
-					<tr><td><code>&gt;</code> <code>&gt;=</code></td><td>greater than / or equal</td><td><code>if $timer &gt;= 10m</code></td></tr>
-					<tr><td><code>&amp;&amp;</code></td><td>and: both must be true</td><td><code>if $players &gt; 0 &amp;&amp; $timer &lt;= 5m</code></td></tr>
-					<tr><td><code>||</code></td><td>or: either can be true</td><td><code>if $name == survivor || $name == player</code></td></tr>
-					<tr><td>(none)</td><td>true if set to true</td><td><code>if $quick</code></td></tr>
+					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>/discord</code> catches "/discord please" but not "/discordx". Case is ignored.</td></tr>
+					<tr><td><code>{player_name}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td><code>==</code> <code>!=</code> ignoring case, or <b>matches</b> with <code>*</code> for any characters: <code>*admin*</code>, <code>192.168.*</code></td></tr>
+					<tr><td><code>{player_id}</code> <code>{player_ping}</code> <code>{players_online}</code></td><td><code>==</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td></tr>
+					<tr><td><code>{player_role}</code></td><td>The same, against Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
 				</tbody>
 			</table>
-			<h3>How values compare</h3>
+			<h3>Examples</h3>
 			<ul>
-				<li>Text is compared in lower case, so <code>Survivor</code>, <code>SURVIVOR</code> and <code>survivor</code> are all equal.</li>
-				<li>Numbers and times compare as numbers (<code>05 == 5</code>, <code>$timer == 5m</code>). <code>&lt;</code>, <code>&gt;</code> and the others only work on numbers; on text they count as false.</li>
-				<li><code>$timer == $warn</code> is true when <code>$timer</code> is any time in the list.</li>
-				<li><code>&amp;&amp;</code> is checked before <code>||</code>, so <code>a || b &amp;&amp; c</code> means a, or (b and c). There are no brackets.</li>
-				<li>Use <code>"quotes"</code> to compare against empty text: <code>if $msg == ""</code>.</li>
+				<li>Schedule: <b>If</b> <code>{players_online} &gt; 0</code> Kick everyone, <b>Else</b> Shut down server.</li>
+				<li>On join: <b>If</b> <code>{player_ping} &gt;= 500</code> Kick, reason <i>Ping too high ({player_ping})</i>.</li>
+				<li>Player message: <b>If</b> <code>{message}</code> starts with <code>/discord</code>, Message to Player <i>Visit us at discord.gg/...</i>.</li>
 			</ul>
-			<h3>Mistakes are caught before saving</h3>
-			<p>The edit dialog shows script mistakes in red as you type, with the line number: a block with no <code>end</code>, a number without a unit, a variable that's used but never set, a timed line outside a countdown, or setting a built-in like <code>$players</code>.</p>
+			<p>The run log under the table shows each decision, e.g. <code>If {player_ping} &gt;= 500: no</code>.</p>
 		</div>
 
 		<div class="helppane" data-pane="triggers">
-			<h3>The three triggers</h3>
+			<h3>The four triggers</h3>
 			<table>
-				<thead><tr><th>Trigger</th><th>Starts when</th><th>Needs Enable</th><th>Timer</th></tr></thead>
+				<thead><tr><th>Trigger</th><th>Runs</th><th>Needs Enable</th></tr></thead>
 				<tbody>
-					<tr><td><b>Manual</b></td><td>You press Run, or something POSTs to <code>/api/flows/&lt;id&gt;/run</code></td><td>No (the Enable button is greyed out)</td><td>Delay after Run</td></tr>
-					<tr><td><b>Schedule</b></td><td>The cron expression fires</td><td>Yes</td><td>Delay after, or countdown before, the cron time</td></tr>
-					<tr><td><b>On player join</b></td><td>A player joins</td><td>Yes</td><td>Delay after the join</td></tr>
+					<tr><td><b>Schedule</b></td><td>On a cron schedule</td><td>Yes</td></tr>
+					<tr><td><b>On join</b></td><td>Once for each player who finishes loading in</td><td>Yes</td></tr>
+					<tr><td><b>Player message</b></td><td>Once for every chat message a player sends</td><td>Yes</td></tr>
+					<tr><td><b>Manual</b></td><td>When you press Run (or POST to <code>/api/flows/&lt;id&gt;/run</code>)</td><td>No</td></tr>
 				</tbody>
 			</table>
-			<h3>Rules worth knowing</h3>
 			<ul>
-				<li>New schedule and player-join flows are saved <b>disabled</b>. Press Enable to switch them on.</li>
-				<li>Changing an existing flow's trigger saves it disabled too, so a restart flow can never start firing on every join by accident.</li>
-				<li>Run works with every trigger, so you can test a scheduled flow without waiting for its time: a countdown starts at the full Timer. Flows that use <code>$player</code>, <code>$name</code>, <code>$ip</code>, <code>$guid</code> or <code>$ping</code> outside <code>for each player</code> are the exception.</li>
-			</ul>
-			<h3>On player join</h3>
-<pre>// Timer 5s
-say $player Welcome to our server, $name!
-wait 3s
-say $player Type /help for the rules.</pre>
-			<ul>
-				<li>The flow runs once for each player who joins, with <code>$player</code>, <code>$name</code>, <code>$ip</code>, <code>$guid</code> and <code>$ping</code> set to them.</li>
-				<li>Several players can be in progress at once; they share one log and one Stop button, which stops all of them.</li>
-				<li>Players already online when the app starts are not greeted. After the game server restarts, everyone who reconnects is.</li>
+				<li>Every trigger can have a <b>delay</b> before step 1.</li>
+				<li>Changing an existing flow's trigger saves it disabled, so a restart flow can't start firing on every join by accident.</li>
+				<li>Run works for Schedule and Manual flows. On join and Player message flows run for a player, so only a player can start them.</li>
+				<li>On join: players already online when ReCON starts are not greeted. After the game server restarts, everyone who reconnects is.</li>
+				<li>Player message: ReCON finds who sent the line by their name among the players online, then uses their GUID. If two players online have the same name, their messages don't run flows.</li>
+				<li>Several players can be in progress at once in On join and Player message flows; they share one run log and one Stop button.</li>
 			</ul>
 		</div>
 
 		<div class="helppane" data-pane="schedule">
 			<h3>Cron expressions</h3>
-			<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone (set <code>TZ</code> on the container). The text under the field explains what you typed in plain English and shows the next three runs.</p>
+			<p>Five fields: <code>minute hour day-of-month month day-of-week</code>, in the server's time zone (set <code>TZ</code> on the container). The text under the field explains what you typed and shows the next runs, with the delay added.</p>
 			<ul>
 				<li><code>0 6 * * *</code> every day at 06:00</li>
 				<li><code>0 */6 * * *</code> every 6 hours (00:00, 06:00, 12:00, 18:00)</li>
 				<li><code>30 4 * * 1,4</code> Mondays and Thursdays at 04:30</li>
 				<li><code>0 5 * * 1-5</code> weekdays at 05:00</li>
-				<li><code>0 3 1 * *</code> the 1st of every month at 03:00</li>
 			</ul>
-			<h3>Field syntax</h3>
 			<ul>
 				<li><code>*</code> any value, <code>1,4</code> a list, <code>1-5</code> a range, <code>*/15</code> every 15th.</li>
 				<li>Months and weekdays accept names: <code>jan</code>-<code>dec</code>, <code>sun</code>-<code>sat</code>. Sunday is 0 or 7.</li>
-				<li>If both day-of-month and day-of-week are restricted, a day matches when <b>either</b> does (standard cron).</li>
 			</ul>
-			<h3>Countdowns and app restarts</h3>
+			<h3>After a restart</h3>
+			<p>When ReCON logs in to the server again (after a restart), it sends <code>#unlock</code>, so a restart flow can end with Shut down server.</p>
+		</div>
+
+		<div class="helppane" data-pane="chat">
+			<h3>Built-in chat commands</h3>
+			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) turns each on or off, sets its cooldown and changes the wording ReCON sends. Who may use /kick and /ban is set on the Players page: <b>Details</b>, <b>Permissions</b>.</p>
+			<table>
+				<thead><tr><th>Command</th><th>Does</th></tr></thead>
+				<tbody>
+					<tr><td><code>/help</code></td><td>Lists the commands; <code>/help /vote</code> explains one</td></tr>
+					<tr><td><code>/shout &lt;message&gt;</code></td><td>Sends the message to everyone</td></tr>
+					<tr><td><code>/whisper &lt;number&gt; &lt;message&gt;</code></td><td>Private message to that player</td></tr>
+					<tr><td><code>/players</code></td><td>Lists everyone online with their number</td></tr>
+					<tr><td><code>/vote &lt;question&gt;</code></td><td>Starts a server-wide vote; everyone answers <code>/vote y</code> or <code>/vote n</code>. More yes than no passes.</td></tr>
+					<tr><td><code>/code</code></td><td>Sends the player's code (last 6 characters of their GUID) to the mods and admins online</td></tr>
+					<tr><td><code>/kick &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
+					<tr><td><code>/ban &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently, even if they have left</td></tr>
+				</tbody>
+			</table>
 			<ul>
-				<li>With a Timer set to <b>Before schedule</b>, the cron time is when the countdown reaches 0. A 60m Timer with <code>0 6 * * *</code> starts the run at 05:00.</li>
-				<li>If the app restarts during a countdown it joins it again with the time left; timed lines that already passed are skipped. Manually started runs are not resumed.</li>
+				<li>Mods can kick and ban Players. Admins can also kick and ban Mods. Nobody can kick or ban an Admin from chat; the Kick and Ban buttons on these pages work on everyone.</li>
+				<li>Every mod and admin online is told about each kick and ban. <b>Announce</b> also tells everyone.</li>
+				<li>Only a command that works gets an answer. Anything else (a typo, a cooldown, no permission) is ignored; the line is still in the player's chat history.</li>
 			</ul>
 		</div>
 
@@ -360,8 +396,6 @@ say $player Type /help for the rules.</pre>
 </div>
 <script>
 let flows = [];
-let editing = null;
-let previewTimer = null;
 let dragging = false;
 let dragId = null;
 
@@ -424,11 +458,8 @@ function btn(label, onclick, disabled, title) {
 // triggerCell is what the Trigger column shows for a flow.
 function triggerCell(f) {
 	let t = f.trigger === 'schedule' ? '<span class="mono">' + esc(f.schedule) + '</span>' :
-		f.trigger === 'join' ? 'On player join' : 'Manual';
-	if (f.timer) {
-		let how = f.trigger === 'schedule' && f.timerMode === 'before' ? ' before' : ' delay';
-		t += '<br><span class="sub">' + esc(f.timer) + how + '</span>';
-	}
+		f.trigger === 'join' ? 'On player join' : f.trigger === 'chat' ? 'Player message' : 'Manual';
+	if (f.delay) t += '<br><span class="sub">' + esc(f.delay) + ' delay</span>';
 	return t;
 }
 
@@ -438,6 +469,9 @@ async function refresh() {
 		let r = await fetch('/api/flows');
 		let d = await r.json();
 		if (!d.ok) { setStatusCount('web', ''); return; } // the status bar shows why
+		if (editorOpen()) { // keep the list fresh for the editor, but don't rebuild under a drag in it
+			flows = d.flows || flows;
+		}
 		flows = d.flows || [];
 		let runs = {};
 		(d.runs || []).forEach(function(x) { runs[x.flowId] = x; });
@@ -446,16 +480,18 @@ async function refresh() {
 			let run = runs[f.id];
 			let active = !!(run && run.active);
 			let manual = f.trigger === 'manual';
+			let player = f.trigger === 'join' || f.trigger === 'chat';
 			let next = manual ? (f.nextRun || 'Manual only') : (f.scheduleEnabled ? (f.nextRun || '-') : 'Disabled');
 			let buttons =
 				btn(f.scheduleEnabled ? 'Disable' : 'Enable', 'toggleFlow(' + f.id + ')', manual,
 					manual ? 'Manual flows only run when you press Run' : '') +
-				(active ? btn('Stop', 'stopFlow(' + f.id + ')', false) : btn('Run', 'runFlow(' + f.id + ')', false)) +
-				btn('Edit', 'editFlow(' + f.id + ')', false) +
+				(active ? btn('Stop', 'stopFlow(' + f.id + ')', false) : btn('Run', 'runFlow(' + f.id + ')', player || !!f.broken,
+					player ? 'This flow runs for a player, so only a player can start it' : '')) +
+				btn('Edit', 'editFlow(' + f.id + ')', !!f.broken, f.broken ? 'Delete it and build it again with steps' : '') +
 				btn('Delete', 'deleteFlow(' + f.id + ')', active);
 			return '<tr draggable="true" data-id="' + f.id + '"><td title="' + esc(f.name) + '">' + esc(f.name) + '</td>' +
 				'<td>' + triggerCell(f) + '</td>' +
-				'<td>' + statusCell(run) + '</td>' +
+				'<td>' + (f.broken ? '<span class="bad-flow" title="' + esc(f.broken) + '">Old script format: rebuild it</span>' : statusCell(run)) + '</td>' +
 				'<td>' + esc(f.lastRun || '-') + '</td>' +
 				'<td>' + esc(next) + '</td>' +
 				'<td class="actions">' + buttons + '</td></tr>';
@@ -594,105 +630,15 @@ function openHelp() {
 }
 function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
 
+// Escape closes whichever dialog is on top (an open step menu first).
 document.addEventListener('keydown', function(e) {
 	if (e.key !== 'Escape') return;
+	if (document.querySelector('.menu:not([hidden])')) return; // the editor closes its menu
 	if (document.getElementById('confirmModal').style.display === 'flex') closeConfirm();
 	else if (document.getElementById('helpModal').style.display === 'flex') closeHelp();
+	else if (cmdsOpen()) document.getElementById('cmdCancel').click();
+	else if (editorOpen()) cancelEditor();
 });
-
-// The schedule field only matters for the Schedule trigger, and the Timer
-// mode only for a scheduled flow with a Timer.
-function syncTrigger() {
-	let t = document.getElementById('trigger').value;
-	let hasTimer = document.getElementById('timer').value.trim() !== '';
-	document.getElementById('schedWrap').style.display = t === 'schedule' ? 'block' : 'none';
-	// Only a scheduled flow can count down to its time, so for Manual and
-	// On player join the Timer is a plain delay and Before/After is hidden.
-	document.getElementById('modeWrap').style.display = t === 'schedule' ? 'block' : 'none';
-	document.getElementById('modeWrap').style.visibility = hasTimer ? 'visible' : 'hidden';
-	document.getElementById('timerLabel').textContent = t === 'schedule' ?
-		'Timer (optional, e.g. 5s, 60m, 1h30m)' :
-		'Delay before the script starts (optional, e.g. 5s, 2m)';
-}
-
-function openModal(f, title) {
-	editing = f;
-	document.getElementById('title').textContent = title;
-	document.getElementById('name').value = f.name;
-	document.getElementById('script').value = f.script;
-	document.getElementById('cancel').value = f.cancel || '';
-	document.getElementById('timer').value = f.timer || '';
-	document.getElementById('timerMode').value = f.timerMode || 'before';
-	document.getElementById('trigger').value = f.trigger || 'manual';
-	// For manual and join flows the stored schedule is just "manual"/"on-join".
-	document.getElementById('sched').value = f.trigger === 'schedule' ? (f.schedule || '') : '';
-	syncTrigger();
-	document.getElementById('modal').style.display = 'flex';
-	updatePreview();
-}
-
-function newFlow() {
-	openModal({ id: 0, name: '', script: 'say -1 Hello everyone!\n', cancel: '', timer: '', timerMode: 'before', trigger: 'manual', schedule: '', scheduleEnabled: false }, 'New flow');
-}
-
-function editFlow(id) { openModal(find(id), 'Edit flow'); }
-
-function closeModal() { document.getElementById('modal').style.display = 'none'; }
-
-function queuePreview() {
-	clearTimeout(previewTimer);
-	previewTimer = setTimeout(updatePreview, 300);
-}
-
-async function updatePreview() {
-	let help = document.getElementById('schedHelp');
-	try {
-		let d = await post('/api/flows/preview', formFlow());
-		if (!d.ok) {
-			help.className = 'help bad';
-			help.textContent = d.error || 'Invalid schedule';
-			return;
-		}
-		help.className = 'help';
-		let html = '<b>' + esc(d.description) + '</b>';
-		if (d.next && d.next.length) html += '<br>Next runs: ' + d.next.map(esc).join(' &middot; ');
-		if (d.starts) html += '<br>Next countdown starts: ' + esc(d.starts);
-		if (d.span) html += '<br>' + esc(d.span);
-		help.innerHTML = html;
-	} catch(e) {
-		help.textContent = '';
-	}
-}
-
-// formFlow is the edit dialog's fields, as the preview and save APIs take them.
-function formFlow() {
-	let trigger = document.getElementById('trigger').value;
-	return {
-		id: editing.id,
-		name: document.getElementById('name').value,
-		script: document.getElementById('script').value,
-		cancel: document.getElementById('cancel').value,
-		trigger: trigger,
-		schedule: trigger === 'schedule' ? document.getElementById('sched').value : '',
-		timer: document.getElementById('timer').value,
-		timerMode: document.getElementById('timerMode').value,
-		scheduleEnabled: !!editing.scheduleEnabled
-	};
-}
-
-['sched', 'script', 'cancel'].forEach(function(id) {
-	document.getElementById(id).addEventListener('input', queuePreview);
-});
-document.getElementById('timer').addEventListener('input', function() { syncTrigger(); queuePreview(); });
-document.getElementById('timerMode').addEventListener('change', updatePreview);
-document.getElementById('trigger').addEventListener('change', function() { syncTrigger(); updatePreview(); });
-
-document.getElementById('save').onclick = async () => {
-	let d = await post('/api/flows', formFlow());
-	if (!d.ok) { showMessage('Save failed', d.error || 'Save failed'); return; }
-	closeModal();
-	refresh();
-};
 
 function clearDragMarks() {
 	Array.prototype.forEach.call(document.querySelectorAll('#flows tr'), function(tr) {
@@ -763,6 +709,964 @@ flowsBody.addEventListener('dragend', endDrag);
 refresh();
 setInterval(refresh, {{.RefreshInterval.Milliseconds}});
 setInterval(tickCountdowns, 1000);
+
+// ---------------------------------------------------------------------------
+// Flow editor: steps built from fixed rows
+// ---------------------------------------------------------------------------
+(function () {
+'use strict';
+const TRIGGERS = [['schedule', 'Schedule'], ['join', 'On join'], ['chat', 'Player message'], ['manual', 'Manual']];
+const TRIGGER_NAME = Object.fromEntries(TRIGGERS);
+
+// ---------------------------------------------------------------------------
+// Placeholders and If subjects
+// ---------------------------------------------------------------------------
+// "The player" is whoever triggered the flow: who joined, or who typed the
+// message. Schedule and Manual flows have no player.
+const TOKENS = [
+	{ tok: '{player_name}', need: 'player', title: 'Name of the player who triggered the flow' },
+	{ tok: '{player_id}', need: 'player', title: 'Their player number' },
+	{ tok: '{player_ping}', need: 'player', title: 'Their ping' },
+	{ tok: '{player_ip}', need: 'player', title: 'Their IP address' },
+	{ tok: '{player_guid}', need: 'player', title: 'Their BattlEye GUID' },
+	{ tok: '{player_role}', need: 'player', title: 'Their role: Player, Mod or Admin' },
+	{ tok: '{message}', need: 'chat', title: 'Everything they typed' },
+	{ tok: '{players_online}', need: '', title: 'How many players are online (works in every flow)' }
+];
+const NEED_TEXT = {
+	player: 'needs a player: use the On join or Player message trigger',
+	chat: 'needs the Player message trigger'
+};
+// Kinds: word = the chat message, matched by words; text = exact or
+// wildcard; num = numbers; role = Player < Mod < Admin.
+const WORD_OPS = [['has', 'contains'], ['starts', 'starts with']];
+const TEXT_OPS = [['eq', '=='], ['ne', '!='], ['wild', 'matches']];
+const NUM_OPS = [['eq', '=='], ['ne', '!='], ['gt', '>'], ['ge', '>='], ['lt', '<'], ['le', '<=']];
+const ROLES = [['0', 'Player'], ['1', 'Mod'], ['2', 'Admin']];
+const SUBJECTS = [
+	['message', '{message}', 'word', 'chat'],
+	['player_name', '{player_name}', 'text', 'player'],
+	['player_id', '{player_id}', 'num', 'player'],
+	['player_ping', '{player_ping}', 'num', 'player'],
+	['player_ip', '{player_ip}', 'text', 'player'],
+	['player_guid', '{player_guid}', 'text', 'player'],
+	['player_role', '{player_role}', 'role', 'player'],
+	['players_online', '{players_online}', 'num', '']
+];
+const subjectOf = (s) => SUBJECTS.find((x) => x[0] === s.subject) || SUBJECTS[1];
+const opsFor = (sub) => sub[2] === 'word' ? WORD_OPS : sub[2] === 'text' ? TEXT_OPS : NUM_OPS;
+function defaultCond(subject) {
+	const kind = (SUBJECTS.find((x) => x[0] === subject) || SUBJECTS[1])[2];
+	if (kind === 'word') return { subject, op: 'has', value: '' };
+	if (kind === 'text') return { subject, op: 'eq', value: '' };
+	if (kind === 'role') return { subject, op: 'ge', value: '1' };
+	return { subject, op: 'ge', value: '0' };
+}
+
+// {message}: the value is words and "quoted phrases"; any one is a match.
+// contains: the word or phrase appears as whole words. starts with: the
+// message's first word is one of them (so /help matches "/help vote" but
+// not "/helpme").
+// Case is ignored.
+function terms(value) {
+	const out = [];
+	String(value || '').replace(/"([^"]*)"|(\S+)/g, (m, q, w) => { const t = (q != null ? q : w).trim().toLowerCase(); if (t) out.push(t); return m; });
+	return out;
+}
+// Who a message goes to: Everyone (say -1) or Player (say <their number>).
+// Schedule and Manual flows have no player, so everyone only.
+function toOpts(trigger) {
+	if (trigger === 'join' || trigger === 'chat') return [['all', 'Everyone'], ['player', 'Player']];
+	return [['all', 'Everyone']];
+}
+function whoOpts() { return [['player', 'Player']]; }
+// Times: a plain number is seconds, or use h, m and s together: 90, 90s,
+// 1m20s, 1h, 2h 15m. Stored as typed, run as seconds.
+function parseDur(v) {
+	const s = String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, '');
+	if (!s) return null;
+	if (/^\d+$/.test(s)) return +s;
+	const m = s.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+	if (!m || !(m[1] || m[2] || m[3])) return null;
+	return (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0);
+}
+const BAN_LEN = [['0', 'permanently'], ['60', 'for 1 hour'], ['1440', 'for 1 day'], ['10080', 'for 7 days'], ['43200', 'for 30 days']];
+
+const STEPS = {
+	message:    { label: 'Message', cat: 'msg', group: 'Messages', desc: 'say -1 or say <number>',
+		parts: ['to', { k: 'to', kind: 'select', opts: 'to' }, { k: 'text', kind: 'text', ph: 'Message text' }], def: { to: 'all', text: '' } },
+	playerList: { label: 'Player list', cat: 'msg', group: 'Messages', desc: 'Names of everyone online',
+		parts: ['send the online players to', { k: 'to', kind: 'select', opts: 'to' }], def: { to: 'player' } },
+	wait:       { label: 'Wait', cat: 'time', group: 'Timing', desc: 'Pause before the next step',
+		parts: [{ k: 'time', kind: 'dur', ph: '1m20s' }], def: { time: '10s' } },
+	lock:       { label: 'Lock server', cat: 'server', group: 'Server', desc: '#lock: no new joins', parts: [], def: {} },
+	unlock:     { label: 'Unlock server', cat: 'server', group: 'Server', desc: '#unlock', parts: [], def: {} },
+	shutdown:   { label: 'Shut down server', cat: 'server', group: 'Server', desc: '#shutdown', parts: [], def: {} },
+	kick:       { label: 'Kick', cat: 'player', group: 'Players', desc: 'Kick the player',
+		parts: [{ k: 'who', kind: 'select', opts: 'who' }, 'reason', { k: 'reason', kind: 'text', ph: 'Reason shown to them' }], def: { who: 'player', reason: '' } },
+	ban:        { label: 'Ban', cat: 'player', group: 'Players', desc: 'Ban by GUID, then kick',
+		parts: [{ k: 'who', kind: 'select', opts: 'who' }, { k: 'len', kind: 'select', opts: BAN_LEN }, 'reason', { k: 'reason', kind: 'text', ph: 'Reason' }], def: { who: 'player', len: '0', reason: '' } },
+	kickAll:    { label: 'Kick everyone', cat: 'player', group: 'Players', desc: 'kickall',
+		parts: ['reason', { k: 'reason', kind: 'text', ph: 'Server restart' }], def: { reason: 'Server restart' } },
+	if:         { label: 'If', cat: 'logic', group: 'Logic', desc: 'Run steps only when… (comes with its End if)',
+		parts: [{ k: 'subject', kind: 'select', opts: 'subjects' }, { k: 'op', kind: 'select', opts: 'ops' }, { k: 'value', kind: 'val' }], def: { subject: 'player_ping', op: 'ge', value: '500' } },
+	stop:       { label: 'Stop flow', cat: 'logic', group: 'Logic', desc: 'End the run here', parts: ['end the run here'], def: {} },
+	command:    { label: 'RCON command', cat: 'adv', group: 'Advanced', desc: 'Any command, placeholders allowed',
+		parts: [{ k: 'cmd', kind: 'text', ph: 'kick {player_id} Example', mono: true }], def: { cmd: '' } }
+};
+const GROUPS = ['Messages', 'Timing', 'Server', 'Players', 'Logic', 'Advanced'];
+const STOP_TYPES = ['message', 'lock', 'unlock', 'kickAll', 'command'];
+
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs, ...kids) {
+	const n = document.createElement(tag);
+	if (attrs) for (const [k, v] of Object.entries(attrs)) {
+		if (v === false || v == null) continue;
+		if (k === 'class') n.className = v;
+		else if (k === 'text') n.textContent = v;
+		else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+		else n.setAttribute(k, v === true ? '' : v);
+	}
+	for (const c of kids.flat(Infinity)) if (c != null) n.append(c);
+	return n;
+}
+function ctx(f) {
+	const t = f.trigger.type;
+	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat' };
+}
+const secsOf = (v) => parseDur(v) || 0;
+// An If: { type: 'if', branches: [{ subject, op, value, steps }, ...], else: [steps] | null }.
+// branches[0] is the If, the rest are Else ifs (checked in order), then the Else.
+const lists = (s) => s.branches.map((b) => b.steps).concat(s.else ? [s.else] : []);
+function countSteps(list) {
+	let n = 0;
+	for (const s of list) { n++; if (s.type === 'if') for (const l of lists(s)) n += countSteps(l); }
+	return n;
+}
+function fmtSecs(secs) {
+	if (!secs) return '0s';
+	const h = Math.floor(secs / 3600), m = Math.floor(secs % 3600 / 60), s = secs % 60;
+	return (h ? h + 'h ' : '') + (m ? m + 'm ' : '') + (s ? s + 's' : '');
+}
+const pad = (n) => String(n).padStart(2, '0');
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtClock = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+const fmtWhen = (d) => DAYS[d.getDay()] + ' ' + pad(d.getDate()) + ' ' + MONS[d.getMonth()] + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+function runLength(list) {
+	let len = 0;
+	for (const s of list) {
+		if (s.type === 'wait') len += secsOf(s.time);
+		else if (s.type === 'if') len += Math.max(0, ...lists(s).map(runLength));
+	}
+	return len;
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+// An If owns its branches and steps; its Else if, Else and End if rows are drawn
+// from that, so they can't come apart from their If.
+function stepNeeds(s) {
+	const n = [];
+	if ((s.type === 'message' || s.type === 'playerList') && s.to === 'player') n.push(['player', 'Player']);
+	if (s.type === 'kick' || s.type === 'ban') n.push(['player', 'Kick and Ban']);
+	for (const k of ['text', 'reason', 'cmd']) {
+		const v = s[k] || '';
+		for (const t of TOKENS) if (v.includes(t.tok)) n.push([t.need, t.tok]);
+	}
+	return n;
+}
+function condErr(c, b) {
+	const sub = subjectOf(b);
+	if (!c[sub[3]]) return sub[1] + ' ' + NEED_TEXT[sub[3]];
+	if ((sub[2] === 'num' || sub[2] === 'role') && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
+	if (sub[2] === 'word' && !terms(b.value).length) return 'Enter a word, several words, or a "quoted phrase"';
+	return '';
+}
+function stepErr(c, s) {
+	for (const [need, what] of stepNeeds(s)) if (!c[need]) return what + ' ' + NEED_TEXT[need];
+	if (s.type === 'message' && !String(s.text || '').trim()) return 'Add the message text';
+	if (s.type === 'command' && !String(s.cmd || '').trim()) return 'Type the command to send';
+	if (s.type === 'wait' && !(secsOf(s.time) > 0)) return 'Enter a time: 30 (seconds), 90s, 1m20s or 1h';
+	if (s.type === 'if' && subjectOf(s)[2] === 'num' && !/^\d+$/.test(String(s.value).trim())) return 'Enter a whole number';
+	return '';
+}
+// Step numbers in the order the rows are shown (Else and End if rows have none).
+function numbering(list, map = new Map()) {
+	for (const s of list) {
+		map.set(s, map.size + 1);
+		if (s.type === 'if') for (const l of lists(s)) numbering(l, map);
+	}
+	return map;
+}
+function validate(f, list) {
+	const c = ctx(f);
+	const nums = numbering(list);
+	const errs = new Map();
+	let first = null;
+	for (const [s, n] of nums) {
+		if (s.type === 'if') {
+			for (const b of s.branches) {
+				const e = condErr(c, b);
+				if (e) { errs.set(b, e); if (first == null) first = n; }
+			}
+			continue;
+		}
+		const e = stepErr(c, s);
+		if (e) { errs.set(s, e); if (first == null) first = n; }
+	}
+	return { errs, first, nums };
+}
+
+function sendsText(s) {
+	const to = s.to === 'player' ? '{player_id}' : '-1';
+	const who = '{player_id}';
+	switch (s.type) {
+		case 'message': return 'say ' + to + ' ' + (s.text || '');
+		case 'playerList': return 'say ' + to + ' Online (N): name, name, ...';
+		case 'lock': return '#lock';
+		case 'unlock': return '#unlock';
+		case 'shutdown': return '#shutdown';
+		case 'kick': return 'kick ' + who + ' ' + (s.reason || '');
+		case 'ban': return 'addBan {player_guid} ' + s.len + ' ' + (s.reason || '') + ', then kick ' + who;
+		case 'kickAll': return 'kickall ' + (s.reason || 'Server restarting');
+		case 'command': return s.cmd || '';
+	}
+	return '';
+}
+
+function describeIf(s) {
+	const sub = subjectOf(s);
+	const op = opsFor(sub).find((o) => o[0] === s.op) || opsFor(sub)[0];
+	const val = sub[2] === 'role' ? (ROLES.find((r) => r[0] === String(s.value)) || ROLES[0])[1] : sub[2] === 'num' || sub[2] === 'word' || s.op === 'wild' ? s.value : '"' + s.value + '"';
+	return sub[1] + ' ' + op[1] + ' ' + val;
+}
+
+// ---------------------------------------------------------------------------
+// Steps
+// ---------------------------------------------------------------------------
+let rowRefs = { steps: [], onStop: [] };
+let flatRows = { steps: [], onStop: [] };
+let jointRefs = { steps: [], onStop: [] };
+// Else and End if rows repeat their If's condition, e.g. end if {players_online} > 0
+const jointText = (s, isElse) => isElse ? '' : describeIf(s.branches[0]);
+function jointLabel(key, s, isElse) {
+	const span = el('span', { class: 'w', style: 'font-family:var(--mono);font-size:12.5px', text: jointText(s, isElse) });
+	jointRefs[key].push({ span, s, isElse });
+	return span;
+}
+const ifIds = new WeakMap();
+let ifSeq = 0;
+const ifId = (s) => { if (!ifIds.has(s)) ifIds.set(s, ++ifSeq); return ifIds.get(s); };
+
+// One row per step, plus an Else row and an End if row drawn for each If.
+// Every row knows the list and index of the step it belongs to.
+function flatten(list, depth = 0, out = []) {
+	list.forEach((s, i) => {
+		const start = out.length;
+		out.push({ kind: 'step', s, list, i, depth });
+		if (s.type === 'if') {
+			s.branches.forEach((b, k) => {
+				if (k) out.push({ kind: 'elif', s, b, k, list, i, depth });
+				flatten(b.steps, depth + 1, out);
+			});
+			if (s.else) { out.push({ kind: 'else', s, list, i, depth }); flatten(s.else, depth + 1, out); }
+			out.push({ kind: 'end', s, list, i, depth });
+		}
+		out[start].last = out.length - 1; // last row of this step's block
+	});
+	return out;
+}
+function findParent(root, target) {
+	for (let i = 0; i < root.length; i++) {
+		const s = root[i];
+		if (s.type !== 'if') continue;
+		const ls = lists(s);
+		const idx = ls.indexOf(target);
+		if (idx >= 0) return { node: s, idx, ls, list: root, i };
+		for (const l of ls) { const r = findParent(l, target); if (r) return r; }
+	}
+	return null;
+}
+
+function renderSteps(key) {
+	const box = key === 'steps' ? $('steps') : $('onStop');
+	const list = ed[key];
+	box.textContent = '';
+	rowRefs[key] = [];
+	flatRows[key] = [];
+	jointRefs[key] = [];
+	if (!list.length) {
+		box.append(el('div', { class: 'empty', text: key === 'steps' ? 'No steps yet. Add the first one below.' : 'Nothing is sent when stopped.' }));
+		return;
+	}
+	const { errs, nums } = validate(ed, list);
+	const rows = flatten(list);
+	flatRows[key] = rows;
+	rows.forEach((r, ri) => {
+		const s = r.s, n = nums.get(s);
+		const style = 'margin-left:' + (r.depth * 26) + 'px';
+		let row;
+		if (r.kind === 'step') {
+			const def = STEPS[s.type];
+			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
+			const obj = s.type === 'if' ? s.branches[0] : s;
+			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key));
+			const sends = el('div', { class: 'sends' });
+			const err = el('div', { class: 'err' });
+			const atTop = r.list === list && r.i === 0;
+			const atBottom = r.list === list && r.i === list.length - 1;
+			const what = s.type === 'if' ? 'If block on step ' + n : 'step ' + n;
+			row = el('div', { class: 'step', 'data-r': ri, 'data-if': s.type === 'if' ? ifId(s) : null, style },
+				el('span', { class: 'grip', title: s.type === 'if' ? 'Drag to move the whole If block' : 'Drag to move', 'aria-hidden': 'true', text: '⋮⋮' }),
+				el('span', { class: 'num', text: String(n) }),
+				el('div', { class: 'body' }, sentence, sends, err),
+				el('div', { class: 'tools' },
+					s.type === 'if' ? el('button', { type: 'button', class: 'addelse', title: 'Add an Else if (checked after the ones above it)', 'aria-label': 'Add Else if to step ' + n, onclick: () => { s.branches.push(sameSubject(s.branches[0])); changed(true); }, text: '+ Else if' }) : null,
+					s.type === 'if' && !s.else ? el('button', { type: 'button', class: 'addelse', title: 'Add an Else to this If', 'aria-label': 'Add Else to step ' + n, onclick: () => { s.else = []; changed(true); }, text: '+ Else' }) : null,
+					el('button', { type: 'button', title: 'Move up', 'aria-label': 'Move ' + what + ' up', disabled: atTop, onclick: () => moveStep(key, r.list, r.i, -1), text: '▲' }),
+					el('button', { type: 'button', title: 'Move down', 'aria-label': 'Move ' + what + ' down', disabled: atBottom, onclick: () => moveStep(key, r.list, r.i, 1), text: '▼' }),
+					el('button', { type: 'button', title: s.type === 'if' ? 'Duplicate the whole If block' : 'Duplicate', 'aria-label': 'Duplicate ' + what, onclick: () => { r.list.splice(r.i + 1, 0, clone(s)); changed(true); }, text: '⧉' }),
+					el('button', { type: 'button', title: s.type === 'if' ? 'Delete the If and every step inside it' : 'Delete', 'aria-label': 'Delete ' + what, onclick: () => { r.list.splice(r.i, 1); changed(true); }, text: '✕' })
+				)
+			);
+			rowRefs[key].push({ row, sends, err, s, ek: obj });
+		} else if (r.kind === 'elif') {
+			const b = r.b, k = r.k;
+			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill logic', text: 'Else if' }));
+			// An Else if always compares the same thing as its If; only the operator and value change.
+			for (const p of STEPS.if.parts) sentence.append(p.k === 'subject'
+				? el('span', { class: 'w', title: 'Set by the If: change it there', style: 'color:var(--fg);font-family:var(--mono);font-size:12.5px;padding:0 4px', text: subjectOf(b)[1] })
+				: field(b, p, key));
+			const err = el('div', { class: 'err' });
+			const what = 'Else if ' + k + ' of step ' + n;
+			row = el('div', { class: 'step joint branch', 'data-r': ri, 'data-if': ifId(s), style },
+				el('span', { class: 'grip', 'aria-hidden': 'true' }),
+				el('span', { class: 'num' }),
+				el('div', { class: 'body' }, sentence, err),
+				el('div', { class: 'tools' },
+					el('button', { type: 'button', title: 'Check this one earlier', 'aria-label': 'Move ' + what + ' up', onclick: () => moveBranch(key, s, k, -1), text: '▲' }),
+					el('button', { type: 'button', title: 'Check this one later', 'aria-label': 'Move ' + what + ' down', disabled: k === s.branches.length - 1, onclick: () => moveBranch(key, s, k, 1), text: '▼' }),
+					el('button', { type: 'button', title: 'Remove this Else if (its steps move below the End if)', 'aria-label': 'Remove ' + what,
+						onclick: () => { const [gone] = s.branches.splice(k, 1); r.list.splice(r.i + 1, 0, ...gone.steps); changed(true); }, text: '✕' })
+				)
+			);
+			rowRefs[key].push({ row, sends: el('div'), err, s: b, ek: b });
+		} else {
+			const isElse = r.kind === 'else';
+			row = el('div', { class: 'step joint', 'data-r': ri, 'data-if': ifId(s), style },
+				el('span', { class: 'grip', 'aria-hidden': 'true' }),
+				el('span', { class: 'num' }),
+				el('div', { class: 'body' }, el('div', { class: 'sentence' },
+					el('span', { class: 'pill logic', text: isElse ? 'Else' : 'End if' }),
+					jointLabel(key, s, isElse))),
+				el('div', { class: 'tools' }, isElse ? el('button', {
+					type: 'button', title: 'Remove the Else (its steps move below the End if)', 'aria-label': 'Remove Else of step ' + n,
+					onclick: () => { const moved = s.else; s.else = null; r.list.splice(r.i + 1, 0, ...moved); changed(true); }, text: '✕'
+				}) : null)
+			);
+		}
+		box.append(row);
+	});
+	updateDerivedRows(key, errs);
+}
+
+function field(s, p, key) {
+	if (p.kind === 'select') {
+		let opts = p.opts;
+		if (opts === 'subjects') { const c = ctx(ed); opts = SUBJECTS.filter((x) => c[x[3]] || x[0] === s.subject).map(([v, l]) => [v, l]); }
+		if (opts === 'ops') opts = opsFor(subjectOf(s));
+		if (opts === 'to') opts = toOpts(ed.trigger.type);
+		if (opts === 'who') opts = whoOpts();
+		if (key === 'onStop' && p.k === 'to') opts = [['all', 'everyone']];
+		if (!opts.some(([v]) => v === String(s[p.k]))) s[p.k] = opts[0][0];
+		// Only one choice: show it as words, not a dropdown.
+		if (opts.length === 1) return el('span', { class: 'w', style: 'color:var(--fg)', text: opts[0][1] });
+		const sel = el('select', { 'aria-label': p.k }, opts.map(([v, l]) => el('option', { value: v, text: l, selected: String(s[p.k]) === v })));
+		sel.addEventListener('change', () => {
+			s[p.k] = sel.value;
+			if (p.k === 'subject') Object.assign(s, defaultCond(s.subject));
+			changed(true);
+		});
+		return sel;
+	}
+	if (p.kind === 'val' && subjectOf(s)[2] === 'role') {
+		if (!ROLES.some(([v]) => v === String(s.value))) s.value = '1';
+		const sel = el('select', { 'aria-label': 'player_role' }, ROLES.map(([v, l]) => el('option', { value: v, text: l, selected: String(s.value) === v })));
+		sel.addEventListener('change', () => { s.value = sel.value; changed(false); });
+		return sel;
+	}
+	const cls = p.kind === 'text' ? 'text' : p.kind === 'dur' ? 'dur' : 'val';
+	const inp = el('input', { class: cls, value: s[p.k] == null ? '' : s[p.k], placeholder: p.ph || '', 'aria-label': p.k, autocomplete: 'off', spellcheck: p.kind === 'text' && !p.mono ? 'true' : 'false', style: p.mono ? 'font-family:var(--mono);font-size:13px' : null });
+	if (p.kind === 'val') {
+		const kind = subjectOf(s)[2];
+		inp.placeholder = kind === 'num' ? '0' : kind === 'word' ? (s.op === 'starts' ? '/discord' : 'noob idiot "a phrase"') : s.op === 'wild' ? '*admin* or 192.168.*' : 'exact value';
+	}
+	if (p.kind === 'dur') {
+		const chk = () => inp.classList.toggle('bad', !(parseDur(inp.value) > 0));
+		chk();
+		inp.addEventListener('input', chk);
+	}
+	inp.addEventListener('input', () => { s[p.k] = inp.value; changed(false); });
+	if (p.kind === 'text') inp.addEventListener('focus', () => { lastText = inp; });
+	return inp;
+}
+
+function updateDerivedRows(key, errs) {
+	if (!errs) errs = validate(ed, ed[key]).errs;
+	for (const j of jointRefs[key]) j.span.textContent = jointText(j.s, j.isElse);
+	for (const r of rowRefs[key]) {
+		let t = r.s.type ? sendsText(r.s) : '';
+		if (r.s.type === 'wait') {
+			const secs = secsOf(r.s.time);
+			t = secs > 0 ? 'waits ' + secs + ' second' + (secs === 1 ? '' : 's') : '';
+		} else if (t) t = 'sends: ' + t;
+		r.sends.textContent = t;
+		r.sends.hidden = !t;
+		const e = errs.get(r.ek || r.s) || '';
+		r.err.textContent = e;
+		r.err.hidden = !e;
+		r.row.classList.toggle('has-err', !!e);
+	}
+}
+
+// ▲ and ▼ move a step (an If brings its whole block) one row at a time,
+// stepping into and out of If blocks on the way.
+function stepUp(root, list, i) {
+	const s = list[i];
+	if (i > 0) {
+		const prev = list[i - 1];
+		list.splice(i, 1);
+		if (prev.type === 'if') { const ls = lists(prev); ls[ls.length - 1].push(s); }
+		else list.splice(i - 1, 0, s);
+		return true;
+	}
+	const p = findParent(root, list);
+	if (!p) return false;
+	list.splice(i, 1);
+	if (p.idx > 0) p.ls[p.idx - 1].push(s);
+	else p.list.splice(p.i, 0, s);
+	return true;
+}
+function stepDown(root, list, i) {
+	const s = list[i];
+	if (i < list.length - 1) {
+		const next = list[i + 1];
+		list.splice(i, 1);
+		if (next.type === 'if') next.branches[0].steps.unshift(s);
+		else list.splice(i + 1, 0, s);
+		return true;
+	}
+	const p = findParent(root, list);
+	if (!p) return false;
+	list.splice(i, 1);
+	if (p.idx < p.ls.length - 1) p.ls[p.idx + 1].unshift(s);
+	else p.list.splice(p.i + 1, 0, s);
+	return true;
+}
+function moveStep(key, list, i, dir) {
+	const s = list[i];
+	if (!(dir < 0 ? stepUp(ed[key], list, i) : stepDown(ed[key], list, i))) return;
+	changed(true);
+	const ref = rowRefs[key].find((r) => r.s === s);
+	const btn = ref && ref.row.querySelector(dir < 0 ? '[title="Move up"]' : '[title="Move down"]');
+	if (btn && !btn.disabled) btn.focus();
+}
+
+// Else ifs swap places with the condition above or below; moving one above
+// the first makes it the If.
+function moveBranch(key, s, k, dir) {
+	const b = s.branches, j = k + dir;
+	if (j < 0 || j >= b.length) return;
+	[b[k], b[j]] = [b[j], b[k]];
+	changed(true);
+	const moved = b[j];
+	const ref = rowRefs[key].find((r) => r.ek === moved);
+	const btn = ref && ref.row.querySelector(dir < 0 ? '[title="Check this one earlier"]' : '[title="Check this one later"]');
+	if (btn && !btn.disabled) btn.focus();
+}
+
+// Where a drop above or below a row puts the step.
+function dropPos(r, above) {
+	if (r.kind === 'step') {
+		if (above) return { list: r.list, i: r.i };
+		return r.s.type === 'if' ? { list: r.s.branches[0].steps, i: 0 } : { list: r.list, i: r.i + 1 };
+	}
+	const ls = lists(r.s);
+	if (r.kind === 'elif') return above ? { list: ls[r.k - 1], i: ls[r.k - 1].length } : { list: r.b.steps, i: 0 };
+	const lastBranch = r.s.branches[r.s.branches.length - 1].steps;
+	if (r.kind === 'else') return above ? { list: lastBranch, i: lastBranch.length } : { list: r.s.else, i: 0 };
+	const last = ls[ls.length - 1];
+	return above ? { list: last, i: last.length } : { list: r.list, i: r.i + 1 };
+}
+
+function setupDrag(box) {
+	const key = box.id === 'steps' ? 'steps' : 'onStop';
+	let drag = null;
+	const rowsEls = () => [...box.querySelectorAll('.step')];
+	box.addEventListener('pointerdown', (e) => {
+		const g = e.target.closest('.grip');
+		const row = g && g.closest('.step');
+		if (row && !row.classList.contains('joint')) row.draggable = true;
+	});
+	box.addEventListener('dragstart', (e) => {
+		const row = e.target.closest('.step');
+		if (!row || !row.draggable) { e.preventDefault(); return; }
+		const ri = +row.dataset.r;
+		const r = flatRows[key][ri];
+		drag = { r, from: ri, to: r.last };
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('text/plain', String(ri));
+		rowsEls().forEach((x) => { const j = +x.dataset.r; if (j >= drag.from && j <= drag.to) x.classList.add('dragging'); });
+	});
+	const clearDrop = () => box.querySelectorAll('.step').forEach((r) => r.classList.remove('drop-above', 'drop-below'));
+	const clear = () => box.querySelectorAll('.step').forEach((r) => r.classList.remove('drop-above', 'drop-below', 'dragging'));
+	const above = (e, row) => e.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2;
+	// A block can't be dropped inside itself.
+	const target = (e) => {
+		const row = e.target.closest('.step');
+		if (!drag || !row) return null;
+		const ri = +row.dataset.r;
+		if (ri >= drag.from && ri <= drag.to) return null;
+		const ab = above(e, row);
+		return { row, ab, pos: dropPos(flatRows[key][ri], ab) };
+	};
+	box.addEventListener('dragover', (e) => {
+		const t = target(e);
+		clearDrop();
+		if (!t) return;
+		e.preventDefault();
+		t.row.classList.add(t.ab ? 'drop-above' : 'drop-below');
+	});
+	box.addEventListener('drop', (e) => {
+		e.preventDefault();
+		const t = target(e);
+		const d = drag;
+		drag = null;
+		clear();
+		if (!t || !d) return;
+		const s = d.r.list.splice(d.r.i, 1)[0];
+		let ti = t.pos.i;
+		if (t.pos.list === d.r.list && ti > d.r.i) ti--;
+		t.pos.list.splice(ti, 0, s);
+		changed(true);
+	});
+	box.addEventListener('dragend', () => {
+		drag = null;
+		clear();
+		box.querySelectorAll('.step').forEach((r) => { r.draggable = false; });
+	});
+	// Pointing at an If, its Else or its End if lights up all three.
+	box.addEventListener('mouseover', (e) => {
+		const row = e.target.closest('.step');
+		const id = row && row.dataset.if;
+		box.querySelectorAll('.step.hl').forEach((x) => { if (x.dataset.if !== id) x.classList.remove('hl'); });
+		if (id) box.querySelectorAll('.step[data-if="' + id + '"]').forEach((x) => x.classList.add('hl'));
+	});
+	box.addEventListener('mouseleave', () => box.querySelectorAll('.step.hl').forEach((x) => x.classList.remove('hl')));
+}
+
+// ---------------------------------------------------------------------------
+// Add-step menus and placeholder chips
+// ---------------------------------------------------------------------------
+function whyDisabled(type, key) {
+	if (key === 'onStop') return STOP_TYPES.includes(type) ? '' : 'not for Stop';
+	if ((type === 'kick' || type === 'ban') && !ctx(ed).player) return 'needs On join or Player message';
+	return '';
+}
+function openMenu(key) {
+	const menu = key === 'steps' ? $('menu') : $('stopMenu');
+	const btn = key === 'steps' ? $('addBtn') : $('addStopBtn');
+	if (!menu.hidden) { closeMenus(); return; }
+	closeMenus();
+	menu.textContent = '';
+	for (const g of GROUPS) {
+		const items = Object.entries(STEPS).filter(([t, d]) => d.group === g && (key === 'steps' || STOP_TYPES.includes(t)));
+		if (!items.length) continue;
+		const grp = el('div', { class: 'grp' }, el('div', { class: 'gl', text: g }));
+		for (const [type, d] of items) {
+			const why = whyDisabled(type, key);
+			grp.append(el('button', { type: 'button', disabled: !!why, title: why || d.desc, onclick: () => addStep(key, type) }, d.label, el('small', { text: why || d.desc })));
+		}
+		menu.append(grp);
+	}
+	menu.hidden = false;
+	btn.setAttribute('aria-expanded', 'true');
+	menu.scrollIntoView({ block: 'nearest' });
+	const first = menu.querySelector('button:not(:disabled)');
+	if (first) first.focus();
+}
+function closeMenus() {
+	for (const [m, b] of [['menu', 'addBtn'], ['stopMenu', 'addStopBtn']]) {
+		$(m).hidden = true;
+		$(b).setAttribute('aria-expanded', 'false');
+	}
+}
+// A new condition on the same subject as the If, with a fresh operator and value.
+function sameSubject(first) {
+	return Object.assign(defaultCond(first.subject), { steps: [] });
+}
+// Keep every Else if on its If's subject (after the If's subject changes).
+function syncIfs(list) {
+	for (const s of list) {
+		if (s.type !== 'if') continue;
+		const first = s.branches[0];
+		s.branches.forEach((b, k) => {
+			if (k && b.subject !== first.subject) Object.assign(b, sameSubject(first), { steps: b.steps });
+		});
+		for (const l of lists(s)) syncIfs(l);
+	}
+}
+function newCond() {
+	const c = ctx(ed);
+	return Object.assign(defaultCond(c.chat ? 'message' : c.player ? 'player_ping' : 'players_online'), { steps: [] });
+}
+function addStep(key, type) {
+	const s = Object.assign({ type }, clone(STEPS[type].def));
+	if ((type === 'message' || type === 'playerList') && key === 'steps') s.to = ctx(ed).player ? 'player' : 'all';
+	if (type === 'playerList' && ed.trigger.type === 'chat') s.to = 'player';
+
+	if (type === 'if') { delete s.subject; delete s.op; delete s.value; s.branches = [newCond()]; s.else = null; }
+	ed[key].push(s);
+	closeMenus();
+	changed(true);
+	const target = rowRefs[key].find((r) => r.s === s);
+	if (target) {
+		const f = target.row.querySelector('input, select');
+		if (f) f.focus();
+		target.row.scrollIntoView({ block: 'nearest' });
+	}
+}
+document.addEventListener('click', (e) => { if (!e.target.closest('.addrow')) closeMenus(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
+
+function renderChips() {
+	const c = ctx(ed);
+	const box = $('chips');
+	box.textContent = '';
+	box.append('Insert:');
+	for (const t of TOKENS) {
+		if (t.need && !c[t.need]) continue;
+		box.append(el('button', {
+			type: 'button', title: t.title, text: t.tok,
+			onmousedown: (e) => e.preventDefault(),
+			onclick: () => {
+				let inp = lastText && document.body.contains(lastText) ? lastText : $('steps').querySelector('input.text');
+				if (!inp) return;
+				const a = inp.selectionStart ?? inp.value.length, b = inp.selectionEnd ?? inp.value.length;
+				inp.value = inp.value.slice(0, a) + t.tok + inp.value.slice(b);
+				inp.focus();
+				inp.setSelectionRange(a + t.tok.length, a + t.tok.length);
+				inp.dispatchEvent(new Event('input'));
+			}
+		}));
+	}
+}
+
+
+// ---------------------------------------------------------------------------
+// Editing a flow
+// ---------------------------------------------------------------------------
+// ed is the flow being edited, in the editor's shape: the trigger is an
+// object { type, cron, delay }. toEditor and fromEditor convert to and from
+// what /api/flows uses.
+let ed = null;
+let edSaved = '';   // ed as last opened or saved, to tell if it changed
+let lastText = null;
+
+function toEditor(f) {
+	return {
+		id: f.id || 0, name: f.name || '', scheduleEnabled: !!f.scheduleEnabled,
+		trigger: { type: f.trigger || 'manual', cron: f.trigger === 'schedule' ? (f.schedule || '') : '0 6 * * *', delay: f.delay || '' },
+		steps: clone(f.steps || []), onStop: clone(f.onStop || [])
+	};
+}
+function fromEditor() {
+	const t = ed.trigger;
+	return {
+		id: ed.id, name: ed.name, scheduleEnabled: ed.scheduleEnabled, trigger: t.type,
+		schedule: t.type === 'schedule' ? t.cron : '', delay: t.delay || '',
+		steps: ed.steps, onStop: t.type === 'schedule' || t.type === 'manual' ? ed.onStop : []
+	};
+}
+const edChanged = () => !!ed && JSON.stringify(fromEditor()) !== edSaved;
+
+function openEditor(f, title) {
+	ed = toEditor(f);
+	edSaved = JSON.stringify(fromEditor());
+	$('edTitle').textContent = title;
+	$('edMsg').textContent = '';
+	$('editModal').style.display = 'flex';
+	renderAll();
+	$('editModal').querySelector('.fb-scroll').scrollTop = 0;
+	if (!ed.name) $('fName').focus();
+}
+window.newFlow = function () {
+	openEditor({ trigger: 'manual', steps: [], onStop: [] }, 'New flow');
+};
+window.editFlow = function (id) {
+	const f = flows.find((x) => x.id === id);
+	if (f) openEditor(f, 'Edit flow');
+};
+function closeEditor() {
+	closeMenus();
+	$('editModal').style.display = 'none';
+	ed = null;
+}
+window.editorOpen = () => $('editModal').style.display === 'flex';
+window.cancelEditor = function () {
+	if (!edChanged()) { closeEditor(); return; }
+	showConfirm('Discard changes?', 'Your changes to this flow haven\'t been saved.', 'Discard', closeEditor);
+};
+$('edCancel').addEventListener('click', window.cancelEditor);
+
+// ---------------------------------------------------------------------------
+// Trigger
+// ---------------------------------------------------------------------------
+let previewTimer = null;
+function renderTrigger() {
+	const seg = $('trigSeg');
+	seg.textContent = '';
+	for (const [id, label] of TRIGGERS) {
+		seg.append(el('button', {
+			type: 'button', 'aria-pressed': String(ed.trigger.type === id), text: label,
+			onclick: () => {
+				if (ed.trigger.type === id) return;
+				ed.trigger = { type: id, cron: ed.trigger.cron || '0 6 * * *', delay: ed.trigger.delay };
+				renderAll();
+			}
+		}));
+	}
+	const box = $('trigFields');
+	box.textContent = '';
+	const t = ed.trigger;
+	if (t.type === 'schedule') {
+		const i = el('input', { value: t.cron || '', placeholder: '0 6 * * *', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Schedule (cron)' });
+		i.addEventListener('input', () => { t.cron = i.value; queuePreview(); });
+		box.append(el('label', { class: 'f' }, 'Schedule (cron)', i));
+	}
+	const d = el('input', { class: 'dur', value: t.delay || '', placeholder: 'none, or e.g. 1m20s', title: 'Seconds, or h m s such as 1m20s', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Delay before step 1' });
+	const check = () => d.classList.toggle('bad', d.value.trim() !== '' && parseDur(d.value) == null);
+	d.addEventListener('input', () => { t.delay = d.value; check(); queuePreview(); });
+	check();
+	box.append(el('label', { class: 'f' }, 'Delay before step 1 (optional)', d));
+	$('stopSection').hidden = !(t.type === 'schedule' || t.type === 'manual');
+	updateTrigHint();
+}
+function queuePreview() {
+	clearTimeout(previewTimer);
+	previewTimer = setTimeout(updateTrigHint, 300);
+}
+// updateTrigHint is the line under the trigger. For a schedule it asks
+// ReCON what the cron expression means and when the next runs start.
+async function updateTrigHint() {
+	if (!ed) return;
+	const t = ed.trigger, h = $('trigHint');
+	const len = runLength(ed.steps), delay = secsOf(t.delay);
+	const lenText = len ? ' The steps take ' + fmtSecs(len).trim() + '.' : '';
+	const delayText = delay ? ' Step 1 starts ' + fmtSecs(delay).trim() + ' after the trigger.' : '';
+	h.className = 'hint';
+	if (t.type === 'join') {
+		h.textContent = 'Runs once for each player who finishes loading in (once "(Lobby)" is gone from their name). They are the Player: {player_name}, {player_id}, {player_ping}, {player_ip}, {player_guid} and {player_role}.' + delayText + lenText;
+		return;
+	}
+	if (t.type === 'chat') {
+		h.textContent = 'Runs for every chat message a player sends. ReCON finds the sender by name among the players online, then uses their GUID, so {player_id}, {player_guid} and the rest are theirs and Player messages go back to them. {message} is what they typed: use an If on it, with contains (any of the words, or a "quoted phrase") or starts with (the first word, such as /discord). Case is ignored.' + delayText;
+		return;
+	}
+	if (t.type === 'manual') {
+		h.textContent = 'Runs only when you press Run (or POST /api/flows/<id>/run).' + delayText + lenText;
+		return;
+	}
+	const sent = JSON.stringify([t.cron, t.delay]);
+	let d;
+	try { d = await post('/api/flows/preview', { trigger: 'schedule', schedule: t.cron, delay: t.delay }); } catch (e) { return; }
+	if (!ed || JSON.stringify([ed.trigger.cron, ed.trigger.delay]) !== sent || ed.trigger.type !== 'schedule') return; // typed on since
+	h.textContent = '';
+	if (!d.ok) { h.className = 'hint bad'; h.textContent = d.error || 'Invalid schedule'; return; }
+	h.append(el('b', { text: d.description }));
+	if (d.next && d.next.length) h.append('. Step 1 runs ' + d.next.join(' · ') + '.');
+	h.append(lenText);
+}
+
+// ---------------------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------------------
+function changed(structural) {
+	syncIfs(ed.steps);
+	if (structural) { renderSteps('steps'); renderSteps('onStop'); }
+	else { updateDerivedRows('steps'); updateDerivedRows('onStop'); }
+	if (ed.trigger.type !== 'schedule') updateTrigHint();
+}
+function renderAll() {
+	$('fName').value = ed.name;
+	renderTrigger();
+	renderChips();
+	renderSteps('steps');
+	renderSteps('onStop');
+}
+$('fName').addEventListener('input', (e) => { ed.name = e.target.value; });
+$('addBtn').addEventListener('click', () => openMenu('steps'));
+$('addStopBtn').addEventListener('click', () => openMenu('onStop'));
+$('saveBtn').addEventListener('click', async () => {
+	const msg = $('edMsg');
+	msg.textContent = '';
+	if (!ed.name.trim()) { msg.textContent = 'Name the flow first.'; $('fName').focus(); return; }
+	const bad = validate(ed, ed.steps).first;
+	if (bad != null) { msg.textContent = 'Fix step ' + bad + ' first (shown in red).'; return; }
+	const badStop = validate(ed, ed.onStop).first;
+	if (badStop != null && !$('stopSection').hidden) { msg.textContent = 'Fix When stopped step ' + badStop + ' first.'; return; }
+	let d;
+	try { d = await post('/api/flows', fromEditor()); } catch (e) { msg.textContent = 'ReCON could not be reached; the flow was not saved.'; return; }
+	if (!d.ok) { msg.textContent = d.error || 'Save failed'; return; }
+	closeEditor();
+	refresh();
+});
+setupDrag($('steps'));
+setupDrag($('onStop'));
+
+})();
+
+// ---------------------------------------------------------------------------
+// Chat commands dialog: GET/POST /api/chat-commands. The commands, their
+// labels, defaults and allowed placeholders all come from ReCON.
+// ---------------------------------------------------------------------------
+(function () {
+'use strict';
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs, ...kids) {
+	const n = document.createElement(tag);
+	if (attrs) for (const [k, v] of Object.entries(attrs)) {
+		if (v === false || v == null) continue;
+		if (k === 'class') n.className = v;
+		else if (k === 'text') n.textContent = v;
+		else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+		else n.setAttribute(k, v === true ? '' : v);
+	}
+	for (const c of kids.flat(Infinity)) if (c != null) n.append(c);
+	return n;
+}
+const clone = (o) => JSON.parse(JSON.stringify(o));
+// Times: a plain number is seconds, or h/m/s such as 1m30s.
+function parseDur(v) {
+	const s = String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, '');
+	if (!s) return null;
+	if (/^\d+$/.test(s)) return +s;
+	const m = s.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+	if (!m || !(m[1] || m[2] || m[3])) return null;
+	return (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0);
+}
+
+let CMDS = [], DEFAULTS = {}, saved = {}, draft = null;
+
+function setMsg(text, cls) { const m = $('cmdMsg'); m.className = cls || ''; m.textContent = text || ''; }
+
+function durInput(id, value, ph, zeroOk, set) {
+	const i = el('input', { class: 'dur', id, value, placeholder: ph, autocomplete: 'off', spellcheck: 'false', title: 'Seconds, or h m s such as 1m30s' });
+	const chk = () => { const v = parseDur(i.value); i.classList.toggle('bad', v == null || (!zeroOk && v === 0)); };
+	i.addEventListener('input', () => { set(i.value); chk(); dirty(); });
+	chk();
+	return i;
+}
+function unknown(text, allowed) {
+	return [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((k) => !allowed.includes(k));
+}
+
+function renderCmds() {
+	const list = $('cmdList');
+	list.textContent = '';
+	for (const c of CMDS) {
+		const s = draft[c.cmd];
+		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '/' + c.cmd, c.staff ? el('span', { class: 'who', text: 'MODS & ADMINS' }) : null));
+		const on = el('input', { type: 'checkbox', checked: s.on, id: 'on-' + c.cmd });
+		head.append(el('label', { class: 'opt', for: 'on-' + c.cmd }, on, 'On'));
+		head.append(el('label', { class: 'opt', for: 'cool-' + c.cmd }, 'Cooldown', durInput('cool-' + c.cmd, s.cool, '0', true, (v) => { s.cool = v; })));
+		if (c.length) {
+			head.append(el('label', { class: 'opt', for: 'len-' + c.cmd }, 'Vote lasts', durInput('len-' + c.cmd, s.length, '5m', false, (v) => { s.length = v; })));
+		}
+		let annBox = null;
+		if (c.announce) {
+			annBox = el('input', { type: 'checkbox', checked: s.announce, id: 'ann-' + c.cmd });
+			head.append(el('label', { class: 'opt', for: 'ann-' + c.cmd }, annBox, 'Announce to everyone'));
+		}
+		const fields = el('div', { class: 'fields' });
+		const row = el('div', { class: 'cmd' + (s.on ? '' : ' off') }, head, fields);
+		on.addEventListener('change', () => { s.on = on.checked; row.classList.toggle('off', !s.on); dirty(); });
+		for (const f of c.fields) {
+			const inp = el('input', { value: s.msgs[f.key], spellcheck: 'false', autocomplete: 'off', id: 'f-' + c.cmd + '-' + f.key });
+			const err = el('div', { class: 'err' });
+			const wrap = el('div', { class: 'field' }, el('label', { for: inp.id, text: f.label }), inp, err,
+				el('div', { class: 'ph' }, 'Can use: ', f.ph.map((k, i) => [i ? ' ' : '', el('code', { text: '{' + k + '}' })])));
+			const upd = () => {
+				const bad = unknown(inp.value, f.ph);
+				inp.classList.toggle('bad', bad.length > 0 || !inp.value.trim());
+				err.textContent = !inp.value.trim() ? 'This message can\'t be empty.' : bad.length ? 'Not available here: ' + bad.map((k) => '{' + k + '}').join(', ') : '';
+				err.hidden = !err.textContent;
+			};
+			inp.addEventListener('input', () => { s.msgs[f.key] = inp.value; upd(); dirty(); });
+			upd();
+			if (f.key === 'announce' && annBox) {
+				const sync = () => { wrap.style.opacity = s.announce ? '' : '.45'; };
+				annBox.addEventListener('change', () => { s.announce = annBox.checked; sync(); dirty(); });
+				sync();
+			}
+			fields.append(wrap);
+		}
+		list.append(row);
+	}
+}
+function hasErrors() { return !!$('cmdList').querySelector('input.bad'); }
+function dirty() {
+	setMsg('');
+	$('cmdSave').disabled = hasErrors() || JSON.stringify(draft) === JSON.stringify(saved);
+}
+window.cmdsOpen = () => $('cmdModal').style.display === 'flex';
+window.closeCmds = () => { $('cmdModal').style.display = 'none'; };
+window.openCmds = async function () {
+	$('cmdList').textContent = 'Loading...';
+	setMsg('');
+	$('cmdSave').disabled = true;
+	$('cmdModal').style.display = 'flex';
+	try {
+		const d = await (await fetch('/api/chat-commands', { cache: 'no-store' })).json();
+		if (!d.ok) throw new Error(d.error);
+		CMDS = d.commands; DEFAULTS = d.defaults; saved = d.settings;
+	} catch (e) {
+		$('cmdList').textContent = 'Could not load the chat command settings.';
+		return;
+	}
+	draft = clone(saved);
+	renderCmds();
+	dirty();
+	$('cmdList').scrollTop = 0;
+};
+$('cmdCancel').addEventListener('click', () => {
+	if (draft && JSON.stringify(draft) !== JSON.stringify(saved)) {
+		showConfirm('Discard changes?', 'Your changes to the chat commands haven\'t been saved.', 'Discard', window.closeCmds);
+		return;
+	}
+	window.closeCmds();
+});
+$('cmdModal').addEventListener('click', (e) => { if (e.target === $('cmdModal')) $('cmdCancel').click(); });
+$('cmdReset').addEventListener('click', () => { draft = clone(DEFAULTS); renderCmds(); dirty(); });
+$('cmdSave').addEventListener('click', async () => {
+	$('cmdSave').disabled = true;
+	try {
+		const d = await post('/api/chat-commands', { settings: draft });
+		if (!d.ok) { setMsg(d.error || 'Save failed', 'bad'); $('cmdSave').disabled = false; return; }
+		saved = d.settings;
+		draft = clone(saved);
+		renderCmds();
+		dirty();
+		setMsg('Saved', 'saved');
+	} catch (e) {
+		setMsg('ReCON could not be reached; nothing was saved.', 'bad');
+		$('cmdSave').disabled = false;
+	}
+});
+})();
 </script>
 </body>
 </html>

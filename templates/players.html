@@ -35,6 +35,25 @@ td.act-left button { margin-right: 0; }
 .badge { font-size: 12px; border-radius: 3px; padding: 1px 6px; color: #ccc; background: #333; }
 .badge.online { color: #111; background: #81c995; }
 .badge.banned { color: #111; background: #f28b82; }
+/* Role badges: next to the name in the tables and in the Details header. */
+.badge.role-1 { color: #111; background: #fdd663; }
+.badge.role-2 { color: #111; background: #f28b82; }
+td .badge { margin-left: 6px; vertical-align: 1px; }
+
+/* Permissions tab */
+.roles { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 14px; }
+.role { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: start; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 12px 14px; cursor: pointer; }
+.role:hover { border-color: #555; }
+.role.sel { border-color: #8ab4f8; background: #1b2433; }
+.role input { width: auto; margin: 3px 0 0; accent-color: #8ab4f8; }
+.role .name { font-weight: 600; }
+.role .name .tagline { font-weight: 400; color: #aaa; font-size: 13px; margin-left: 6px; }
+.role .can { grid-column: 2; color: #bbb; font-size: 13px; line-height: 1.55; }
+.role .can code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #111; padding: 1px 4px; border-radius: 3px; }
+#permState { font-size: 13px; min-height: 1.4em; }
+#permState.saved { color: #81c995; }
+#permState.bad { color: #f28b82; }
+.ownernote { color: #888; font-size: 12.5px; margin-top: 14px; line-height: 1.5; }
 .dtabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid #444; }
 .dtabs button { margin: 0 0 -1px; padding: 7px 14px; font-size: 13px; color: #aaa; background: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; }
 .dtabs button:hover { color: #eee; }
@@ -66,7 +85,7 @@ td.act-left button { margin-right: 0; }
 .notebar .saved { font-size: 13px; color: #81c995; }
 .notebar .unsaved { font-size: 13px; color: #fdd663; }
 .notebar button { margin: 0 0 0 auto; }
-.dfoot { display: flex; justify-content: flex-end; border-top: 1px solid #333; padding-top: 12px; }
+.dfoot { display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 12px; }
 .dfoot button { margin: 0; }
 @media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
@@ -159,8 +178,8 @@ td.act-left button { margin-right: 0; }
 		<div class="dlg-head">
 			<h2 id="detName">Player</h2>
 			<span id="detBadge" class="badge"></span>
+			<span id="detRole" class="badge" hidden></span>
 			<span id="detGuid" class="sub"></span>
-			<button type="button" id="detBan" class="close"></button>
 		</div>
 		<div class="dtabs" id="detTabs">
 			<button type="button" data-tab="overview">Overview</button>
@@ -168,6 +187,7 @@ td.act-left button { margin-right: 0; }
 			<button type="button" data-tab="ips">IPs</button>
 			<button type="button" data-tab="chat">Chat</button>
 			<button type="button" data-tab="notes">Notes</button>
+			<button type="button" data-tab="permissions">Permissions</button>
 		</div>
 		<div class="dpanes">
 			<div class="dpane" data-pane="overview">
@@ -205,9 +225,15 @@ td.act-left button { margin-right: 0; }
 					<span id="noteStatus"></span>
 				</div>
 			</div>
+			<div class="dpane" data-pane="permissions">
+				<div class="hint">What this player can do with the chat commands in game. The role is stored with their GUID, so it stays when they change name. New players are Players. Clicking a role saves it.</div>
+				<div class="roles" id="roles" role="radiogroup" aria-label="Role"></div>
+				<div id="permState"></div>
+				<p class="ownernote">This page is the server owner: its Kick and Ban buttons work on everyone, including Admins.</p>
+			</div>
 		</div>
 		<div id="detErr" class="dlg-err"></div>
-		<div class="dfoot"><button type="button" onclick="closeDetails()">Close</button></div>
+		<div class="dfoot"><button type="button" id="detBan"></button><button type="button" onclick="closeDetails()">Close</button></div>
 	</div>
 </div>
 
@@ -270,6 +296,14 @@ function esc(s) {
 	return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Roles for the chat commands, by number (Players page: Details, Permissions).
+const ROLE_NAMES = ['Player', 'Mod', 'Admin'];
+
+// roleBadge is the Mod or Admin badge shown after a name (nothing for Players).
+function roleBadge(role) {
+	return role > 0 ? ' <span class="badge role-' + role + '">' + ROLE_NAMES[role] + '</span>' : '';
+}
+
 async function api(url, opt = {}) { return fetch(url, opt); }
 
 async function refresh() {
@@ -283,7 +317,7 @@ async function refresh() {
 			let g = esc(p.guid);
 			return '<tr>' +
 				'<td>' + p.id + '</td>' +
-				'<td>' + n + '</td>' +
+				'<td title="' + n + '">' + n + roleBadge(p.role) + '</td>' +
 				'<td class="mono">' + esc(p.ip) + '</td>' +
 				'<td class="mono">' + g + '</td>' +
 				'<td>' + p.ping + '</td>' +
@@ -307,7 +341,7 @@ async function refresh() {
 			let playtime = (days ? days + 'd ' : '') + (hours ? hours + 'h ' : '') + minutes + 'm';
 
 			return '<tr>' +
-				'<td>' + esc(p.name) + '</td>' +
+				'<td title="' + esc(p.name) + '">' + esc(p.name) + roleBadge(p.role) + '</td>' +
 				'<td class="mono">' + esc(p.ip) + '</td>' +
 				'<td class="mono">' + esc(p.guid) + '</td>' +
 				'<td>' + playtime + '</td>' +
@@ -702,6 +736,9 @@ async function openDetails(guid) {
 	document.getElementById('detGuid').textContent = guid;
 	document.getElementById('detBan').style.visibility = 'hidden';
 	document.getElementById('detErr').textContent = '';
+	document.getElementById('permState').textContent = '';
+	document.getElementById('detRole').hidden = true;
+	document.getElementById('roles').textContent = '';
 	['detTiles', 'detBanBox', 'detShared', 'detSessions', 'detIPs', 'detChat'].forEach(id => document.getElementById(id).textContent = '');
 	document.getElementById('noteInput').value = '';
 	document.getElementById('detChatInput').value = '';
@@ -860,10 +897,93 @@ function renderDetails(keepDraft) {
 	ci.nextElementSibling.disabled = !p.online;
 	if (detTab === 'chat') loadDetChat();
 
+	// Permissions
+	renderRoleBadge();
+	renderRoles();
+
 	// Notes
 	noteSaved = det.note.text || '';
 	if (!keepDraft) document.getElementById('noteInput').value = noteSaved;
 	updateNoteBar('');
+}
+
+// ---------------------------------------------------------------------------
+// Permissions tab: the player's role for the chat commands
+// ---------------------------------------------------------------------------
+
+// What each role can do, shown under its name. [x] is shown as code.
+const ROLE_INFO = [
+	{ tag: 'normal user (default)', can: ['Can use ', ['/help'], ', ', ['/shout'], ', ', ['/whisper'], ', ', ['/players'], ', ', ['/vote'], ' and ', ['/code'], '.'] },
+	{ tag: 'moderator', can: ['Everything a Player can, plus ', ['/kick'], ' and ', ['/ban'], ' on Players. Gets every ', ['/code'], ' and every kick and ban notice.'] },
+	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['/kick'], ' and ', ['/ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] }
+];
+
+function renderRoleBadge() {
+	let b = document.getElementById('detRole');
+	let r = det ? det.player.role || 0 : 0;
+	b.hidden = r === 0;
+	b.className = 'badge role-' + r;
+	b.textContent = ROLE_NAMES[r];
+}
+
+function renderRoles() {
+	let box = document.getElementById('roles');
+	box.textContent = '';
+	if (!det) return;
+	let cur = det.player.role || 0;
+	ROLE_INFO.forEach(function (info, v) {
+		let input = document.createElement('input');
+		input.type = 'radio';
+		input.name = 'role';
+		input.value = String(v);
+		input.checked = cur === v;
+		input.setAttribute('aria-label', ROLE_NAMES[v]);
+		input.addEventListener('change', () => setRole(v));
+		let name = document.createElement('div');
+		name.className = 'name';
+		name.textContent = ROLE_NAMES[v];
+		let tag = document.createElement('span');
+		tag.className = 'tagline';
+		tag.textContent = info.tag;
+		name.append(tag);
+		let can = document.createElement('div');
+		can.className = 'can';
+		info.can.forEach(function (x) {
+			if (Array.isArray(x)) { let c = document.createElement('code'); c.textContent = x[0]; can.append(c); }
+			else can.append(document.createTextNode(x));
+		});
+		let label = document.createElement('label');
+		label.className = 'role' + (cur === v ? ' sel' : '');
+		label.append(input, name, can);
+		box.append(label);
+	});
+}
+
+// setRole saves a role as soon as it is clicked (POST /api/players/<guid>/role).
+async function setRole(v) {
+	if (!det) return;
+	let guid = det.guid, name = det.player.name;
+	let st = document.getElementById('permState');
+	st.className = '';
+	st.textContent = 'Saving...';
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(guid) + '/role', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ role: v })
+		});
+		let d = await r.json();
+		if (!d.ok) throw new Error(d.error || 'not saved');
+		if (det && det.guid === guid) det.player.role = d.role;
+		st.className = 'saved';
+		st.textContent = 'Saved: ' + name + ' is now ' + (v === 0 ? 'a Player' : v === 1 ? 'a Mod' : 'an Admin');
+		refresh();
+	} catch (e) {
+		st.className = 'bad';
+		st.textContent = 'Role not saved: ' + (e.message || 'ReCON could not be reached');
+	}
+	renderRoleBadge();
+	renderRoles();
 }
 
 // playerLink is another player's name as a link that opens their details.
