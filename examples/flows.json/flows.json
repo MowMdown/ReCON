@@ -1,0 +1,49 @@
+{
+  "flows": [
+    {
+      "name": "Welcome Player",
+      "schedule": "on-join",
+      "timer": "3s",
+      "script": [
+        "if $name == Survivor",
+        "kick $player Name must not be Survivor",
+        "else",
+        "$server = Welcome to this DayZ server!",
+        "say $player $name! $server",
+        "end"
+      ]
+    },
+    {
+      "name": "MOTD",
+      "schedule": "*/20 * * * *",
+      "timer": "30s",
+      "timerMode": "after",
+      "script": [
+        "say -1 Admins are active, please play respectfully.",
+        "wait 3s",
+        "say -1 If you need admin assistance, send a message in game."
+      ]
+    },
+    {
+      "name": "Server restart",
+      "schedule": "0 */6 * * *",
+      "timer": "1h",
+      "timerMode": "before",
+      "script": [
+        "$warn = 60m 30m 15m 10m 5m 3m",
+        "$warn | say -1 Server is going to restart in @minutes minutes!",
+        "2m | #lock",
+        "1m | if $players > 0",
+        "say -1 Server is going down for a restart, you will be kicked!",
+        "wait 10s",
+        "#kickall Server Restart",
+        "end",
+        "0 | #shutdown"
+      ],
+      "cancel": [
+        "say -1 Server restart has been cancelled.",
+        "#unlock"
+      ]
+    }
+  ]
+}
