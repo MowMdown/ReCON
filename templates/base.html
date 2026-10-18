@@ -8,6 +8,9 @@ button { margin-right: 5px; padding: {{.ButtonPadding}}; }
 .modal { display: none; position: fixed; inset: 0; background: #0009; align-items: center; justify-content: center; }
 .box { background: #222; padding: {{.ModalPadding}}; border-radius: 8px; width: min({{.ModalWidth}}, 90vw); }
 input, textarea { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.InputPadding}}; background: #111; color: #eee; border: 1px solid #555; }
+/* Text fields: no browser focus highlight; the blinking cursor shows which
+   one is active. */
+input:focus, textarea:focus { outline: none; }
 .buttons { text-align: right; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
 nav { margin-bottom: 16px; }

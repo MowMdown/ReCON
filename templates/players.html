@@ -167,7 +167,7 @@ td.act-left button { margin-right: 0; }
 			<button type="button" data-tab="sessions">Sessions</button>
 			<button type="button" data-tab="ips">IPs</button>
 			<button type="button" data-tab="chat">Chat</button>
-			<button type="button" data-tab="notes" id="detNotesTab">Notes</button>
+			<button type="button" data-tab="notes">Notes</button>
 		</div>
 		<div class="dpanes">
 			<div class="dpane" data-pane="overview">
@@ -925,9 +925,7 @@ function updateNoteBar(state) {
 	let st = document.getElementById('noteStatus');
 	if (state === 'saving') { st.className = 'saved'; st.textContent = 'Saving...'; }
 	else if (v !== noteSaved) { st.className = 'unsaved'; st.textContent = 'Saves when you close'; }
-	else { st.className = ''; st.textContent = ''; }
-	document.getElementById('detNotesTab').textContent = noteSaved.trim() ? 'Notes •' : 'Notes';
-}
+	else { st.className = ''; st.textContent = ''; }}
 
 document.getElementById('noteInput').addEventListener('input', () => updateNoteBar(''));
 
