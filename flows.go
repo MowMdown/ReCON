@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -11,1195 +12,811 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	_ "time/tzdata" // lets the TZ env var work in minimal container images
 )
 
 // ============================================================================
-// flows.go overview (flows v2)
+// flows.go overview
 // ----------------------------------------------------------------------------
-// A "flow" is a small script that runs once per second ("tick"). Every line
-// that sends something to the server takes one tick; `wait 10s` takes ten;
-// $variable lines take none. The full design is claude/flows-v2-design.md.
+// A flow is a list of steps built on the Flows page: send a message, wait,
+// lock the server, kick the player, an If with Else ifs and an Else, and so
+// on. Steps run top to bottom; only Wait takes time.
 //
-// Each flow can have a Timer, and $timer holds the seconds left on it:
+// Every flow has one trigger:
 //
-//	no Timer   the script runs from the top when the flow is triggered
-//	delay      wait out the Timer, then run from the top
-//	           (manual and join flows; scheduled flows set to "after")
-//	countdown  scheduled flows set to "before": the run starts Timer before
-//	           the cron time and $timer counts down to 0 at it. Only here can
-//	           timed lines be used:
+//	schedule  a cron schedule, while Enabled
+//	join      once for each player who finishes loading in, while Enabled
+//	chat      once for each chat message a player sends, while Enabled
+//	manual    only when Run is pressed
 //
-//	$warn = 60m 30m 15m 10m 5m 3m 2m
-//	$warn | say -1 Server is going to restart in @minutes minutes!
-//	2m    | if $players > 0
-//	  say -1 Locking the server now.
-//	  #lock
-//	end
-//	0     | #shutdown
+// and an optional delay before step 1. "The player" is whoever triggered a
+// join or chat run; {player_name}, {player_id}, {player_ping}, {player_ip},
+// {player_guid}, {player_role} and {message} are filled in from them.
+// Schedule and Manual flows have no player, so they message everyone only.
 //
-// `5m | ...` is shorthand for `if $timer == 5m ... end`. Commands sent when
-// Stop is pressed live in the flow's separate Cancel field.
+// The same file runs the built-in chat commands (/help, /shout, /whisper,
+// /players, /vote, /code, /kick, /ban), since they also react to chat.
 //
-// Sections: time values, parsing, values and conditions, the runner (ticks,
-// sequences, sending commands), save-time analysis and preview, cron, flow
-// definitions and validation, run bookkeeping, the scheduler, and the
-// player-join trigger.
+// Sections: times, steps and conditions, validation, the runner, cron, flow
+// definitions, run bookkeeping, the scheduler, the join and chat triggers,
+// and the chat commands.
 // ============================================================================
 
 // ---------------------------------------------------------------------------
-// Time values: 5s, 10m, 1h, 1m30s (and a bare 0)
+// Times: a plain number of seconds, or h, m and s together (90, 1m20s, 2h 15m)
 // ---------------------------------------------------------------------------
 
-// maxTimeSecs is the longest time a flow can use (Timer, offsets, waits).
-// It matches the 24 hour safety limit on a run.
+// maxTimeSecs is the longest time a flow can use (a wait or the delay). It
+// matches the 24 hour safety limit on a run.
 const maxTimeSecs = 86400
 
-var (
-	timeRe    = regexp.MustCompile(`(?i)^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$`)
-	numberRe  = regexp.MustCompile(`^-?\d+(\.\d+)?$`)
-	varNameRe = regexp.MustCompile(`^\$([A-Za-z_][A-Za-z0-9_]*)$`)
-	varRe     = regexp.MustCompile(`\$([A-Za-z_][A-Za-z0-9_]*)`)
-	assignRe  = regexp.MustCompile(`^\$([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$`)
-	// timeLeftRe finds the @ words. Plurals come first so @hours isn't read
-	// as @hour followed by "s".
-	timeLeftRe = regexp.MustCompile(`@(hours|minutes|seconds|hour|minute|second)\b`)
-	// offsetLikeRe is what can stand left of "|" in a timed line. Signed
-	// offsets and "cancel" are matched so they get a helpful error.
-	offsetLikeRe = regexp.MustCompile(`(?i)^(cancel|[+-]?\s*\d[\dhms\s]*|\$[A-Za-z_][A-Za-z0-9_]*)$`)
-)
+var durRe = regexp.MustCompile(`^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$`)
 
-// timeLit reads a time with units or a bare "0", as total seconds. Units
-// can be combined, largest first: "90s", "5m", "1h", "1m30s", "1h3m15s"
-// (= 3795).
-func timeLit(s string) (int, bool) {
-	s = strings.TrimSpace(s)
-	if s == "0" {
-		return 0, true
-	}
-	m := timeRe.FindStringSubmatch(s)
-	if m == nil || s == "" {
+// parseDur reads a time as typed on the pages: a plain number is seconds
+// ("90"), or h, m and s can be combined, largest first ("90s", "1m20s",
+// "2h 15m"). Spaces and case are ignored. ok is false for anything else.
+func parseDur(s string) (int, bool) {
+	s = strings.ToLower(strings.Join(strings.Fields(s), ""))
+	if s == "" {
 		return 0, false
 	}
-	secs := 0
+	m := durRe.FindStringSubmatch(s)
+	plain := m == nil && strings.Trim(s, "0123456789") == ""
+	if m == nil && !plain {
+		return 0, false
+	}
+	if plain {
+		m = []string{s, "", "", s}
+	}
+	if m[1] == "" && m[2] == "" && m[3] == "" {
+		return 0, false
+	}
+	total := 0
 	for i, mul := range []int{3600, 60, 1} {
-		if m[i+1] != "" {
-			n, err := strconv.Atoi(m[i+1])
-			if err != nil || n > maxTimeSecs {
-				return maxTimeSecs + 1, true
-			}
-			secs += n * mul
+		if m[i+1] == "" {
+			continue
 		}
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil || n > 10*maxTimeSecs {
+			return 10 * maxTimeSecs, true // too long; callers check the limit
+		}
+		total += n * mul
 	}
-	return secs, true
+	return total, true
 }
 
-// parseTime reads a time where one is required, with a user-facing error.
-func parseTime(s string) (int, error) {
-	s = strings.TrimSpace(s)
-	secs, ok := timeLit(s)
-	switch {
-	case !ok && numberRe.MatchString(s):
-		return 0, fmt.Errorf("%q needs a unit, such as %ss or %sm", s, s, s)
-	case !ok:
-		return 0, fmt.Errorf("%q is not a time (examples: 30s, 5m, 1h, 1m30s)", s)
-	case secs > maxTimeSecs:
-		return 0, fmt.Errorf("%q is too long (24h at most)", s)
+// fmtDur writes seconds for log lines: 1h 5m 20s, 45s, 0s.
+func fmtDur(secs int) string {
+	if secs <= 0 {
+		return "0s"
 	}
-	return secs, nil
-}
-
-// fmtLeft writes a number of seconds the way scripts do: 1h, 60m is shown as
-// 1h, 90s as 1m30s, 0 as 0.
-func fmtLeft(secs int) string {
-	if secs == 0 {
-		return "0"
-	}
-	var b strings.Builder
+	var parts []string
 	if h := secs / 3600; h > 0 {
-		fmt.Fprintf(&b, "%dh", h)
+		parts = append(parts, strconv.Itoa(h)+"h")
 	}
 	if m := secs % 3600 / 60; m > 0 {
-		fmt.Fprintf(&b, "%dm", m)
+		parts = append(parts, strconv.Itoa(m)+"m")
 	}
 	if s := secs % 60; s > 0 {
-		fmt.Fprintf(&b, "%ds", s)
+		parts = append(parts, strconv.Itoa(s)+"s")
 	}
-	return b.String()
-}
-
-// fillTimeLeft replaces the @ words with the time left on $timer.
-func fillTimeLeft(s string, timer int) string {
-	if timer < 0 {
-		timer = 0
-	}
-	return timeLeftRe.ReplaceAllStringFunc(s, func(m string) string {
-		switch strings.ToLower(m[1:]) {
-		case "hours", "hour":
-			return strconv.Itoa(timer / 3600)
-		case "minutes":
-			return strconv.Itoa(timer / 60)
-		case "seconds":
-			return strconv.Itoa(timer)
-		case "minute":
-			return fmt.Sprintf("%02d", timer%3600/60)
-		}
-		return fmt.Sprintf("%02d", timer%60) // second
-	})
+	return strings.Join(parts, " ")
 }
 
 // ---------------------------------------------------------------------------
-// Parsing
+// Steps
 // ---------------------------------------------------------------------------
 
-type nodeKind int
-
-const (
-	nodeCmd  nodeKind = iota // an RCON command
-	nodeSet                  // $var = value
-	nodeIf                   // if / else / end, and the wrapper of a timed line
-	nodeDo                   // do ... end: a group of lines
-	nodeEach                 // for each player ... end
-	nodeWait                 // wait <time>
-	nodeStop                 // stop: end the run now
-)
-
-type flowNode struct {
-	kind  nodeKind
-	line  int
-	text  string    // the command, or the value of a $var = value line
-	name  string    // the variable, for nodeSet
-	cond  *flowCond // for nodeIf (nil on a timed line's wrapper)
-	at    *timedAt  // set on a timed line's wrapper: run when $timer is one of these
-	then  []*flowNode
-	els   []*flowNode
-	ticks int  // for nodeWait
-	open  bool // parse-time: still waiting for its "end"
-	inEls bool // parse-time: lines now go to els
+// Step is one row of a flow, stored as JSON in the flows table. Which fields
+// are used depends on Type:
+//
+//	message     To (all | player), Text
+//	playerList  To: sends "Online (N): name, name, ..."
+//	wait        Time ("30", "1m20s")
+//	lock, unlock, shutdown
+//	kick        Who (player), Reason
+//	ban         Who (player), Len (minutes, 0 = permanent), Reason
+//	kickAll     Reason
+//	command     Cmd: any RCON command
+//	stop        ends the run
+//	if          Branches (the If, then any Else ifs) and Else
+type Step struct {
+	Type     string   `json:"type"`
+	To       string   `json:"to,omitempty"`
+	Text     string   `json:"text,omitempty"`
+	Time     string   `json:"time,omitempty"`
+	Who      string   `json:"who,omitempty"`
+	Len      string   `json:"len,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
+	Cmd      string   `json:"cmd,omitempty"`
+	Branches []Branch `json:"branches,omitempty"`
+	Else     *[]Step  `json:"else,omitempty"` // nil: no Else
 }
 
-// timedAt is the left side of a timed line: fixed seconds ("5m | ...") or a
-// list variable ("$warn | ...").
-type timedAt struct {
-	secs    []int
-	listVar string
-	text    string // as written, for log lines
+// Branch is the If or one Else if: a condition and the steps it runs. Every
+// branch of one If compares the same Subject; only Op and Value differ.
+type Branch struct {
+	Subject string `json:"subject"`
+	Op      string `json:"op"`
+	Value   string `json:"value"`
+	Steps   []Step `json:"steps"`
 }
 
-type varUse struct {
-	name   string
-	line   int
-	inEach bool // inside for each player
+// branchLists is an If's step lists in order: each branch, then the Else.
+func branchLists(s *Step) [][]Step {
+	out := make([][]Step, 0, len(s.Branches)+1)
+	for _, b := range s.Branches {
+		out = append(out, b.Steps)
+	}
+	if s.Else != nil {
+		out = append(out, *s.Else)
+	}
+	return out
 }
 
-type parsedFlow struct {
-	Top []*flowNode // the script's top-level lines, in order
-
-	setup      []*flowNode      // leading $var = value lines, run before the first tick
-	lists      map[string][]int // lists set from fixed times at the top level
-	timedLines []int            // lines with "offset |"
-	timerUses  []int            // lines that use $timer at all
-	timerSets  []int            // lines that assign $timer
-	playerUses []varUse         // $player, $name, $ip, $guid, $ping
+// fixSteps gives every branch and Else a non-nil list, so the page always
+// gets [] rather than null, and trims the text fields.
+func fixSteps(list []Step) []Step {
+	if list == nil {
+		return []Step{}
+	}
+	for i := range list {
+		s := &list[i]
+		s.Type = strings.TrimSpace(s.Type)
+		s.To, s.Who, s.Len = strings.TrimSpace(s.To), strings.TrimSpace(s.Who), strings.TrimSpace(s.Len)
+		s.Text, s.Reason, s.Cmd = cleanReason(s.Text), cleanReason(s.Reason), cleanReason(s.Cmd)
+		s.Time = strings.TrimSpace(s.Time)
+		for j := range s.Branches {
+			b := &s.Branches[j]
+			b.Subject, b.Op, b.Value = strings.TrimSpace(b.Subject), strings.TrimSpace(b.Op), cleanReason(b.Value)
+			b.Steps = fixSteps(b.Steps)
+		}
+		if s.Else != nil {
+			e := fixSteps(*s.Else)
+			s.Else = &e
+		}
+	}
+	return list
 }
 
-// isWatcher reports whether a top-level node is checked on every tick
-// rather than run once when the top-to-bottom sequence reaches it. Timed
-// lines always are; in a countdown, so is every top-level if. In other flows
-// a top-level if runs in its place, like any other line.
-func isWatcher(n *flowNode, countdown bool) bool {
-	return n.kind == nodeIf && (n.at != nil || countdown)
-}
-
-// Variables the program fills in. Only $timer can be set by a script (and
-// only in a countdown).
-var reservedVars = map[string]bool{"timer": true, "players": true, "player": true, "name": true, "ip": true, "guid": true, "ping": true}
-
-var playerVars = map[string]bool{"player": true, "name": true, "ip": true, "guid": true, "ping": true}
-
-// normalizeScript is applied before a script is saved: blank lines are
-// dropped (a "//" line is the way to keep a visual separator) and trailing
-// spaces trimmed. Indentation is kept.
-func normalizeScript(s string) string {
-	var out []string
-	for _, l := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
-		l = strings.TrimRight(l, " \t\r")
-		if strings.TrimSpace(l) == "" {
-			continue
-		}
-		out = append(out, l)
-	}
-	return strings.Join(out, "\n")
-}
-
-// parseFlowScript turns a script into nodes. Every error names the line.
-// Checks that depend on the flow's trigger and Timer are in analyzeFlow.
-func parseFlowScript(script string) (*parsedFlow, error) {
-	pf := &parsedFlow{lists: map[string][]int{}}
-	var stack []*flowNode // open blocks, innermost last
-	assigned := map[string]bool{}
-	var condVars []varUse
-	listNames := map[string]bool{} // every variable ever set to a list
-	type textUse struct {
-		name string
-		line int
-	}
-	var textVars []textUse
-	eachDepth := 0
-
-	add := func(n *flowNode) {
-		if len(stack) == 0 {
-			pf.Top = append(pf.Top, n)
-			return
-		}
-		top := stack[len(stack)-1]
-		if top.inEls {
-			top.els = append(top.els, n)
-		} else {
-			top.then = append(top.then, n)
-		}
-	}
-	push := func(n *flowNode) {
-		n.open = true
-		if n.kind == nodeEach {
-			eachDepth++
-		}
-		stack = append(stack, n)
-	}
-	noteVars := func(s string, ln int, inCond bool) {
-		for _, m := range varRe.FindAllStringSubmatch(s, -1) {
-			name := strings.ToLower(m[1])
-			if name == "timer" {
-				pf.timerUses = append(pf.timerUses, ln)
-			}
-			if playerVars[name] {
-				pf.playerUses = append(pf.playerUses, varUse{name, ln, eachDepth > 0})
-			}
-			if inCond {
-				condVars = append(condVars, varUse{name, ln, eachDepth > 0})
-			}
-		}
-	}
-
-	// block reads a line that opens a block ("if ...", "do", "for each
-	// player"); ok is false if the line isn't one.
-	block := func(text string, ln int) (*flowNode, bool, error) {
-		low := strings.ToLower(text)
-		switch {
-		case low == "if" || strings.HasPrefix(low, "if "):
-			c, err := parseCond(strings.TrimSpace(text[2:]))
-			if err != nil {
-				return nil, true, fmt.Errorf("line %d: %v", ln, err)
-			}
-			for _, and := range c.any {
-				for _, cmp := range and {
-					noteVars(cmp.left+" "+cmp.right, ln, true)
-					if err := checkTimerCmp(cmp); err != nil {
-						return nil, true, fmt.Errorf("line %d: %v", ln, err)
-					}
-				}
-			}
-			return &flowNode{kind: nodeIf, line: ln, cond: c}, true, nil
-		case low == "do":
-			return &flowNode{kind: nodeDo, line: ln}, true, nil
-		case strings.Join(strings.Fields(low), " ") == "for each player":
-			return &flowNode{kind: nodeEach, line: ln}, true, nil
-		case strings.HasPrefix(low, "for ") || low == "for" || strings.HasPrefix(low, "while ") || low == "while":
-			return nil, true, fmt.Errorf("line %d: only \"for each player\" is supported for now", ln)
-		case strings.HasPrefix(low, "do "):
-			return nil, true, fmt.Errorf("line %d: \"do\" goes on a line of its own, with the lines below it and an \"end\"", ln)
-		}
-		return nil, false, nil
-	}
-
-	// simple reads a line that isn't a block keyword: wait, stop, $var =
-	// value, or a command.
-	simple := func(text string, ln int) (*flowNode, error) {
-		low := strings.ToLower(text)
-		switch {
-		case low == "wait" || strings.HasPrefix(low, "wait "):
-			arg := strings.TrimSpace(text[4:])
-			if arg == "" {
-				return nil, fmt.Errorf("line %d: wait needs a time, such as wait 10s", ln)
-			}
-			secs, err := parseTime(arg)
-			if err != nil {
-				return nil, fmt.Errorf("line %d: wait: %v", ln, err)
-			}
-			if secs == 0 {
-				return nil, fmt.Errorf("line %d: wait 0 does nothing; use a time such as wait 5s", ln)
-			}
-			return &flowNode{kind: nodeWait, line: ln, ticks: secs}, nil
-		case low == "stop":
-			return &flowNode{kind: nodeStop, line: ln}, nil
-		case low == "else" || strings.HasPrefix(low, "else "):
-			return nil, fmt.Errorf("line %d: \"else\" goes on a line of its own, inside an if", ln)
-		case low == "end" || strings.HasPrefix(low, "end "):
-			return nil, fmt.Errorf("line %d: \"end\" goes on a line of its own", ln)
-		}
-		if m := assignRe.FindStringSubmatch(text); m != nil {
-			name := strings.ToLower(m[1])
-			val := strings.TrimSpace(m[2])
-			if strings.HasPrefix(val, "=") {
-				return nil, fmt.Errorf("line %d: == compares, so it goes in an if (use a single = to set a variable)", ln)
-			}
-			if val == "" {
-				return nil, fmt.Errorf("line %d: $%s = needs a value", ln, name)
-			}
-			if reservedVars[name] && name != "timer" {
-				return nil, fmt.Errorf("line %d: $%s is filled in automatically and can't be set", ln, name)
-			}
-			list, isList, err := listLit(val)
-			if err != nil {
-				return nil, fmt.Errorf("line %d: %v", ln, err)
-			}
-			if name == "timer" {
-				pf.timerSets = append(pf.timerSets, ln)
-				pf.timerUses = append(pf.timerUses, ln)
-				if isList {
-					return nil, fmt.Errorf("line %d: $timer holds one time, not a list", ln)
-				}
-				if numberRe.MatchString(val) && val != "0" {
-					return nil, fmt.Errorf("line %d: %q needs a unit, such as $timer = %sm", ln, val, val)
-				}
-			}
-			if isList {
-				listNames[name] = true
-				if len(stack) == 0 {
-					pf.lists[name] = list
-				}
-			}
-			noteVars(val, ln, false)
-			assigned[name] = true
-			return &flowNode{kind: nodeSet, line: ln, name: name, text: val}, nil
-		}
-		noteVars(text, ln, false)
-		for _, m := range varRe.FindAllStringSubmatch(text, -1) {
-			textVars = append(textVars, textUse{strings.ToLower(m[1]), ln})
-		}
-		return &flowNode{kind: nodeCmd, line: ln, text: cleanReason(text)}, nil
-	}
-
-	for i, raw := range strings.Split(script, "\n") {
-		ln := i + 1
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "//") {
-			continue
-		}
-		low := strings.ToLower(line)
-
-		// Timed line: "<offset> | ..." or "$list | ...". A "||" in a
-		// condition never looks like this, because what's before it isn't
-		// an offset.
-		if when, rest, ok := strings.Cut(line, "|"); ok && !strings.HasPrefix(rest, "|") {
-			w := strings.TrimSpace(when)
-			if offsetLikeRe.MatchString(w) {
-				at, err := parseTimedAt(w)
-				if err != nil {
-					return nil, fmt.Errorf("line %d: %v", ln, err)
-				}
-				if len(stack) > 0 {
-					return nil, fmt.Errorf("line %d: a timed line can't go inside a block; put the block under the time instead (%s | if ...)", ln, w)
-				}
-				if at.listVar != "" {
-					condVars = append(condVars, varUse{at.listVar, ln, false})
-				}
-				rest = strings.TrimSpace(rest)
-				if rest == "" {
-					return nil, fmt.Errorf("line %d: %s | needs a command after it", ln, w)
-				}
-				pf.timedLines = append(pf.timedLines, ln)
-				pf.timerUses = append(pf.timerUses, ln)
-				wrap := &flowNode{kind: nodeIf, line: ln, at: at}
-				add(wrap)
-				inner, isBlock, err := block(rest, ln)
-				if err != nil {
-					return nil, err
-				}
-				if isBlock {
-					wrap.then = []*flowNode{inner}
-					push(inner)
-					continue
-				}
-				rl := strings.ToLower(rest)
-				if rl == "wait" || strings.HasPrefix(rl, "wait ") || rl == "stop" {
-					return nil, fmt.Errorf("line %d: %q can't be timed; put it inside a do block (%s | do ... end)", ln, rest, w)
-				}
-				n, err := simple(rest, ln)
-				if err != nil {
-					return nil, err
-				}
-				wrap.then = []*flowNode{n}
-				continue
-			}
-		}
-
-		switch {
-		case low == "else":
-			if len(stack) == 0 || stack[len(stack)-1].kind != nodeIf {
-				return nil, fmt.Errorf("line %d: \"else\" without an \"if\"", ln)
-			}
-			top := stack[len(stack)-1]
-			if top.inEls {
-				return nil, fmt.Errorf("line %d: second \"else\" for the \"if\" on line %d", ln, top.line)
-			}
-			top.inEls = true
-			continue
-		case low == "end":
-			if len(stack) == 0 {
-				return nil, fmt.Errorf("line %d: \"end\" without an \"if\", \"do\" or \"for each player\"", ln)
-			}
-			top := stack[len(stack)-1]
-			top.open = false
-			if top.kind == nodeEach {
-				eachDepth--
-			}
-			stack = stack[:len(stack)-1]
-			continue
-		case strings.HasPrefix(low, "else "):
-			return nil, fmt.Errorf("line %d: \"else\" goes on a line of its own (for else-if, put an if inside the else)", ln)
-		}
-
-		n, isBlock, err := block(line, ln)
-		if err != nil {
-			return nil, err
-		}
-		if isBlock {
-			add(n)
-			push(n)
-			continue
-		}
-		if n, err = simple(line, ln); err != nil {
-			return nil, err
-		}
-		add(n)
-	}
-	if len(stack) > 0 {
-		top := stack[len(stack)-1]
-		return nil, fmt.Errorf("line %d: this block has no \"end\"", top.line)
-	}
-	if len(pf.Top) == 0 {
-		return nil, errors.New("the script has no lines yet")
-	}
-	for _, v := range condVars {
-		if !reservedVars[v.name] && !assigned[v.name] {
-			return nil, fmt.Errorf("line %d: unknown variable $%s (set it first with $%s = ...)", v.line, v.name, v.name)
-		}
-	}
-	for _, v := range textVars {
-		if listNames[v.name] {
-			return nil, fmt.Errorf("line %d: $%s is a list; use @minutes for the time left, or use the list as an offset or with ==", v.line, v.name)
-		}
-	}
-	for _, n := range pf.Top {
-		if n.kind != nodeSet {
-			break
-		}
-		pf.setup = append(pf.setup, n)
-	}
-	return pf, nil
-}
-
-// parseTimedAt reads the left side of a timed line.
-func parseTimedAt(w string) (*timedAt, error) {
-	at := &timedAt{text: w}
-	switch {
-	case strings.EqualFold(w, "cancel"):
-		return nil, errors.New("cancel lines have moved to the Cancel field of the flow")
-	case strings.HasPrefix(w, "-") || strings.HasPrefix(w, "+"):
-		bare := strings.TrimSpace(w[1:])
-		return nil, fmt.Errorf("write %s: time left, no sign", bare)
-	case strings.HasPrefix(w, "$"):
-		at.listVar = strings.ToLower(w[1:])
-		if at.listVar == "timer" || reservedVars[at.listVar] {
-			return nil, fmt.Errorf("$%s can't be used as a time here", at.listVar)
-		}
-		return at, nil
-	}
-	secs, err := parseTime(strings.ReplaceAll(w, " ", ""))
-	if err != nil {
-		return nil, err
-	}
-	at.secs = []int{secs}
-	return at, nil
-}
-
-// listLit reports whether a value is a list of times ("60m 30m 15m"). The
-// list is sorted greatest first; equal values keep their written order.
-func listLit(val string) ([]int, bool, error) {
-	f := strings.Fields(val)
-	if len(f) < 2 {
-		return nil, false, nil
-	}
-	allNum := true
-	for _, tok := range f {
-		if _, ok := timeLit(tok); !ok && !numberRe.MatchString(tok) {
-			allNum = false
-			break
-		}
-	}
-	if !allNum {
-		return nil, false, nil
-	}
-	out := make([]int, 0, len(f))
-	for _, tok := range f {
-		secs, err := parseTime(tok)
-		if err != nil {
-			return nil, false, fmt.Errorf("list: %v", err)
-		}
-		out = append(out, secs)
-	}
-	sort.SliceStable(out, func(a, b int) bool { return out[a] > out[b] })
-	return out, true, nil
-}
-
-// checkTimerCmp rejects a bare number compared with $timer ($timer == 5).
-func checkTimerCmp(c flowCmp) error {
-	l, r := strings.ToLower(c.left), strings.ToLower(c.right)
-	other := ""
-	switch {
-	case l == "$timer":
-		other = c.right
-	case r == "$timer":
-		other = c.left
-	default:
-		return nil
-	}
-	if numberRe.MatchString(other) && other != "0" {
-		return fmt.Errorf("%q needs a unit, such as $timer %s %sm", other, c.op, other)
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Conditions
-// ---------------------------------------------------------------------------
-
-type flowCmp struct{ left, op, right string } // op "" = the left side alone is tested (if $quick)
-
-// flowCond is any of several all-of groups: (a && b) || (c) ...
-type flowCond struct {
-	text string
-	any  [][]flowCmp
-}
-
-var cmpOps = []string{"==", "!=", "<=", ">=", "<", ">"}
-
-func parseCond(s string) (*flowCond, error) {
-	if s == "" {
-		return nil, errors.New("\"if\" needs a condition, e.g. if $players > 0")
-	}
-	c := &flowCond{text: s}
-	for _, orPart := range strings.Split(s, "||") {
-		var and []flowCmp
-		for _, part := range strings.Split(orPart, "&&") {
-			cmp, err := parseCmp(strings.TrimSpace(part))
-			if err != nil {
-				return nil, err
-			}
-			and = append(and, cmp)
-		}
-		c.any = append(c.any, and)
-	}
-	return c, nil
-}
-
-func parseCmp(s string) (flowCmp, error) {
-	if s == "" {
-		return flowCmp{}, errors.New("missing comparison next to && or ||")
-	}
-	for i := 0; i < len(s); i++ {
-		for _, op := range cmpOps {
-			if strings.HasPrefix(s[i:], op) {
-				l, r := strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+len(op):])
-				if l == "" || r == "" {
-					return flowCmp{}, fmt.Errorf("%q needs something on both sides of %s", s, op)
-				}
-				return flowCmp{l, op, r}, nil
-			}
-		}
-		if s[i] == '=' {
-			return flowCmp{}, fmt.Errorf("%q: use == to compare (a single = sets a variable)", s)
-		}
-	}
-	if len(strings.Fields(s)) != 1 {
-		return flowCmp{}, fmt.Errorf("%q needs a comparison: == != < <= > >=", s)
-	}
-	return flowCmp{left: s}, nil // a lone value: if $quick
-}
-
-// unquote drops one pair of surrounding double quotes.
-func unquote(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
-// ---------------------------------------------------------------------------
-// Values
-// ---------------------------------------------------------------------------
-
-type valKind int
-
-const (
-	vStr valKind = iota
-	vNum
-	vTime // seconds
-	vList // times in seconds, greatest first
-	vBool
-)
-
-type value struct {
-	kind valKind
-	s    string
-	n    float64
-	list []int
-	b    bool
-}
-
-func strVal(s string) value  { return value{kind: vStr, s: s} }
-func numVal(n float64) value { return value{kind: vNum, n: n} }
-func timeVal(s int) value    { return value{kind: vTime, n: float64(s)} }
-
-func (v value) text() string {
-	switch v.kind {
-	case vNum, vTime:
-		return strconv.FormatFloat(v.n, 'f', -1, 64)
-	case vBool:
-		return strconv.FormatBool(v.b)
-	case vList:
-		parts := make([]string, len(v.list))
-		for i, s := range v.list {
-			parts[i] = fmtLeft(s)
-		}
-		return strings.Join(parts, " ")
-	}
-	return v.s
-}
-
-// number reports a value's numeric form, if it has one.
-func (v value) number() (float64, bool) {
-	switch v.kind {
-	case vNum, vTime:
-		return v.n, true
-	case vStr:
-		if numberRe.MatchString(strings.TrimSpace(v.s)) {
-			n, _ := strconv.ParseFloat(strings.TrimSpace(v.s), 64)
-			return n, true
-		}
-		if secs, ok := timeLit(v.s); ok {
-			return float64(secs), true
-		}
-	}
-	return 0, false
-}
-
-func (v value) truthy() bool {
-	switch v.kind {
-	case vBool:
-		return v.b
-	case vNum, vTime:
-		return v.n != 0
-	case vList:
-		return len(v.list) > 0
-	}
-	s := strings.ToLower(strings.TrimSpace(v.s))
-	return s != "" && s != "false" && s != "0"
-}
-
-// ---------------------------------------------------------------------------
-// Runner: one job is one run of a flow (or one player, for join flows)
-// ---------------------------------------------------------------------------
-
-// job holds a run's state between ticks. Variables start fresh every run.
-type job struct {
-	run       *flowRun
-	pf        *parsedFlow
-	p         *Player // the joining player, join flows only
-	vars      map[string]value
-	countdown bool
-	timer     int  // $timer: seconds left in a countdown; 0 otherwise
-	newTimer  *int // a $timer assignment, applied from the next tick
-	halted    bool // a stop line ran
-
-	plain    *seq              // the top-level lines that aren't watchers (see isWatcher)
-	watching map[int]*seq      // a running block started by Top[i]
-	plainIdx map[*flowNode]int // top-level index of each plain node
-}
-
-// seq walks through a list of lines, one command per tick.
-type seq struct {
-	x      *job
-	frames []*frame
-	wait   int // ticks still to wait
-}
-
-type frame struct {
-	nodes   []*flowNode
-	i       int
-	players []Player // for each player: the players being gone through
-	pi      int
-}
-
-func newJob(run *flowRun, pf *parsedFlow, p *Player, countdown bool, timer int) *job {
-	x := &job{run: run, pf: pf, p: p, vars: map[string]value{}, countdown: countdown, timer: timer,
-		watching: map[int]*seq{}, plainIdx: map[*flowNode]int{}}
-	var plain []*flowNode
-	for i, n := range pf.Top {
-		if !isWatcher(n, countdown) {
-			x.plainIdx[n] = i
-			plain = append(plain, n)
-		}
-	}
-	// The setup lines at the top run before the first tick.
-	if len(pf.setup) > 0 {
-		s := &seq{x: x, frames: []*frame{{nodes: pf.setup}}}
-		s.step()
-		plain = plain[len(pf.setup):]
-	}
-	if len(plain) > 0 {
-		x.plain = &seq{x: x, frames: []*frame{{nodes: plain}}}
-	}
-	return x
-}
-
-func (s *seq) done() bool { return len(s.frames) == 0 && s.wait == 0 }
-
-// pos is the top-level index of the line the plain sequence is on: the next
-// line to run, or the line whose block or wait it is still in. -1 when done.
-func (s *seq) pos() int {
-	if len(s.frames) == 0 {
-		return -1
-	}
-	b := s.frames[0]
-	switch {
-	case (len(s.frames) > 1 || s.wait > 0) && b.i > 0:
-		return s.x.plainIdx[b.nodes[b.i-1]]
-	case b.i < len(b.nodes):
-		return s.x.plainIdx[b.nodes[b.i]]
-	case b.i > 0:
-		return s.x.plainIdx[b.nodes[b.i-1]]
-	}
-	return -1
-}
-
-// step runs this sequence's part of one tick: lines that take no time, then
-// one command (or one tick of a wait). It returns when the tick is used up or
-// the sequence has finished.
-func (s *seq) step() {
-	for !s.x.halted {
-		if s.wait > 0 {
-			if s.wait--; s.wait == 0 {
-				s.trim()
-			}
-			return
-		}
-		if len(s.frames) == 0 {
-			return
-		}
-		f := s.frames[len(s.frames)-1]
-		if f.i >= len(f.nodes) {
-			if f.players != nil && f.pi+1 < len(f.players) {
-				f.pi++
-				f.i = 0
-				continue
-			}
-			s.frames = s.frames[:len(s.frames)-1]
-			continue
-		}
-		n := f.nodes[f.i]
-		f.i++
-		switch n.kind {
-		case nodeCmd:
-			s.x.send(s.fill(n.text))
-			s.trim()
-			return
-		case nodeSet:
-			s.x.set(n, s.eval(n.text))
-		case nodeWait:
-			s.wait = n.ticks
-		case nodeStop:
-			s.x.run.logf("stop (line %d)", n.line)
-			s.x.halted = true
-			return
-		case nodeDo:
-			s.frames = append(s.frames, &frame{nodes: n.then})
-		case nodeIf:
-			if n.at != nil { // a timed line reached inside a sequence: already matched
-				s.frames = append(s.frames, &frame{nodes: n.then})
-				continue
-			}
-			ok := s.evalCond(n.cond)
-			s.x.run.logf("if %s -> %v (line %d)", n.cond.text, ok, n.line)
-			if ok {
-				s.frames = append(s.frames, &frame{nodes: n.then})
-			} else if len(n.els) > 0 {
-				s.frames = append(s.frames, &frame{nodes: n.els})
-			}
-		case nodeEach:
-			ps := s.x.onlinePlayers()
-			s.x.run.logf("for each player: %d online (line %d)", len(ps), n.line)
-			if len(ps) > 0 {
-				s.frames = append(s.frames, &frame{nodes: n.then, players: ps})
-			}
-		}
-	}
-}
-
-// trim drops finished blocks, so a sequence whose last line has just gone
-// out counts as done straight away.
-func (s *seq) trim() {
-	for len(s.frames) > 0 {
-		f := s.frames[len(s.frames)-1]
-		if f.i < len(f.nodes) || (f.players != nil && f.pi+1 < len(f.players)) {
-			return
-		}
-		s.frames = s.frames[:len(s.frames)-1]
-	}
-}
-
-// tick runs one second of the job: every if and timed line is checked and
-// every running sequence moves on, in script order.
-func (x *job) tick() {
-	plainDone := x.plain == nil || x.plain.done()
-	plainAt := -1
-	if !plainDone {
-		plainAt = x.plain.pos()
-	}
-	for i, n := range x.pf.Top {
-		if x.halted {
-			return
-		}
-		if !plainDone && i == plainAt {
-			x.plain.step()
-			plainDone = true // at most once per tick
-		}
-		if !isWatcher(n, x.countdown) {
-			continue
-		}
-		if s := x.watching[i]; s != nil {
-			s.step()
-			if s.done() {
-				delete(x.watching, i)
-			}
-			continue
-		}
-		var body []*flowNode
-		if n.at != nil {
-			if x.atMatches(n.at) {
-				x.run.logf("%s | (line %d)", n.at.text, n.line)
-				body = n.then
-			}
-		} else {
-			probe := &seq{x: x}
-			if probe.evalCond(n.cond) {
-				x.run.logf("if %s -> true (line %d)", n.cond.text, n.line)
-				body = n.then
-			} else {
-				body = n.els
-			}
-		}
-		if len(body) == 0 {
-			continue
-		}
-		s := &seq{x: x, frames: []*frame{{nodes: body}}}
-		s.step()
-		if !s.done() {
-			x.watching[i] = s
-		}
-	}
-	if !plainDone && !x.halted {
-		x.plain.step()
-	}
-}
-
-// idle reports whether nothing is left to send (non-countdown runs end then).
-func (x *job) idle() bool {
-	return (x.plain == nil || x.plain.done()) && len(x.watching) == 0
-}
-
-// unsent counts sequences still going, for the log when a countdown ends.
-func (x *job) unsent() int {
-	n := len(x.watching)
-	if x.plain != nil && !x.plain.done() {
+// countSteps counts every step, inside Ifs too.
+func countSteps(list []Step) int {
+	n := 0
+	for i := range list {
 		n++
+		if list[i].Type == "if" {
+			for _, l := range branchLists(&list[i]) {
+				n += countSteps(l)
+			}
+		}
 	}
 	return n
 }
 
-func (x *job) atMatches(at *timedAt) bool {
-	if at.listVar != "" {
-		v, ok := x.vars[at.listVar]
-		if !ok {
-			return false
-		}
-		switch v.kind {
-		case vList:
-			for _, s := range v.list {
-				if s == x.timer {
-					return true
+// runLength is how long the waits take, counting the longest branch of each If.
+func runLength(list []Step) int {
+	total := 0
+	for i := range list {
+		s := &list[i]
+		switch s.Type {
+		case "wait":
+			secs, _ := parseDur(s.Time)
+			total += secs
+		case "if":
+			longest := 0
+			for _, l := range branchLists(s) {
+				if n := runLength(l); n > longest {
+					longest = n
 				}
 			}
+			total += longest
+		}
+	}
+	return total
+}
+
+// ---------------------------------------------------------------------------
+// Placeholders and conditions
+// ---------------------------------------------------------------------------
+
+// Roles, by number: what is stored in players.role.
+const (
+	rolePlayer = 0
+	roleMod    = 1
+	roleAdmin  = 2
+)
+
+var roleNames = []string{"Player", "Mod", "Admin"}
+
+func roleName(r int) string {
+	if r < 0 || r >= len(roleNames) {
+		return roleNames[0]
+	}
+	return roleNames[r]
+}
+
+// What a placeholder or If subject needs: nothing (any trigger), "player"
+// (On join or Player message) or "chat" (Player message only).
+const (
+	needNothing = ""
+	needPlayer  = "player"
+	needChat    = "chat"
+)
+
+var needText = map[string]string{
+	needPlayer: "needs a player: use the On join or Player message trigger",
+	needChat:   "needs the Player message trigger",
+}
+
+// flowTokens are the placeholders steps can use, and what each needs.
+var flowTokens = map[string]string{
+	"player_name": needPlayer, "player_id": needPlayer, "player_ping": needPlayer,
+	"player_ip": needPlayer, "player_guid": needPlayer, "player_role": needPlayer,
+	"message": needChat, "players_online": needNothing,
+}
+
+var tokenRe = regexp.MustCompile(`\{(\w+)\}`)
+
+// condSubject is something an If can compare. kind decides the operators:
+//
+//	word  the chat message: contains, starts with
+//	text  ==, !=, matches (* wildcard), ignoring case
+//	num   == != > >= < <=
+//	role  like num, with the value picked from Player, Mod, Admin
+type condSubject struct{ kind, need string }
+
+var condSubjects = map[string]condSubject{
+	"message":     {"word", needChat},
+	"player_name": {"text", needPlayer},
+	"player_id":   {"num", needPlayer},
+	"player_ping": {"num", needPlayer},
+	"player_ip":   {"text", needPlayer},
+	"player_guid": {"text", needPlayer},
+	"player_role": {"role", needPlayer},
+	// How many players are online, from the 5-second player check. Works on
+	// every trigger: "If {players_online} > 0, Kick everyone, else Shut down".
+	"players_online": {"num", needNothing},
+}
+
+var condOps = map[string][]string{
+	"word": {"has", "starts"},
+	"text": {"eq", "ne", "wild"},
+	"num":  {"eq", "ne", "gt", "ge", "lt", "le"},
+	"role": {"eq", "ne", "gt", "ge", "lt", "le"},
+}
+
+var opText = map[string]string{"has": "contains", "starts": "starts with", "eq": "==", "ne": "!=",
+	"wild": "matches", "gt": ">", "ge": ">=", "lt": "<", "le": "<="}
+
+// describeCond writes a condition the way the page shows it, for the run log:
+// {player_ping} >= 500, {player_name} == "Survivor".
+func describeCond(b Branch) string {
+	sub := condSubjects[b.Subject]
+	val := b.Value
+	switch {
+	case sub.kind == "role":
+		n, _ := strconv.Atoi(b.Value)
+		val = roleName(n)
+	case sub.kind == "text" && b.Op != "wild":
+		val = `"` + b.Value + `"`
+	}
+	return "{" + b.Subject + "} " + opText[b.Op] + " " + val
+}
+
+// terms splits a {message} value into words and "quoted phrases", lower case.
+func terms(value string) []string {
+	var out []string
+	rest := strings.TrimSpace(value)
+	for rest != "" {
+		var t string
+		if rest[0] == '"' {
+			end := strings.IndexByte(rest[1:], '"')
+			if end < 0 {
+				t, rest = rest[1:], ""
+			} else {
+				t, rest = rest[1:end+1], rest[end+2:]
+			}
+		} else {
+			end := strings.IndexFunc(rest, unicode.IsSpace)
+			if end < 0 {
+				end = len(rest)
+			}
+			t, rest = rest[:end], rest[end:]
+		}
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			out = append(out, t)
+		}
+		rest = strings.TrimSpace(rest)
+	}
+	return out
+}
+
+func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+// containsWord reports whether t appears in s as whole words: "noob" is in
+// "you noob!" but not in "noobish".
+func containsWord(s, t string) bool {
+	for from := 0; from <= len(s); {
+		i := strings.Index(s[from:], t)
+		if i < 0 {
 			return false
 		}
-		n, ok := v.number()
-		return ok && int(n) == x.timer
+		i += from
+		before, _ := utf8.DecodeLastRuneInString(s[:i])
+		after, _ := utf8.DecodeRuneInString(s[i+len(t):])
+		if (i == 0 || !isWordRune(before)) && (i+len(t) == len(s) || !isWordRune(after)) {
+			return true
+		}
+		from = i + 1
 	}
-	for _, s := range at.secs {
-		if s == x.timer {
+	return false
+}
+
+// matchWords checks {message}. contains: any of the words or phrases appears
+// as whole words. starts with: the message's first word is one of the words
+// (so /discord matches "/discord please" but not "/discordx"). Case is ignored.
+func matchWords(op, msg, value string) bool {
+	m := strings.ToLower(strings.TrimSpace(msg))
+	first := ""
+	if f := strings.Fields(m); len(f) > 0 {
+		first = f[0]
+	}
+	for _, t := range terms(value) {
+		if op == "starts" && t == first || op == "has" && containsWord(m, t) {
 			return true
 		}
 	}
 	return false
 }
 
-func (x *job) set(n *flowNode, v value) {
-	if n.name == "timer" {
-		secs, ok := v.number()
-		if !ok || secs < 0 {
-			x.run.logf("line %d: $timer = %q is not a time (ignored)", n.line, v.text())
-			return
-		}
-		t := int(secs)
-		x.newTimer = &t
-		x.run.logf("$timer = %s from the next tick (line %d)", fmtLeft(t), n.line)
-		return
-	}
-	x.vars[n.name] = v
-	x.run.logf("set $%s = %s", n.name, v.text())
+// wildMatch matches text against a pattern where * is any run of characters
+// and ? is one character, ignoring case.
+func wildMatch(pattern, s string) bool {
+	q := regexp.QuoteMeta(pattern)
+	q = strings.NewReplacer(`\*`, ".*", `\?`, ".").Replace(q)
+	re, err := regexp.Compile("(?is)^" + q + "$")
+	return err == nil && re.MatchString(s)
 }
 
-// onlinePlayers is the poller's latest list (see playersPolled), or a fresh
-// read before the poller's first result.
-func (x *job) onlinePlayers() []Player {
-	latest.Lock()
-	ps, ok := append([]Player(nil), latest.players...), latest.ok
-	latest.Unlock()
-	if ok {
-		return ps
+// evalCond checks one branch's condition against the subject's value.
+func evalCond(b Branch, v string) bool {
+	sub := condSubjects[b.Subject]
+	v = strings.TrimSpace(v)
+	switch sub.kind {
+	case "word":
+		return matchWords(b.Op, v, b.Value)
+	case "text":
+		switch b.Op {
+		case "eq":
+			return strings.EqualFold(v, b.Value)
+		case "ne":
+			return !strings.EqualFold(v, b.Value)
+		}
+		return wildMatch(b.Value, v)
 	}
-	out, acked, err := runShared("players", 3*time.Second, true, "")
-	if err != nil || !acked {
-		x.run.logf("couldn't read the player list (err=%v)", err)
-		x.run.markFailed()
-		return nil
+	a, err1 := strconv.Atoi(v)
+	c, err2 := strconv.Atoi(strings.TrimSpace(b.Value))
+	if err1 != nil || err2 != nil {
+		return false
 	}
-	return parsePlayers(out)
+	switch b.Op {
+	case "eq":
+		return a == c
+	case "ne":
+		return a != c
+	case "gt":
+		return a > c
+	case "ge":
+		return a >= c
+	case "lt":
+		return a < c
+	case "le":
+		return a <= c
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// Validation (the page checks the same things as you build; this is the
+// check that counts)
+// ---------------------------------------------------------------------------
+
+// maxSteps and maxDepth keep a flow to a size the page can show.
+const (
+	maxSteps = 500
+	maxDepth = 10
+)
+
+var stepTypes = map[string]bool{"message": true, "playerList": true, "wait": true, "lock": true,
+	"unlock": true, "shutdown": true, "kick": true, "ban": true, "kickAll": true, "command": true,
+	"stop": true, "if": true}
+
+// stopTypes are the steps allowed in "When stopped": they go out once, with no player.
+var stopTypes = map[string]bool{"message": true, "lock": true, "unlock": true, "kickAll": true, "command": true}
+
+// triggerHas is what a trigger provides: a player, and a chat message.
+func triggerHas(trigger string) map[string]bool {
+	return map[string]bool{
+		needNothing: true,
+		needPlayer:  trigger == triggerJoin || trigger == triggerChat,
+		needChat:    trigger == triggerChat,
+	}
+}
+
+type stepChecker struct {
+	has    map[string]bool
+	n      int    // step number, counted as the page numbers them
+	onStop bool   // checking "When stopped"
+	where  string // "Step" or "When stopped, step"
+}
+
+func (c *stepChecker) fail(msg string) error { return fmt.Errorf("%s %d: %s", c.where, c.n, msg) }
+
+// tokensOK reports the first placeholder in text the trigger can't fill.
+func (c *stepChecker) tokensOK(text string) error {
+	for _, m := range tokenRe.FindAllStringSubmatch(text, -1) {
+		if need, ok := flowTokens[m[1]]; ok && need != needNothing && (c.onStop || !c.has[need]) {
+			if c.onStop {
+				return c.fail(m[0] + " can't be used here: When stopped has no player")
+			}
+			return c.fail(m[0] + " " + needText[need])
+		}
+	}
+	return nil
+}
+
+func (c *stepChecker) check(list []Step, depth int) error {
+	if depth > maxDepth {
+		return c.fail(fmt.Sprintf("Ifs can go %d deep at most", maxDepth))
+	}
+	for i := range list {
+		s := &list[i]
+		c.n++
+		if !stepTypes[s.Type] {
+			return c.fail(fmt.Sprintf("unknown step %q", s.Type))
+		}
+		if c.onStop && !stopTypes[s.Type] {
+			return c.fail("only Message, Lock, Unlock, Kick everyone and RCON command steps can go here")
+		}
+		player := c.has[needPlayer] && !c.onStop
+		switch s.Type {
+		case "message", "playerList":
+			switch s.To {
+			case "all":
+			case "player":
+				if !player {
+					return c.fail(`"Player" ` + needText[needPlayer])
+				}
+			default:
+				return c.fail("pick who it goes to")
+			}
+			if s.Type == "message" && s.Text == "" {
+				return c.fail("Add the message text")
+			}
+		case "wait":
+			secs, ok := parseDur(s.Time)
+			if !ok || secs <= 0 {
+				return c.fail("Enter a time: 30 (seconds), 90s, 1m20s or 1h")
+			}
+			if secs > maxTimeSecs {
+				return c.fail("A wait can be 24h at most")
+			}
+		case "kick", "ban":
+			if !player {
+				return c.fail("Kick and Ban " + needText[needPlayer])
+			}
+			s.Who = "player"
+			if s.Type == "ban" {
+				if n, err := strconv.Atoi(s.Len); err != nil || n < 0 {
+					return c.fail("pick how long the ban lasts")
+				}
+			}
+		case "command":
+			if s.Cmd == "" {
+				return c.fail("Type the command to send")
+			}
+		case "if":
+			if err := c.checkIf(s, depth); err != nil {
+				return err
+			}
+			continue // the branches checked their own steps
+		}
+		for _, t := range []string{s.Text, s.Reason, s.Cmd} {
+			if err := c.tokensOK(t); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *stepChecker) checkIf(s *Step, depth int) error {
+	if len(s.Branches) == 0 {
+		return c.fail("this If has no condition")
+	}
+	first := s.Branches[0].Subject
+	sub, ok := condSubjects[first]
+	if !ok {
+		return c.fail(fmt.Sprintf("unknown If subject %q", first))
+	}
+	if !c.has[sub.need] {
+		return c.fail("{" + first + "} " + needText[sub.need])
+	}
+	num := c.n // the If's own number, for its conditions' errors
+	for _, b := range s.Branches {
+		if b.Subject != first {
+			return fmt.Errorf("%s %d: every Else if must compare {%s}, like its If", c.where, num, first)
+		}
+		okOp := false
+		for _, op := range condOps[sub.kind] {
+			okOp = okOp || op == b.Op
+		}
+		if !okOp {
+			return fmt.Errorf("%s %d: pick an operator", c.where, num)
+		}
+		switch sub.kind {
+		case "num", "role":
+			if _, err := strconv.Atoi(strings.TrimSpace(b.Value)); err != nil {
+				return fmt.Errorf("%s %d: Enter a whole number", c.where, num)
+			}
+		case "word":
+			if len(terms(b.Value)) == 0 {
+				return fmt.Errorf(`%s %d: Enter a word, several words, or a "quoted phrase"`, c.where, num)
+			}
+		}
+	}
+	for _, l := range branchLists(s) {
+		if err := c.check(l, depth+1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkSteps validates a flow's steps and its When stopped steps for its
+// trigger. Errors name the step as the page numbers them.
+func checkSteps(trigger string, steps, onStop []Step) error {
+	if len(steps) == 0 {
+		return errors.New("add at least one step")
+	}
+	if countSteps(steps)+countSteps(onStop) > maxSteps {
+		return fmt.Errorf("a flow can have %d steps at most", maxSteps)
+	}
+	c := &stepChecker{has: triggerHas(trigger), where: "Step"}
+	if err := c.check(steps, 0); err != nil {
+		return err
+	}
+	if len(onStop) > 0 && trigger != triggerSchedule && trigger != triggerManual {
+		return errors.New("only Schedule and Manual flows have When stopped steps")
+	}
+	s := &stepChecker{has: map[string]bool{}, onStop: true, where: "When stopped, step"}
+	return s.check(onStop, 0)
+}
+
+// ---------------------------------------------------------------------------
+// Runner: one job is one run of a flow's steps (for one player, in join and
+// chat flows)
+// ---------------------------------------------------------------------------
+
+// flowPlayer is the player a join or chat run is for, as they were when it
+// started. Their number is looked up again (by GUID) whenever it's used,
+// because numbers are reused when players leave.
+type flowPlayer struct {
+	Player
+	role    int
+	message string
+}
+
+type job struct {
+	run *flowRun
+	ctx context.Context
+	p   *flowPlayer // nil for schedule and manual runs
 }
 
 // sendCommand sends one flow command. Tests replace it.
 var sendCommand = runFlowCommand
 
-// send sends one command, with its variables already filled in.
-func (x *job) send(cmd string) {
-	sendCommand(x.run, cmd)
-}
-
-// player is the player the per-player variables refer to: the innermost for
-// each player, else the joining player.
-func (s *seq) player() *Player {
-	for i := len(s.frames) - 1; i >= 0; i-- {
-		if f := s.frames[i]; f.players != nil {
-			return &f.players[f.pi]
-		}
+// currentID is the player's number now, or false if they have left.
+func (x *job) currentID() (int, bool) {
+	if x.p == nil {
+		return 0, false
 	}
-	return s.x.p
+	if p, ok := onlineByGUID(x.p.GUID); ok {
+		return p.ID, true
+	}
+	return 0, false
 }
 
-// lookup returns a variable's value; ok is false if it has none, and then
-// the "$name" text is left as typed.
-func (s *seq) lookup(name string) (value, bool) {
+// value is what a placeholder or If subject stands for in this run.
+func (x *job) value(name string) (string, bool) {
+	if name == "players_online" {
+		latest.Lock()
+		n := len(latest.players)
+		latest.Unlock()
+		return strconv.Itoa(n), true
+	}
+	if x.p == nil {
+		return "", false
+	}
 	switch name {
-	case "timer":
-		return timeVal(s.x.timer), true
-	case "players":
-		return numVal(float64(len(s.x.onlinePlayers()))), true
-	}
-	if playerVars[name] {
-		p := s.player()
-		if p == nil {
-			return value{}, false
+	case "player_name":
+		return bareName(x.p.Name), true
+	case "player_id":
+		if id, ok := x.currentID(); ok {
+			return strconv.Itoa(id), true
 		}
-		switch name {
-		case "player":
-			return numVal(float64(p.ID)), true
-		case "name":
-			return strVal(p.Name), true
-		case "ip":
-			return strVal(p.IP), true
-		case "guid":
-			return strVal(p.GUID), true
-		}
-		return numVal(float64(p.Ping)), true
+		return strconv.Itoa(x.p.ID), true
+	case "player_ping":
+		return strconv.Itoa(x.p.Ping), true
+	case "player_ip":
+		return x.p.IP, true
+	case "player_guid":
+		return x.p.GUID, true
+	case "player_role":
+		return roleName(x.p.role), true
+	case "message":
+		return x.p.message, true
 	}
-	v, ok := s.x.vars[name]
-	return v, ok
+	return "", false
 }
 
-// fill expands $variables, then the @ words. Values are not expanded again,
-// so a player named "$players" stays literal text.
-func (s *seq) fill(text string) string {
-	out := varRe.ReplaceAllStringFunc(text, func(m string) string {
-		if v, ok := s.lookup(strings.ToLower(m[1:])); ok {
-			return v.text()
-		}
-		return m
-	})
-	return cleanReason(fillTimeLeft(out, s.x.timer))
-}
-
-// term reads one value: $var, a time, a number, true/false, "quoted" or text.
-func (s *seq) term(tok string) value {
-	tok = strings.TrimSpace(tok)
-	if m := varNameRe.FindStringSubmatch(tok); m != nil {
-		if v, ok := s.lookup(strings.ToLower(m[1])); ok {
+// fill replaces the placeholders in a step's text. Unknown {words} are left
+// as typed, and what is filled in is not expanded again.
+func (x *job) fill(text string) string {
+	return cleanReason(tokenRe.ReplaceAllStringFunc(text, func(m string) string {
+		if v, ok := x.value(m[1 : len(m)-1]); ok {
 			return v
 		}
-		return strVal(tok)
-	}
-	if numberRe.MatchString(tok) {
-		n, _ := strconv.ParseFloat(tok, 64)
-		return numVal(n)
-	}
-	if secs, ok := timeLit(tok); ok {
-		return timeVal(secs)
-	}
-	switch strings.ToLower(tok) {
-	case "true":
-		return value{kind: vBool, b: true}
-	case "false":
-		return value{kind: vBool, b: false}
-	}
-	if strings.HasPrefix(tok, `"`) {
-		return strVal(unquote(tok))
-	}
-	return strVal(s.fill(tok))
+		return m
+	}))
 }
 
-// eval reads the right side of $var = ...: a list of times, a sum such as
-// $timer + 5m, one value, or text.
-func (s *seq) eval(expr string) value {
-	if list, ok, _ := listLit(expr); ok {
-		return value{kind: vList, list: list}
+// say sends a message to everyone, or to the player. A private message is
+// added to the player's chat history, as the Message dialog does.
+func (x *job) say(to, text string) {
+	if text == "" {
+		return
 	}
-	f := strings.Fields(expr)
-	if len(f) >= 3 && len(f)%2 == 1 {
-		isSum := true
-		for i := 1; i < len(f); i += 2 {
-			if f[i] != "+" && f[i] != "-" {
-				isSum = false
-			}
+	if to != "player" {
+		sendCommand(x.run, "say -1 "+text)
+		return
+	}
+	id, ok := x.currentID()
+	if !ok {
+		x.run.logf("%s has left; message not sent", bareName(x.p.Name))
+		return
+	}
+	cmd := fmt.Sprintf("say %d %s", id, text)
+	sendCommand(x.run, cmd)
+	recordSent(x.p.GUID, cmd)
+}
+
+// recordSent adds a private message ReCON sent to a player's chat history.
+func recordSent(guid, cmd string) {
+	if globalDatabase == nil || guid == "" {
+		return
+	}
+	if err := globalDatabase.AddChatMessage(time.Now(), guid, chatOut, "> "+cmd); err != nil {
+		log.Printf("chat: store: %v", err)
+	}
+}
+
+// onlineNames is the latest player list as "Online (N): a, b, c".
+func onlineNames() string {
+	latest.Lock()
+	names := make([]string, 0, len(latest.players))
+	for _, p := range latest.players {
+		names = append(names, bareName(p.Name))
+	}
+	latest.Unlock()
+	if len(names) == 0 {
+		return "Online (0): nobody"
+	}
+	return fmt.Sprintf("Online (%d): %s", len(names), strings.Join(names, ", "))
+}
+
+// banStep bans the player. Tests replace it.
+var banStep = func(p Player, online bool, minutes int, reason, logAs string) banResult {
+	return banByGUID(p, online, minutes, reason, logAs)
+}
+
+// exec runs a list of steps. It returns false when the run must end: Stop
+// was pressed during a wait, or a Stop flow step ran.
+func (x *job) exec(list []Step) bool {
+	for i := range list {
+		s := &list[i]
+		if x.ctx.Err() != nil {
+			return false
 		}
-		if isSum {
-			total, anyTime := 0.0, false
-			for i := 0; i < len(f); i += 2 {
-				v := s.term(f[i])
-				n, ok := v.number()
-				if !ok {
-					isSum = false
+		switch s.Type {
+		case "message":
+			x.say(s.To, x.fill(s.Text))
+		case "playerList":
+			x.say(s.To, onlineNames())
+		case "wait":
+			secs, _ := parseDur(s.Time)
+			if !sleepUntil(x.ctx, time.Now().Add(time.Duration(secs)*time.Second)) {
+				return false
+			}
+		case "lock", "unlock", "shutdown":
+			sendCommand(x.run, "#"+s.Type)
+		case "kickAll":
+			sendCommand(x.run, strings.TrimSpace("kickall "+x.fill(s.Reason)))
+		case "command":
+			sendCommand(x.run, x.fill(s.Cmd))
+		case "kick":
+			id, ok := x.currentID()
+			if !ok {
+				x.run.logf("%s has left; kick skipped", bareName(x.p.Name))
+				continue
+			}
+			reason := x.fill(s.Reason)
+			if reason == "" {
+				reason = "No reason specified"
+			}
+			sendCommand(x.run, fmt.Sprintf("kick %d %s", id, reason))
+		case "ban":
+			minutes, _ := strconv.Atoi(s.Len)
+			reason := x.fill(s.Reason)
+			if reason == "" {
+				reason = "No reason specified"
+			}
+			p := x.p.Player
+			id, online := x.currentID()
+			p.ID = id
+			res := banStep(p, online, minutes, reason, x.run.name)
+			if !res.OK {
+				x.run.logf("ban of %s failed: %s", bareName(p.Name), res.Error)
+				x.run.markFailed()
+			} else {
+				x.run.logf("banned %s (%s)", bareName(p.Name), banLength(minutes))
+			}
+		case "stop":
+			x.run.logf("Stop flow step: the run ends here")
+			return false
+		case "if":
+			ran := false
+			for k, b := range s.Branches {
+				v, _ := x.value(b.Subject)
+				ok := evalCond(b, v)
+				word := "If "
+				if k > 0 {
+					word = "Else if "
+				}
+				x.run.logf("%s%s: %s", word, describeCond(b), map[bool]string{true: "yes", false: "no"}[ok])
+				if ok {
+					if !x.exec(b.Steps) {
+						return false
+					}
+					ran = true
 					break
 				}
-				anyTime = anyTime || v.kind == vTime
-				if i > 0 && f[i-1] == "-" {
-					n = -n
+			}
+			if !ran && s.Else != nil {
+				x.run.logf("Else")
+				if !x.exec(*s.Else) {
+					return false
 				}
-				total += n
-			}
-			if isSum {
-				if anyTime {
-					return timeVal(int(total))
-				}
-				return numVal(total)
 			}
 		}
 	}
-	if len(f) == 1 {
-		return s.term(f[0])
-	}
-	return strVal(unquote(s.fill(expr)))
+	return true
 }
 
-func (s *seq) evalCond(c *flowCond) bool {
-	for _, and := range c.any {
-		all := true
-		for _, cmp := range and {
-			if !s.evalCmp(cmp) {
-				all = false
-				break
-			}
-		}
-		if all {
-			return true
-		}
+// banLength is "permanently" or "for 1h", for log lines.
+func banLength(minutes int) string {
+	if minutes <= 0 {
+		return "permanent"
 	}
-	return false
+	return "for " + fmtDur(minutes*60)
 }
 
-func (s *seq) evalCmp(c flowCmp) bool {
-	l := s.eval(c.left)
-	if c.op == "" {
-		return l.truthy()
-	}
-	r := s.eval(c.right)
-	// A list matches if the other side equals any value in it.
-	if l.kind == vList || r.kind == vList {
-		list, other := l, r
-		if r.kind == vList {
-			list, other = r, l
-		}
-		n, ok := other.number()
-		in := false
-		for _, v := range list.list {
-			if ok && float64(v) == n {
-				in = true
-			}
-		}
-		switch c.op {
-		case "==":
-			return in
-		case "!=":
-			return !in
-		}
-		s.x.run.logf("can't use %s with a list (counted as false)", c.op)
-		return false
-	}
-	if a, ok := l.number(); ok {
-		if b, ok := r.number(); ok {
-			switch c.op {
-			case "==":
-				return a == b
-			case "!=":
-				return a != b
-			case "<":
-				return a < b
-			case "<=":
-				return a <= b
-			case ">":
-				return a > b
-			case ">=":
-				return a >= b
-			}
-		}
-	}
-	ls := strings.ToLower(strings.TrimSpace(l.text()))
-	rs := strings.ToLower(strings.TrimSpace(r.text()))
-	switch c.op {
-	case "==":
-		return ls == rs
-	case "!=":
-		return ls != rs
-	}
-	s.x.run.logf("can't use %s on %q and %q: both sides must be numbers or times (counted as false)", c.op, ls, rs)
-	return false
-}
-
-// runFlowCommand sends one command (variables already filled in). Only
-// #lock/#unlock are retried (repeating them is harmless); `say` must not be
-// repeated, and #shutdown is expected to go unanswered because the server
-// dies.
+// runFlowCommand sends one flow command. Only #lock/#unlock are retried
+// (repeating them is harmless); `say` must not be repeated, and #shutdown is
+// expected to go unanswered because the server dies.
 //
 // An RCON error, or no reply (except to #shutdown), marks the run as failed;
 // the run carries on, and ends with status "error".
@@ -1209,8 +826,8 @@ func runFlowCommand(run *flowRun, cmd string) {
 	}
 	lower := strings.ToLower(cmd)
 
-	// kickall [reason] (or #kickall) is this program's own command, not a
-	// BattlEye one: it lists the players and kicks each (kickAll).
+	// kickall [reason] is this program's own command, not a BattlEye one: it
+	// lists the players and kicks each (kickAll).
 	if bare := strings.TrimPrefix(lower, "#"); bare == "kickall" || strings.HasPrefix(bare, "kickall ") {
 		reason := strings.TrimSpace(strings.TrimPrefix(cmd, "#")[len("kickall"):])
 		if reason == "" {
@@ -1236,81 +853,6 @@ func runFlowCommand(run *flowRun, cmd string) {
 	}
 }
 
-// runCfg says how one run is timed.
-type runCfg struct {
-	first     time.Time // when the first tick happens (after any delay)
-	countdown bool
-	timer     int       // $timer on the first tick (countdown only)
-	event     time.Time // countdown: when $timer reaches 0
-}
-
-// runJob works through one job and reports whether it was stopped.
-func runJob(run *flowRun, pf *parsedFlow, cfg runCfg, p *Player) (stopped bool) {
-	if p != nil {
-		run.logf("player %d (%s) joined", p.ID, p.Name)
-	}
-	stoppedNow := func() bool {
-		if p != nil {
-			run.logf("stopped for player %d (%s)", p.ID, p.Name)
-		} else {
-			run.logf("stopped")
-		}
-		run.sendCancel()
-		return true
-	}
-	if !sleepUntil(run.ctx, cfg.first) {
-		return stoppedNow()
-	}
-	x := newJob(run, pf, p, cfg.countdown, cfg.timer)
-	for k := 0; ; k++ {
-		at := cfg.first.Add(time.Duration(k) * time.Second)
-		if !sleepUntil(run.ctx, at) {
-			return stoppedNow()
-		}
-		if k > maxTimeSecs {
-			run.logf("still running after 24 hours; stopped")
-			run.markFailed()
-			return false
-		}
-		x.tick()
-		if x.endOfTick() {
-			if x.halted {
-				return false
-			}
-			break
-		}
-	}
-	if p == nil {
-		run.logf("done")
-	}
-	return false
-}
-
-// endOfTick moves $timer on after a tick and reports whether the job is
-// over: a stop line ran, a countdown reached 0, or (other runs) nothing is
-// left to send.
-func (x *job) endOfTick() bool {
-	if x.halted {
-		return true
-	}
-	if !x.countdown {
-		return x.idle()
-	}
-	switch {
-	case x.newTimer != nil:
-		x.timer, x.newTimer = *x.newTimer, nil
-		x.run.setAnchor(time.Now().Add(time.Duration(x.timer) * time.Second))
-	case x.timer == 0:
-		if n := x.unsent(); n > 0 {
-			x.run.logf("the countdown reached 0 with %d block(s) still sending; the rest is not sent", n)
-		}
-		return true
-	default:
-		x.timer--
-	}
-	return false
-}
-
 // sleepUntil waits for t. It returns false if ctx was cancelled first.
 func sleepUntil(ctx context.Context, t time.Time) bool {
 	d := time.Until(t)
@@ -1325,249 +867,6 @@ func sleepUntil(ctx context.Context, t time.Time) bool {
 	case <-tm.C:
 		return true
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Save-time analysis and the edit dialog's preview
-// ---------------------------------------------------------------------------
-
-// flowCfg is how a flow's Timer is used (from the edit dialog's fields).
-type flowCfg struct {
-	trigger   string
-	timer     int  // seconds; 0 = no Timer
-	countdown bool // scheduled, with a Timer, set to "before"
-}
-
-// timedBlock is one point in a countdown where something is sent.
-type timedBlock struct {
-	line     int
-	secs     []int
-	ticks    int    // how many ticks the block can take
-	firstCmd string // the first command it sends
-}
-
-type flowAnalysis struct {
-	blocks     []timedBlock
-	sends      []int // every send point, greatest first
-	plainTicks int   // ticks the plain lines take
-	plainFirst string
-}
-
-// blockTicks is the most ticks a list of lines can take (both sides of an
-// if are counted as the longer one; for each player counts one player).
-func blockTicks(nodes []*flowNode) int {
-	t := 0
-	for _, n := range nodes {
-		switch n.kind {
-		case nodeCmd:
-			t++
-		case nodeWait:
-			t += n.ticks
-		case nodeIf:
-			a, b := blockTicks(n.then), blockTicks(n.els)
-			if b > a {
-				a = b
-			}
-			t += a
-		case nodeDo, nodeEach:
-			t += blockTicks(n.then)
-		}
-	}
-	return t
-}
-
-func firstCmd(nodes []*flowNode) string {
-	for _, n := range nodes {
-		switch n.kind {
-		case nodeCmd:
-			return n.text
-		case nodeIf, nodeDo, nodeEach:
-			if c := firstCmd(n.then); c != "" {
-				return c
-			}
-			if c := firstCmd(n.els); c != "" {
-				return c
-			}
-		}
-	}
-	return ""
-}
-
-// timerEquals finds `$timer == <time or list>` in a condition that has a
-// single all-of group, so the analysis can treat it like a timed line.
-func timerEquals(c *flowCond, lists map[string][]int) []int {
-	if c == nil || len(c.any) != 1 {
-		return nil
-	}
-	for _, cmp := range c.any[0] {
-		if cmp.op != "==" {
-			continue
-		}
-		other := ""
-		switch {
-		case strings.EqualFold(cmp.left, "$timer"):
-			other = cmp.right
-		case strings.EqualFold(cmp.right, "$timer"):
-			other = cmp.left
-		default:
-			continue
-		}
-		if secs, ok := timeLit(other); ok {
-			return []int{secs}
-		}
-		if m := varNameRe.FindStringSubmatch(other); m != nil {
-			return lists[strings.ToLower(m[1])]
-		}
-	}
-	return nil
-}
-
-// analyzeFlow runs the checks that depend on the Timer and trigger, and works
-// out the timeline the preview shows. Every error is a user-facing message.
-func analyzeFlow(pf *parsedFlow, cfg flowCfg) (*flowAnalysis, error) {
-	if !cfg.countdown {
-		// Manual and join flows can't be scheduled, so they never count down.
-		need := "a Timer set to Before schedule"
-		if cfg.trigger != triggerSchedule {
-			need = "a countdown, which only scheduled flows have"
-		}
-		if len(pf.timedLines) > 0 {
-			return nil, fmt.Errorf("line %d: timed lines need %s; use wait to space out commands", pf.timedLines[0], need)
-		}
-		if len(pf.timerUses) > 0 {
-			return nil, fmt.Errorf("line %d: $timer needs %s", pf.timerUses[0], need)
-		}
-	}
-	for _, u := range pf.playerUses {
-		if !u.inEach && cfg.trigger != triggerJoin {
-			return nil, fmt.Errorf("line %d: $%s only works in flows triggered On player join, or inside for each player", u.line, u.name)
-		}
-	}
-	a := &flowAnalysis{}
-	var plain []*flowNode
-	for _, n := range pf.Top {
-		if !isWatcher(n, cfg.countdown) {
-			plain = append(plain, n)
-			continue
-		}
-		var secs []int
-		body := n.then
-		switch {
-		case n.at != nil && n.at.listVar != "":
-			secs = pf.lists[n.at.listVar]
-		case n.at != nil:
-			secs = n.at.secs
-		default:
-			secs = timerEquals(n.cond, pf.lists)
-		}
-		if len(secs) == 0 {
-			continue
-		}
-		a.blocks = append(a.blocks, timedBlock{line: n.line, secs: secs, ticks: blockTicks(body), firstCmd: firstCmd(body)})
-	}
-	a.plainTicks = blockTicks(plain)
-	a.plainFirst = firstCmd(plain)
-	if !cfg.countdown {
-		return a, nil
-	}
-	seen := map[int]bool{}
-	for _, b := range a.blocks {
-		for _, s := range b.secs {
-			if s > cfg.timer {
-				return nil, fmt.Errorf("line %d: %s is earlier than the Timer (%s), so it would never run", b.line, fmtLeft(s), fmtLeft(cfg.timer))
-			}
-			if last := s - (b.ticks - 1); b.ticks > 0 && last < 0 {
-				return nil, fmt.Errorf("line %d: the last line of this block would go out at -%s; start it earlier", b.line, fmtLeft(-last))
-			}
-			if !seen[s] {
-				seen[s] = true
-				a.sends = append(a.sends, s)
-			}
-		}
-	}
-	if last := cfg.timer - (a.plainTicks - 1); a.plainTicks > 0 && last < 0 {
-		return nil, fmt.Errorf("the lines without a time take %s, longer than the Timer (%s)", fmtLeft(a.plainTicks), fmtLeft(cfg.timer))
-	}
-	sort.Sort(sort.Reverse(sort.IntSlice(a.sends)))
-	return a, nil
-}
-
-// summary describes the timeline for the edit dialog. event is the next cron
-// time for scheduled flows (zero otherwise).
-func (a *flowAnalysis) summary(pf *parsedFlow, cfg flowCfg, event time.Time) string {
-	clock := func(t time.Time) string { return t.Format("15:04:05") }
-	var b strings.Builder
-	if cfg.countdown {
-		start := event.Add(-time.Duration(cfg.timer) * time.Second)
-		fmt.Fprintf(&b, "Starts %s (%s before the schedule)", clock(start), fmtLeft(cfg.timer))
-		first, firstAt := a.plainFirst, cfg.timer
-		if first == "" {
-			firstAt = -1
-			for _, bl := range a.blocks {
-				for _, s := range bl.secs {
-					if s > firstAt {
-						first, firstAt = bl.firstCmd, s
-					}
-				}
-			}
-		}
-		if first != "" {
-			fmt.Fprintf(&b, "; first command at %s: %s", clock(event.Add(-time.Duration(firstAt)*time.Second)), fillTimeLeft(first, firstAt))
-		}
-		fmt.Fprintf(&b, ". Ends %s", clock(event))
-		for _, bl := range a.blocks {
-			for _, s := range bl.secs {
-				if s == 0 && bl.firstCmd != "" {
-					fmt.Fprintf(&b, " with %s", bl.firstCmd)
-				}
-			}
-		}
-		b.WriteString(".")
-		if len(a.sends) > 0 {
-			parts := make([]string, len(a.sends))
-			for i, s := range a.sends {
-				parts[i] = fmtLeft(s)
-			}
-			fmt.Fprintf(&b, " Timed lines at %s.", strings.Join(parts, ", "))
-		}
-		if len(pf.timerSets) > 0 {
-			lines := make([]string, len(pf.timerSets))
-			for i, l := range pf.timerSets {
-				lines[i] = strconv.Itoa(l)
-			}
-			fmt.Fprintf(&b, " The length can change: $timer is set on line %s.", strings.Join(lines, ", "))
-		}
-		return b.String()
-	}
-	when := map[string]string{
-		triggerManual:   "when Run is pressed",
-		triggerJoin:     "when a player joins",
-		triggerSchedule: "at the scheduled time",
-	}[cfg.trigger]
-	after := map[string]string{
-		triggerManual:   "Run is pressed",
-		triggerJoin:     "the player joins",
-		triggerSchedule: "the scheduled time",
-	}[cfg.trigger]
-	if cfg.timer > 0 {
-		fmt.Fprintf(&b, "Starts %s after %s", fmtLeft(cfg.timer), after)
-		if !event.IsZero() {
-			fmt.Fprintf(&b, " (%s)", clock(event.Add(time.Duration(cfg.timer)*time.Second)))
-		}
-	} else {
-		fmt.Fprintf(&b, "Starts %s", when)
-		if !event.IsZero() {
-			fmt.Fprintf(&b, " (%s)", clock(event))
-		}
-	}
-	if a.plainFirst != "" {
-		fmt.Fprintf(&b, " with %s", a.plainFirst)
-	}
-	if a.plainTicks > 1 {
-		fmt.Fprintf(&b, ". The lines take %s", fmtLeft(a.plainTicks))
-	}
-	b.WriteString(".")
-	return b.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -1846,45 +1145,44 @@ func fmtWhen(t time.Time) string { return t.Format("Mon 02 Jan 15:04 MST") }
 // Flow definitions (stored in the flows table, see db.go)
 // ---------------------------------------------------------------------------
 
-// Flow triggers: how a flow starts besides the Run button.
+// Flow triggers.
 const (
 	triggerManual   = "manual"   // only Run starts it
 	triggerSchedule = "schedule" // cron schedule, while Enabled
 	triggerJoin     = "join"     // once per joining player, while Enabled
+	triggerChat     = "chat"     // once per chat message, while Enabled
 )
 
-// What the schedule column holds for the two triggers without a cron expression.
+// What the schedule column holds for the triggers without a cron expression.
 const (
 	scheduleManual = "manual"
 	scheduleJoin   = "on-join"
+	scheduleChat   = "on-chat"
 )
 
-// Timer modes for scheduled flows with a Timer.
-const (
-	timerAfter  = "after"  // delay: run the script Timer after the cron time
-	timerBefore = "before" // countdown: start Timer before the cron time
-)
-
+// Flow is one flow as the Flows page and the API see it. In the flows table
+// the steps are JSON in the script column, When stopped is JSON in the
+// cancel column, and Delay is in the timer column.
 type Flow struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	Script string `json:"script"`
-	// Cancel holds commands sent when Stop is pressed, one per line.
-	Cancel string `json:"cancel"`
-	// Timer is a time such as "60m", or "" for no Timer.
-	Timer string `json:"timer"`
-	// TimerMode is "after" or "before" for a scheduled flow with a Timer,
-	// "" otherwise.
-	TimerMode string `json:"timerMode"`
-	// Schedule is what's stored: "manual", "on-join" or a cron expression.
-	Schedule string `json:"schedule"`
-	// Trigger (manual | schedule | join) is derived from Schedule when read,
-	// not stored. The edit dialog sends it on save; if empty, Schedule decides.
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	// Trigger is manual, schedule, join or chat. It is stored in the
+	// schedule column ("manual", "on-join", "on-chat" or the cron
+	// expression) and filled in when read.
 	Trigger string `json:"trigger"`
-	// ScheduleEnabled turns the trigger on (schedule and join flows only).
-	ScheduleEnabled bool   `json:"scheduleEnabled"`
-	NextRun         string `json:"nextRun,omitempty"` // computed for the UI, not stored
-	LastRun         string `json:"lastRun,omitempty"` // when it was last started, for the UI, not stored
+	// Schedule is the cron expression (schedule flows only).
+	Schedule string `json:"schedule"`
+	// Delay is the time before step 1, as typed ("", "5s", "1m20s").
+	Delay  string `json:"delay"`
+	Steps  []Step `json:"steps"`
+	OnStop []Step `json:"onStop"`
+	// ScheduleEnabled turns the trigger on (schedule, join and chat flows).
+	ScheduleEnabled bool `json:"scheduleEnabled"`
+	// Broken says why a stored flow couldn't be read (one written for the
+	// old script format). It is never stored.
+	Broken  string `json:"broken,omitempty"`
+	NextRun string `json:"nextRun,omitempty"` // for the page, not stored
+	LastRun string `json:"lastRun,omitempty"` // for the page, not stored
 }
 
 // maxFlowNameLen is the longest flow name allowed, in characters. The Flow
@@ -1900,125 +1198,76 @@ func clipName(s string, n int) string {
 }
 
 // triggerOf reads a flow's trigger from its stored schedule. Blank and
-// "* * * * *" (what older flows used for "no schedule") count as manual.
+// "* * * * *" count as manual.
 func triggerOf(schedule string) string {
 	switch strings.ToLower(strings.Join(strings.Fields(schedule), " ")) {
 	case scheduleManual, "", "* * * * *":
 		return triggerManual
 	case scheduleJoin:
 		return triggerJoin
+	case scheduleChat:
+		return triggerChat
 	}
 	return triggerSchedule
 }
 
-// fillTrigger sets f.Trigger after a flow is read from the database. A manual
-// flow is never reported as enabled.
-func fillTrigger(f *Flow) {
-	f.Trigger = triggerOf(f.Schedule)
-	if f.Trigger == triggerManual {
-		f.ScheduleEnabled = false
-	}
-}
-
-// storedSchedule is what goes in the schedule column for a validated flow.
+// storedSchedule is what goes in the schedule column.
 func storedSchedule(f Flow) string {
 	switch f.Trigger {
 	case triggerJoin:
 		return scheduleJoin
+	case triggerChat:
+		return scheduleChat
 	case triggerSchedule:
 		return f.Schedule
 	}
 	return scheduleManual
 }
 
-// configOf reads a flow's Timer fields. Errors are user-facing.
-func configOf(f Flow) (flowCfg, error) {
-	cfg := flowCfg{trigger: f.Trigger}
-	if t := strings.TrimSpace(f.Timer); t != "" {
-		secs, err := parseTime(t)
-		if err != nil {
-			return cfg, fmt.Errorf("Timer: %v", err)
-		}
-		cfg.timer = secs
+// flowFromRow fills a flow read from the database: its trigger from the
+// schedule column and its steps from JSON. A flow saved in the old script
+// format can't be read; Broken says so and it doesn't run.
+func flowFromRow(f *Flow, script, cancel string) {
+	f.Trigger = triggerOf(f.Schedule)
+	if f.Trigger != triggerSchedule {
+		f.Schedule = ""
 	}
-	// Only a scheduled flow can count down to its time; for manual and join
-	// flows the Timer is always a delay, whatever mode is sent.
-	if cfg.trigger == triggerSchedule && cfg.timer > 0 {
-		switch strings.ToLower(strings.TrimSpace(f.TimerMode)) {
-		case timerBefore, "":
-			cfg.countdown = true
-		case timerAfter:
-		default:
-			return cfg, fmt.Errorf("Timer mode: use %q or %q", timerBefore, timerAfter)
-		}
+	if f.Trigger == triggerManual {
+		f.ScheduleEnabled = false
 	}
-	return cfg, nil
-}
-
-// storedTimer returns the Timer (as typed, lower case) and Timer mode as
-// saved, both empty where they don't apply.
-func storedTimer(f Flow, cfg flowCfg) (string, string) {
-	if cfg.timer == 0 {
-		return "", ""
+	f.Steps, f.OnStop = []Step{}, []Step{}
+	if err := json.Unmarshal([]byte(script), &f.Steps); err != nil {
+		f.Steps = []Step{}
+		f.Broken = "This flow was written for the old script format. Delete it and build it again with steps."
+		return
 	}
-	t := strings.ToLower(strings.TrimSpace(f.Timer))
-	switch {
-	case cfg.countdown:
-		return t, timerBefore
-	case cfg.trigger == triggerSchedule:
-		return t, timerAfter
-	}
-	return t, ""
-}
-
-const defaultRestartScript = `// Server restart. The run starts 60 minutes (the Timer) before the
-// scheduled time, and $timer counts down to 0 at it. "5m | ..." runs a
-// line when 5 minutes are left.
-$warn = 60m 30m 15m 10m 5m 3m
-$warn | say -1 Server is going to restart in @minutes minutes!
-2m    | #lock
-1m    | if $players > 0
-  say -1 Server is going to restart in 1 minute!
-  #kickall Server Restart
-end
-0     | #shutdown`
-
-const defaultRestartCancel = `say -1 Server restart cancelled.
-#unlock`
-
-// initFlows creates the table, seeds an example restart flow on first run,
-// and logs any saved flow written for the old script format.
-func initFlows() error {
-	seed := Flow{Name: "Server restart", Script: defaultRestartScript, Cancel: defaultRestartCancel,
-		Timer: "60m", TimerMode: timerBefore, Schedule: "0 6 * * *"}
-	if err := globalDatabase.EnsureFlowsTable(seed); err != nil {
-		return err
-	}
-	flows, err := globalDatabase.ListFlows()
-	if err != nil {
-		return err
-	}
-	for _, f := range flows {
-		if err := checkFlow(f); err != nil {
-			log.Printf("flow[%s] needs updating for the new script format and won't run until it is saved again: %v", f.Name, err)
+	if strings.TrimSpace(cancel) != "" {
+		if err := json.Unmarshal([]byte(cancel), &f.OnStop); err != nil {
+			f.OnStop = []Step{}
 		}
 	}
-	return nil
+	f.Steps, f.OnStop = fixSteps(f.Steps), fixSteps(f.OnStop)
 }
 
-// normalizeTrigger checks the trigger the dialog sent. Empty means manual.
+// stepsJSON is how steps are stored.
+func stepsJSON(list []Step) string {
+	b, _ := json.Marshal(fixSteps(list))
+	return string(b)
+}
+
+// normalizeTrigger checks the trigger the page sent. Empty means manual.
 func normalizeTrigger(t string) (string, error) {
 	switch t = strings.ToLower(strings.TrimSpace(t)); t {
 	case "":
 		return triggerManual, nil
-	case triggerManual, triggerSchedule, triggerJoin:
+	case triggerManual, triggerSchedule, triggerJoin, triggerChat:
 		return t, nil
 	}
-	return "", fmt.Errorf("unknown trigger %q (use manual, schedule or join)", t)
+	return "", fmt.Errorf("unknown trigger %q (use manual, schedule, join or chat)", t)
 }
 
-// cronExamples follows every schedule error, so the dialog shows what a
-// valid schedule looks like.
+// cronExamples follows every schedule error, so the page shows what a valid
+// schedule looks like.
 const cronExamples = `Enter a cron expression such as:
 0 6 * * *  - every day at 06:00
 0 */6 * * *  - every 6 hours (00:00, 06:00, 12:00, 18:00)
@@ -2026,7 +1275,6 @@ const cronExamples = `Enter a cron expression such as:
 0 5 * * 1-5  - weekdays at 05:00`
 
 // checkCronSchedule validates the schedule of a schedule-triggered flow.
-// Anything triggerOf wouldn't read back as a cron schedule is rejected.
 func checkCronSchedule(schedule string) error {
 	if triggerOf(schedule) != triggerSchedule {
 		return errors.New("Schedule: " + cronExamples)
@@ -2037,75 +1285,78 @@ func checkCronSchedule(schedule string) error {
 	return nil
 }
 
-// checkCancel validates the Cancel field: plain commands, one per line.
-func checkCancel(cancel string) error {
-	for i, l := range strings.Split(cancel, "\n") {
-		l = strings.TrimSpace(l)
-		low := strings.ToLower(l)
-		if l == "" || strings.HasPrefix(l, "//") {
-			continue
-		}
-		first := strings.Fields(low)[0]
-		switch first {
-		case "if", "else", "end", "do", "for", "while", "wait", "stop":
-			return fmt.Errorf("Cancel line %d: only plain commands go here, sent one after another when Stop is pressed", i+1)
-		}
-		if strings.HasPrefix(l, "$") && strings.Contains(l, "=") {
-			return fmt.Errorf("Cancel line %d: variables can't be set here", i+1)
-		}
-		for _, m := range varRe.FindAllStringSubmatch(l, -1) {
-			if name := strings.ToLower(m[1]); playerVars[name] {
-				return fmt.Errorf("Cancel line %d: $%s can't be used here (Cancel is sent once for the whole run)", i+1, name)
-			}
-		}
+// delayOf reads a flow's delay in seconds. Errors are user-facing.
+func delayOf(f Flow) (int, error) {
+	if strings.TrimSpace(f.Delay) == "" {
+		return 0, nil
 	}
-	return nil
+	secs, ok := parseDur(f.Delay)
+	switch {
+	case !ok:
+		return 0, errors.New("Delay: enter a time such as 30 (seconds), 90s or 1m20s")
+	case secs > maxTimeSecs:
+		return 0, errors.New("Delay: 24h at most")
+	}
+	return secs, nil
 }
 
-// cancelLines are the Cancel field's commands, in order.
-func cancelLines(cancel string) []string {
-	var out []string
-	for _, l := range strings.Split(cancel, "\n") {
-		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "//") {
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
-// parseAndAnalyze parses a flow's script and checks it against its trigger
-// and Timer. Errors are user-facing.
-func parseAndAnalyze(f Flow) (*parsedFlow, flowCfg, *flowAnalysis, error) {
-	cfg, err := configOf(f)
-	if err != nil {
-		return nil, cfg, nil, err
-	}
-	pf, err := parseFlowScript(f.Script)
-	if err != nil {
-		return nil, cfg, nil, err
-	}
-	a, err := analyzeFlow(pf, cfg)
-	if err != nil {
-		return nil, cfg, nil, err
-	}
-	return pf, cfg, a, nil
-}
-
-// checkFlow runs every check a stored flow must pass to run.
+// checkFlow runs every check a flow must pass to be saved or run.
 func checkFlow(f Flow) error {
+	if f.Broken != "" {
+		return errors.New(f.Broken)
+	}
 	if f.Trigger == triggerSchedule {
 		if err := checkCronSchedule(f.Schedule); err != nil {
 			return err
 		}
 	}
-	if err := checkCancel(f.Cancel); err != nil {
+	if _, err := delayOf(f); err != nil {
 		return err
 	}
-	_, _, _, err := parseAndAnalyze(f)
-	return err
+	return checkSteps(f.Trigger, f.Steps, f.OnStop)
 }
 
-// flowsWithNextRun lists every flow and fills NextRun and LastRun for the UI.
+// defaultRestart is the flow seeded on first start (disabled).
+func defaultRestart() Flow {
+	msg := func(t string) Step { return Step{Type: "message", To: "all", Text: t} }
+	wait := func(t string) Step { return Step{Type: "wait", Time: t} }
+	return Flow{Name: "Server restart", Trigger: triggerSchedule, Schedule: "0 6 * * *",
+		Steps: []Step{
+			msg("Server restart in 60 minutes."), wait("30m"),
+			msg("Server restart in 30 minutes."), wait("15m"),
+			msg("Server restart in 15 minutes."), wait("10m"),
+			msg("Server restart in 5 minutes. Find a safe spot!"), wait("3m"),
+			{Type: "lock"},
+			msg("Server locked. Restart in 2 minutes."), wait("1m"),
+			{Type: "if", Branches: []Branch{{Subject: "players_online", Op: "gt", Value: "0",
+				Steps: []Step{{Type: "kickAll", Reason: "Server restart"}, wait("1m")}}}},
+			{Type: "shutdown"},
+		},
+		OnStop: []Step{msg("Server restart cancelled."), {Type: "unlock"}},
+	}
+}
+
+// initFlows creates the table, seeds an example restart flow on first run,
+// and logs any saved flow that can't run.
+func initFlows() error {
+	seed := defaultRestart()
+	seed.Schedule = storedSchedule(seed)
+	if err := globalDatabase.EnsureFlowsTable(seed, stepsJSON(seed.Steps), stepsJSON(seed.OnStop)); err != nil {
+		return err
+	}
+	flows, err := globalDatabase.ListFlows()
+	if err != nil {
+		return err
+	}
+	for _, f := range flows {
+		if err := checkFlow(f); err != nil {
+			log.Printf("flow[%s] won't run until it is fixed: %v", f.Name, err)
+		}
+	}
+	return nil
+}
+
+// flowsWithNextRun lists every flow and fills NextRun and LastRun for the page.
 func flowsWithNextRun() ([]Flow, error) {
 	flows, err := globalDatabase.ListFlows()
 	if err != nil {
@@ -2127,10 +1378,13 @@ func flowsWithNextRun() ([]Flow, error) {
 		case !f.ScheduleEnabled:
 		case f.Trigger == triggerJoin:
 			f.NextRun = "On player join"
+		case f.Trigger == triggerChat:
+			f.NextRun = "On player message"
 		default:
 			if c, err := parseCron(f.Schedule); err == nil {
 				if next, ok := c.next(now); ok {
-					f.NextRun = fmtWhen(next)
+					delay, _ := delayOf(*f)
+					f.NextRun = fmtWhen(next.Add(time.Duration(delay) * time.Second))
 				}
 			}
 		}
@@ -2138,44 +1392,42 @@ func flowsWithNextRun() ([]Flow, error) {
 	return flows, nil
 }
 
-// validateAndSaveFlow checks a flow from the edit dialog (or an import) and
-// stores it. Every error it returns is a user-facing message.
+// validateAndSaveFlow checks a flow from the page (or an import) and stores
+// it. Every error it returns is a user-facing message.
 //
 // New flows are saved disabled, manual flows are never enabled, and an edit
 // that changes a flow's trigger saves it disabled, so switching an enabled
-// restart flow to "On player join" can't make it fire without pressing Enable.
+// restart flow to On player join can't make it fire without pressing Enable.
 func validateAndSaveFlow(f Flow) (int64, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Schedule = strings.TrimSpace(f.Schedule)
+	f.Delay = strings.ToLower(strings.TrimSpace(f.Delay))
+	f.Broken = ""
 	if f.Name == "" {
 		return 0, errors.New("name is required")
 	}
 	if utf8.RuneCountInString(f.Name) > maxFlowNameLen {
 		return 0, fmt.Errorf("Name: %d characters max", maxFlowNameLen)
 	}
-	// An import (or a bare API call) may only have a schedule; it says what the trigger is.
-	if strings.TrimSpace(f.Trigger) == "" {
-		f.Trigger = triggerOf(f.Schedule)
-	}
 	trig, err := normalizeTrigger(f.Trigger)
 	if err != nil {
 		return 0, err
 	}
 	f.Trigger = trig
-	f.Script = normalizeScript(f.Script)
-	f.Cancel = normalizeScript(f.Cancel)
+	f.Steps, f.OnStop = fixSteps(f.Steps), fixSteps(f.OnStop)
+	if f.Trigger != triggerSchedule && f.Trigger != triggerManual {
+		f.OnStop = []Step{}
+	}
 	if err := checkFlow(f); err != nil {
 		return 0, err
 	}
-	cfg, _ := configOf(f)
-	f.Timer, f.TimerMode = storedTimer(f, cfg)
 	f.Schedule = storedSchedule(f)
 	if f.Trigger == triggerManual || f.ID == 0 {
 		f.ScheduleEnabled = false
 	} else if old, err := globalDatabase.GetFlow(f.ID); err == nil && old.Trigger != f.Trigger {
 		f.ScheduleEnabled = false
 	}
-	id, err := globalDatabase.SaveFlow(f)
+	id, err := globalDatabase.SaveFlow(f, stepsJSON(f.Steps), stepsJSON(f.OnStop))
 	if err != nil {
 		return 0, errors.New("could not save (is the name already used?)")
 	}
@@ -2185,58 +1437,31 @@ func validateAndSaveFlow(f Flow) (int64, error) {
 // checkFlowCanEnable reports why a flow can't be enabled, if it can't.
 func checkFlowCanEnable(f Flow) error {
 	if f.Trigger == triggerManual {
-		return errors.New("manual flows have nothing to enable - press Run to start one, or edit the flow and pick the Schedule or On player join trigger")
+		return errors.New("manual flows have nothing to enable - press Run to start one, or edit the flow and pick another trigger")
 	}
 	return checkFlow(f)
 }
 
-// previewFlow builds the plain-English summary the edit dialog shows: what
-// the trigger means, the next few run times, and the script's timeline.
+// previewFlow is the edit dialog's line under the trigger: what the
+// schedule means and when the next runs start.
 func previewFlow(f Flow) map[string]any {
 	trig, err := normalizeTrigger(f.Trigger)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	f.Trigger = trig
-	cfg, err := configOf(f)
+	delay, err := delayOf(f)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
-	if err := checkCancel(f.Cancel); err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
+	if trig != triggerSchedule {
+		return map[string]any{"ok": true}
 	}
-	// Script mistakes show in red while typing, with the line number.
-	var a *flowAnalysis
-	pf, perr := parseFlowScript(f.Script)
-	if perr == nil {
-		a, perr = analyzeFlow(pf, cfg)
-	}
-	if perr != nil && strings.TrimSpace(f.Script) != "" {
-		return map[string]any{"ok": false, "error": "Script: " + perr.Error()}
-	}
-	resp := map[string]any{"ok": true}
-
-	switch trig {
-	case triggerManual:
-		resp["description"] = "Manual only - this flow runs when you press Run (or POST /api/flows/<id>/run). There is nothing to enable."
-		if a != nil {
-			resp["span"] = a.summary(pf, cfg, time.Time{})
-		}
-		return resp
-	case triggerJoin:
-		resp["description"] = "While Enabled, this flow runs once for each player who joins. $player, $name, $ip, $guid and $ping are that player."
-		if a != nil {
-			resp["span"] = a.summary(pf, cfg, time.Time{})
-		}
-		return resp
-	}
-
-	// Schedule trigger.
 	if err := checkCronSchedule(f.Schedule); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	c, _ := parseCron(f.Schedule)
-	resp["description"] = c.describe()
+	resp := map[string]any{"ok": true, "description": c.describe()}
 	next := []string{}
 	t := time.Now()
 	for i := 0; i < 3; i++ {
@@ -2244,13 +1469,7 @@ func previewFlow(f Flow) map[string]any {
 		if !ok {
 			break
 		}
-		if i == 0 && a != nil {
-			resp["span"] = a.summary(pf, cfg, n)
-			if cfg.countdown {
-				resp["starts"] = fmtWhen(n.Add(-time.Duration(cfg.timer) * time.Second))
-			}
-		}
-		next = append(next, fmtWhen(n))
+		next = append(next, fmtWhen(n.Add(time.Duration(delay)*time.Second)))
 		t = n
 	}
 	if len(next) == 0 {
@@ -2264,25 +1483,25 @@ func previewFlow(f Flow) map[string]any {
 // Runs
 // ---------------------------------------------------------------------------
 
-// flowRun is the live (or last finished) run of one flow. A scheduled or
-// manual run has one job; a join run has one job per player in progress, all
-// sharing this run's log, context and Stop button. Mutable fields are guarded
-// by flowRuns' mutex.
+// flowRun is the live (or last finished) run of one flow. A schedule or
+// manual run has one job; a join or chat run has one job per player in
+// progress, all sharing this run's log, context and Stop button. Mutable
+// fields are guarded by flowRuns' mutex.
 type flowRun struct {
-	flowID     int64
-	name       string
-	status     string // running | done | stopped | error
-	active     bool
-	failed     bool      // a command failed; the run ends as "error"
-	stopped    bool      // the Stop button was pressed
-	anchor     time.Time // countdown: when $timer reaches 0; otherwise when the script starts
-	lastRun    time.Time // when the flow was last started (join flows: last player)
-	jobs       int       // jobs still working through the script
-	log        []string
-	cancelCmds []string // the Cancel field, sent once if Stop is pressed
-	cancelOnce sync.Once
-	ctx        context.Context
-	cancel     context.CancelFunc
+	flowID   int64
+	name     string
+	status   string // running | done | stopped | error
+	active   bool
+	failed   bool      // a command failed; the run ends as "error"
+	stopped  bool      // the Stop button was pressed
+	anchor   time.Time // when step 1 starts (after the delay)
+	lastRun  time.Time // when the flow was last started
+	jobs     int       // jobs still working through the steps
+	log      []string
+	onStop   []Step // sent once if Stop is pressed
+	stopOnce sync.Once
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 // flowRuns holds each flow's current or last run, in memory only.
@@ -2302,7 +1521,12 @@ const (
 	sourceManual   = "manual run"
 	sourceSchedule = "schedule"
 	sourceJoin     = "player join trigger"
+	sourceChat     = "player message trigger"
 )
+
+// maxRunLog is how many lines a run's log keeps (join and chat runs can go
+// on for a long time).
+const maxRunLog = 500
 
 // logf writes a line to the container log as flow[name] and to the run log
 // shown on the Flows page.
@@ -2317,6 +1541,9 @@ func (r *flowRun) logf(format string, a ...any) {
 func (r *flowRun) addToRunLog(msg string) {
 	flowRuns.Lock()
 	r.log = append(r.log, time.Now().Format("15:04:05")+"  "+msg)
+	if len(r.log) > maxRunLog {
+		r.log = append([]string(nil), r.log[len(r.log)-maxRunLog:]...)
+	}
 	flowRuns.Unlock()
 }
 
@@ -2326,23 +1553,14 @@ func (r *flowRun) markFailed() {
 	flowRuns.Unlock()
 }
 
-func (r *flowRun) setAnchor(t time.Time) {
-	flowRuns.Lock()
-	r.anchor = t
-	flowRuns.Unlock()
-}
-
-// sendCancel sends the Cancel field's commands, once per run.
-func (r *flowRun) sendCancel() {
-	r.cancelOnce.Do(func() {
-		if len(r.cancelCmds) == 0 {
+// sendOnStop sends the When stopped steps, once per run.
+func (r *flowRun) sendOnStop() {
+	r.stopOnce.Do(func() {
+		if len(r.onStop) == 0 {
 			return
 		}
-		r.logf("sending the Cancel commands")
-		x := &seq{x: &job{run: r, vars: map[string]value{}}}
-		for _, c := range r.cancelCmds {
-			sendCommand(r, x.fill(c))
-		}
+		r.logf("sending the When stopped steps")
+		(&job{run: r, ctx: context.Background()}).exec(r.onStop)
 	})
 }
 
@@ -2390,34 +1608,28 @@ func snapshotRuns() []runView {
 	return out
 }
 
-// startFlow starts a run now (the Run button), whatever the flow's trigger.
-// minutes > 0 replaces the Timer for this run: a countdown of that length,
-// or that long a delay.
+// startFlow starts a run now (the Run button). minutes > 0 replaces the
+// flow's delay for this run. Join and chat flows run for a player, so Run
+// can't start them.
 func startFlow(f Flow, minutes int) error {
-	pf, cfg, _, err := parseAndAnalyze(f)
-	if err != nil {
+	if err := checkFlow(f); err != nil {
 		return err
 	}
-	for _, u := range pf.playerUses {
-		if !u.inEach {
-			return fmt.Errorf("this flow uses $%s, so it only runs when a player joins", u.name)
-		}
+	switch f.Trigger {
+	case triggerJoin:
+		return errors.New("this flow runs for each player who joins, so Run can't start it")
+	case triggerChat:
+		return errors.New("this flow runs for each player message, so Run can't start it")
 	}
+	delay, _ := delayOf(f)
 	if minutes > 0 {
-		cfg.timer = minutes * 60
+		delay = minutes * 60
 	}
-	now := time.Now()
-	rc := runCfg{first: now, countdown: cfg.countdown, timer: cfg.timer}
-	if cfg.countdown {
-		rc.event = now.Add(time.Duration(cfg.timer) * time.Second)
-	} else {
-		rc.first = now.Add(time.Duration(cfg.timer) * time.Second)
-	}
-	return launch(f, pf, rc, sourceManual, nil)
+	return launch(f, time.Now().Add(time.Duration(delay)*time.Second), sourceManual, nil)
 }
 
 // stopFlow cancels the active run of a flow (the Stop button). The run sends
-// the Cancel commands as it stops.
+// the When stopped steps as it stops.
 func stopFlow(id int64) error {
 	flowRuns.Lock()
 	run := flowRuns.byFlow[id]
@@ -2442,10 +1654,11 @@ func deleteFlow(id int64) error {
 	return globalDatabase.DeleteFlow(id)
 }
 
-// launch starts a run of f. p is the joining player for join flows (nil
-// otherwise); a join adds a job to the flow's active run if there is one,
-// while any other start is refused with errFlowRunning.
-func launch(f Flow, pf *parsedFlow, rc runCfg, source string, p *Player) error {
+// launch starts a run of f whose first step goes at `start`. p is the player
+// for join and chat flows (nil otherwise); a player run adds a job to the
+// flow's active run if there is one, while any other start is refused with
+// errFlowRunning.
+func launch(f Flow, start time.Time, source string, p *flowPlayer) error {
 	flowRuns.Lock()
 	run := flowRuns.byFlow[f.ID]
 	active := run != nil && run.active
@@ -2456,24 +1669,50 @@ func launch(f Flow, pf *parsedFlow, rc runCfg, source string, p *Player) error {
 	if !active {
 		ctx, cancel := context.WithCancel(context.Background())
 		run = &flowRun{flowID: f.ID, name: f.Name, status: "running", active: true,
-			cancelCmds: cancelLines(f.Cancel), ctx: ctx, cancel: cancel}
+			onStop: f.OnStop, ctx: ctx, cancel: cancel}
+		if old := flowRuns.byFlow[f.ID]; old != nil && p != nil {
+			run.log = old.log // join and chat flows keep one running log
+		}
 		flowRuns.byFlow[f.ID] = run
 	}
 	run.jobs++
-	run.anchor = rc.first
-	if rc.countdown {
-		run.anchor = rc.event
-	}
+	run.anchor = start
 	run.lastRun = time.Now()
-	if rc.first.After(run.lastRun) {
-		run.lastRun = rc.first
-	}
 	flowRuns.Unlock()
-	if !active {
+	if !active || p != nil {
 		run.logf("Started by %s", source)
 	}
-	go func() { run.jobDone(runJob(run, pf, rc, p)) }()
+	go func() { run.jobDone(runJob(run, f, start, p)) }()
 	return nil
+}
+
+// runJob works through one job and reports whether it was stopped.
+func runJob(run *flowRun, f Flow, start time.Time, p *flowPlayer) (stopped bool) {
+	who := ""
+	if p != nil {
+		who = fmt.Sprintf(" for %s (#%d)", bareName(p.Name), p.ID)
+		if p.message != "" {
+			run.logf("%s: %s", bareName(p.Name), p.message)
+		} else {
+			run.logf("player %d (%s) joined", p.ID, bareName(p.Name))
+		}
+	}
+	if d := time.Until(start); d >= time.Second {
+		run.logf("waiting %s before step 1", fmtDur(int((d+time.Second/2)/time.Second)))
+	}
+	if !sleepUntil(run.ctx, start) {
+		run.logf("stopped%s", who)
+		run.sendOnStop()
+		return true
+	}
+	x := &job{run: run, ctx: run.ctx, p: p}
+	if !x.exec(f.Steps) && run.ctx.Err() != nil {
+		run.logf("stopped%s", who)
+		run.sendOnStop()
+		return true
+	}
+	run.logf("done%s", who)
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -2487,9 +1726,9 @@ const scheduleGrace = 15 * time.Second
 // scheduleTick is how often the scheduler checks for runs to start.
 const scheduleTick = 5 * time.Second
 
-// lastFired is the latest cron occurrence started for each flow, so a
-// finished or stopped run isn't started again inside the same window. Only
-// the scheduler goroutine touches it.
+// lastFired is the latest cron time started for each flow, so a finished or
+// stopped run isn't started again for the same time. Only the scheduler
+// goroutine touches it.
 var lastFired = map[int64]time.Time{}
 
 // launchDue reports whether a run that starts at `start` should be launched
@@ -2510,16 +1749,9 @@ func startScheduler() {
 }
 
 // runScheduleTick starts, for every enabled scheduled flow, the first cron
-// occurrence that hasn't been started yet and whose start is now or before
-// the next tick:
-//
-//	countdown  starts Timer before the cron time. If ReCON was down when the
-//	           countdown should have started, it joins it, with $timer at the
-//	           time left; timed lines that already passed never match.
-//	delay      the script starts Timer after the cron time.
-//	no Timer   the script starts at the cron time.
-//
-// A delay or no-Timer run more than scheduleGrace late is skipped.
+// time that hasn't been started yet and whose first step (cron time plus the
+// delay) is now or before the next tick. A run more than scheduleGrace late
+// is skipped.
 func runScheduleTick(now time.Time) {
 	flows, err := globalDatabase.ListFlows()
 	if err != nil {
@@ -2527,50 +1759,24 @@ func runScheduleTick(now time.Time) {
 		return
 	}
 	for _, f := range flows {
-		if !f.ScheduleEnabled || f.Trigger != triggerSchedule {
-			continue // disabled, manual, or a player-join flow
+		if !f.ScheduleEnabled || f.Trigger != triggerSchedule || checkFlow(f) != nil {
+			continue
 		}
 		c, err := parseCron(f.Schedule)
 		if err != nil {
 			continue
 		}
-		pf, cfg, _, err := parseAndAnalyze(f)
-		if err != nil {
-			continue
-		}
-		timer := time.Duration(cfg.timer) * time.Second
-
-		// The first occurrence whose start (or, for a countdown, whose event)
-		// hasn't passed yet, skipping any already started.
-		from := now.Add(-scheduleGrace)
-		if !cfg.countdown {
-			from = from.Add(-timer)
-		}
+		delay, _ := delayOf(f)
+		d := time.Duration(delay) * time.Second
+		from := now.Add(-scheduleGrace - d)
 		if lf, ok := lastFired[f.ID]; ok && lf.After(from) {
 			from = lf
 		}
 		t, ok := c.next(from)
-		if !ok {
+		if !ok || !launchDue(now, t.Add(d)) {
 			continue
 		}
-		rc := runCfg{countdown: cfg.countdown, first: t.Add(timer)}
-		if cfg.countdown {
-			rc.event = t
-			rc.first = t.Add(-timer)
-			rc.timer = cfg.timer
-			if now.After(rc.first) { // joining a countdown already under way
-				left := int(t.Sub(now) / time.Second)
-				if left < 0 {
-					left = 0
-				}
-				rc.timer = left
-				rc.first = t.Add(-time.Duration(left) * time.Second)
-			}
-		}
-		if !launchDue(now, rc.first) {
-			continue
-		}
-		if err := launch(f, pf, rc, sourceSchedule, nil); errors.Is(err, errFlowRunning) {
+		if err := launch(f, t.Add(d), sourceSchedule, nil); errors.Is(err, errFlowRunning) {
 			continue // busy: retry next tick
 		} else if err != nil {
 			log.Printf("scheduler: %s: %v", f.Name, err)
@@ -2580,11 +1786,11 @@ func runScheduleTick(now time.Time) {
 }
 
 // ---------------------------------------------------------------------------
-// Player-join trigger, and the latest player list for $players
+// Player-join trigger, and the latest player list
 // ---------------------------------------------------------------------------
 
-// latest is the poller's most recent player list. $players and for each
-// player read it, so flows don't send their own `players` command.
+// latest is the poller's most recent player list. Flows and chat commands
+// read it, so they don't send their own `players` command.
 var latest struct {
 	sync.Mutex
 	players []Player
@@ -2608,9 +1814,9 @@ var joinWatch = struct {
 }{seen: map[string]bool{}}
 
 // playersPolled is called by the poller with every successful `players`
-// result. It keeps the latest list for $players and starts the join flows
-// for new arrivals. The first call after startup only records who is online,
-// so a restart doesn't greet everybody.
+// result. It keeps the latest list and starts the join flows for new
+// arrivals. The first call after startup only records who is online, so a
+// restart doesn't greet everybody.
 func playersPolled(players []Player) {
 	latest.Lock()
 	latest.players, latest.ok = append([]Player(nil), players...), true
@@ -2640,8 +1846,7 @@ func newArrivals(players []Player) []Player {
 }
 
 // playersLost is called when the game server stops answering. Everyone is
-// forgotten, so players are greeted again when they reconnect, and $players
-// reads 0.
+// forgotten, so players are greeted again when they reconnect.
 func playersLost() {
 	joinWatch.seen = map[string]bool{}
 	latest.Lock()
@@ -2649,25 +1854,600 @@ func playersLost() {
 	latest.Unlock()
 }
 
-// startJoinFlows runs every enabled join flow once for each player, after
-// the flow's Timer (if any).
-func startJoinFlows(joined []Player) {
+// playerRole reads a player's role (Player when unknown).
+func playerRole(guid string) int {
+	if globalDatabase == nil {
+		return rolePlayer
+	}
+	return globalDatabase.PlayerRole(guid)
+}
+
+// startPlayerFlows runs every enabled flow with the given trigger once for
+// the player, after each flow's delay.
+func startPlayerFlows(trigger, source string, p *flowPlayer) {
 	flows, err := globalDatabase.ListFlows()
 	if err != nil {
-		log.Printf("join flows: %v", err)
+		log.Printf("%s flows: %v", trigger, err)
 		return
 	}
 	for _, f := range flows {
-		if !f.ScheduleEnabled || f.Trigger != triggerJoin {
+		if !f.ScheduleEnabled || f.Trigger != trigger || checkFlow(f) != nil {
 			continue
 		}
-		pf, cfg, _, err := parseAndAnalyze(f)
-		if err != nil {
-			continue
+		delay, _ := delayOf(f)
+		pp := *p
+		launch(f, time.Now().Add(time.Duration(delay)*time.Second), source, &pp)
+	}
+}
+
+// startJoinFlows runs the join flows for each player who just joined.
+func startJoinFlows(joined []Player) {
+	for _, p := range joined {
+		startPlayerFlows(triggerJoin, sourceJoin, &flowPlayer{Player: p, role: playerRole(p.GUID)})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Chat: Player message flows and the built-in chat commands
+// ---------------------------------------------------------------------------
+
+// startChatWatcher reacts to every chat line for as long as ReCON runs:
+// built-in chat commands first, then the Player message flows.
+//
+// The sender is found by exact name among the players online (without the
+// "(Lobby)" tag). If nobody online has that name, or more than one player
+// does, the line is ignored; what they may do comes from their GUID's role.
+func startChatWatcher() {
+	events, _ := serverEvents.subscribe(256)
+	go func() {
+		for ev := range events {
+			if ev.Kind == eventChat {
+				handleChatLine(ev.Name, ev.Message)
+			}
 		}
-		for i := range joined {
-			rc := runCfg{first: time.Now().Add(time.Duration(cfg.timer) * time.Second)}
-			launch(f, pf, rc, sourceJoin, &joined[i])
+	}()
+}
+
+func handleChatLine(name, message string) {
+	p, ok := onlineByUniqueName(name)
+	if !ok || p.GUID == "" {
+		return
+	}
+	role := playerRole(p.GUID)
+	handleChatCommand(p, role, message)
+	startPlayerFlows(triggerChat, sourceChat, &flowPlayer{Player: p, role: role, message: strings.TrimSpace(message)})
+}
+
+// chatCommandDef is one built-in chat command as the settings dialog shows
+// it: its default cooldown, whether it has Announce and a vote length, its
+// help text, and the messages it sends (each with its default wording and
+// the placeholders it may use).
+type chatCommandDef struct {
+	Cmd      string      `json:"cmd"`
+	Staff    bool        `json:"staff"`    // mods and admins only
+	Cool     string      `json:"cool"`     // default cooldown
+	Announce bool        `json:"announce"` // has the Announce setting
+	Length   bool        `json:"length"`   // has the vote length setting
+	Help     string      `json:"help"`     // what /help /<cmd> sends
+	Fields   []chatField `json:"fields"`
+}
+
+type chatField struct {
+	Key   string   `json:"key"`
+	Label string   `json:"label"`
+	Def   string   `json:"def"`
+	Ph    []string `json:"ph"` // placeholders it may use
+}
+
+var chatCommandDefs = []chatCommandDef{
+	{Cmd: "help", Cool: "0", Help: "/help lists the commands. /help /<command> explains one.",
+		Fields: []chatField{{"list", "/help reply (to the player)", "Commands: {commands}. Type /help /<command> for details.", []string{"commands"}}}},
+	{Cmd: "shout", Cool: "10s", Help: "/shout <message> sends your message to everyone on the server.",
+		Fields: []chatField{{"msg", "Message (to everyone)", "({player_name}): {message}", []string{"player_name", "message"}}}},
+	{Cmd: "whisper", Cool: "0", Help: "/whisper <player number> <message> sends a private message to that player.",
+		Fields: []chatField{{"msg", "Message (to the player number they typed)", "({player_name}): {message}", []string{"player_name", "message"}}}},
+	{Cmd: "players", Cool: "10s", Help: "/players lists everyone online with their player number, for /whisper.",
+		Fields: []chatField{{"entry", "Each player in the list (5 per line, a line every 3 seconds, to the player)", "{target_name}:{target_id}", []string{"target_name", "target_id"}}}},
+	{Cmd: "vote", Cool: "10m", Length: true, Help: "/vote <question> starts a server-wide vote on the topic you choose. Everyone answers with /vote y or /vote n.",
+		Fields: []chatField{
+			{"start", "Vote question (to everyone)", "({player_name}) {topic}? Yes or No? Type /vote y or /vote n", []string{"player_name", "topic"}},
+			{"result", "Result (to everyone, when the vote ends)", "The server has spoken and the result is {vote_result}!", []string{"vote_result", "yes", "no", "topic"}},
+		}},
+	{Cmd: "code", Cool: "0", Help: "/code sends your player code to the admins and mods online, so they can find you.",
+		Fields: []chatField{{"staff", "Message (to each mod and admin online)", "Code for {player_name} (#{player_id}): {code}", []string{"player_name", "player_id", "code"}}}},
+	{Cmd: "kick", Staff: true, Cool: "0", Announce: true, Help: "/kick <code> <reason> kicks the player with that code. Ask them to type /code first.",
+		Fields: []chatField{
+			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been kicked by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
+			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been kicked", []string{"target_name", "reason"}},
+		}},
+	{Cmd: "ban", Staff: true, Cool: "0", Announce: true, Help: "/ban <code> <reason> permanently bans the player with that code (the last 6 characters of their GUID). Ask them to type /code first.",
+		Fields: []chatField{
+			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been banned by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
+			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been banned", []string{"target_name", "reason"}},
+		}},
+}
+
+func chatDef(cmd string) *chatCommandDef {
+	for i := range chatCommandDefs {
+		if chatCommandDefs[i].Cmd == cmd {
+			return &chatCommandDefs[i]
 		}
 	}
+	return nil
+}
+
+// chatSetting is one command's settings as stored and edited.
+type chatSetting struct {
+	On       bool              `json:"on"`
+	Cool     string            `json:"cool"`               // server-wide cooldown, "0" = none
+	Announce bool              `json:"announce,omitempty"` // kick and ban: also tell everyone
+	Length   string            `json:"length,omitempty"`   // vote: how long it stays open
+	Msgs     map[string]string `json:"msgs"`
+}
+
+// chatSettings is every command's settings, by command name.
+type chatSettings map[string]chatSetting
+
+// chatSettingsKey is where the settings are stored in the settings table.
+const chatSettingsKey = "chat_commands"
+
+func defaultChatSettings() chatSettings {
+	out := chatSettings{}
+	for _, d := range chatCommandDefs {
+		s := chatSetting{On: true, Cool: d.Cool, Announce: d.Announce, Msgs: map[string]string{}}
+		if d.Length {
+			s.Length = "5m"
+		}
+		for _, f := range d.Fields {
+			s.Msgs[f.Key] = f.Def
+		}
+		out[d.Cmd] = s
+	}
+	return out
+}
+
+// mergeChatSettings lays saved settings over the defaults, so a command or
+// message added later gets its default and unknown keys are dropped.
+func mergeChatSettings(saved chatSettings) chatSettings {
+	out := defaultChatSettings()
+	for _, d := range chatCommandDefs {
+		s, ok := saved[d.Cmd]
+		if !ok {
+			continue
+		}
+		m := out[d.Cmd]
+		m.On, m.Cool = s.On, s.Cool
+		if d.Announce {
+			m.Announce = s.Announce
+		}
+		if d.Length && s.Length != "" {
+			m.Length = s.Length
+		}
+		for _, f := range d.Fields {
+			if v, ok := s.Msgs[f.Key]; ok {
+				m.Msgs[f.Key] = v
+			}
+		}
+		out[d.Cmd] = m
+	}
+	return out
+}
+
+// checkChatSettings validates settings from the dialog. Errors are
+// user-facing.
+func checkChatSettings(s chatSettings) error {
+	for _, d := range chatCommandDefs {
+		c := s[d.Cmd]
+		if secs, ok := parseDur(c.Cool); !ok || secs > maxTimeSecs {
+			return fmt.Errorf("/%s cooldown: enter seconds, or a time such as 1m30s (24h at most)", d.Cmd)
+		}
+		if d.Length {
+			if secs, ok := parseDur(c.Length); !ok || secs < 1 || secs > 3600 {
+				return fmt.Errorf("/%s length: enter a time from 1s to 1h, such as 5m", d.Cmd)
+			}
+		}
+		for _, f := range d.Fields {
+			v := c.Msgs[f.Key]
+			if strings.TrimSpace(v) == "" {
+				return fmt.Errorf("/%s: %s can't be empty", d.Cmd, f.Label)
+			}
+			for _, m := range tokenRe.FindAllStringSubmatch(v, -1) {
+				ok := false
+				for _, p := range f.Ph {
+					ok = ok || p == m[1]
+				}
+				if !ok {
+					return fmt.Errorf("/%s: %s can't use %s", d.Cmd, f.Label, m[0])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// chatState is the commands' settings in memory, the time each command was
+// last used (cooldowns are server-wide), and the vote in progress.
+var chatState = struct {
+	sync.Mutex
+	settings chatSettings
+	loaded   bool
+	lastUsed map[string]time.Time
+	vote     *chatVote
+}{lastUsed: map[string]time.Time{}}
+
+type chatVote struct {
+	topic   string
+	yes, no int
+	voted   map[string]bool // by GUID: the first answer counts
+}
+
+// currentChatSettings returns the settings, reading them from the database
+// the first time.
+func currentChatSettings() chatSettings {
+	chatState.Lock()
+	defer chatState.Unlock()
+	if !chatState.loaded {
+		chatState.settings = loadChatSettings()
+		chatState.loaded = true
+	}
+	return chatState.settings
+}
+
+func loadChatSettings() chatSettings {
+	saved := chatSettings{}
+	if globalDatabase != nil {
+		raw, ok, err := globalDatabase.Setting(chatSettingsKey)
+		if err != nil {
+			log.Printf("chat commands: reading settings: %v", err)
+		}
+		if ok {
+			if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+				log.Printf("chat commands: stored settings unreadable, using defaults: %v", err)
+			}
+		}
+	}
+	return mergeChatSettings(saved)
+}
+
+// saveChatSettings checks and stores settings from the dialog.
+func saveChatSettings(s chatSettings) (chatSettings, error) {
+	s = mergeChatSettings(s)
+	for cmd, c := range s {
+		c.Cool = strings.ToLower(strings.TrimSpace(c.Cool))
+		c.Length = strings.ToLower(strings.TrimSpace(c.Length))
+		for k, v := range c.Msgs {
+			c.Msgs[k] = cleanReason(v)
+		}
+		s[cmd] = c
+	}
+	if err := checkChatSettings(s); err != nil {
+		return nil, err
+	}
+	b, _ := json.Marshal(s)
+	if err := globalDatabase.SaveSetting(chatSettingsKey, string(b)); err != nil {
+		return nil, err
+	}
+	chatState.Lock()
+	chatState.settings, chatState.loaded = s, true
+	chatState.Unlock()
+	return s, nil
+}
+
+// fillTemplate replaces {placeholders} in a message from settings.
+func fillTemplate(tpl string, vals map[string]string) string {
+	return cleanReason(tokenRe.ReplaceAllStringFunc(tpl, func(m string) string {
+		if v, ok := vals[m[1:len(m)-1]]; ok {
+			return v
+		}
+		return m
+	}))
+}
+
+// chatSay sends `say <to> <text>` for a chat command (to -1 is everyone)
+// and reports whether the server acknowledged it. A private message goes
+// into that player's chat history. Tests replace it.
+var chatSay = func(to Player, everyone bool, text string) bool {
+	cmd := fmt.Sprintf("say %d %s", to.ID, text)
+	if everyone {
+		cmd = "say -1 " + text
+	}
+	_, acked, err := runShared(cmd, 2*time.Second, false, "chat")
+	if err == nil && acked && !everyone {
+		recordSent(to.GUID, cmd)
+	}
+	return err == nil && acked
+}
+
+// chatKick kicks a player for /kick. Tests replace it.
+var chatKick = func(p Player, reason string) bool {
+	_, acked, err := runShared(fmt.Sprintf("kick %d %s", p.ID, reason), 2*time.Second, false, "chat")
+	return err == nil && acked
+}
+
+// playersLinePause is the gap between the lines /players sends.
+var playersLinePause = 3 * time.Second
+
+// codeOf is a player's code: the last 6 characters of their GUID, lower case.
+func codeOf(guid string) string {
+	g := strings.ToLower(guid)
+	if len(g) < 6 {
+		return g
+	}
+	return g[len(g)-6:]
+}
+
+var codeRe = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
+
+// onlineNow is a copy of the latest player list.
+func onlineNow() []Player {
+	latest.Lock()
+	defer latest.Unlock()
+	return append([]Player(nil), latest.players...)
+}
+
+// onlineStaff is every mod and admin online.
+func onlineStaff() []Player {
+	roles := map[string]int{}
+	if globalDatabase != nil {
+		if r, err := globalDatabase.Roles(); err == nil {
+			roles = r
+		}
+	}
+	var out []Player
+	for _, p := range onlineNow() {
+		if roles[strings.ToLower(p.GUID)] >= roleMod {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// coolingDown reports whether a command is still in its server-wide cooldown.
+func coolingDown(cmd string, s chatSetting) bool {
+	secs, _ := parseDur(s.Cool)
+	if secs <= 0 {
+		return false
+	}
+	chatState.Lock()
+	defer chatState.Unlock()
+	return time.Since(chatState.lastUsed[cmd]) < time.Duration(secs)*time.Second
+}
+
+func markUsed(cmd string) {
+	chatState.Lock()
+	chatState.lastUsed[cmd] = time.Now()
+	chatState.Unlock()
+}
+
+// handleChatCommand runs a built-in command typed by p (whose role is role).
+// Only a command that works gets a reply or does anything: an unknown
+// command, one turned off or cooling down, one the player may not use, or
+// one missing what it needs is dropped without a word. The chat line itself
+// is already in the player's history, so nothing more is logged.
+func handleChatCommand(p Player, role int, text string) {
+	text = strings.TrimSpace(text)
+	fields := strings.Fields(text)
+	if len(fields) == 0 || !strings.HasPrefix(fields[0], "/") {
+		return
+	}
+	cmd := strings.ToLower(fields[0][1:])
+	def := chatDef(cmd)
+	if def == nil {
+		return
+	}
+	all := currentChatSettings()
+	set := all[cmd]
+	if !set.On || def.Staff && role < roleMod {
+		return
+	}
+	rest := strings.TrimSpace(text[len(fields[0]):])
+	args := fields[1:]
+	name := bareName(p.Name)
+	if cmd != "vote" && coolingDown(cmd, set) {
+		return
+	}
+	switch cmd {
+	case "help":
+		if len(args) == 0 {
+			var names []string
+			for _, d := range chatCommandDefs {
+				if all[d.Cmd].On && (!d.Staff || role >= roleMod) {
+					names = append(names, "/"+d.Cmd)
+				}
+			}
+			if chatSay(p, false, fillTemplate(set.Msgs["list"], map[string]string{"commands": strings.Join(names, ", ")})) {
+				markUsed(cmd)
+			}
+			return
+		}
+		d := chatDef(strings.ToLower(strings.TrimPrefix(args[0], "/")))
+		if d == nil || !all[d.Cmd].On || d.Staff && role < roleMod {
+			return
+		}
+		if chatSay(p, false, d.Help) {
+			markUsed(cmd)
+		}
+
+	case "shout":
+		if rest == "" {
+			return
+		}
+		if chatSay(p, true, fillTemplate(set.Msgs["msg"], map[string]string{"player_name": name, "message": rest})) {
+			markUsed(cmd)
+		}
+
+	case "whisper":
+		if len(args) < 2 {
+			return
+		}
+		id, err := strconv.Atoi(args[0])
+		if err != nil || id == p.ID {
+			return
+		}
+		target, ok := onlineByID(id)
+		if !ok {
+			return
+		}
+		msg := strings.TrimSpace(rest[len(args[0]):])
+		if chatSay(target, false, fillTemplate(set.Msgs["msg"], map[string]string{"player_name": name, "message": msg})) {
+			markUsed(cmd)
+		}
+
+	case "players":
+		online := onlineNow()
+		if len(online) == 0 {
+			return
+		}
+		var lines []string
+		for i := 0; i < len(online); i += 5 {
+			var parts []string
+			for _, o := range online[i:min(i+5, len(online))] {
+				parts = append(parts, fillTemplate(set.Msgs["entry"], map[string]string{"target_name": bareName(o.Name), "target_id": strconv.Itoa(o.ID)}))
+			}
+			lines = append(lines, strings.Join(parts, " | "))
+		}
+		markUsed(cmd)
+		go func() {
+			for i, l := range lines {
+				if i > 0 {
+					time.Sleep(playersLinePause)
+				}
+				asker, ok := onlineByGUID(p.GUID) // their number now; stop if they left
+				if !ok {
+					return
+				}
+				chatSay(asker, false, l)
+			}
+		}()
+
+	case "vote":
+		chatVoteCommand(p, set, rest)
+
+	case "code":
+		staff := onlineStaff()
+		if len(staff) == 0 {
+			return
+		}
+		vals := map[string]string{"player_name": name, "player_id": strconv.Itoa(p.ID), "code": codeOf(p.GUID)}
+		sent := false
+		for _, s := range staff {
+			sent = chatSay(s, false, fillTemplate(set.Msgs["staff"], vals)) || sent
+		}
+		if sent {
+			markUsed(cmd)
+		}
+
+	case "kick", "ban":
+		chatPunish(cmd, p, role, set, args)
+	}
+}
+
+// chatVoteCommand handles /vote <question> (start a vote) and /vote y|n.
+func chatVoteCommand(p Player, set chatSetting, rest string) {
+	answer := strings.ToLower(rest)
+	if answer == "y" || answer == "yes" || answer == "n" || answer == "no" {
+		chatState.Lock()
+		defer chatState.Unlock()
+		v := chatState.vote
+		if v == nil || v.voted[strings.ToLower(p.GUID)] {
+			return // no vote running, or they already voted: the first answer counts
+		}
+		v.voted[strings.ToLower(p.GUID)] = true
+		if answer[0] == 'y' {
+			v.yes++
+		} else {
+			v.no++
+		}
+		return
+	}
+	topic := strings.TrimSpace(strings.TrimRight(rest, "?"))
+	if topic == "" || coolingDown("vote", set) {
+		return
+	}
+	chatState.Lock()
+	if chatState.vote != nil {
+		chatState.Unlock()
+		return // one vote at a time
+	}
+	v := &chatVote{topic: topic, voted: map[string]bool{}}
+	chatState.vote = v
+	chatState.lastUsed["vote"] = time.Now()
+	chatState.Unlock()
+
+	chatSay(p, true, fillTemplate(set.Msgs["start"], map[string]string{"player_name": bareName(p.Name), "topic": topic}))
+	length, _ := parseDur(set.Length)
+	go func() {
+		time.Sleep(time.Duration(length) * time.Second)
+		chatState.Lock()
+		chatState.vote = nil
+		yes, no := v.yes, v.no
+		chatState.Unlock()
+		result := "FAILED" // a tie, or no votes at all, fails
+		if yes > no {
+			result = "PASSED"
+		}
+		log.Printf("chat: vote %q %s (%d yes, %d no)", v.topic, result, yes, no)
+		chatSay(Player{}, true, fillTemplate(set.Msgs["result"], map[string]string{
+			"vote_result": result, "yes": strconv.Itoa(yes), "no": strconv.Itoa(no), "topic": v.topic}))
+	}()
+}
+
+// chatPunish handles /kick <code> [reason] and /ban <code> [reason]. Mods
+// can kick and ban Players; Admins can also kick and ban Mods. Nobody can
+// kick or ban themselves, or anyone of their own rank or higher, from chat.
+// /ban is always permanent and also finds players who have left.
+func chatPunish(cmd string, p Player, role int, set chatSetting, args []string) {
+	if len(args) == 0 || !codeRe.MatchString(args[0]) {
+		return
+	}
+	code := strings.ToLower(args[0])
+	reason := cleanReason(strings.Join(args[1:], " "))
+	if reason == "" {
+		reason = "No reason given"
+	}
+	var matches []Player
+	for _, o := range onlineNow() {
+		if codeOf(o.GUID) == code {
+			matches = append(matches, o)
+		}
+	}
+	online := len(matches) > 0
+	if !online && cmd == "ban" && globalDatabase != nil {
+		known, err := globalDatabase.PlayersByCode(code)
+		if err != nil {
+			log.Printf("chat: /ban lookup: %v", err)
+			return
+		}
+		matches = known
+	}
+	if len(matches) != 1 {
+		return // nobody, or more than one player, has that code
+	}
+	t := matches[0]
+	if strings.EqualFold(t.GUID, p.GUID) || playerRole(t.GUID) >= role {
+		return
+	}
+	done := "kicked"
+	if cmd == "kick" {
+		if !chatKick(t, reason) {
+			return
+		}
+	} else {
+		done = "banned"
+		if res := banStep(t, online, 0, reason, "chat"); !res.OK {
+			log.Printf("chat: /ban of %s failed: %s", bareName(t.Name), res.Error)
+			return
+		}
+	}
+	markUsed(cmd)
+	vals := map[string]string{"target_name": bareName(t.Name), "player_name": bareName(p.Name), "reason": reason}
+	for _, s := range onlineStaff() {
+		if !strings.EqualFold(s.GUID, t.GUID) { // a kicked Mod is on their way out
+			chatSay(s, false, fillTemplate(set.Msgs["staff"], vals))
+		}
+	}
+	if set.Announce {
+		chatSay(Player{}, true, fillTemplate(set.Msgs["announce"], vals))
+	}
+	log.Printf("chat: %s %s %s (%s)", bareName(p.Name), done, bareName(t.Name), reason)
 }

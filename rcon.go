@@ -737,6 +737,7 @@ type Player struct {
 	Offline           bool   `json:"offline"`
 	TotalPlaytimeSecs int64  `json:"totalPlaytimeSeconds"`
 	LastSeenUnix      int64  `json:"lastSeenUnix"` // offline players: when they were last seen (Unix seconds)
+	Role              int    `json:"role"`         // 0 Player, 1 Mod, 2 Admin (from the database; filled in by the pages' API)
 }
 
 // Ban is one entry of the GUID section of the BattlEye `bans` output, also the
@@ -807,6 +808,22 @@ func bareName(name string) string {
 // latest `players` list (flows.go), so they never send a command of their own.
 func onlineByName(name string) (Player, bool) {
 	return onlineWhere(func(p Player) bool { return bareName(p.Name) == name })
+}
+
+// onlineByUniqueName finds who wrote a chat line for the chat commands and
+// Player message flows: the one online player with exactly that name. ok is
+// false when nobody, or more than one player, has it.
+func onlineByUniqueName(name string) (Player, bool) {
+	latest.Lock()
+	defer latest.Unlock()
+	var found Player
+	n := 0
+	for _, p := range latest.players {
+		if bareName(p.Name) == name {
+			found, n = p, n+1
+		}
+	}
+	return found, n == 1
 }
 
 func onlineByID(id int) (Player, bool) {

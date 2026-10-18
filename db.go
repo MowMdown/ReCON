@@ -23,8 +23,10 @@ import (
 //   - players / sessions / IP history (SyncPlayers, OfflinePlayers, ...)
 //   - player details and admin notes (PlayerDetails, SaveNote)
 //   - chat history (AddChatMessage, ChatHistory)
+//   - player roles for the chat commands (PlayerRole, SetPlayerRole, ...)
+//   - settings, such as the chat commands' (Setting, SaveSetting)
 //   - bans (BanUser, SyncBans, BanNames, DeleteBan)
-//   - flows storage (ListFlows, GetFlow, SaveFlow, ...)
+//   - flows storage (ListFlows, GetFlow, SaveFlow, ...): steps are kept as JSON
 //
 // The bottom section keeps the database in step with the game server: the
 // background poller, the BattlEye -> DB ban mirror (and the in-memory ban
@@ -107,6 +109,12 @@ func OpenDatabase(filepath string) (*Database, error) {
 		note TEXT NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
+	-- Small settings kept as text by key (the chat commands' settings are
+	-- one JSON value under 'chat_commands').
+	CREATE TABLE IF NOT EXISTS settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
 	CREATE INDEX IF NOT EXISTS idx_session_history_guid
 		ON session_history(guid);
 	CREATE INDEX IF NOT EXISTS idx_chat_messages_guid
@@ -175,6 +183,19 @@ func OpenDatabase(filepath string) (*Database, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create schema: %w", err)
+	}
+	// Each player's role for the chat commands: 0 Player (everyone starts
+	// here), 1 Mod, 2 Admin. Added to databases made before roles existed.
+	var hasRole int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('players') WHERE name = 'role'").Scan(&hasRole); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to read the players table: %w", err)
+	}
+	if hasRole == 0 {
+		if _, err := db.Exec("ALTER TABLE players ADD COLUMN role INTEGER NOT NULL DEFAULT 0"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to add players.role: %w", err)
+		}
 	}
 	// Seed player_ips with every IP already recorded in session history.
 	// Safe to repeat: existing (guid, ip) rows are left alone.
@@ -353,7 +374,7 @@ func (db *Database) SyncPlayers(currentPlayers []Player) error {
 // OfflinePlayers returns all players from the database who are not currently connected.
 func (db *Database) OfflinePlayers() ([]Player, error) {
 	rows, err := db.Query(`
-		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen
+		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen, p.role
 		FROM players p
 		WHERE NOT EXISTS (
 			SELECT 1 FROM active_sessions a WHERE a.guid = p.guid
@@ -369,7 +390,7 @@ func (db *Database) OfflinePlayers() ([]Player, error) {
 	for rows.Next() {
 		var p Player
 		var lastSeen time.Time
-		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen); err != nil {
+		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen, &p.Role); err != nil {
 			return nil, err
 		}
 		p.LastSeenUnix = lastSeen.Unix()
@@ -429,6 +450,92 @@ func (db *Database) GUIDByName(name string) (string, error) {
 }
 
 // ---------------------------------------------------------------------------
+// Roles (the chat commands' permissions, set on the Players page)
+// ---------------------------------------------------------------------------
+
+// PlayerRole returns a player's role (0 Player, 1 Mod, 2 Admin) by GUID,
+// case-insensitive. Unknown players, and errors, are Player.
+func (db *Database) PlayerRole(guid string) int {
+	var role int
+	if err := db.QueryRow("SELECT role FROM players WHERE lower(guid) = lower(?)", guid).Scan(&role); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("roles: reading %s: %v", guid, err)
+		}
+		return 0
+	}
+	return role
+}
+
+// SetPlayerRole stores a player's role. found is false if the GUID was never seen.
+func (db *Database) SetPlayerRole(guid string, role int) (found bool, err error) {
+	res, err := db.Exec("UPDATE players SET role = ? WHERE lower(guid) = lower(?)", role, guid)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// Roles returns lower-case GUID -> role for every Mod and Admin.
+func (db *Database) Roles() (map[string]int, error) {
+	rows, err := db.Query("SELECT guid, role FROM players WHERE role > 0")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var g string
+		var r int
+		if err := rows.Scan(&g, &r); err != nil {
+			return nil, err
+		}
+		out[strings.ToLower(g)] = r
+	}
+	return out, rows.Err()
+}
+
+// PlayersByCode returns every known player whose GUID ends with code (the
+// last 6 characters, what /code shows), for /ban on a player who has left.
+func (db *Database) PlayersByCode(code string) ([]Player, error) {
+	rows, err := db.Query("SELECT username, last_ip, guid, role FROM players WHERE substr(lower(guid), -6) = lower(?)", code)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Player
+	for rows.Next() {
+		var p Player
+		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.Role); err != nil {
+			return nil, err
+		}
+		p.ID, p.Offline = -1, true
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+// Setting returns a stored setting; ok is false when it was never saved.
+func (db *Database) Setting(key string) (value string, ok bool, err error) {
+	err = db.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return value, err == nil, err
+}
+
+// SaveSetting stores a setting.
+func (db *Database) SaveSetting(key, value string) error {
+	_, err := db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
+// ---------------------------------------------------------------------------
 // Player details and admin notes (the Players page's Details dialog)
 // ---------------------------------------------------------------------------
 
@@ -443,7 +550,8 @@ type detailsPlayer struct {
 	LastSeen        int64  `json:"lastSeen"`
 	PlaytimeSeconds int64  `json:"playtimeSeconds"`
 	Online          bool   `json:"online"`
-	ID              int    `json:"id"` // player number while online, else -1
+	ID              int    `json:"id"`   // player number while online, else -1
+	Role            int    `json:"role"` // 0 Player, 1 Mod, 2 Admin
 }
 
 type detailsSession struct {
@@ -537,9 +645,9 @@ func asString(v any) string {
 func (db *Database) PlayerDetails(guid string) (*playerDetails, error) {
 	d := &playerDetails{}
 	var first, last any
-	err := db.QueryRow(`SELECT guid, username, last_ip, first_seen, last_seen, total_playtime_seconds
+	err := db.QueryRow(`SELECT guid, username, last_ip, first_seen, last_seen, total_playtime_seconds, role
 		FROM players WHERE lower(guid) = lower(?)`, guid).
-		Scan(&d.Player.GUID, &d.Player.Name, &d.Player.LastIP, &first, &last, &d.Player.PlaytimeSeconds)
+		Scan(&d.Player.GUID, &d.Player.Name, &d.Player.LastIP, &first, &last, &d.Player.PlaytimeSeconds, &d.Player.Role)
 	if err != nil {
 		return nil, err
 	}
@@ -866,11 +974,14 @@ func (db *Database) storedBans() (map[string]banState, error) {
 // ---------------------------------------------------------------------------
 
 // EnsureFlowsTable creates the flows table and, if it is empty, seeds one
-// flow with the given name, script and schedule (left disabled).
+// flow (left disabled). script and cancel are the seed's steps and When
+// stopped steps as JSON (flows.go stepsJSON).
 //
-// The schedule column also holds the flow's trigger: "manual", "on-join" or
-// a cron expression (see triggerOf in flows.go).
-func (db *Database) EnsureFlowsTable(seed Flow) error {
+// Columns: script holds the steps as JSON, cancel the When stopped steps,
+// timer the delay before step 1, and schedule the trigger: "manual",
+// "on-join", "on-chat" or a cron expression (see triggerOf in flows.go).
+// timer_mode is left over from the old script format and no longer used.
+func (db *Database) EnsureFlowsTable(seed Flow, script, cancel string) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS flows (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -882,7 +993,6 @@ func (db *Database) EnsureFlowsTable(seed Flow) error {
 		)`); err != nil {
 		return err
 	}
-	// Columns added by flows v2: the Cancel field, the Timer and its mode.
 	for _, col := range []string{"cancel", "timer", "timer_mode"} {
 		var has int
 		if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name = ?", col).Scan(&has); err != nil {
@@ -899,17 +1009,16 @@ func (db *Database) EnsureFlowsTable(seed Flow) error {
 		return err
 	}
 	if n == 0 {
-		_, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, timer_mode, schedule, position) VALUES (?, ?, ?, ?, ?, ?, 1)",
-			seed.Name, seed.Script, seed.Cancel, seed.Timer, seed.TimerMode, seed.Schedule)
+		_, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, schedule, position) VALUES (?, ?, ?, ?, ?, 1)",
+			seed.Name, script, cancel, seed.Delay, seed.Schedule)
 		return err
 	}
 	return nil
 }
 
-// ListFlows returns every flow in display order, with Trigger filled in from
-// the schedule column.
+// ListFlows returns every flow in display order, read with flowFromRow.
 func (db *Database) ListFlows() ([]Flow, error) {
-	rows, err := db.Query("SELECT id, name, script, cancel, timer, timer_mode, schedule, schedule_enabled FROM flows ORDER BY position, id")
+	rows, err := db.Query("SELECT id, name, script, cancel, timer, schedule, schedule_enabled FROM flows ORDER BY position, id")
 	if err != nil {
 		return nil, err
 	}
@@ -917,46 +1026,52 @@ func (db *Database) ListFlows() ([]Flow, error) {
 	flows := []Flow{}
 	for rows.Next() {
 		var f Flow
+		var script, cancel string
 		var en int
-		if err := rows.Scan(&f.ID, &f.Name, &f.Script, &f.Cancel, &f.Timer, &f.TimerMode, &f.Schedule, &en); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &script, &cancel, &f.Delay, &f.Schedule, &en); err != nil {
 			return nil, err
 		}
 		f.ScheduleEnabled = en != 0
-		fillTrigger(&f)
+		flowFromRow(&f, script, cancel)
 		flows = append(flows, f)
 	}
 	return flows, rows.Err()
 }
 
-// GetFlow returns one flow (Trigger filled in), or sql.ErrNoRows.
+// GetFlow returns one flow, or sql.ErrNoRows.
 func (db *Database) GetFlow(id int64) (Flow, error) {
 	var f Flow
+	var script, cancel string
 	var en int
-	err := db.QueryRow("SELECT id, name, script, cancel, timer, timer_mode, schedule, schedule_enabled FROM flows WHERE id = ?", id).
-		Scan(&f.ID, &f.Name, &f.Script, &f.Cancel, &f.Timer, &f.TimerMode, &f.Schedule, &en)
+	err := db.QueryRow("SELECT id, name, script, cancel, timer, schedule, schedule_enabled FROM flows WHERE id = ?", id).
+		Scan(&f.ID, &f.Name, &script, &cancel, &f.Delay, &f.Schedule, &en)
+	if err != nil {
+		return f, err
+	}
 	f.ScheduleEnabled = en != 0
-	fillTrigger(&f)
-	return f, err
+	flowFromRow(&f, script, cancel)
+	return f, nil
 }
 
 // SaveFlow inserts a new flow (ID 0, placed last) or updates an existing one.
-// f.Schedule must already be in stored form ("manual", "on-join" or cron);
-// f.Trigger is not stored. Updating a missing ID returns sql.ErrNoRows.
-func (db *Database) SaveFlow(f Flow) (int64, error) {
+// f.Schedule must already be in stored form ("manual", "on-join", "on-chat"
+// or cron); script and cancel are the steps as JSON. Updating a missing ID
+// returns sql.ErrNoRows.
+func (db *Database) SaveFlow(f Flow, script, cancel string) (int64, error) {
 	en := 0
 	if f.ScheduleEnabled {
 		en = 1
 	}
 	if f.ID == 0 {
-		res, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, timer_mode, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
-			f.Name, f.Script, f.Cancel, f.Timer, f.TimerMode, f.Schedule, en)
+		res, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, timer_mode, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, '', ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
+			f.Name, script, cancel, f.Delay, f.Schedule, en)
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
-	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, timer_mode = ?, schedule = ?, schedule_enabled = ? WHERE id = ?",
-		f.Name, f.Script, f.Cancel, f.Timer, f.TimerMode, f.Schedule, en, f.ID)
+	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, timer_mode = '', schedule = ?, schedule_enabled = ? WHERE id = ?",
+		f.Name, script, cancel, f.Delay, f.Schedule, en, f.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -1212,7 +1327,7 @@ func startBackgroundSync(interval time.Duration) {
 			if err := globalDatabase.SyncPlayers(players); err != nil {
 				log.Printf("poller: sync: %v", err)
 			}
-			playersPolled(players) // starts player-join flows for new arrivals (flows.go)
+			playersPolled(players) // keeps the list for flows and chat commands, starts join flows (flows.go)
 			// Ban list changes rarely: reconcile at start and every 6th poll (~30s).
 			if n%6 == 1 {
 				if _, err := syncBanList(); err != nil {

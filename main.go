@@ -24,7 +24,8 @@ import (
 //	rcon.go   talking to the game server (BattlEye protocol, sessions, parsing)
 //	web.go    HTTP routes, JSON API and the HTML pages
 //	db.go     SQLite storage and the poller that mirrors the server into it
-//	flows.go  flow scripts, cron schedules, the runner and the scheduler
+//	flows.go  flows (steps, triggers, the runner and the scheduler) and the
+//	          built-in chat commands
 // ============================================================================
 
 var (
@@ -80,7 +81,8 @@ func main() {
 		log.Fatalf("failed to initialize flows: %v", err)
 	}
 
-	startScheduler() // runs enabled flows on their cron schedule (flows.go)
+	startScheduler()   // runs enabled flows on their cron schedule (flows.go)
+	startChatWatcher() // chat commands and Player message flows (flows.go)
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	startBackgroundSync(5 * time.Second) // periodic player/ban polling (db.go)

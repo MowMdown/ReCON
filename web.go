@@ -53,6 +53,7 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("POST /api/players/{guid}/chat", handleChatSend)        // {"message": ...} -> say <id> <message>
 	mux.HandleFunc("GET /api/players/{guid}/details", handlePlayerDetails) // Details dialog: sessions, IPs, ban, note
 	mux.HandleFunc("POST /api/players/{guid}/note", handleSaveNote)        // {"note": ...}, up to 500 characters
+	mux.HandleFunc("POST /api/players/{guid}/role", handleSetRole)         // {"role": 0|1|2}: Player, Mod, Admin
 
 	// RCON console on the Players page.
 	mux.HandleFunc("GET /api/console", handleConsoleEvents)   // ?after=N: server messages and commands since N
@@ -67,17 +68,21 @@ func runWebServer(addr string) error {
 	// Flows.
 	mux.HandleFunc("GET /flows", pageHandler(flowsPage))
 	mux.HandleFunc("GET /api/flows", handleFlowsList)                   // flows + current/last run of each
-	mux.HandleFunc("POST /api/flows", handleFlowSave)                   // create/update {id, name, script, trigger, schedule}
+	mux.HandleFunc("POST /api/flows", handleFlowSave)                   // create/update {id, name, trigger, schedule, delay, steps, onStop}
 	mux.HandleFunc("POST /api/flows/{id}/run", withFlow(handleFlowRun)) // optional {"minutes": N}
 	mux.HandleFunc("POST /api/flows/{id}/stop", withFlow(handleFlowStop))
 	mux.HandleFunc("POST /api/flows/{id}/enable", withFlow(handleFlowEnable))
 	mux.HandleFunc("POST /api/flows/{id}/disable", withFlow(handleFlowDisable))
 	mux.HandleFunc("POST /api/flows/{id}/delete", withFlow(handleFlowDelete))
-	mux.HandleFunc("POST /api/flows/preview", handleFlowPreview)  // {trigger, schedule, script}
+	mux.HandleFunc("POST /api/flows/preview", handleFlowPreview)  // {trigger, schedule, delay}
 	mux.HandleFunc("POST /api/flows/reorder", handleFlowReorder)  // {ids: [...]}
 	mux.HandleFunc("GET /api/flows/export", handleFlowExport)     // download flows.json
 	mux.HandleFunc("POST /api/flows/import", handleFlowImport)    // {flows: [...]}
 	mux.HandleFunc("POST /api/flows/command", handleQuickCommand) // {command: lock|unlock|shutdown|kickall}
+
+	// Built-in chat commands (/help, /shout, ...): their settings, edited on the Flows page.
+	mux.HandleFunc("GET /api/chat-commands", handleChatCommandsGet)
+	mux.HandleFunc("POST /api/chat-commands", handleChatCommandsSave) // {settings: {...}}
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -163,10 +168,11 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// decodeBody decodes a JSON request body (capped at 16 KiB) into dst. An
-// empty body is not an error: dst keeps its zero values.
+// decodeBody decodes a JSON request body (capped at 1 MiB, enough for a
+// large flow) into dst. An empty body is not an error: dst keeps its zero
+// values.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
-	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(dst)
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(dst)
 	if errors.Is(err, io.EOF) {
 		return nil
 	}
@@ -263,8 +269,9 @@ func livePlayers(w http.ResponseWriter) ([]Player, bool) {
 }
 
 // handlePlayersJSON serves GET /api/players: live players plus offline ones
-// from the DB, and "bans": lower-case GUID -> ban status for everyone banned
-// (the offline table's Ban Status column).
+// from the DB (each with its role, for the Mod/Admin badge), and "bans":
+// lower-case GUID -> ban status for everyone banned (the offline table's Ban
+// Status column).
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	players, ok := livePlayers(w)
 	if !ok {
@@ -274,6 +281,11 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("error reading offline players from DB: %v", err)
 		offlinePlayers = []Player{}
+	}
+	if roles, err := globalDatabase.Roles(); err == nil {
+		for i := range players {
+			players[i].Role = roles[strings.ToLower(players[i].GUID)]
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
@@ -377,42 +389,63 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	banPlayer(w, p, true, req)
 }
 
-// banPlayer bans player p by GUID and writes the JSON response. online says
-// whether p is connected right now (p.ID is only meaningful then).
+// banResult is what banByGUID did, as the API reports it.
+type banResult struct {
+	OK        bool   `json:"ok"`
+	GUIDBan   bool   `json:"guid_ban"`
+	DBUpdated bool   `json:"db_updated"`
+	Online    bool   `json:"online"`
+	Kicked    bool   `json:"kicked"`
+	Perm      bool   `json:"perm"`
+	Error     string `json:"error,omitempty"`
+	code      int    // HTTP status for the API
+}
+
+// banByGUID bans player p by GUID. online says whether p is connected right
+// now (p.ID is only meaningful then). The pages, flows and the /ban chat
+// command all ban through it; logAs labels the rcon log lines.
 //
-//  1. `addBan <guid> <minutes> <reason>` (0 minutes = permanent). Failure -> 502.
-//  2. If online, kick with the same reason. A failed kick is only reported ("kicked").
+//  1. `addBan <guid> <minutes> <reason>` (0 minutes = permanent).
+//  2. If online, kick with the same reason. A failed kick is only reported (Kicked).
 //  3. Record GUID/name/IP/reason in SQLite (the IP is informational, not banned).
-func banPlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) {
+func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResult {
 	banListLock.Lock()
 	defer banListLock.Unlock()
-	_, guidAck, guidErr := runShared(fmt.Sprintf("addBan %s %d %s", p.GUID, req.Minutes, req.Reason), 1500*time.Millisecond, false, "web")
+	res := banResult{Online: online, Perm: minutes == 0, code: http.StatusOK}
+	_, guidAck, guidErr := runShared(fmt.Sprintf("addBan %s %d %s", p.GUID, minutes, reason), 1500*time.Millisecond, false, logAs)
 	if guidErr != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "guid_ban": false, "guid_error": guidErr.Error()})
-		return
+		res.Error, res.code = guidErr.Error(), http.StatusBadGateway
+		return res
 	}
 	if !guidAck {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "guid_ban": false, "error": "GUID ban was not acknowledged"})
-		return
+		res.Error, res.code = "GUID ban was not acknowledged", http.StatusBadGateway
+		return res
 	}
-	kicked := false
+	res.GUIDBan = true
 	if online {
-		_, kickAck, kickErr := runShared(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
-		kicked = kickErr == nil && kickAck
-		if !kicked {
+		_, kickAck, kickErr := runShared(fmt.Sprintf("kick %d %s", p.ID, reason), 1500*time.Millisecond, false, logAs)
+		res.Kicked = kickErr == nil && kickAck
+		if !res.Kicked {
 			log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
 		}
 	}
 	perm := 0
-	if req.Minutes == 0 {
+	if res.Perm {
 		perm = 1
 	}
-	if err := globalDatabase.BanUser(p.GUID, p.Name, p.IP, req.Reason, perm); err != nil {
+	if err := globalDatabase.BanUser(p.GUID, bareName(p.Name), p.IP, reason, perm); err != nil {
 		log.Printf("error recording ban in DB: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "guid_ban": true, "db_updated": false, "online": online, "kicked": kicked, "error": "GUID ban succeeded but database update failed"})
-		return
+		res.Error, res.code = "GUID ban succeeded but database update failed", http.StatusInternalServerError
+		return res
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "online": online, "kicked": kicked, "perm": perm == 1})
+	res.DBUpdated, res.OK = true, true
+	return res
+}
+
+// banPlayer bans player p from the pages and writes the JSON response.
+func banPlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) {
+	res := banByGUID(p, online, req.Minutes, req.Reason, "web")
+	writeJSON(w, res.code, res)
 }
 
 // ---------------------------------------------------------------------------
@@ -497,6 +530,38 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "note": note})
+}
+
+// handleSetRole serves POST /api/players/{guid}/role {"role": 0|1|2}: the
+// player's role for the chat commands (Player, Mod or Admin). The Details
+// dialog's Permissions tab saves it as soon as a role is clicked.
+func handleSetRole(w http.ResponseWriter, r *http.Request) {
+	guid, ok := playerGUID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Role *int `json:"role"`
+	}
+	if err := decodeBody(w, r, &req); err != nil || req.Role == nil {
+		fail(w, http.StatusBadRequest, `send {"role": 0, 1 or 2}`)
+		return
+	}
+	if *req.Role < rolePlayer || *req.Role > roleAdmin {
+		fail(w, http.StatusBadRequest, "role must be 0 (Player), 1 (Mod) or 2 (Admin)")
+		return
+	}
+	found, err := globalDatabase.SetPlayerRole(guid, *req.Role)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
+		return
+	}
+	log.Printf("roles: %s is now %s", guid, roleName(*req.Role))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role": *req.Role})
 }
 
 // handleChatHistory serves GET /api/players/{guid}/chat: the player's chat
@@ -857,8 +922,8 @@ func withFlow(h func(http.ResponseWriter, *http.Request, Flow)) http.HandlerFunc
 	}
 }
 
-// handleFlowRun: optional body {"minutes": N} replaces the flow's Timer for
-// this run (a countdown of N minutes, or an N minute delay).
+// handleFlowRun: optional body {"minutes": N} replaces the flow's delay for
+// this run with N minutes.
 func handleFlowRun(w http.ResponseWriter, r *http.Request, f Flow) {
 	var body struct {
 		Minutes int `json:"minutes"`
@@ -922,41 +987,16 @@ func handleFlowDelete(w http.ResponseWriter, r *http.Request, f Flow) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// scriptText is a flow script inside an export/import file: an array of lines
-// (what Export writes) or one string with \n line breaks.
-type scriptText string
-
-func (s scriptText) MarshalJSON() ([]byte, error) {
-	var sb strings.Builder
-	enc := json.NewEncoder(&sb)
-	enc.SetEscapeHTML(false) // keep & < > readable in the file
-	if err := enc.Encode(strings.Split(strings.ReplaceAll(string(s), "\r\n", "\n"), "\n")); err != nil {
-		return nil, err
-	}
-	return []byte(strings.TrimSpace(sb.String())), nil
-}
-
-func (s *scriptText) UnmarshalJSON(b []byte) error {
-	var lines []string
-	if err := json.Unmarshal(b, &lines); err == nil {
-		*s = scriptText(strings.Join(lines, "\n"))
-		return nil
-	}
-	var one string
-	if err := json.Unmarshal(b, &one); err != nil {
-		return errors.New("script must be an array of lines or a string")
-	}
-	*s = scriptText(one)
-	return nil
-}
-
+// flowFileEntry is one flow in an export file.
 type flowFileEntry struct {
-	Name      string     `json:"name"`
-	Schedule  string     `json:"schedule"`            // "manual", "on-join" or a cron expression
-	Timer     string     `json:"timer,omitempty"`     // e.g. "60m"
-	TimerMode string     `json:"timerMode,omitempty"` // "before" or "after" (scheduled flows)
-	Script    scriptText `json:"script"`
-	Cancel    scriptText `json:"cancel,omitempty"`
+	Name     string `json:"name"`
+	Trigger  string `json:"trigger"`            // schedule, join, chat or manual
+	Schedule string `json:"schedule,omitempty"` // cron, for schedule flows
+	Delay    string `json:"delay,omitempty"`    // e.g. "5s"
+	Steps    []Step `json:"steps"`
+	OnStop   []Step `json:"onStop,omitempty"`
+	// Script is only read, to recognise a file from the old script format.
+	Script json.RawMessage `json:"script,omitempty"`
 }
 
 type flowFile struct {
@@ -973,8 +1013,11 @@ func handleFlowExport(w http.ResponseWriter, r *http.Request) {
 	}
 	out := flowFile{Flows: make([]flowFileEntry, 0, len(flows))}
 	for _, f := range flows {
-		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Schedule: f.Schedule, Timer: f.Timer,
-			TimerMode: f.TimerMode, Script: scriptText(f.Script), Cancel: scriptText(f.Cancel)})
+		if f.Broken != "" {
+			continue
+		}
+		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Trigger: f.Trigger, Schedule: f.Schedule,
+			Delay: f.Delay, Steps: f.Steps, OnStop: f.OnStop})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="flows.json"`)
@@ -987,7 +1030,7 @@ func handleFlowExport(w http.ResponseWriter, r *http.Request) {
 // handleFlowImport appends every flow in a flows.json body to the bottom of
 // the list, disabled. A taken name gets " (2)", " (3)", ...; a name over
 // maxFlowNameLen is shortened; flows that fail the usual checks are skipped
-// and reported. Each entry's schedule says its trigger.
+// and reported.
 func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 	var in flowFile
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&in); err != nil {
@@ -1015,13 +1058,17 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 			skipped = append(skipped, fmt.Sprintf("flow #%d: name is required", i+1))
 			continue
 		}
+		if len(e.Script) > 0 && len(e.Steps) == 0 {
+			skipped = append(skipped, base+": written for the old script format; build it again with steps")
+			continue
+		}
 		name := base
 		for n := 2; taken[strings.ToLower(name)]; n++ {
 			suffix := fmt.Sprintf(" (%d)", n)
 			name = clipName(base, maxFlowNameLen-len(suffix)) + suffix
 		}
-		if _, err := validateAndSaveFlow(Flow{Name: name, Script: string(e.Script), Cancel: string(e.Cancel),
-			Timer: e.Timer, TimerMode: e.TimerMode, Schedule: e.Schedule}); err != nil {
+		if _, err := validateAndSaveFlow(Flow{Name: name, Trigger: e.Trigger, Schedule: e.Schedule,
+			Delay: e.Delay, Steps: e.Steps, OnStop: e.OnStop}); err != nil {
 			skipped = append(skipped, base+": "+err.Error())
 			continue
 		}
@@ -1033,7 +1080,7 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 
 // handleFlowPreview returns the edit dialog's plain-English summary.
 func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
-	var f Flow // trigger, schedule, timer, timerMode, script, cancel
+	var f Flow // trigger, schedule, delay
 	if err := decodeBody(w, r, &f); err != nil {
 		fail(w, http.StatusBadRequest, "bad JSON")
 		return
@@ -1101,6 +1148,36 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 	default:
 		fail(w, http.StatusBadRequest, "unknown command")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Chat commands API (the Flows page's Chat commands dialog)
+// ---------------------------------------------------------------------------
+
+// handleChatCommandsGet serves GET /api/chat-commands: every command with
+// its labels, defaults and allowed placeholders ("commands"), and the
+// current settings.
+func handleChatCommandsGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "commands": chatCommandDefs,
+		"settings": currentChatSettings(), "defaults": defaultChatSettings()})
+}
+
+// handleChatCommandsSave serves POST /api/chat-commands {"settings": {...}}.
+func handleChatCommandsSave(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Settings chatSettings `json:"settings"`
+	}
+	if err := decodeBody(w, r, &req); err != nil || req.Settings == nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	saved, err := saveChatSettings(req.Settings)
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	log.Printf("chat commands: settings saved")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "settings": saved})
 }
 
 // ---------------------------------------------------------------------------
