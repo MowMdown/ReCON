@@ -2,8 +2,10 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,12 +21,15 @@ import (
 //
 //   - schema setup (OpenDatabase) and the flows table (EnsureFlowsTable)
 //   - players / sessions / IP history (SyncPlayers, OfflinePlayers, ...)
+//   - player details and admin notes (PlayerDetails, SaveNote)
+//   - chat history (AddChatMessage, ChatHistory)
 //   - bans (BanUser, SyncBans, BanNames, DeleteBan)
 //   - flows storage (ListFlows, GetFlow, SaveFlow, ...)
 //
 // The bottom section keeps the database in step with the game server: the
-// background poller and the BattlEye -> DB ban mirror. Those are the only
-// parts here that call into rcon.go.
+// background poller, the BattlEye -> DB ban mirror (and the in-memory ban
+// status it leaves behind), and the chat recorder. Those are the only parts
+// here that call into rcon.go.
 // ============================================================================
 
 type Database struct {
@@ -86,8 +91,26 @@ func OpenDatabase(filepath string) (*Database, error) {
 		PRIMARY KEY (guid, ip),
 		FOREIGN KEY(guid) REFERENCES players(guid) ON DELETE CASCADE
 	);
+	-- Each player's chat lines and the private messages ReCON sent them,
+	-- by GUID (lower case). direction is 'in' (they wrote it) or 'out'.
+	CREATE TABLE IF NOT EXISTS chat_messages (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		at DATETIME NOT NULL,
+		guid TEXT NOT NULL,
+		direction TEXT NOT NULL,
+		line TEXT NOT NULL
+	);
+	-- One admin note per player (the Details dialog's Notes tab), by GUID
+	-- (lower case), up to maxNoteLen characters.
+	CREATE TABLE IF NOT EXISTS player_notes (
+		guid TEXT PRIMARY KEY,
+		note TEXT NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
 	CREATE INDEX IF NOT EXISTS idx_session_history_guid
 		ON session_history(guid);
+	CREATE INDEX IF NOT EXISTS idx_chat_messages_guid
+		ON chat_messages(guid, id);
 	DROP INDEX IF EXISTS idx_bans_player_name;
 
 	-- Read-only views with friendlier column names. The tables above are
@@ -394,6 +417,302 @@ func (db *Database) PlayerByGUID(guid string) (Player, error) {
 	return p, err
 }
 
+// GUIDByName returns the GUID of the most recently seen player with this
+// exact name, or "" if there is none.
+func (db *Database) GUIDByName(name string) (string, error) {
+	var guid string
+	err := db.QueryRow("SELECT guid FROM players WHERE username = ? ORDER BY last_seen DESC LIMIT 1", name).Scan(&guid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return guid, err
+}
+
+// ---------------------------------------------------------------------------
+// Player details and admin notes (the Players page's Details dialog)
+// ---------------------------------------------------------------------------
+
+// recentSessionsKept is how many past sessions PlayerDetails returns, newest first.
+const recentSessionsKept = 100
+
+type detailsPlayer struct {
+	GUID            string `json:"guid"`
+	Name            string `json:"name"`
+	LastIP          string `json:"lastIp"`
+	FirstSeen       int64  `json:"firstSeen"`
+	LastSeen        int64  `json:"lastSeen"`
+	PlaytimeSeconds int64  `json:"playtimeSeconds"`
+	Online          bool   `json:"online"`
+	ID              int    `json:"id"` // player number while online, else -1
+}
+
+type detailsSession struct {
+	Connected    int64  `json:"connected"`
+	Disconnected int64  `json:"disconnected"` // 0 for the session in progress
+	Seconds      int64  `json:"seconds"`
+	IP           string `json:"ip"`
+	Current      bool   `json:"current"`
+}
+
+type sharedPlayer struct {
+	GUID string `json:"guid"`
+	Name string `json:"name"`
+}
+
+type detailsIP struct {
+	IP        string         `json:"ip"`
+	FirstUsed int64          `json:"firstUsed"`
+	LastUsed  int64          `json:"lastUsed"`
+	Others    []sharedPlayer `json:"others"` // other players seen on this IP
+}
+
+// playerDetails is everything stored about one player, as GET
+// /api/players/{guid}/details returns it. Times are Unix seconds. Online, ID
+// and Ban are filled in by the handler (web.go).
+type playerDetails struct {
+	Player   detailsPlayer `json:"player"`
+	Sessions struct {
+		Count      int              `json:"count"` // finished sessions
+		AvgSeconds int64            `json:"avgSeconds"`
+		Recent     []detailsSession `json:"recent"`
+	} `json:"sessions"`
+	IPs  []detailsIP `json:"ips"`
+	Ban  banState    `json:"ban"`
+	Note struct {
+		Text    string `json:"text"`
+		Updated int64  `json:"updated"`
+	} `json:"note"`
+}
+
+// unixOf reads a DATETIME column scanned into `any`. Drivers hand these back
+// as time.Time or as text depending on how the value was written (the
+// player_ips seed copies text with MIN/MAX), so both are handled. 0 when
+// empty or unreadable.
+func unixOf(v any) int64 {
+	switch t := v.(type) {
+	case time.Time:
+		if t.IsZero() {
+			return 0
+		}
+		return t.Unix()
+	case int64:
+		return t
+	case []byte:
+		return unixOf(string(t))
+	case string:
+		s := strings.TrimSpace(t)
+		for _, layout := range []string{
+			"2006-01-02 15:04:05.999999999-07:00",
+			"2006-01-02 15:04:05.999999999 -0700 MST",
+			"2006-01-02 15:04:05.999999999Z07:00",
+			"2006-01-02T15:04:05.999999999Z07:00",
+			"2006-01-02 15:04:05.999999999",
+			"2006-01-02 15:04:05",
+		} {
+			if p, err := time.Parse(layout, s); err == nil {
+				return p.Unix()
+			}
+		}
+		// Go's time.Time.String() adds " m=+1.23" when it carries a monotonic reading.
+		if i := strings.Index(s, " m="); i > 0 {
+			return unixOf(s[:i])
+		}
+	}
+	return 0
+}
+
+// asString reads a TEXT column scanned into `any`.
+func asString(v any) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	case []byte:
+		return string(s)
+	}
+	return ""
+}
+
+// PlayerDetails gathers everything stored about one player (GUID matched
+// case-insensitively), or sql.ErrNoRows if the GUID was never seen.
+func (db *Database) PlayerDetails(guid string) (*playerDetails, error) {
+	d := &playerDetails{}
+	var first, last any
+	err := db.QueryRow(`SELECT guid, username, last_ip, first_seen, last_seen, total_playtime_seconds
+		FROM players WHERE lower(guid) = lower(?)`, guid).
+		Scan(&d.Player.GUID, &d.Player.Name, &d.Player.LastIP, &first, &last, &d.Player.PlaytimeSeconds)
+	if err != nil {
+		return nil, err
+	}
+	g := d.Player.GUID // the stored spelling, for the other tables
+	d.Player.FirstSeen, d.Player.LastSeen, d.Player.ID = unixOf(first), unixOf(last), -1
+
+	var avg sql.NullFloat64
+	if err := db.QueryRow("SELECT COUNT(*), AVG(duration_seconds) FROM session_history WHERE guid = ?", g).
+		Scan(&d.Sessions.Count, &avg); err != nil {
+		return nil, err
+	}
+	d.Sessions.AvgSeconds = int64(avg.Float64 + 0.5)
+
+	// The session in progress (if any) first, then the finished ones.
+	d.Sessions.Recent = []detailsSession{}
+	var since, ip any
+	if err := db.QueryRow("SELECT connected_at, ip FROM active_sessions WHERE guid = ?", g).Scan(&since, &ip); err == nil {
+		c := unixOf(since)
+		s := detailsSession{Connected: c, IP: asString(ip), Current: true}
+		if c > 0 {
+			s.Seconds = time.Now().Unix() - c
+		}
+		d.Sessions.Recent = append(d.Sessions.Recent, s)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT connected_at, disconnected_at, duration_seconds, ip
+		FROM session_history WHERE guid = ? ORDER BY id DESC LIMIT ?`, g, recentSessionsKept)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var c, x any
+		var s detailsSession
+		if err := rows.Scan(&c, &x, &s.Seconds, &s.IP); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		s.Connected, s.Disconnected = unixOf(c), unixOf(x)
+		d.Sessions.Recent = append(d.Sessions.Recent, s)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	d.IPs = []detailsIP{}
+	byIP := map[string]int{}
+	rows, err = db.Query("SELECT ip, first_seen, last_seen FROM player_ips WHERE guid = ? ORDER BY last_seen DESC", g)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var a, b any
+		var e detailsIP
+		if err := rows.Scan(&e.IP, &a, &b); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		e.FirstUsed, e.LastUsed, e.Others = unixOf(a), unixOf(b), []sharedPlayer{}
+		byIP[e.IP] = len(d.IPs)
+		d.IPs = append(d.IPs, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Everyone else seen on any of those IPs.
+	rows, err = db.Query(`
+		SELECT DISTINCT other.ip, p.guid, p.username
+		FROM player_ips mine
+		JOIN player_ips other ON other.ip = mine.ip AND other.guid != mine.guid
+		JOIN players p ON p.guid = other.guid
+		WHERE mine.guid = ?
+		ORDER BY p.username COLLATE NOCASE`, g)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var ipText string
+		var o sharedPlayer
+		if err := rows.Scan(&ipText, &o.GUID, &o.Name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if i, ok := byIP[ipText]; ok {
+			d.IPs[i].Others = append(d.IPs[i].Others, o)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var upd any
+	err = db.QueryRow("SELECT note, updated_at FROM player_notes WHERE guid = ?", strings.ToLower(g)).Scan(&d.Note.Text, &upd)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	d.Note.Updated = unixOf(upd)
+	return d, nil
+}
+
+// PlayerKnown reports whether a GUID (case-insensitive) has ever been seen.
+func (db *Database) PlayerKnown(guid string) (bool, error) {
+	var n int
+	err := db.QueryRow("SELECT COUNT(*) FROM players WHERE lower(guid) = lower(?)", guid).Scan(&n)
+	return n > 0, err
+}
+
+// SaveNote stores a player's admin note; an empty note deletes it.
+func (db *Database) SaveNote(guid, note string) error {
+	guid = strings.ToLower(guid)
+	if strings.TrimSpace(note) == "" {
+		_, err := db.Exec("DELETE FROM player_notes WHERE guid = ?", guid)
+		return err
+	}
+	_, err := db.Exec(`
+		INSERT INTO player_notes (guid, note, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(guid) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at`,
+		guid, note, time.Now().UTC())
+	return err
+}
+
+// ---------------------------------------------------------------------------
+// Chat history (each player's chat and the private messages sent to them)
+// ---------------------------------------------------------------------------
+
+// Chat directions.
+const (
+	chatIn  = "in"  // the player wrote it
+	chatOut = "out" // ReCON sent it to them
+)
+
+// chatLine is one row of a player's history. Line is ready to show:
+// "(Global) Name: text" for chat in, "> say 3 text" for messages out.
+type chatLine struct {
+	Time      time.Time `json:"time"`
+	Direction string    `json:"direction"`
+	Line      string    `json:"line"`
+}
+
+// AddChatMessage stores one line of a player's history.
+func (db *Database) AddChatMessage(at time.Time, guid, direction, line string) error {
+	_, err := db.Exec("INSERT INTO chat_messages (at, guid, direction, line) VALUES (?, ?, ?, ?)",
+		at.UTC(), strings.ToLower(guid), direction, line)
+	return err
+}
+
+// ChatHistory returns a player's newest `limit` lines, oldest first.
+func (db *Database) ChatHistory(guid string, limit int) ([]chatLine, error) {
+	rows, err := db.Query(`
+		SELECT at, direction, line FROM (
+			SELECT id, at, direction, line FROM chat_messages
+			WHERE guid = ? ORDER BY id DESC LIMIT ?
+		) ORDER BY id`, strings.ToLower(guid), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	lines := []chatLine{}
+	for rows.Next() {
+		var l chatLine
+		var at any
+		if err := rows.Scan(&at, &l.Direction, &l.Line); err != nil {
+			return nil, err
+		}
+		l.Time = time.Unix(unixOf(at), 0)
+		lines = append(lines, l)
+	}
+	return lines, rows.Err()
+}
+
 // ---------------------------------------------------------------------------
 // Bans
 // ---------------------------------------------------------------------------
@@ -520,6 +839,26 @@ func (db *Database) BanNames() (map[string]string, error) {
 func (db *Database) DeleteBan(guid string) error {
 	_, err := db.Exec("DELETE FROM bans WHERE lower(guid) = lower(?)", guid)
 	return err
+}
+
+// storedBans reads the bans table as ban states (permanent vs timed is
+// known, the minutes left are not). Used before the first BattlEye read.
+func (db *Database) storedBans() (map[string]banState, error) {
+	rows, err := db.Query("SELECT guid, reason, perm FROM bans")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]banState{}
+	for rows.Next() {
+		var g, reason string
+		var perm int
+		if err := rows.Scan(&g, &reason, &perm); err != nil {
+			return nil, err
+		}
+		out[strings.ToLower(g)] = banState{Banned: true, Perm: perm == 1, MinutesLeft: -1, Reason: reason}
+	}
+	return out, rows.Err()
 }
 
 // ---------------------------------------------------------------------------
@@ -667,7 +1006,8 @@ func (db *Database) DeleteFlow(id int64) error {
 // list and delete a ban that was just added.
 var banListLock sync.Mutex
 
-// syncBanList reads the BattlEye list and mirrors it into the DB.
+// syncBanList reads the BattlEye list and mirrors it into the DB, and keeps
+// it in memory for the ban status the pages show (rememberBans).
 // Holds banListLock for the whole read+mirror so it can't interleave with a
 // ban/unban. Return values matter to callers:
 //   - (nil, err)   -> couldn't read the live list at all
@@ -680,10 +1020,138 @@ func syncBanList() ([]Ban, error) {
 	if err != nil {
 		return nil, err
 	}
+	rememberBans(bans)
 	if err := globalDatabase.SyncBans(bans); err != nil {
 		return bans, err
 	}
 	return bans, nil
+}
+
+// banState is one player's ban as the pages show it. MinutesLeft is -1 when
+// it isn't known (a permanent ban, or only the database copy is available).
+type banState struct {
+	Banned      bool   `json:"banned"`
+	Perm        bool   `json:"perm"`
+	MinutesLeft int    `json:"minutesLeft"`
+	Reason      string `json:"reason"`
+}
+
+// banCache is the BattlEye ban list as last read by syncBanList, by
+// lower-case GUID, so the pages can show "Banned - 2d 4h left" without
+// asking the server each time.
+var banCache = struct {
+	sync.Mutex
+	ok     bool
+	readAt time.Time
+	byGUID map[string]Ban
+}{}
+
+// rememberBans keeps a freshly read ban list. A GUID listed more than once
+// keeps its longest ban.
+func rememberBans(bans []Ban) {
+	m := make(map[string]Ban, len(bans))
+	for _, b := range bans {
+		g := strings.ToLower(b.GUID)
+		if old, dup := m[g]; dup && !longerBan(b, old) {
+			continue
+		}
+		m[g] = b
+	}
+	banCache.Lock()
+	banCache.ok, banCache.readAt, banCache.byGUID = true, time.Now(), m
+	banCache.Unlock()
+}
+
+// longerBan reports whether a outlasts b.
+func longerBan(a, b Ban) bool {
+	if a.Perm != b.Perm {
+		return a.Perm
+	}
+	am, _ := strconv.Atoi(a.Minutes)
+	bm, _ := strconv.Atoi(b.Minutes)
+	return am > bm
+}
+
+// stateOf turns a ban list entry into a banState, counting down the minutes
+// since the list was read.
+func stateOf(b Ban, readAt time.Time) banState {
+	st := banState{Banned: true, Perm: b.Perm, MinutesLeft: -1, Reason: b.Reason}
+	if !b.Perm {
+		if m, err := strconv.Atoi(b.Minutes); err == nil {
+			left := m - int(time.Since(readAt)/time.Minute)
+			if left < 0 {
+				left = 0 // expired since the last read; gone at the next sync
+			}
+			st.MinutesLeft = left
+		}
+	}
+	return st
+}
+
+// banStatuses returns every banned GUID's status. Before the first ban list
+// read it falls back to the bans table.
+func banStatuses() map[string]banState {
+	banCache.Lock()
+	if banCache.ok {
+		out := make(map[string]banState, len(banCache.byGUID))
+		for g, b := range banCache.byGUID {
+			out[g] = stateOf(b, banCache.readAt)
+		}
+		banCache.Unlock()
+		return out
+	}
+	banCache.Unlock()
+	out, err := globalDatabase.storedBans()
+	if err != nil {
+		log.Printf("bans: reading the bans table: %v", err)
+		return map[string]banState{}
+	}
+	return out
+}
+
+// banStatusOf is one player's ban status (Banned false when not banned).
+func banStatusOf(guid string) banState {
+	if st, ok := banStatuses()[strings.ToLower(guid)]; ok {
+		return st
+	}
+	return banState{MinutesLeft: -1}
+}
+
+// guidForChat finds who wrote a chat line: an online player with that name,
+// else the last player seen with it (someone who chatted and left before the
+// next poll). "" when nobody matches.
+func guidForChat(name string) string {
+	if p, ok := onlineByName(name); ok && p.GUID != "" {
+		return p.GUID
+	}
+	guid, err := globalDatabase.GUIDByName(name)
+	if err != nil {
+		log.Printf("chat: looking up %q: %v", name, err)
+	}
+	return guid
+}
+
+// startChatRecorder files every incoming chat line (serverEvents, rcon.go)
+// under its writer's GUID for as long as ReCON runs. A line from a name no
+// player has had is logged and left out of the history (it still shows in
+// the console).
+func startChatRecorder() {
+	events, _ := serverEvents.subscribe(256)
+	go func() {
+		for ev := range events {
+			if ev.Kind != eventChat {
+				continue
+			}
+			guid := guidForChat(ev.Name)
+			if guid == "" {
+				log.Printf("chat: no player named %q, line not kept in a history: %s", ev.Name, ev.Text)
+				continue
+			}
+			if err := globalDatabase.AddChatMessage(ev.Time, guid, chatIn, ev.Text); err != nil {
+				log.Printf("chat: store: %v", err)
+			}
+		}
+	}()
 }
 
 // rconPolled and rconFails let the status bar show what the poller saw:
@@ -695,8 +1163,8 @@ var (
 )
 
 // startBackgroundSync tracks players (and periodically the ban list) in the
-// background so the DB stays current without any web page open.
-// It is the only caller of SyncPlayers.
+// background so the DB stays current without any web page open, and starts
+// the chat recorder. It is the only caller of SyncPlayers.
 //
 // Every `interval`:
 //   - Poll `players` (single attempt, 3s wait).
@@ -709,6 +1177,7 @@ var (
 //   - On the 1st poll and every 6th after (~30s at a 5s interval), also
 //     reconcile the ban list, since it changes rarely.
 func startBackgroundSync(interval time.Duration) {
+	startChatRecorder()
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()

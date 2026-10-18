@@ -10,9 +10,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ============================================================================
@@ -29,8 +31,6 @@ import (
 // runWebServer registers every route and serves until the listener fails.
 // Patterns use Go 1.22 method and {wildcard} routing.
 func runWebServer(addr string) error {
-	startChatRecorder() // files incoming chat under each player's GUID (console.go)
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
@@ -46,13 +46,15 @@ func runWebServer(addr string) error {
 
 	// Players.
 	mux.HandleFunc("GET /players", pageHandler(playersPage))
-	mux.HandleFunc("GET /api/players", handlePlayersJSON)                 // online + offline players
-	mux.HandleFunc("GET /api/players/all", handleAllPlayersJSON)          // every player ever seen (no RCON needed)
-	mux.HandleFunc("POST /api/players/{id}/{action}", handlePlayerAction) // message | kick | ban
-	mux.HandleFunc("GET /api/players/{guid}/chat", handleChatHistory)     // their chat + messages sent to them (console.go)
-	mux.HandleFunc("POST /api/players/{guid}/chat", handleChatSend)       // {"message": ...} -> say <id> <message>
+	mux.HandleFunc("GET /api/players", handlePlayersJSON)                  // online + offline players
+	mux.HandleFunc("GET /api/players/all", handleAllPlayersJSON)           // every player ever seen (no RCON needed)
+	mux.HandleFunc("POST /api/players/{id}/{action}", handlePlayerAction)  // message | kick | ban
+	mux.HandleFunc("GET /api/players/{guid}/chat", handleChatHistory)      // their chat + messages sent to them
+	mux.HandleFunc("POST /api/players/{guid}/chat", handleChatSend)        // {"message": ...} -> say <id> <message>
+	mux.HandleFunc("GET /api/players/{guid}/details", handlePlayerDetails) // Details dialog: sessions, IPs, ban, note
+	mux.HandleFunc("POST /api/players/{guid}/note", handleSaveNote)        // {"note": ...}, up to 500 characters
 
-	// RCON console on the Players page (console.go).
+	// RCON console on the Players page.
 	mux.HandleFunc("GET /api/console", handleConsoleEvents)   // ?after=N: server messages and commands since N
 	mux.HandleFunc("POST /api/console", handleConsoleCommand) // {"command": ...}, run exactly as typed
 
@@ -98,14 +100,16 @@ var quietPaths = map[string]bool{
 	"/api/console": true,
 }
 
-// isQuiet reports whether a request is a routine poll: a quietPaths GET, or
-// the Message dialog re-reading a player's chat (/api/players/<guid>/chat).
+// isQuiet reports whether a request is a routine read: a quietPaths GET, or
+// the Message and Details dialogs reading one player
+// (/api/players/<guid>/chat, /api/players/<guid>/details).
 func isQuiet(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
 	p := r.URL.Path
-	return quietPaths[p] || (strings.HasPrefix(p, "/api/players/") && strings.HasSuffix(p, "/chat"))
+	return quietPaths[p] || (strings.HasPrefix(p, "/api/players/") &&
+		(strings.HasSuffix(p, "/chat") || strings.HasSuffix(p, "/details")))
 }
 
 // logRequests logs each request (method, path+query, remote address,
@@ -258,7 +262,9 @@ func livePlayers(w http.ResponseWriter) ([]Player, bool) {
 	return parsePlayers(out), true
 }
 
-// handlePlayersJSON serves GET /api/players: live players plus offline ones from the DB.
+// handlePlayersJSON serves GET /api/players: live players plus offline ones
+// from the DB, and "bans": lower-case GUID -> ban status for everyone banned
+// (the offline table's Ban Status column).
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	players, ok := livePlayers(w)
 	if !ok {
@@ -275,6 +281,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		"players":        players,
 		"count":          len(players),
 		"offlinePlayers": offlinePlayers,
+		"bans":           banStatuses(),
 	})
 }
 
@@ -406,6 +413,256 @@ func banPlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "guid_ban": true, "db_updated": true, "online": online, "kicked": kicked, "perm": perm == 1})
+}
+
+// ---------------------------------------------------------------------------
+// Player details, notes and chat (the Players page's Details and Message dialogs)
+// ---------------------------------------------------------------------------
+
+// maxNoteLen is the longest admin note, in characters.
+const maxNoteLen = 500
+
+// chatHistoryLimit is how many lines GET /api/players/{guid}/chat returns:
+// the newest ones, oldest first. Everything stays in the table.
+const chatHistoryLimit = 300
+
+// playerGUID returns the {guid} path value, lower-cased; false (with a 404
+// written) when it isn't a GUID.
+func playerGUID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	guid := r.PathValue("guid")
+	if !guidPattern.MatchString(guid) {
+		fail(w, http.StatusNotFound, "invalid player GUID")
+		return "", false
+	}
+	return strings.ToLower(guid), true
+}
+
+// handlePlayerDetails serves GET /api/players/{guid}/details: everything
+// logged about one player (db.go PlayerDetails), plus whether they are
+// online right now and their ban status. Works for offline players and
+// while RCON is down.
+func handlePlayerDetails(w http.ResponseWriter, r *http.Request) {
+	guid, ok := playerGUID(w, r)
+	if !ok {
+		return
+	}
+	d, err := globalDatabase.PlayerDetails(guid)
+	if errors.Is(err, sql.ErrNoRows) {
+		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
+		return
+	} else if err != nil {
+		log.Printf("details %s: %v", guid, err)
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if p, on := onlineByGUID(guid); on {
+		d.Player.Online, d.Player.ID = true, p.ID
+		d.Player.Name = bareName(p.Name)
+	}
+	d.Ban = banStatusOf(guid)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "details": d})
+}
+
+// handleSaveNote serves POST /api/players/{guid}/note {"note": "..."}: up to
+// maxNoteLen characters; an empty note deletes it.
+func handleSaveNote(w http.ResponseWriter, r *http.Request) {
+	guid, ok := playerGUID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Note string `json:"note"`
+	}
+	if err := decodeBody(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	note := strings.TrimRight(strings.ReplaceAll(req.Note, "\r\n", "\n"), " \t\n")
+	if n := utf8.RuneCountInString(note); n > maxNoteLen {
+		fail(w, http.StatusBadRequest, fmt.Sprintf("note is %d characters; the limit is %d", n, maxNoteLen))
+		return
+	}
+	known, err := globalDatabase.PlayerKnown(guid)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !known {
+		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
+		return
+	}
+	if err := globalDatabase.SaveNote(guid, note); err != nil {
+		log.Printf("note %s: %v", guid, err)
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "note": note})
+}
+
+// handleChatHistory serves GET /api/players/{guid}/chat: the player's chat
+// and the private messages sent to them, oldest first. Works while RCON is
+// down, and for players who are offline.
+func handleChatHistory(w http.ResponseWriter, r *http.Request) {
+	guid, ok := playerGUID(w, r)
+	if !ok {
+		return
+	}
+	lines, err := globalDatabase.ChatHistory(guid, chatHistoryLimit)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": lines})
+}
+
+// handleChatSend serves POST /api/players/{guid}/chat {"message": "..."}:
+// sends `say <id> <message>` to the player with that GUID and adds it to
+// their history. It reads `players` first because the player's number can
+// change between page refreshes (it's reused after someone leaves).
+func handleChatSend(w http.ResponseWriter, r *http.Request) {
+	guid, ok := playerGUID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := decodeBody(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	msg := cleanReason(req.Message)
+	if msg == "" {
+		fail(w, http.StatusBadRequest, "message is required")
+		return
+	}
+	players, ok := livePlayers(w)
+	if !ok {
+		return
+	}
+	var p Player
+	found := false
+	for _, x := range players {
+		if strings.EqualFold(x.GUID, guid) {
+			p, found = x, true
+			break
+		}
+	}
+	if !found {
+		fail(w, http.StatusConflict, "player is no longer connected")
+		return
+	}
+	cmd := fmt.Sprintf("say %d %s", p.ID, msg)
+	_, acked, err := runShared(cmd, 2*time.Second, false, "web")
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if !acked {
+		fail(w, http.StatusBadGateway, "message was not acknowledged by the server")
+		return
+	}
+	if err := globalDatabase.AddChatMessage(time.Now(), guid, chatOut, "> "+cmd); err != nil {
+		log.Printf("chat: store: %v", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ---------------------------------------------------------------------------
+// RCON console (the Players page's Console dialog)
+// ---------------------------------------------------------------------------
+//
+// GET /api/console?after=N returns the server messages since N (serverEvents,
+// rcon.go), plus the commands typed in the console and their replies. POST
+// /api/console runs any RCON command and puts it and its reply in the same
+// log. Commands sent by flows and the other pages are left out (the Flows
+// page and the container log show those).
+
+// handleConsoleEvents serves GET /api/console?after=N: every kept event
+// newer than N, plus "last" to send as after= next time. The page polls it
+// while the console is open; after=0 (or none) returns the whole buffer.
+func handleConsoleEvents(w http.ResponseWriter, r *http.Request) {
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	events, last := serverEvents.afterWithLast(after)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "events": events, "last": last})
+}
+
+// consoleSayRe matches a private message typed in the console (say 3 hi),
+// so it can be added to that player's history. say -1 (everyone) is not.
+var consoleSayRe = regexp.MustCompile(`(?i)^say\s+(\d+)\s+(.+)$`)
+
+// handleConsoleCommand serves POST /api/console {"command": "..."}: runs one
+// command exactly as typed and writes the outcome into the console log.
+// runShared already logged the command itself (as consoleSource). kickall is
+// ReCON's own command, as in the CLI console; everything else goes to
+// BattlEye.
+func handleConsoleCommand(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := decodeBody(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	cmd := cleanReason(req.Command)
+	if cmd == "" {
+		fail(w, http.StatusBadRequest, "no command")
+		return
+	}
+	note := func(kind, text string) {
+		serverEvents.publish(ServerEvent{Time: time.Now(), Kind: kind, Text: text, PlayerID: -1})
+	}
+
+	if low := strings.ToLower(cmd); low == "kickall" || strings.HasPrefix(low, "kickall ") {
+		reason := strings.TrimSpace(cmd[len("kickall"):])
+		if reason == "" {
+			reason = "Server restarting"
+		}
+		note(eventSent, "> "+cmd)
+		rep, err := kickAll(sharedRunner{}, reason)
+		if err != nil {
+			note(eventError, "kickall failed: "+err.Error())
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		log.Printf("rcon[%s] > %s", consoleSource, rep.summary(reason))
+		note(eventReply, rep.summary(reason))
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": true, "output": rep.summary(reason)})
+		return
+	}
+
+	out, acked, err := runShared(cmd, 3*time.Second, false, consoleSource)
+	switch {
+	case err != nil:
+		note(eventError, "error: "+err.Error())
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	case !acked:
+		note(eventError, "(no acknowledgement from server)")
+	case strings.TrimSpace(out) != "":
+		note(eventReply, strings.TrimRight(out, "\r\n "))
+	}
+	if acked {
+		recordConsoleSay(cmd)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": acked, "output": out})
+}
+
+// recordConsoleSay adds a `say <id> ...` typed in the console to that
+// player's history, if they are online.
+func recordConsoleSay(cmd string) {
+	m := consoleSayRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return
+	}
+	id, _ := strconv.Atoi(m[1])
+	p, ok := onlineByID(id)
+	if !ok || p.GUID == "" {
+		return
+	}
+	if err := globalDatabase.AddChatMessage(time.Now(), p.GUID, chatOut, "> "+cmd); err != nil {
+		log.Printf("chat: store: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -896,11 +1153,11 @@ var pageSettings = struct {
 	HeaderFontSize:      "14px",
 	BodyFontSize:        "14px",
 	IDWidth:             "60px",
-	PlayerWidth:         "220px",
+	PlayerWidth:         "190px",
 	IPWidth:             "150px",
-	GUIDWidth:           "280px",
-	PingWidth:           "80px",
-	ActionsWidth:        "240px",
+	GUIDWidth:           "300px", // the widest column: a 32-character GUID
+	PingWidth:           "56px",  // Bans/other pages; on the Players page Ping takes the spare width
+	ActionsWidth:        "290px", // online players: Message, Kick, Ban and Details (~255px) plus padding and font slack
 	ModalWidth:          "420px",
 	ModalPadding:        "20px",
 	InputPadding:        "9px",

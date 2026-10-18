@@ -496,9 +496,10 @@ func runShared(command string, wait time.Duration, allowRetry bool, logAs string
 	if allowRetry {
 		maxAttempts = 3
 	}
-	// Commands someone asked for (logAs set) also go to the console page's
-	// log, once per call however many attempts it takes.
-	if logAs != "" {
+	// Commands typed in the console page also go to its log, once per call
+	// however many attempts it takes. Commands from flows and the other
+	// pages don't: the Flows page and the container log already show them.
+	if logAs == consoleSource {
 		serverEvents.publish(ServerEvent{Time: time.Now(), Kind: eventSent, Text: "> " + command, Source: logAs, PlayerID: -1})
 	}
 	var lastErr error
@@ -551,6 +552,10 @@ func (sharedRunner) run(command string, wait time.Duration) (string, bool, error
 // Messages sent while the server isn't talking to us (a restart, before
 // reloginShared gets in again) are lost; BattlEye keeps no backlog.
 
+// consoleSource is the runShared logAs label for commands typed in the
+// console page; only those are echoed into its log.
+const consoleSource = "console"
+
 // Server event kinds.
 const (
 	eventConnect    = "connect"    // Player #3 Name (1.2.3.4:2304) connected
@@ -562,7 +567,7 @@ const (
 	eventOther      = "other"      // anything not recognised; Text still has the line
 
 	// Not from BattlEye: lines ReCON adds so the console shows both sides.
-	eventSent  = "sent"  // > say -1 hello   (a command ReCON sent; Source says who asked)
+	eventSent  = "sent"  // > say -1 hello   (a command typed in the console page)
 	eventReply = "reply" // the server's answer to a console command
 	eventError = "error" // a console command that failed or got no answer
 )
@@ -787,6 +792,36 @@ func parsePlayers(out string) []Player {
 func findPlayer(out string, id int) (Player, bool) {
 	for _, p := range parsePlayers(out) {
 		if p.ID == id {
+			return p, true
+		}
+	}
+	return Player{}, false
+}
+
+// bareName drops the "(Lobby)" tag BattlEye adds while a player is loading.
+func bareName(name string) string {
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(name), lobbySuffix))
+}
+
+// onlineByName, onlineByID and onlineByGUID look a player up in the poller's
+// latest `players` list (flows.go), so they never send a command of their own.
+func onlineByName(name string) (Player, bool) {
+	return onlineWhere(func(p Player) bool { return bareName(p.Name) == name })
+}
+
+func onlineByID(id int) (Player, bool) {
+	return onlineWhere(func(p Player) bool { return p.ID == id })
+}
+
+func onlineByGUID(guid string) (Player, bool) {
+	return onlineWhere(func(p Player) bool { return strings.EqualFold(p.GUID, guid) })
+}
+
+func onlineWhere(match func(Player) bool) (Player, bool) {
+	latest.Lock()
+	defer latest.Unlock()
+	for _, p := range latest.players {
+		if match(p) {
 			return p, true
 		}
 	}
