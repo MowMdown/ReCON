@@ -496,6 +496,11 @@ func runShared(command string, wait time.Duration, allowRetry bool, logAs string
 	if allowRetry {
 		maxAttempts = 3
 	}
+	// Commands someone asked for (logAs set) also go to the console page's
+	// log, once per call however many attempts it takes.
+	if logAs != "" {
+		serverEvents.publish(ServerEvent{Time: time.Now(), Kind: eventSent, Text: "> " + command, Source: logAs, PlayerID: -1})
+	}
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		s, err := connectShared()
@@ -555,12 +560,18 @@ const (
 	eventChat       = "chat"       // (Global) Name: text
 	eventAdmin      = "admin"      // RCon admin #0 (1.2.3.4:5678) logged in
 	eventOther      = "other"      // anything not recognised; Text still has the line
+
+	// Not from BattlEye: lines ReCON adds so the console shows both sides.
+	eventSent  = "sent"  // > say -1 hello   (a command ReCON sent; Source says who asked)
+	eventReply = "reply" // the server's answer to a console command
+	eventError = "error" // a console command that failed or got no answer
 )
 
 // ServerEvent is one parsed server message. Fields a kind doesn't have stay
 // empty; PlayerID is -1 when the line names no player number (chat, admin,
 // other).
 type ServerEvent struct {
+	Seq      int64     `json:"seq"` // set by serverEvents.publish: 1, 2, 3, ... for this run of ReCON
 	Time     time.Time `json:"time"`
 	Kind     string    `json:"kind"`
 	Text     string    `json:"text"` // the line exactly as BattlEye sent it
@@ -571,6 +582,7 @@ type ServerEvent struct {
 	GUID     string    `json:"guid,omitempty"`    // lower-cased
 	Channel  string    `json:"channel,omitempty"` // chat: Global, Side, Direct, Vehicle, ...
 	Message  string    `json:"message,omitempty"` // chat text, or the kick reason
+	Source   string    `json:"source,omitempty"`  // sent: who asked ("web", "console", a flow's name)
 }
 
 var (
@@ -629,6 +641,7 @@ const recentEventsKept = 200
 // ones. Safe for concurrent use.
 type eventHub struct {
 	mu     sync.Mutex
+	seq    int64 // Seq of the last published event
 	recent []ServerEvent
 	subs   map[chan ServerEvent]struct{}
 }
@@ -637,10 +650,13 @@ type eventHub struct {
 // process (in server mode, only the shared session exists).
 var serverEvents = &eventHub{subs: map[chan ServerEvent]struct{}{}}
 
-// publish records an event and hands it to every subscriber that has room.
+// publish numbers an event, records it and hands it to every subscriber
+// that has room.
 func (h *eventHub) publish(ev ServerEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.seq++
+	ev.Seq = h.seq
 	h.recent = append(h.recent, ev)
 	if len(h.recent) > recentEventsKept {
 		h.recent = append([]ServerEvent(nil), h.recent[len(h.recent)-recentEventsKept:]...)
@@ -673,9 +689,31 @@ func (h *eventHub) subscribe(buffer int) (<-chan ServerEvent, func()) {
 
 // recentEvents returns a copy of the kept events, oldest first.
 func (h *eventHub) recentEvents() []ServerEvent {
+	return h.after(0)
+}
+
+// after returns the kept events with Seq greater than seq, oldest first, and
+// the Seq of the newest event (to pass next time). A page polls with the last
+// value it got; 0 means "everything kept". A seq from before a ReCON restart
+// is larger than anything now, so the page gets the whole buffer again.
+func (h *eventHub) after(seq int64) []ServerEvent {
+	events, _ := h.afterWithLast(seq)
+	return events
+}
+
+func (h *eventHub) afterWithLast(seq int64) ([]ServerEvent, int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return append([]ServerEvent(nil), h.recent...)
+	if seq > h.seq {
+		seq = 0 // ReCON restarted since the caller last asked
+	}
+	out := []ServerEvent{}
+	for _, ev := range h.recent {
+		if ev.Seq > seq {
+			out = append(out, ev)
+		}
+	}
+	return out, h.seq
 }
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,8 @@ import (
 // runWebServer registers every route and serves until the listener fails.
 // Patterns use Go 1.22 method and {wildcard} routing.
 func runWebServer(addr string) error {
+	startChatRecorder() // files incoming chat under each player's GUID (console.go)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
@@ -47,6 +49,12 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("GET /api/players", handlePlayersJSON)                 // online + offline players
 	mux.HandleFunc("GET /api/players/all", handleAllPlayersJSON)          // every player ever seen (no RCON needed)
 	mux.HandleFunc("POST /api/players/{id}/{action}", handlePlayerAction) // message | kick | ban
+	mux.HandleFunc("GET /api/players/{guid}/chat", handleChatHistory)     // their chat + messages sent to them (console.go)
+	mux.HandleFunc("POST /api/players/{guid}/chat", handleChatSend)       // {"message": ...} -> say <id> <message>
+
+	// RCON console on the Players page (console.go).
+	mux.HandleFunc("GET /api/console", handleConsoleEvents)   // ?after=N: server messages and commands since N
+	mux.HandleFunc("POST /api/console", handleConsoleCommand) // {"command": ...}, run exactly as typed
 
 	// Bans.
 	mux.HandleFunc("GET /bans", pageHandler(bansPage))
@@ -87,13 +95,24 @@ func runWebServer(addr string) error {
 var quietPaths = map[string]bool{
 	"/health": true, "/players": true, "/bans": true, "/flows": true,
 	"/api/players": true, "/api/bans": true, "/api/flows": true, "/api/status": true,
+	"/api/console": true,
+}
+
+// isQuiet reports whether a request is a routine poll: a quietPaths GET, or
+// the Message dialog re-reading a player's chat (/api/players/<guid>/chat).
+func isQuiet(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	p := r.URL.Path
+	return quietPaths[p] || (strings.HasPrefix(p, "/api/players/") && strings.HasSuffix(p, "/chat"))
 }
 
 // logRequests logs each request (method, path+query, remote address,
-// X-Forwarded-For, user agent), except quietPaths GETs.
+// X-Forwarded-For, user agent), except routine polls (isQuiet).
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !(r.Method == http.MethodGet && quietPaths[r.URL.Path]) {
+		if !isQuiet(r) {
 			from := r.RemoteAddr
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 				from += " (xff " + xff + ")"
