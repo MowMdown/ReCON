@@ -9,12 +9,54 @@
 td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
 .offline-section { margin-top: 42px; }
+.top .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Console and Message dialogs: wider boxes on the shared .modal overlay. */
+.dlg { display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
+.dlg.console { width: min(920px, 94vw); }
+.dlg.chat { width: min(720px, 94vw); }
+.dlg-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dlg-head h2 { margin: 0; font-size: 20px; }
+.dlg-head .sub { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #aaa; }
+.dlg-head .close { margin: 0 0 0 auto; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #81c995; }
+.live.off { color: #f28b82; }
+.log { background: #111; border: 1px solid #333; border-radius: 4px; overflow-y: auto; padding: 10px 12px; box-sizing: border-box; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.65; }
+#consoleLog { height: min(380px, 55vh); }
+#chatLog { height: min(260px, 45vh); }
+.log .ln { display: flex; gap: 12px; white-space: pre-wrap; word-break: break-word; }
+.log .t { color: #888; flex: none; min-width: 64px; }
+.log .src { color: #777; }
+.log .empty { color: #888; }
+/* One colour per kind of line. */
+.k-connect { color: #81c995; }
+.k-disconnect { color: #9aa0a6; }
+.k-guid { color: #777; }
+.k-kick, .k-error { color: #f28b82; }
+.k-chat, .k-in { color: #eee; }
+.k-admin { color: #fdd663; }
+.k-sent, .k-out { color: #8ab4f8; }
+.k-reply { color: #c8c8c8; }
+.k-other { color: #aaa; }
+.cmdrow { display: flex; gap: 8px; align-items: stretch; }
+.cmdrow input { flex: 1; min-width: 0; margin: 0; }
+.cmdrow button { margin: 0; padding: 6px 16px; }
+.cmdrow .prompt { display: flex; align-items: center; padding: 0 2px 0 4px; font-family: ui-monospace, Consolas, monospace; font-size: 14px; color: #8ab4f8; }
+#consoleInput { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.dlg-err { color: #f28b82; font-size: 13px; }
+.dlg-err:empty { display: none; }
 </style>
 </head>
 <body>
 <nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 {{template "statusbar" .}}
-<div class="top"><h1>DayZ Players</h1></div>
+<div class="top">
+	<h1>DayZ Players</h1>
+	<button type="button" class="icon-btn" onclick="openConsole()">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+		Console
+	</button>
+</div>
 <table>
 	<colgroup>
 		<col style="width: {{.IDWidth}}">
@@ -47,6 +89,7 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 	</table>
 </div>
 
+<!-- Kick / Ban dialog -->
 <div id="modal" class="modal">
 	<div class="box">
 		<h2 id="title"></h2>
@@ -60,6 +103,41 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 			<button onclick="closeModal()">Cancel</button>
 			<button id="submit">Submit</button>
 		</div>
+	</div>
+</div>
+
+<!-- RCON console: every server message plus every command ReCON sends -->
+<div id="consoleModal" class="modal">
+	<div class="box dlg console" role="dialog" aria-labelledby="consoleTitle">
+		<div class="dlg-head">
+			<h2 id="consoleTitle">RCON Console</h2>
+			<span id="consoleLive" class="live"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="4" fill="currentColor"></circle></svg><span>Live</span></span>
+			<button type="button" class="close" onclick="closeConsole()">Close</button>
+		</div>
+		<div id="consoleLog" class="log" aria-live="polite"></div>
+		<form id="consoleForm" class="cmdrow" autocomplete="off">
+			<label for="consoleInput" class="prompt">&gt;</label>
+			<input id="consoleInput" type="text" spellcheck="false" placeholder="RCON command, e.g. players or say -1 Hello">
+			<button type="submit">Send</button>
+		</form>
+		<div id="consoleErr" class="dlg-err"></div>
+	</div>
+</div>
+
+<!-- Message dialog: one player's chat and the private messages sent to them -->
+<div id="chatModal" class="modal">
+	<div class="box dlg chat" role="dialog" aria-labelledby="chatTitle">
+		<div class="dlg-head">
+			<h2 id="chatTitle">Message</h2>
+			<span id="chatSub" class="sub"></span>
+			<button type="button" class="close" onclick="closeChat()">Close</button>
+		</div>
+		<div id="chatLog" class="log" aria-live="polite"></div>
+		<form id="chatForm" class="cmdrow" autocomplete="off">
+			<input id="chatInput" type="text" aria-label="Private message">
+			<button type="submit">Send</button>
+		</form>
+		<div id="chatErr" class="dlg-err"></div>
 	</div>
 </div>
 <script>
@@ -80,14 +158,15 @@ async function refresh() {
 		setStatusCount('rcon', d.count + ' player(s) online');
 		document.getElementById('players').innerHTML = d.players.map(function(p) {
 			let n = esc(p.name);
+			let g = esc(p.guid);
 			return '<tr>' +
 				'<td>' + p.id + '</td>' +
 				'<td>' + n + '</td>' +
 				'<td class="mono">' + esc(p.ip) + '</td>' +
-				'<td class="mono">' + esc(p.guid) + '</td>' +
+				'<td class="mono">' + g + '</td>' +
 				'<td>' + p.ping + '</td>' +
 				'<td>' +
-					'<button data-id="' + p.id + '" data-action="message" data-name="' + n + '" onclick="handleActionClick(this)">Message</button>' +
+					'<button data-id="' + p.id + '" data-guid="' + g + '" data-action="message" data-name="' + n + '" onclick="handleActionClick(this)">Message</button>' +
 					'<button data-id="' + p.id + '" data-action="kick" data-name="' + n + '" onclick="handleActionClick(this)">Kick</button>' +
 					'<button data-id="' + p.id + '" data-action="ban" data-name="' + n + '" onclick="handleActionClick(this)">Ban</button>' +
 				'</td>' +
@@ -129,7 +208,14 @@ function fmtLastSeen(unix) {
 }
 
 function handleActionClick(btn) {
-	openModal(parseInt(btn.getAttribute('data-id'), 10), btn.getAttribute('data-action'), btn.getAttribute('data-name'));
+	let id = parseInt(btn.getAttribute('data-id'), 10);
+	let a = btn.getAttribute('data-action');
+	let name = btn.getAttribute('data-name');
+	if (a === 'message') {
+		openChat(id, btn.getAttribute('data-guid'), name);
+		return;
+	}
+	openModal(id, a, name);
 }
 
 function openModal(id, a, name) {
@@ -137,7 +223,7 @@ function openModal(id, a, name) {
 	action = a;
 	document.getElementById('title').textContent = a[0].toUpperCase() + a.slice(1) + ' ' + name;
 	document.getElementById('durationWrap').style.display = a === 'ban' ? 'block' : 'none';
-	document.getElementById('textLabel').textContent = a === 'message' ? 'Message' : 'Reason';
+	document.getElementById('textLabel').textContent = 'Reason';
 	document.getElementById('text').value = '';
 	document.getElementById('minutes').value = '';
 	document.getElementById('modal').style.display = 'flex';
@@ -146,9 +232,7 @@ function openModal(id, a, name) {
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
 
 document.getElementById('submit').onclick = async () => {
-	let body = action === 'message'
-		? { message: document.getElementById('text').value }
-		: { reason: document.getElementById('text').value, minutes: parseInt(document.getElementById('minutes').value, 10) };
+	let body = { reason: document.getElementById('text').value, minutes: parseInt(document.getElementById('minutes').value, 10) };
 	if (action === 'ban' && (!Number.isInteger(body.minutes) || body.minutes < 0)) {
 		alert('Duration must be a whole number of minutes (0 = permanent).');
 		return;
@@ -169,6 +253,241 @@ document.getElementById('submit').onclick = async () => {
 	}
 	refresh();
 };
+
+// ---------------------------------------------------------------------------
+// Log lines shared by the Console and Message dialogs
+// ---------------------------------------------------------------------------
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+// logTime shows HH:MM:SS for today, MM-DD HH:MM for older lines.
+function logTime(iso) {
+	let d = new Date(iso);
+	if (isNaN(d)) return '';
+	if (d.toDateString() !== new Date().toDateString()) {
+		return pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+	}
+	return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+
+// logLine builds one row: time, then the text in its kind's colour, then
+// (for commands a flow or page sent) who sent it. Text is set with
+// textContent, so nothing from the server is ever parsed as HTML.
+function logLine(time, kind, text, source) {
+	let row = document.createElement('div');
+	row.className = 'ln';
+	let t = document.createElement('span');
+	t.className = 't';
+	t.textContent = logTime(time);
+	let x = document.createElement('span');
+	x.className = 'k-' + (kind || 'other');
+	x.textContent = text;
+	row.append(t, x);
+	if (source) {
+		let s = document.createElement('span');
+		s.className = 'src';
+		s.textContent = '[' + source + ']';
+		row.append(s);
+	}
+	return row;
+}
+
+function emptyLine(text) {
+	let e = document.createElement('div');
+	e.className = 'empty';
+	e.textContent = text;
+	return e;
+}
+
+function nearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 40; }
+
+// ---------------------------------------------------------------------------
+// RCON console
+// ---------------------------------------------------------------------------
+
+let consoleLast = 0;      // seq of the newest line shown (GET /api/console?after=)
+let consoleTimer = null;
+let consoleBusy = false;
+let cmdHistory = [];      // commands sent from this page, newest last (Up/Down to recall)
+let cmdIndex = 0;
+
+async function pollConsole() {
+	if (consoleBusy) return;
+	consoleBusy = true;
+	let live = document.getElementById('consoleLive');
+	try {
+		let d = await (await fetch('/api/console?after=' + consoleLast, { cache: 'no-store' })).json();
+		if (d.ok) {
+			let log = document.getElementById('consoleLog');
+			let stick = nearBottom(log);
+			if (d.last < consoleLast) log.textContent = ''; // ReCON restarted: start over
+			if (d.events.length) {
+				let empty = log.querySelector('.empty');
+				if (empty) empty.remove();
+				for (let ev of d.events) {
+					let src = ev.kind === 'sent' && ev.source && ev.source !== 'console' ? ev.source : '';
+					log.appendChild(logLine(ev.time, ev.kind, ev.text, src));
+				}
+				while (log.childElementCount > 1000) log.firstElementChild.remove();
+			} else if (!log.childElementCount) {
+				log.appendChild(emptyLine('Waiting for messages from the server...'));
+			}
+			consoleLast = d.last;
+			if (stick) log.scrollTop = log.scrollHeight;
+		}
+		live.classList.remove('off');
+		live.lastElementChild.textContent = 'Live';
+	} catch (e) {
+		live.classList.add('off');
+		live.lastElementChild.textContent = 'Reconnecting...';
+	}
+	consoleBusy = false;
+}
+
+function openConsole() {
+	document.getElementById('consoleModal').style.display = 'flex';
+	let log = document.getElementById('consoleLog');
+	log.scrollTop = log.scrollHeight;
+	pollConsole();
+	clearInterval(consoleTimer);
+	consoleTimer = setInterval(pollConsole, 1000);
+	document.getElementById('consoleInput').focus();
+}
+
+function closeConsole() {
+	document.getElementById('consoleModal').style.display = 'none';
+	clearInterval(consoleTimer);
+	consoleTimer = null;
+}
+
+document.getElementById('consoleForm').onsubmit = async (e) => {
+	e.preventDefault();
+	let input = document.getElementById('consoleInput');
+	let err = document.getElementById('consoleErr');
+	let cmd = input.value.trim();
+	if (!cmd) return;
+	input.value = '';
+	err.textContent = '';
+	if (cmdHistory[cmdHistory.length - 1] !== cmd) cmdHistory.push(cmd);
+	cmdIndex = cmdHistory.length;
+	let log = document.getElementById('consoleLog');
+	log.scrollTop = log.scrollHeight; // follow the reply
+	try {
+		let r = await fetch('/api/console', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ command: cmd })
+		});
+		let d = await r.json();
+		if (!d.ok && r.status === 400) err.textContent = d.error || 'Command not sent';
+	} catch (e2) {
+		err.textContent = 'ReCON could not be reached; the command may not have been sent.';
+	}
+	pollConsole();
+};
+
+// Up/Down recall earlier commands, like a terminal.
+document.getElementById('consoleInput').addEventListener('keydown', (e) => {
+	if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+	if (!cmdHistory.length) return;
+	e.preventDefault();
+	cmdIndex = Math.max(0, Math.min(cmdHistory.length, cmdIndex + (e.key === 'ArrowUp' ? -1 : 1)));
+	e.target.value = cmdHistory[cmdIndex] || '';
+});
+
+// ---------------------------------------------------------------------------
+// Message dialog: one player's conversation
+// ---------------------------------------------------------------------------
+
+let chat = null;      // {id, guid, name} of the player the dialog is open for
+let chatTimer = null;
+let chatKey = '';     // what the log shows now, to skip redrawing an unchanged history
+
+async function loadChat() {
+	if (!chat) return;
+	let guid = chat.guid;
+	try {
+		let d = await (await fetch('/api/players/' + encodeURIComponent(guid) + '/chat', { cache: 'no-store' })).json();
+		if (!chat || chat.guid !== guid || !d.ok) return;
+		let msgs = d.messages || [];
+		let last = msgs[msgs.length - 1];
+		let key = msgs.length + '|' + (last ? last.time + last.line : '');
+		if (key === chatKey) return;
+		let log = document.getElementById('chatLog');
+		let stick = chatKey === '' || nearBottom(log);
+		chatKey = key;
+		log.textContent = '';
+		if (!msgs.length) {
+			log.appendChild(emptyLine('No chat from ' + chat.name + ' yet.'));
+		}
+		for (let m of msgs) {
+			log.appendChild(logLine(m.time, m.direction === 'out' ? 'out' : 'in', m.line, ''));
+		}
+		if (stick) log.scrollTop = log.scrollHeight;
+	} catch (e) {
+		// keep showing what we have; the next poll tries again
+	}
+}
+
+function openChat(id, guid, name) {
+	chat = { id: id, guid: guid, name: name };
+	chatKey = '';
+	document.getElementById('chatTitle').textContent = 'Message ' + name;
+	document.getElementById('chatSub').textContent = 'Player #' + id;
+	document.getElementById('chatLog').textContent = '';
+	document.getElementById('chatErr').textContent = '';
+	let input = document.getElementById('chatInput');
+	input.value = '';
+	input.placeholder = 'Private message to ' + name;
+	document.getElementById('chatModal').style.display = 'flex';
+	loadChat();
+	clearInterval(chatTimer);
+	chatTimer = setInterval(loadChat, 2000);
+	input.focus();
+}
+
+function closeChat() {
+	document.getElementById('chatModal').style.display = 'none';
+	clearInterval(chatTimer);
+	chatTimer = null;
+	chat = null;
+}
+
+document.getElementById('chatForm').onsubmit = async (e) => {
+	e.preventDefault();
+	if (!chat) return;
+	let input = document.getElementById('chatInput');
+	let err = document.getElementById('chatErr');
+	let msg = input.value.trim();
+	if (!msg) return;
+	err.textContent = '';
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(chat.guid) + '/chat', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ message: msg })
+		});
+		let d = await r.json();
+		if (!d.ok) {
+			err.textContent = d.error || 'Message not sent';
+			return;
+		}
+		input.value = '';
+		let log = document.getElementById('chatLog');
+		log.scrollTop = log.scrollHeight;
+		loadChat();
+	} catch (e2) {
+		err.textContent = 'ReCON could not be reached; the message was not sent.';
+	}
+};
+
+// Escape closes whichever dialog is open.
+document.addEventListener('keydown', (e) => {
+	if (e.key !== 'Escape') return;
+	if (document.getElementById('chatModal').style.display === 'flex') closeChat();
+	else if (document.getElementById('consoleModal').style.display === 'flex') closeConsole();
+	else if (document.getElementById('modal').style.display === 'flex') closeModal();
+});
 
 refresh();
 setInterval(refresh, {{.RefreshInterval.Milliseconds}});
