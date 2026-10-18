@@ -2,47 +2,149 @@
   "flows": [
     {
       "name": "Welcome Player",
-      "schedule": "on-join",
-      "timer": "3s",
-      "script": [
-        "if $name == Survivor",
-        "kick $player Name must not be Survivor",
-        "else",
-        "$server = Welcome to this DayZ server!",
-        "say $player $name! $server",
-        "end"
+      "trigger": "join",
+      "delay": "3s",
+      "steps": [
+        {
+          "type": "if",
+          "branches": [
+            {
+              "subject": "player_name",
+              "op": "eq",
+              "value": "Survivor",
+              "steps": [
+                {
+                  "type": "kick",
+                  "who": "player",
+                  "reason": "Name must not be Survivor"
+                }
+              ]
+            }
+          ],
+          "else": [
+            {
+              "type": "message",
+              "to": "player",
+              "text": "Welcome {player_name} to our DayZ server!"
+            }
+          ]
+        }
       ]
     },
     {
       "name": "MOTD",
+      "trigger": "schedule",
       "schedule": "*/20 * * * *",
-      "timer": "30s",
-      "timerMode": "after",
-      "script": [
-        "say -1 Admins are active, please play respectfully.",
-        "wait 3s",
-        "say -1 If you need admin assistance, send a message in game."
+      "delay": "3s",
+      "steps": [
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Admins are active, please play respectfully."
+        },
+        {
+          "type": "wait",
+          "time": "2s"
+        },
+        {
+          "type": "message",
+          "to": "all",
+          "text": "If you need admin assistance, send a message in game."
+        }
       ]
     },
     {
-      "name": "Server restart",
-      "schedule": "0 */6 * * *",
-      "timer": "1h",
-      "timerMode": "before",
-      "script": [
-        "$warn = 60m 30m 15m 10m 5m 3m",
-        "$warn | say -1 Server is going to restart in @minutes minutes!",
-        "2m | #lock",
-        "1m | if $players > 0",
-        "say -1 Server is going down for a restart, you will be kicked!",
-        "wait 10s",
-        "#kickall Server Restart",
-        "end",
-        "0 | #shutdown"
+      "name": "Server Restart",
+      "trigger": "schedule",
+      "schedule": "0 5/6 * * *",
+      "steps": [
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Server is going to restart in 60 minutes."
+        },
+        {
+          "type": "wait",
+          "time": "30m"
+        },
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Server is going to restart in 30 minutes."
+        },
+        {
+          "type": "wait",
+          "time": "15m"
+        },
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Server is going to restart in 15 minutes."
+        },
+        {
+          "type": "wait",
+          "time": "5m"
+        },
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Server is going to restart in 10 minutes."
+        },
+        {
+          "type": "wait",
+          "time": "5m"
+        },
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Server is going to restart in 5 minutes."
+        },
+        {
+          "type": "wait",
+          "time": "2m"
+        },
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Server is going to restart in 3 minutes."
+        },
+        {
+          "type": "wait",
+          "time": "1m"
+        },
+        {
+          "type": "lock"
+        },
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Server is going to restart in 2 minutes, you will be kicked."
+        },
+        {
+          "type": "wait",
+          "time": "1m"
+        },
+        {
+          "type": "kickAll",
+          "reason": "Server Restart"
+        },
+        {
+          "type": "wait",
+          "time": "10s"
+        },
+        {
+          "type": "shutdown"
+        }
       ],
-      "cancel": [
-        "say -1 Server restart has been cancelled.",
-        "#unlock"
+      "onStop": [
+        {
+          "type": "message",
+          "to": "all",
+          "text": "Server restart has been postponed."
+        },
+        {
+          "type": "unlock"
+        }
       ]
     }
   ]
