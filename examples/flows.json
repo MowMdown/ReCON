@@ -118,11 +118,11 @@
         {
           "type": "message",
           "to": "all",
-          "text": "Server is going to restart in 2 minutes, you will be kicked."
+          "text": "Server is going to restart in < 2 minutes, you will be kicked."
         },
         {
           "type": "wait",
-          "time": "1m"
+          "time": "1m50s"
         },
         {
           "type": "kickAll",
