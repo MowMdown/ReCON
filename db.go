@@ -63,7 +63,10 @@ func OpenDatabase(filepath string) (*Database, error) {
 		last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		total_playtime_seconds INTEGER NOT NULL DEFAULT 0,
 		-- Role for the chat commands: 0 Player (everyone starts here), 1 Mod, 2 Admin.
-		role INTEGER NOT NULL DEFAULT 0
+		role INTEGER NOT NULL DEFAULT 0,
+		-- SteamID64 as decimal text. ReCON never writes it: it stays NULL
+		-- until guidsearch fills it in from the GUID.
+		steam_id TEXT
 	);
 	CREATE TABLE IF NOT EXISTS active_sessions (
 		guid TEXT PRIMARY KEY,
@@ -85,7 +88,9 @@ func OpenDatabase(filepath string) (*Database, error) {
 		player_name TEXT NOT NULL,
 		ip TEXT NOT NULL,
 		reason TEXT NOT NULL,
-		perm INTEGER NOT NULL DEFAULT 0
+		perm INTEGER NOT NULL DEFAULT 0,
+		-- As players.steam_id: NULL until guidsearch fills it in.
+		steam_id TEXT
 	);
 	CREATE TABLE IF NOT EXISTS player_ips (
 		guid TEXT NOT NULL,
@@ -121,6 +126,11 @@ func OpenDatabase(filepath string) (*Database, error) {
 		ON session_history(guid);
 	CREATE INDEX IF NOT EXISTS idx_chat_messages_guid
 		ON chat_messages(guid, id);
+	-- Same names guidsearch uses, so neither program makes a second index.
+	CREATE INDEX IF NOT EXISTS idx_players_steam_id
+		ON players(steam_id);
+	CREATE INDEX IF NOT EXISTS idx_bans_steam_id
+		ON bans(steam_id);
 
 	-- Read-only views with friendlier column names. The tables above are
 	-- what the app writes to; these are just for browsing in sqlite3.
@@ -129,6 +139,7 @@ func OpenDatabase(filepath string) (*Database, error) {
 		SELECT
 			username AS player_name,
 			guid AS player_guid,
+			steam_id AS steam_id,
 			last_ip AS last_ip_address,
 			first_seen AS first_joined,
 			last_seen AS last_seen,
@@ -176,6 +187,7 @@ func OpenDatabase(filepath string) (*Database, error) {
 		SELECT
 			player_name AS player_name,
 			guid AS player_guid,
+			steam_id AS steam_id,
 			ip AS ip_address_when_banned,
 			reason AS ban_reason,
 			CASE perm WHEN 1 THEN 'Permanent' ELSE 'Timed' END AS ban_type
