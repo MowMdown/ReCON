@@ -1016,8 +1016,6 @@ type flowFileEntry struct {
 	Delay    string `json:"delay,omitempty"`    // e.g. "5s"
 	Steps    []Step `json:"steps"`
 	OnStop   []Step `json:"onStop,omitempty"`
-	// Script is only read, to recognise a file from the old script format.
-	Script json.RawMessage `json:"script,omitempty"`
 }
 
 type flowFile struct {
@@ -1034,9 +1032,6 @@ func handleFlowExport(w http.ResponseWriter, r *http.Request) {
 	}
 	out := flowFile{Flows: make([]flowFileEntry, 0, len(flows))}
 	for _, f := range flows {
-		if f.Broken != "" {
-			continue
-		}
 		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Trigger: f.Trigger, Schedule: f.Schedule,
 			Delay: f.Delay, Steps: f.Steps, OnStop: f.OnStop})
 	}
@@ -1077,10 +1072,6 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 		base := clipName(strings.TrimSpace(e.Name), maxFlowNameLen)
 		if base == "" {
 			skipped = append(skipped, fmt.Sprintf("flow #%d: name is required", i+1))
-			continue
-		}
-		if len(e.Script) > 0 && len(e.Steps) == 0 {
-			skipped = append(skipped, base+": written for the old script format; build it again with steps")
 			continue
 		}
 		name := base

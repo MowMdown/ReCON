@@ -61,7 +61,9 @@ func OpenDatabase(filepath string) (*Database, error) {
 		last_ip TEXT NOT NULL,
 		first_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		total_playtime_seconds INTEGER NOT NULL DEFAULT 0
+		total_playtime_seconds INTEGER NOT NULL DEFAULT 0,
+		-- Role for the chat commands: 0 Player (everyone starts here), 1 Mod, 2 Admin.
+		role INTEGER NOT NULL DEFAULT 0
 	);
 	CREATE TABLE IF NOT EXISTS active_sessions (
 		guid TEXT PRIMARY KEY,
@@ -119,7 +121,6 @@ func OpenDatabase(filepath string) (*Database, error) {
 		ON session_history(guid);
 	CREATE INDEX IF NOT EXISTS idx_chat_messages_guid
 		ON chat_messages(guid, id);
-	DROP INDEX IF EXISTS idx_bans_player_name;
 
 	-- Read-only views with friendlier column names. The tables above are
 	-- what the app writes to; these are just for browsing in sqlite3.
@@ -183,30 +184,6 @@ func OpenDatabase(filepath string) (*Database, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create schema: %w", err)
-	}
-	// Each player's role for the chat commands: 0 Player (everyone starts
-	// here), 1 Mod, 2 Admin. Added to databases made before roles existed.
-	var hasRole int
-	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('players') WHERE name = 'role'").Scan(&hasRole); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to read the players table: %w", err)
-	}
-	if hasRole == 0 {
-		if _, err := db.Exec("ALTER TABLE players ADD COLUMN role INTEGER NOT NULL DEFAULT 0"); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to add players.role: %w", err)
-		}
-	}
-	// Seed player_ips with every IP already recorded in session history.
-	// Safe to repeat: existing (guid, ip) rows are left alone.
-	_, err = db.Exec(`
-		INSERT OR IGNORE INTO player_ips (guid, ip, first_seen, last_seen)
-		SELECT guid, ip, MIN(connected_at), MAX(disconnected_at)
-		FROM session_history
-		GROUP BY guid, ip`)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to seed player_ips: %w", err)
 	}
 	return &Database{db}, nil
 }
@@ -593,9 +570,8 @@ type playerDetails struct {
 }
 
 // unixOf reads a DATETIME column scanned into `any`. Drivers hand these back
-// as time.Time or as text depending on how the value was written (the
-// player_ips seed copies text with MIN/MAX), so both are handled. 0 when
-// empty or unreadable.
+// as time.Time or as text depending on the driver and how the value was
+// written, so both are handled. 0 when empty or unreadable.
 func unixOf(v any) int64 {
 	switch t := v.(type) {
 	case time.Time:
@@ -979,29 +955,19 @@ func (db *Database) storedBans() (map[string]banState, error) {
 // Columns: script holds the steps as JSON, cancel the When stopped steps,
 // timer the delay before step 1, and schedule the trigger: "manual",
 // "on-join", "on-chat" or a cron expression (see triggerOf in flows.go).
-// timer_mode is left over from the old script format and no longer used.
 func (db *Database) EnsureFlowsTable() error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS flows (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL UNIQUE,
 			script TEXT NOT NULL,
+			cancel TEXT NOT NULL DEFAULT '',
+			timer TEXT NOT NULL DEFAULT '',
 			schedule TEXT NOT NULL DEFAULT '',
 			schedule_enabled INTEGER NOT NULL DEFAULT 0,
 			position INTEGER NOT NULL DEFAULT 0
 		)`); err != nil {
 		return err
-	}
-	for _, col := range []string{"cancel", "timer", "timer_mode"} {
-		var has int
-		if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name = ?", col).Scan(&has); err != nil {
-			return err
-		}
-		if has == 0 {
-			if _, err := db.Exec("ALTER TABLE flows ADD COLUMN " + col + " TEXT NOT NULL DEFAULT ''"); err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }
@@ -1053,14 +1019,14 @@ func (db *Database) SaveFlow(f Flow, script, cancel string) (int64, error) {
 		en = 1
 	}
 	if f.ID == 0 {
-		res, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, timer_mode, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, '', ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
+		res, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
 			f.Name, script, cancel, f.Delay, f.Schedule, en)
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
-	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, timer_mode = '', schedule = ?, schedule_enabled = ? WHERE id = ?",
+	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, schedule = ?, schedule_enabled = ? WHERE id = ?",
 		f.Name, script, cancel, f.Delay, f.Schedule, en, f.ID)
 	if err != nil {
 		return 0, err

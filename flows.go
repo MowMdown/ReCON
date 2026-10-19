@@ -1177,12 +1177,9 @@ type Flow struct {
 	Steps  []Step `json:"steps"`
 	OnStop []Step `json:"onStop"`
 	// ScheduleEnabled turns the trigger on (schedule, join and chat flows).
-	ScheduleEnabled bool `json:"scheduleEnabled"`
-	// Broken says why a stored flow couldn't be read (one written for the
-	// old script format). It is never stored.
-	Broken  string `json:"broken,omitempty"`
-	NextRun string `json:"nextRun,omitempty"` // for the page, not stored
-	LastRun string `json:"lastRun,omitempty"` // for the page, not stored
+	ScheduleEnabled bool   `json:"scheduleEnabled"`
+	NextRun         string `json:"nextRun,omitempty"` // for the page, not stored
+	LastRun         string `json:"lastRun,omitempty"` // for the page, not stored
 }
 
 // maxFlowNameLen is the longest flow name allowed, in characters. The Flow
@@ -1197,11 +1194,11 @@ func clipName(s string, n int) string {
 	return strings.TrimSpace(string([]rune(s)[:n]))
 }
 
-// triggerOf reads a flow's trigger from its stored schedule. Blank and
-// "* * * * *" count as manual.
+// triggerOf reads a flow's trigger from its stored schedule. Blank counts
+// as manual.
 func triggerOf(schedule string) string {
 	switch strings.ToLower(strings.Join(strings.Fields(schedule), " ")) {
-	case scheduleManual, "", "* * * * *":
+	case scheduleManual, "":
 		return triggerManual
 	case scheduleJoin:
 		return triggerJoin
@@ -1225,8 +1222,8 @@ func storedSchedule(f Flow) string {
 }
 
 // flowFromRow fills a flow read from the database: its trigger from the
-// schedule column and its steps from JSON. A flow saved in the old script
-// format can't be read; Broken says so and it doesn't run.
+// schedule column and its steps from JSON. Steps that can't be read are left
+// empty, so the flow fails its checks and doesn't run.
 func flowFromRow(f *Flow, script, cancel string) {
 	f.Trigger = triggerOf(f.Schedule)
 	if f.Trigger != triggerSchedule {
@@ -1238,8 +1235,7 @@ func flowFromRow(f *Flow, script, cancel string) {
 	f.Steps, f.OnStop = []Step{}, []Step{}
 	if err := json.Unmarshal([]byte(script), &f.Steps); err != nil {
 		f.Steps = []Step{}
-		f.Broken = "This flow was written for the old script format. Delete it and build it again with steps."
-		return
+		log.Printf("flow[%s] steps can't be read: %v", f.Name, err)
 	}
 	if strings.TrimSpace(cancel) != "" {
 		if err := json.Unmarshal([]byte(cancel), &f.OnStop); err != nil {
@@ -1315,9 +1311,6 @@ func delayOf(f Flow) (int, error) {
 
 // checkFlow runs every check a flow must pass to be saved or run.
 func checkFlow(f Flow) error {
-	if f.Broken != "" {
-		return errors.New(f.Broken)
-	}
 	if f.Trigger == triggerSchedule {
 		if err := checkCronSchedule(f.Schedule); err != nil {
 			return err
@@ -1394,7 +1387,6 @@ func validateAndSaveFlow(f Flow) (int64, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Schedule = strings.TrimSpace(f.Schedule)
 	f.Delay = strings.ToLower(strings.TrimSpace(f.Delay))
-	f.Broken = ""
 	if f.Name == "" {
 		return 0, errors.New("name is required")
 	}
@@ -2003,14 +1995,8 @@ func defaultChatSettings() chatSettings {
 	return out
 }
 
-// oldCmdRe finds "!help" style command names in a default message, to
-// recognise the same message saved when commands started with "/".
-var oldCmdRe = regexp.MustCompile(`!([\w<])`)
-
 // mergeChatSettings lays saved settings over the defaults, so a command or
-// message added later gets its default and unknown keys are dropped. A
-// message still set to its old default from when commands started with "/"
-// (DayZ drops chat lines starting with "/") gets the new default.
+// message added later gets its default and unknown keys are dropped.
 func mergeChatSettings(saved chatSettings) chatSettings {
 	out := defaultChatSettings()
 	for _, d := range chatCommandDefs {
@@ -2027,7 +2013,7 @@ func mergeChatSettings(saved chatSettings) chatSettings {
 			m.Length = s.Length
 		}
 		for _, f := range d.Fields {
-			if v, ok := s.Msgs[f.Key]; ok && v != oldCmdRe.ReplaceAllString(f.Def, "/$1") {
+			if v, ok := s.Msgs[f.Key]; ok {
 				m.Msgs[f.Key] = v
 			}
 		}
