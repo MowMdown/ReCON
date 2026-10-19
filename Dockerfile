@@ -2,16 +2,21 @@
 FROM golang:1.22-alpine AS build
 
 WORKDIR /src
+
 COPY go.mod ./
 COPY go.sum* ./
 COPY *.go ./
+
 # HTML pages, embedded into the binary by //go:embed in web.go
 COPY templates ./templates
+
 RUN go mod tidy
 
 RUN CGO_ENABLED=0 GOOS=linux \
     go build -ldflags="-s -w" -o /recon .
 
+
+# --- Stage 2: Runtime ---
 FROM alpine:3.20
 
 RUN apk add --no-cache \
@@ -19,17 +24,24 @@ RUN apk add --no-cache \
     tzdata \
     sqlite
 
-RUN addgroup -g 100 users 2>/dev/null || true && \
+# Create a dedicated non-root user and group (default: 1001:1001)
+RUN addgroup -S -g 1001 recon && \
+    adduser -S -D -H -u 1001 -G recon recon && \
     mkdir -p /data && \
-    chown -R 99:100 /data
+    chown recon:recon /data
 
 COPY --from=build /recon /usr/local/bin/recon
 
-# `rcon` is a short alias for the command-line tool (docker exec ... rcon players).
+# Short alias for the command-line tool
+# Usage: docker exec <container> rcon players
 RUN ln -s /usr/local/bin/recon /usr/local/bin/rcon
 
 WORKDIR /data
-USER 99:100
+
+USER 1001:1001
+
 EXPOSE 8080
+
 VOLUME ["/data"]
+
 ENTRYPOINT ["recon"]
