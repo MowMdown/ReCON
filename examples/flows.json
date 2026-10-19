@@ -49,7 +49,7 @@
         {
           "type": "message",
           "to": "all",
-          "text": "If you need admin assistance, send a message in game."
+          "text": "If you need admin assistance, send a message in game or type !help."
         }
       ]
     },
