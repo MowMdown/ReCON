@@ -10,7 +10,7 @@ COPY templates ./templates
 RUN go mod tidy
 
 RUN CGO_ENABLED=0 GOOS=linux \
-    go build -ldflags="-s -w" -o /rcon-bridge .
+    go build -ldflags="-s -w" -o /recon .
 
 FROM alpine:3.20
 
@@ -23,13 +23,13 @@ RUN addgroup -g 100 users 2>/dev/null || true && \
     mkdir -p /data && \
     chown -R 99:100 /data
 
-COPY --from=build /rcon-bridge /usr/local/bin/rcon-bridge
+COPY --from=build /recon /usr/local/bin/recon
 
-RUN ln -s /usr/local/bin/rcon-bridge /usr/local/bin/rcon && \
-    ln -s /usr/local/bin/rcon-bridge /rcon-bridge
+# `rcon` is a short alias for the command-line tool (docker exec ... rcon players).
+RUN ln -s /usr/local/bin/recon /usr/local/bin/rcon
 
 WORKDIR /data
 USER 99:100
 EXPOSE 8080
 VOLUME ["/data"]
-ENTRYPOINT ["rcon-bridge"]
+ENTRYPOINT ["recon"]
