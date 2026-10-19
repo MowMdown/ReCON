@@ -342,7 +342,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 			</table>
 			<ul>
 				<li>Every trigger can have a <b>delay</b> before step 1.</li>
-				<li>Changing an existing flow's trigger saves it disabled, so a restart flow can't start firing on every join by accident.</li>
+				<li>A flow's trigger is fixed once it is saved, so a restart flow can never start firing on every join by accident. To use another trigger, make a new flow (or Export, change <code>trigger</code> in the file, and Import).</li>
 				<li>Run works for Schedule and Manual flows. On join and Player message flows run for a player, so only a player can start them.</li>
 				<li>On join: players already online when ReCON starts are not greeted. After the game server restarts, everyone who reconnects is.</li>
 				<li>Player message: ReCON finds who sent the line by their name among the players online, then uses their GUID. If two players online have the same name, their messages don't run flows.</li>
@@ -1080,7 +1080,7 @@ function field(s, p, key) {
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
 		if (opts === 'to') opts = toOpts(ed.trigger.type);
 		if (opts === 'who') opts = whoOpts();
-		if (key === 'onStop' && p.k === 'to') opts = [['all', 'everyone']];
+		if (key === 'onStop' && p.k === 'to') opts = [['all', 'Everyone']];
 		if (!opts.some(([v]) => v === String(s[p.k]))) s[p.k] = opts[0][0];
 		// Only one choice: show it as words, not a dropdown.
 		if (opts.length === 1) return el('span', { class: 'w', style: 'color:var(--fg)', text: opts[0][1] });
@@ -1429,9 +1429,13 @@ let previewTimer = null;
 function renderTrigger() {
 	const seg = $('trigSeg');
 	seg.textContent = '';
+	// A saved flow keeps its trigger: only a new flow can pick one.
+	const locked = ed.id !== 0;
 	for (const [id, label] of TRIGGERS) {
 		seg.append(el('button', {
 			type: 'button', 'aria-pressed': String(ed.trigger.type === id), text: label,
+			disabled: locked && ed.trigger.type !== id,
+			title: locked && ed.trigger.type !== id ? 'A saved flow\'s trigger can\'t be changed; make a new flow instead' : null,
 			onclick: () => {
 				if (ed.trigger.type === id) return;
 				ed.trigger = { type: id, cron: ed.trigger.cron || '0 6 * * *', delay: ed.trigger.delay };
