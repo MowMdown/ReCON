@@ -19,7 +19,6 @@
 .run { margin-top: 24px; }
 #confirmText { white-space: pre-line; }
 .sub { color: #aaa; font-size: 12px; }
-.bad-flow { color: #f28b82; }
 pre.log { background: #1a1a1a; padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; max-height: 320px; overflow-y: auto; }
 td.actions { white-space: nowrap; }
 /* Flow names are capped at 48 characters, which fits the 340px column in
@@ -422,8 +421,8 @@ function fmtRemaining(unix) {
 
 // statusText is the Status column:
 //   Idle               never run, or the last run finished normally
-//   Running - 45m45s   counting down: to 0 in a countdown, or to the end of a delay
-//   Running            the script is running (no countdown, or the delay is over)
+//   Running - 45m45s   waiting out the delay before step 1
+//   Running            the steps are running
 //   Error              a command failed (no reply or RCON error)
 //   Stopped            the Stop button was pressed
 function statusText(run) {
@@ -485,13 +484,13 @@ async function refresh() {
 			let buttons =
 				btn(f.scheduleEnabled ? 'Disable' : 'Enable', 'toggleFlow(' + f.id + ')', manual,
 					manual ? 'Manual flows only run when you press Run' : '') +
-				(active ? btn('Stop', 'stopFlow(' + f.id + ')', false) : btn('Run', 'runFlow(' + f.id + ')', player || !!f.broken,
+				(active ? btn('Stop', 'stopFlow(' + f.id + ')', false) : btn('Run', 'runFlow(' + f.id + ')', player,
 					player ? 'This flow runs for a player, so only a player can start it' : '')) +
-				btn('Edit', 'editFlow(' + f.id + ')', !!f.broken, f.broken ? 'Delete it and build it again with steps' : '') +
+				btn('Edit', 'editFlow(' + f.id + ')', false) +
 				btn('Delete', 'deleteFlow(' + f.id + ')', active);
 			return '<tr draggable="true" data-id="' + f.id + '"><td title="' + esc(f.name) + '">' + esc(f.name) + '</td>' +
 				'<td>' + triggerCell(f) + '</td>' +
-				'<td>' + (f.broken ? '<span class="bad-flow" title="' + esc(f.broken) + '">Old script format: rebuild it</span>' : statusCell(run)) + '</td>' +
+				'<td>' + statusCell(run) + '</td>' +
 				'<td>' + esc(f.lastRun || '-') + '</td>' +
 				'<td>' + esc(next) + '</td>' +
 				'<td class="actions">' + buttons + '</td></tr>';
