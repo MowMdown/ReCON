@@ -1131,26 +1131,44 @@ document.getElementById('detBan').onclick = async function () {
 // Details dialog: Steam Profile tab (GET /api/players/<guid>/steam)
 // ---------------------------------------------------------------------------
 
-let steamFor = null; // GUID the tab shows (or is loading), so switching tabs doesn't refetch
+let steamFor = null;       // GUID the tab shows (or is loading), so switching tabs doesn't refetch
+let steamPollTimer = null; // re-checks the tab while a SteamID search runs
 
 // loadDetSteam fills the tab for the open player. refresh asks ReCON to
-// fetch from Steam now instead of using its 30-minute copy.
-async function loadDetSteam(refresh) {
+// fetch from Steam now instead of using its 30-minute copy; quiet keeps what
+// the tab shows until the answer arrives (the search progress polls).
+async function loadDetSteam(refresh, quiet) {
 	let guid = detOpenGuid;
 	if (!guid || (!refresh && steamFor === guid)) return;
 	steamFor = guid;
 	let box = document.getElementById('detSteam');
 	let btn = document.getElementById('steamRefresh');
 	if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
-	else { box.textContent = ''; box.append(steamHint('Loading the Steam profile...')); }
-	let d;
-	try {
-		d = await (await fetch('/api/players/' + encodeURIComponent(guid) + '/steam' + (refresh ? '?refresh=1' : ''), { cache: 'no-store' })).json();
-	} catch (e) {
-		d = { ok: false, error: 'ReCON could not be reached.' };
-	}
+	else if (!quiet) { box.textContent = ''; box.append(steamHint('Loading the Steam profile...')); }
+	let d = await steamCall('/api/players/' + encodeURIComponent(guid) + '/steam' + (refresh ? '?refresh=1' : ''), { cache: 'no-store' });
 	if (detOpenGuid !== guid) return; // another player was opened meanwhile
 	renderSteam(d);
+}
+
+// steamCall fetches one of the Steam tab's API calls. A reply that isn't
+// JSON (a "404 page not found" from a ReCON without the route, say) becomes
+// an error naming the HTTP status and the start of the reply, instead of
+// looking like ReCON is down.
+async function steamCall(url, opt) {
+	let r;
+	try {
+		r = await fetch(url, opt);
+	} catch (e) {
+		return { ok: false, error: 'ReCON could not be reached.' };
+	}
+	let text = '';
+	try { text = await r.text(); } catch (e) {}
+	try {
+		return JSON.parse(text);
+	} catch (e) {
+		return { ok: false, error: 'ReCON answered HTTP ' + r.status + (text.trim() ? ': ' + text.trim().slice(0, 120) : ' with an empty reply') +
+			(r.status === 404 ? '. This ReCON build is missing the Steam routes in web.go.' : '.') };
+	}
 }
 
 function steamHint(text) {
@@ -1188,6 +1206,57 @@ function fmtHours(min) {
 
 function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
 
+// renderSteamSearch is the tab for a player with no SteamID yet: the Search
+// Steam ID button, or the search's progress (re-checked every 2 seconds
+// while the tab is open, until the SteamID turns up).
+function renderSteamSearch(box, s) {
+	clearTimeout(steamPollTimer);
+	let guid = detOpenGuid;
+	let others = Math.max((s.searchingFor || 0) - 1, 0);
+	if (s.state === 'searching' || s.state === 'queued') {
+		let elapsed = s.startedUnix ? fmtDuration(Math.floor(Date.now() / 1000) - s.startedUnix) : '';
+		if (s.state === 'searching') {
+			box.append(steamCallout('warn', 'Searching for the SteamID: ' + (s.percent || 0).toFixed(1) + '% of Steam accounts checked' + (elapsed ? ' (' + elapsed + ')' : '') + '.',
+				'Running on ' + plural(s.cores || 1, 'CPU core') + ' at ' + (s.priority || 'medium') + ' priority. Older accounts turn up sooner; a full search can take a while. The profile shows here as soon as it is found, and you can close this dialog meanwhile.' +
+				(others ? ' This search is also looking for ' + plural(others, 'other player') + ' with no SteamID.' : '')));
+		} else {
+			box.append(steamCallout('warn', 'Waiting for the current search to finish.',
+				'Another SteamID search is running (' + (s.percent || 0).toFixed(1) + '% done); this player is searched for next.'));
+		}
+		steamPollTimer = setTimeout(() => {
+			if (detOpenGuid === guid && detTab === 'steam') { steamFor = null; loadDetSteam(false, true); }
+		}, 2000);
+		return;
+	}
+	if (s.state === 'notfound') {
+		box.append(steamCallout('bad', 'No Steam account matched this GUID.', 'Every Steam account ID was checked (finished ' + fmtStamp(s.finishedUnix) + ').'));
+	} else {
+		box.append(steamHint('ReCON doesn’t know this player’s SteamID yet. BattlEye only reports a GUID, which is a one-way hash of the SteamID, so finding it means checking Steam account IDs until one matches. That usually takes seconds for older accounts and longer for new ones.' +
+			(s.auto ? ' Automatic search is on, so ReCON looks the SteamID up when this player is next online, or you can search now.' : '')));
+	}
+	let btn = document.createElement('button');
+	btn.type = 'button';
+	btn.textContent = s.state === 'notfound' ? 'Search again' : 'Search Steam ID';
+	btn.onclick = () => startSteamSearch(btn);
+	let row = document.createElement('div');
+	row.style.marginTop = '12px';
+	row.append(btn);
+	box.append(row);
+}
+
+// startSteamSearch asks ReCON to find the open player's SteamID
+// (POST /api/players/<guid>/steam/search), then shows the progress.
+async function startSteamSearch(btn) {
+	let guid = detOpenGuid;
+	btn.disabled = true;
+	btn.textContent = 'Starting...';
+	let d = await steamCall('/api/players/' + encodeURIComponent(guid) + '/steam/search', { method: 'POST' });
+	if (detOpenGuid !== guid) return;
+	if (!d.ok && /already known/.test(d.error || '')) { steamFor = null; loadDetSteam(false); return; }
+	steamFor = guid;
+	renderSteam(d);
+}
+
 function renderSteam(d) {
 	let box = document.getElementById('detSteam');
 	box.textContent = '';
@@ -1197,8 +1266,8 @@ function renderSteam(d) {
 		return;
 	}
 	if (d.pending) {
-		steamFor = null; // check again next time: guidsearch may have filled it
-		box.append(steamHint('No SteamID for this player yet. guidsearch works it out from the GUID on its next run, and this tab shows the profile once it has.'));
+		steamFor = null; // check again next time the tab is opened
+		renderSteamSearch(box, d.search || {});
 		return;
 	}
 	let p = d.profile;
@@ -1297,7 +1366,7 @@ function renderSteam(d) {
 	});
 	box.append(tl);
 
-	// Steam friends who have played here (matched by the SteamIDs guidsearch filled in).
+	// Steam friends who have played here (matched by the SteamIDs ReCON has found).
 	let here = d.friendsHere || [];
 	if (here.length) {
 		let f = document.createElement('div');
@@ -1308,7 +1377,7 @@ function renderSteam(d) {
 		here.forEach(o => f.append(playerLink(o.guid, o.name)));
 		box.append(f);
 	} else if (p.friends != null) {
-		box.append(steamHint('None of their Steam friends have played on this server (as far as guidsearch has matched SteamIDs).'));
+		box.append(steamHint('None of their Steam friends have played on this server (among players whose SteamID ReCON knows).'));
 	} else {
 		box.append(steamHint('Their friends list is private, so friends on this server can’t be shown.'));
 	}
