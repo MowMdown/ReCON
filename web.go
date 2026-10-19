@@ -268,15 +268,13 @@ func livePlayers(w http.ResponseWriter) ([]Player, bool) {
 	return parsePlayers(out), true
 }
 
-// handlePlayersJSON serves GET /api/players: live players plus offline ones
-// from the DB (each with its role, for the Mod/Admin badge), and "bans":
+// handlePlayersJSON serves GET /api/players: online players plus offline ones
+// from the DB. It answers straight away even while RCON is down
+// ("connected": false, no online players), so the offline list always shows. (each with its role, for the Mod/Admin badge), and "bans":
 // lower-case GUID -> ban status for everyone banned (the offline table's Ban
 // Status column).
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
-	players, ok := livePlayers(w)
-	if !ok {
-		return
-	}
+	players, connected := onlinePlayersForPage()
 	offlinePlayers, err := globalDatabase.OfflinePlayers()
 	if err != nil {
 		log.Printf("error reading offline players from DB: %v", err)
@@ -289,12 +287,35 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
-		"connected":      true,
+		"connected":      connected,
 		"players":        players,
 		"count":          len(players),
 		"offlinePlayers": offlinePlayers,
 		"bans":           banStatuses(),
 	})
+}
+
+// onlinePlayersForPage is the online list for the Players page: the 5-second
+// poller's latest list, so the page never waits on RCON. Before the poller's
+// first result it reads `players` once. connected is false while the game
+// server isn't answering (the poller has missed 3 checks, or that one read
+// failed); the online list is then empty, and the page still shows everyone
+// from the database.
+func onlinePlayersForPage() ([]Player, bool) {
+	latest.Lock()
+	players, ok := append([]Player{}, latest.players...), latest.ok
+	latest.Unlock()
+	if rconStatus() == "unavailable" {
+		return []Player{}, false
+	}
+	if ok {
+		return players, true
+	}
+	out, acked, err := runShared("players", 3*time.Second, false, "")
+	if err != nil || !acked {
+		return []Player{}, false
+	}
+	return parsePlayers(out), true
 }
 
 // handleAllPlayersJSON serves GET /api/players/all: every player ever seen,
