@@ -24,7 +24,7 @@ import (
 //   - players / sessions / IP history (SyncPlayers, OfflinePlayers, ...)
 //   - player details and admin notes (PlayerDetails, SaveNote)
 //   - chat history (AddChatMessage, ChatHistory)
-//   - SteamIDs filled in by guidsearch (SteamIDByGUID, PlayersBySteamIDs)
+//   - SteamIDs (SteamIDByGUID, PlayersBySteamIDs, PendingSteamGUIDs, SetSteamID)
 //   - player roles for the chat commands (PlayerRole, SetPlayerRole, ...)
 //   - settings, such as the chat commands' (Setting, SaveSetting)
 //   - bans (BanUser, SyncBans, BanNames, DeleteBan)
@@ -66,8 +66,8 @@ func OpenDatabase(filepath string) (*Database, error) {
 		total_playtime_seconds INTEGER NOT NULL DEFAULT 0,
 		-- Role for the chat commands: 0 Player (everyone starts here), 1 Mod, 2 Admin.
 		role INTEGER NOT NULL DEFAULT 0,
-		-- SteamID64 as decimal text. ReCON never writes it: it stays NULL
-		-- until guidsearch fills it in from the GUID.
+		-- SteamID64 as decimal text, worked out from the GUID by the Steam
+		-- Profile tab's search (steam.go). NULL until then.
 		steam_id TEXT
 	);
 	CREATE TABLE IF NOT EXISTS active_sessions (
@@ -91,7 +91,8 @@ func OpenDatabase(filepath string) (*Database, error) {
 		ip TEXT NOT NULL,
 		reason TEXT NOT NULL,
 		perm INTEGER NOT NULL DEFAULT 0,
-		-- As players.steam_id: NULL until guidsearch fills it in.
+		-- As players.steam_id. Copied from players when the ban is recorded,
+		-- else NULL until a search finds it.
 		steam_id TEXT
 	);
 	CREATE TABLE IF NOT EXISTS player_ips (
@@ -128,7 +129,8 @@ func OpenDatabase(filepath string) (*Database, error) {
 		ON session_history(guid);
 	CREATE INDEX IF NOT EXISTS idx_chat_messages_guid
 		ON chat_messages(guid, id);
-	-- Same names guidsearch uses, so neither program makes a second index.
+	-- The same names the old guidsearch tool used, so databases it touched
+	-- don't get a second index.
 	CREATE INDEX IF NOT EXISTS idx_players_steam_id
 		ON players(steam_id);
 	CREATE INDEX IF NOT EXISTS idx_bans_steam_id
@@ -429,9 +431,8 @@ func (db *Database) PlayerByGUID(guid string) (Player, error) {
 	return p, err
 }
 
-// SteamIDByGUID returns a player's SteamID64 as guidsearch stored it in
-// players.steam_id ("" until it has). known is false if the GUID was never
-// seen. ReCON reads this column but never writes it.
+// SteamIDByGUID returns a player's SteamID64 from players.steam_id ("" until
+// a search has found it). known is false if the GUID was never seen.
 func (db *Database) SteamIDByGUID(guid string) (steamID string, known bool, err error) {
 	var s sql.NullString
 	err = db.QueryRow("SELECT steam_id FROM players WHERE lower(guid) = lower(?)", guid).Scan(&s)
@@ -441,6 +442,48 @@ func (db *Database) SteamIDByGUID(guid string) (steamID string, known bool, err 
 		return "", false, err
 	}
 	return strings.TrimSpace(s.String), true, nil
+}
+
+// PendingSteamGUIDs returns every GUID (lower case) in players and bans that
+// has no SteamID yet: what a SteamID search looks for. Malformed GUIDs are
+// left out.
+func (db *Database) PendingSteamGUIDs() ([]string, error) {
+	rows, err := db.Query(`
+		SELECT lower(guid) FROM players WHERE steam_id IS NULL OR steam_id = ''
+		UNION
+		SELECT lower(guid) FROM bans WHERE steam_id IS NULL OR steam_id = ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var g string
+		if err := rows.Scan(&g); err != nil {
+			return nil, err
+		}
+		if guidPattern.MatchString(g) {
+			out = append(out, g)
+		}
+	}
+	return out, rows.Err()
+}
+
+// SetSteamID stores the SteamID found for a GUID in players and bans, in one
+// transaction. Only empty steam_id fields are filled.
+func (db *Database) SetSteamID(guid, steamID string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"players", "bans"} {
+		if _, err := tx.Exec("UPDATE "+table+" SET steam_id = ? WHERE lower(guid) = lower(?) AND (steam_id IS NULL OR steam_id = '')",
+			steamID, guid); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // PlayersBySteamIDs returns the known players whose steam_id is one of ids,
@@ -869,31 +912,35 @@ func (db *Database) BanUser(
 	reason string,
 	perm int,
 ) error {
+	// steam_id is copied from players when the player's SteamID is known.
 	_, err := db.Exec(`
 		INSERT INTO bans (
 			guid,
 			player_name,
 			ip,
 			reason,
-			perm
+			perm,
+			steam_id
 		)
-		VALUES (?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, (SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = lower(?)))
 		ON CONFLICT(guid) DO UPDATE SET
 			player_name = excluded.player_name,
 			ip = excluded.ip,
 			reason = excluded.reason,
-			perm = excluded.perm`,
+			perm = excluded.perm,
+			steam_id = COALESCE(NULLIF(bans.steam_id, ''), excluded.steam_id)`,
 		guid,
 		playerName,
 		ip,
 		reason,
 		perm,
+		guid,
 	)
 	return err
 }
 
 // SyncBans mirrors the BattlEye GUID ban list into the bans table:
-// bans missing from the DB are inserted (name/IP looked up from players),
+// bans missing from the DB are inserted (name/IP/SteamID looked up from players),
 // existing rows get their reason/perm refreshed, and rows no longer in
 // BattlEye (expired or removed) are deleted. Callers must pass a list
 // parsed from a complete, recognised `bans` reply.
@@ -916,17 +963,19 @@ func (db *Database) SyncBans(bans []Ban) error {
 			perm = 1
 		}
 		_, err := tx.Exec(`
-			INSERT INTO bans (guid, player_name, ip, reason, perm)
+			INSERT INTO bans (guid, player_name, ip, reason, perm, steam_id)
 			VALUES (
 				?,
 				COALESCE((SELECT username FROM players WHERE guid = ?), 'Unknown'),
 				COALESCE((SELECT last_ip FROM players WHERE guid = ?), ''),
-				?, ?
+				?, ?,
+				(SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = ?)
 			)
 			ON CONFLICT(guid) DO UPDATE SET
 				reason = excluded.reason,
-				perm = excluded.perm`,
-			g, g, g, b.Reason, perm,
+				perm = excluded.perm,
+				steam_id = COALESCE(NULLIF(bans.steam_id, ''), excluded.steam_id)`,
+			g, g, g, b.Reason, perm, g,
 		)
 		if err != nil {
 			return err
@@ -1304,7 +1353,8 @@ var (
 //     is assumed down and SyncPlayers(nil) closes all open sessions once, so
 //     playtime stops accruing while it's offline. From the 3rd miss on, each
 //     round logs in again on the same RCON socket (reloginShared, rcon.go).
-//   - On success, reset the failure counter, sync the parsed list into the DB
+//   - On success, reset the failure counter, sync the parsed list into the DB,
+//     start SteamID searches for new players (auto mode, steamPlayersSeen)
 //     and pass it to playersPolled, which starts player-join flows.
 //   - On the 1st poll and every 6th after (~30s at a 5s interval), also
 //     reconcile the ban list, since it changes rarely.
@@ -1344,6 +1394,7 @@ func startBackgroundSync(interval time.Duration) {
 			if err := globalDatabase.SyncPlayers(players); err != nil {
 				log.Printf("poller: sync: %v", err)
 			}
+			steamPlayersSeen(players) // STEAM_SEARCH_MODE=auto: find new players' SteamIDs (steam.go)
 			playersPolled(players) // keeps the list for flows and chat commands, starts join flows (flows.go)
 			// Ban list changes rarely: reconcile at start and every 6th poll (~30s).
 			if n%6 == 1 {

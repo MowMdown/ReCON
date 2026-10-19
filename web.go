@@ -46,15 +46,16 @@ func runWebServer(addr string) error {
 
 	// Players.
 	mux.HandleFunc("GET /players", pageHandler(playersPage))
-	mux.HandleFunc("GET /api/players", handlePlayersJSON)                  // online + offline players
-	mux.HandleFunc("GET /api/players/all", handleAllPlayersJSON)           // every player ever seen (no RCON needed)
-	mux.HandleFunc("POST /api/players/{id}/{action}", handlePlayerAction)  // message | kick | ban
-	mux.HandleFunc("GET /api/players/{guid}/chat", handleChatHistory)      // their chat + messages sent to them
-	mux.HandleFunc("POST /api/players/{guid}/chat", handleChatSend)        // {"message": ...} -> say <id> <message>
-	mux.HandleFunc("GET /api/players/{guid}/details", handlePlayerDetails) // Details dialog: sessions, IPs, ban, note
-	mux.HandleFunc("POST /api/players/{guid}/note", handleSaveNote)        // {"note": ...}, up to 500 characters
-	mux.HandleFunc("POST /api/players/{guid}/role", handleSetRole)         // {"role": 0|1|2}: Player, Mod, Admin
-	mux.HandleFunc("GET /api/players/{guid}/steam", handlePlayerSteam)     // Steam Profile tab (steam.go); ?refresh=1 fetches now
+	mux.HandleFunc("GET /api/players", handlePlayersJSON)                      // online + offline players
+	mux.HandleFunc("GET /api/players/all", handleAllPlayersJSON)               // every player ever seen (no RCON needed)
+	mux.HandleFunc("POST /api/players/{id}/{action}", handlePlayerAction)      // message | kick | ban
+	mux.HandleFunc("GET /api/players/{guid}/chat", handleChatHistory)          // their chat + messages sent to them
+	mux.HandleFunc("POST /api/players/{guid}/chat", handleChatSend)            // {"message": ...} -> say <id> <message>
+	mux.HandleFunc("GET /api/players/{guid}/details", handlePlayerDetails)     // Details dialog: sessions, IPs, ban, note
+	mux.HandleFunc("POST /api/players/{guid}/note", handleSaveNote)            // {"note": ...}, up to 500 characters
+	mux.HandleFunc("POST /api/players/{guid}/role", handleSetRole)             // {"role": 0|1|2}: Player, Mod, Admin
+	mux.HandleFunc("GET /api/players/{guid}/steam", handlePlayerSteam)         // Steam Profile tab (steam.go); ?refresh=1 fetches now
+	mux.HandleFunc("POST /api/players/{guid}/steam/search", handleSteamSearch) // find a player's SteamID from their GUID (steam.go)
 
 	// RCON console on the Players page.
 	mux.HandleFunc("GET /api/console", handleConsoleEvents)   // ?after=N: server messages and commands since N
