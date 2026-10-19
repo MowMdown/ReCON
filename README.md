@@ -43,14 +43,18 @@ Clone this repo, then put a `docker-compose.yaml` next to it (or use the one in 
 services:
   recon:
     container_name: recon
-    build: ./recon            # the folder this repo is cloned into
+    build: ./recon                      # the folder this repo is cloned into
     restart: unless-stopped
+    user: "${PUID:-1001}:${PGID:-1001}"
     environment:
       TZ: America/New_York
-      RCON_HOST: 192.168.1.10
-      RCON_PORT: "2306"
+      RCON_HOST: 192.168.1.10           # Your DayZ Servers Local IP address
+      RCON_PORT: "2305"                 # Your DayZ Server's RCON Port
       RCON_PASSWORD: ${RCON_PASSWORD}
       STEAM_API_KEY: ${STEAM_API_KEY}   # optional, see Steam profiles
+      STEAM_SEARCH_MODE: "manual"
+      STEAM_SEARCH_CORES: "2"
+      STEAM_SEARCH_PRIORITY: "medium"
     volumes:
       - ./data:/data
     ports:
@@ -69,7 +73,7 @@ STEAM_API_KEY=your-steam-web-api-key
 ```bash
 docker compose up -d --build
 docker logs -f recon
-# listening on :8080 -> RCON 192.168.1.10:2306
+# listening on :8080 -> RCON 192.168.1.10:2305
 # rcon: logged in, sent #unlock (acked=true err=<nil>)
 ```
 
