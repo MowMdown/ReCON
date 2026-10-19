@@ -1,4 +1,4 @@
-module rcon-bridge
+module recon
 
 go 1.22
 
