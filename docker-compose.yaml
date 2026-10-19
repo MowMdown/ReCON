@@ -5,7 +5,10 @@ services:
     restart: unless-stopped
     networks:
       - proxy-net
+    user: "${PUID:-1001}:${PGID:-1001}"
     environment:
+      PUID: ${PUID:-1001}
+      PGID: ${PGID:-1001}
       TZ: America/New_York
       RCON_HOST: 10.0.1.40
       RCON_PORT: "2305"
@@ -26,7 +29,10 @@ services:
     restart: unless-stopped
     networks:
       - proxy-net
+    user: "${PUID:-1001}:${PGID:-1001}"
     environment:
+      PUID: ${PUID:-1001}
+      PGID: ${PGID:-1001}
       TZ: America/New_York
       RCON_HOST: 10.0.1.40
       RCON_PORT: "2309"
@@ -47,7 +53,10 @@ services:
     restart: unless-stopped
     networks:
       - proxy-net
+    user: "${PUID:-1001}:${PGID:-1001}"
     environment:
+      PUID: ${PUID:-1001}
+      PGID: ${PGID:-1001}
       TZ: America/New_York
       RCON_HOST: 10.0.1.40
       RCON_PORT: "2313"
