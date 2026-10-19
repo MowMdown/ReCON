@@ -1,106 +1,93 @@
-# DayZ ReCON
+# ReCON
 
-A small web server that manages a DayZ server over BattlEye RCON. It gives you:
+ReCON is a web admin panel for DayZ servers, built on BattlEye RCON. It runs in a small Docker container next to your game server and gives you:
 
-- a **web GUI** for players, bans and scheduled flows (such as a restart countdown),
-- an **HTTP API** that any tool or task scheduler can call,
-- a **console** for running RCON commands from inside the container.
+- **A web GUI** for players, bans and automated flows: live player list, per-player history, Steam profiles, a live RCON console and a ban manager.
+- **Flows**: restart countdowns, welcome messages, chat replies and more, built from steps in the browser, without writing any script.
+- **In-game chat commands** such as `!help`, `!vote` and `!kick`, with Player, Mod and Admin roles.
+- **An HTTP API** that any script or task scheduler can call, and a **command-line RCON tool** inside the container.
 
-> **No authentication.** Anyone who can reach the port can run any RCON command. Keep it on a trusted local network and never expose it to the internet.
+![Players page](docs/screenshots/players.png)
+
+**Try it without a server:** [`docs/preview`](docs/preview/) has the real pages with sample data built in. Open `docs/preview/players.html` in a browser (from a downloaded copy of the repo, or wherever the `docs` folder is served). Every button and dialog works, but nothing is sent anywhere.
+
+> **No authentication.** Anyone who can reach ReCON's port can run any RCON command on your server. Keep it on a trusted network or behind a reverse proxy with its own login, and never expose it directly to the internet.
+
+## Contents
+
+1. [Install and run](#1-install-and-run)
+2. [Configuration](#2-configuration)
+3. [The web GUI](#3-the-web-gui)
+4. [Flows](#4-flows)
+5. [Chat commands and roles](#5-chat-commands-and-roles)
+6. [Steam profiles](#6-steam-profiles)
+7. [Command line](#7-command-line)
+8. [HTTP API](#8-http-api)
+9. [Development](#9-development)
 
 ---
 
-## 1. Build, install and run
+## 1. Install and run
 
 ### Requirements
 
 - Docker with Docker Compose
 - A DayZ server with BattlEye RCON turned on: `RConPassword` and `RConPort` set in `BEServer_x64.cfg`
-
-### Folder layout
-
-```text
-dayz-recon/
-├── docker-compose.yaml
-├── .env
-└── rcon-bridge/
-    ├── Dockerfile
-    ├── go.mod
-    ├── main.go
-    ├── rcon.go
-    ├── web.go
-    ├── db.go
-    └── flows.go
-```
-
-### Configuration
-
-Each container is configured with environment variables:
-
-| Variable        | Default            | Description                                                              |
-| --------------- | ------------------ | ------------------------------------------------------------------------ |
-| `RCON_PASSWORD` | required           | BattlEye RCON password                                                   |
-| `RCON_HOST`     | `127.0.0.1`        | IP or hostname of the DayZ server                                        |
-| `RCON_PORT`     | `2306`             | BattlEye RCON UDP port (`RConPort` in `BEServer_x64.cfg`)                |
-| `LISTEN_ADDR`   | `:8080`            | Address the web server listens on inside the container                  |
-| `DB_PATH`       | `/data/players.db` | Where player, ban and flow data is kept                                  |
-| `TZ`            | `UTC`              | Time zone for flow schedules, for example `America/New_York`             |
-
-Mount `/data` as a volume, or your players, bans and flows are lost whenever the container is recreated.
-
-Put the password in `.env`, next to `docker-compose.yaml`:
-
-```env
-RCON_PASSWORD=your-rcon-password
-```
+- ReCON doesn't have to run on the same machine as the game server. It only needs to reach the RCON UDP port.
 
 ### docker-compose.yaml
 
+Clone this repo, then put a `docker-compose.yaml` next to it (or use the one in the repo as a starting point):
+
 ```yaml
 services:
-  dayz-recon:
-    container_name: dayz-recon
-    build: ./rcon-bridge
+  recon:
+    container_name: recon
+    build: ./recon            # the folder this repo is cloned into
     restart: unless-stopped
     environment:
+      TZ: America/New_York
       RCON_HOST: 192.168.1.10
       RCON_PORT: "2306"
       RCON_PASSWORD: ${RCON_PASSWORD}
-      TZ: America/New_York
+      STEAM_API_KEY: ${STEAM_API_KEY}   # optional, see Steam profiles
     volumes:
       - ./data:/data
     ports:
       - "8080:8080"
 ```
 
-To manage more than one DayZ server, copy the service once per server. Give each copy its own service and container name, RCON port, password, data folder and host port.
+Put the secrets in `.env`, next to `docker-compose.yaml`:
+
+```env
+RCON_PASSWORD=your-rcon-password
+STEAM_API_KEY=your-steam-web-api-key
+```
 
 ### Build and start
 
-From the folder that holds `docker-compose.yaml`:
-
 ```bash
 docker compose up -d --build
-```
-
-Check that it connected:
-
-```bash
-docker logs -f dayz-recon
+docker logs -f recon
 # listening on :8080 -> RCON 192.168.1.10:2306
+# rcon: logged in, sent #unlock (acked=true err=<nil>)
 ```
 
-Then open `http://<host-ip>:8080/players` in a browser.
+Then open `http://<host>:8080/players`.
 
-### Updating after code changes
+### More than one DayZ server
 
-The Go code is compiled when the image is built, so a plain restart keeps the old version. Rebuild instead:
+Run one ReCON container per game server. Copy the service and give each copy its own service and container name, `RCON_PORT`, password, data folder and host port. Each container keeps its own database.
+
+### Updating
+
+The Go code is compiled into the image, so pull the new code and rebuild:
 
 ```bash
 docker compose up -d --build
 ```
 
-If it still seems to run old code, force a clean build:
+If it still seems to run the old code, force a clean build:
 
 ```bash
 docker compose build --no-cache && docker compose up -d
@@ -108,236 +95,421 @@ docker compose build --no-cache && docker compose up -d
 
 ---
 
-## 2. Using it
+## 2. Configuration
 
-The examples below use `http://<host>:8080`.
+Everything is set with environment variables.
 
-### Web GUI
+| Variable                | Default            | Description |
+| ----------------------- | ------------------ | ----------- |
+| `RCON_PASSWORD`         | required           | BattlEye RCON password |
+| `RCON_HOST`             | `127.0.0.1`        | IP or hostname of the DayZ server |
+| `RCON_PORT`             | `2306`             | BattlEye RCON UDP port (`RConPort` in `BEServer_x64.cfg`) |
+| `LISTEN_ADDR`           | `:8080`            | Address the web server listens on inside the container |
+| `DB_PATH`               | `/data/players.db` | The SQLite database: players, sessions, IPs, chat, notes, roles, bans, flows and settings |
+| `TZ`                    | `UTC`              | Time zone for flow schedules and the times shown, e.g. `America/New_York` |
+| `STEAM_API_KEY`         | none               | Turns on the full Steam Profile tab. Free at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
+| `STEAM_SEARCH_MODE`     | `manual`           | `manual`: look up a player's SteamID only when you press **Search Steam ID**. `auto`: also start a lookup for every new player who joins without one |
+| `STEAM_SEARCH_CORES`    | `1`                | CPU cores a SteamID lookup may use (capped at the cores available) |
+| `STEAM_SEARCH_PRIORITY` | `medium`           | How much of each core it uses: `low` 33%, `medium` 66%, `high` 99% |
 
-Use the links in the top bar to move between the three pages.
+Mount `/data` as a volume, or everything ReCON has recorded is lost when the container is recreated. The container runs as UID 99 / GID 100, so the data folder must be writable by that user.
 
-#### Players: `/players`
+---
 
-Shows the players online right now (ID, name, IP, GUID, ping), refreshed every 5 seconds. Each row has three buttons:
+## 3. The web GUI
 
-| Button  | What it does                                                                                     |
-| ------- | ------------------------------------------------------------------------------------------------ |
-| Message | Sends a private message to that player                                                           |
-| Kick    | Kicks the player with the reason you type                                                        |
-| Ban     | Bans the player's GUID for the minutes you enter (**0 = permanent**), then kicks them             |
+Every page shows two status lines at the top:
 
-Below that, **Offline Players** lists everyone who has played before, with their last IP, total time on the server and when they were last seen.
+- **RCON Status:** whether ReCON can reach the game server (checked every 5 seconds). It shows *Retrying* after a failed check and *Unavailable* after three in a row.
+- **WebGUI Status:** whether your browser can reach ReCON.
 
-#### Server Bans: `/bans`
+On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
 
-Lists the server's GUID bans with the player name, time left and reason, refreshed every 10 seconds. **Unban** removes the ban.
+### Players: `/players`
 
-**Ban Player** (top right) bans anyone who has ever played on the server, online or not:
+The top table lists the players online now (refreshed every 5 seconds). Mods and Admins have a badge after their name.
 
-1. Pick the player by name. Online players are marked `(online)`, and the first 8 characters of each GUID tell apart players with the same name. Players who are already banned aren't listed.
-2. Enter a short reason. This is the message the player sees.
-3. Leave the duration at **0 for a permanent ban**, or enter a number of minutes.
+| Button  | What it does |
+| ------- | ------------ |
+| Message | Opens that player's conversation: their chat, the private messages ReCON sent them, and a box to send another |
+| Kick    | Kicks them with the reason you type |
+| Ban     | Bans their GUID for the minutes you enter (**0 = permanent**), then kicks them |
+| Details | Opens everything ReCON has recorded about them (below) |
 
-The ban is placed on the player's GUID. If they're online, they're kicked right away.
+**Offline Players** lists everyone who has played before: last IP, total time on the server, when they were last seen, and their ban status and reason. If the game server stops answering, this list still shows from the database.
 
-#### Flows: `/flows`
+**Console** (top right) opens a live RCON console. It shows everything the server reports (connects, disconnects, GUIDs, chat, kicks, admin logins) as it happens, and runs any command you type exactly as typed. Up and Down recall earlier commands. Commands sent by flows and buttons aren't shown here; the Flows page and the container log record those.
 
-A flow is a saved list of RCON commands that runs on a schedule (such as a restart countdown) or each time a player joins (such as a welcome message). A default "Server restart" flow is created on first start, disabled.
+![RCON console](docs/screenshots/players-console.png)
 
-| Button           | What it does                                                                     |
-| ---------------- | -------------------------------------------------------------------------------- |
-| Enable / Disable | Turns the flow on or off                                                         |
-| Run / Stop       | Starts a flow right now, or stops a running one                                  |
-| Edit             | Changes the name, steps or schedule                                              |
-| Delete           | Removes the flow (stop it first if it's running)                                 |
-| New flow         | Creates a flow                                                                   |
-| Help             | Opens the full guide to writing flows                                            |
+#### Details
 
-The **#Lock**, **#Unlock**, **#Shutdown** and **#Kick All** buttons at the top right send that command immediately. Shutdown and Kick All ask you to confirm first. You can drag rows to reorder the list, and each flow's run log appears under the table.
+Details works for online and offline players. It has these tabs:
 
-**Writing steps.** Put one step per line, as `offset | command`. Offsets are measured from the scheduled time:
+| Tab           | Shows |
+| ------------- | ----- |
+| Overview      | First and last seen, total time, sessions, average session, last IP, ban status, and a warning when the player shares an IP with anyone else |
+| Sessions      | Each visit: connected, disconnected, duration and IP |
+| IPs           | Every IP they used, and anyone else seen on the same IP. Names are links to that player's details |
+| Steam Profile | Their Steam account (see [Steam profiles](#6-steam-profiles)) |
+| Chat          | Their chat history. While they're online you can message them from here |
+| Notes         | A private admin note of up to 500 characters. It saves when you close the dialog or switch players |
+| Permissions   | Their role for the chat commands: Player, Mod or Admin. Clicking a role saves it |
 
-```text
--60m | say -1 Server is going to restart in $minutes minutes!
--5m  | say -1 Server is going to restart in $minutes minutes!
--3m  | #lock
--1m  | #kickall Restarting now
-0m   | #shutdown
-+90  | #unlock
-cancel | say -1 Server restart cancelled.
+The **Ban** / **Unban** button at the bottom works whether the player is online or not.
+
+| Overview | Steam Profile |
+| :---: | :---: |
+| ![Details: Overview](docs/screenshots/details-overview.png) | ![Details: Steam Profile](docs/screenshots/details-steam.png) |
+
+### Server Bans: `/bans`
+
+Lists the server's GUID bans with the player's name, time left and reason, refreshed every 10 seconds. A GUID ReCON has never seen shows as *Unknown*. **Unban** removes every entry for that GUID and saves the ban file.
+
+**Ban Player** (top right) bans anyone who has ever played on the server, online or not. Pick them by name (online players are marked, and the start of the GUID tells apart players with the same name), enter a reason (the player sees it), and leave the duration at **0 for permanent** or enter minutes. An online player is kicked straight away.
+
+![Server Bans](docs/screenshots/bans.png)
+
+### Flows: `/flows`
+
+See [Flows](#4-flows) below. The **#Lock**, **#Unlock**, **#Shutdown** and **#Kick All** buttons at the top right send that command immediately. Shutdown and Kick All ask you to confirm first.
+
+---
+
+## 4. Flows
+
+A flow is a list of steps ReCON runs for you: send a message, wait, lock the server, kick a player, and so on. Steps run from the top down. Only **Wait** takes time; everything else goes out straight away.
+
+![Flows page](docs/screenshots/flows.png)
+
+| Button           | What it does |
+| ---------------- | ------------ |
+| Enable / Disable | Turns the trigger on or off. Schedule, On join and Player message flows start disabled |
+| Run / Stop       | Starts a Schedule or Manual flow now, or stops a running one |
+| Edit             | Opens the flow editor |
+| Delete           | Deletes the flow (stop it first). This is the only action that asks first |
+| New flow         | Creates a flow |
+| Help             | The full guide: steps, placeholders, If / Else, triggers, cron and chat commands |
+| Export / Import  | Download every flow as `flows.json`, or add the flows in a file (they're added at the bottom, disabled) |
+| Chat commands    | The [chat command settings](#5-chat-commands-and-roles) |
+
+Drag rows to reorder the list. Each flow's latest run log is shown under the table: every message sent, every If decision, and how the run ended.
+
+### Triggers
+
+| Trigger            | Runs | Needs Enable |
+| ------------------ | ---- | ------------ |
+| **Schedule**       | On a cron schedule | Yes |
+| **On join**        | Once for each player who finishes loading in | Yes |
+| **Player message** | Once for every chat message a player sends | Yes |
+| **Manual**         | When you press Run, or call `POST /api/flows/<id>/run` | No |
+
+- Every trigger can have a **delay** before step 1.
+- A flow's trigger can't change after it's saved, so a restart flow can never start firing on every join by accident. To change it, make a new flow, or Export, edit `trigger` in the file and Import.
+- On join and Player message flows run for one player (who joined, or who typed), so Run can't start them. Several players can be in progress at once; they share one run log and one Stop button.
+- Players already online when ReCON starts aren't greeted. After a server restart, everyone who reconnects is.
+
+### Times
+
+Every time box (Wait, the delay, chat command cooldowns) takes seconds, or hours, minutes and seconds together: `30`, `90s`, `1m20s`, `2h 15m`.
+
+### Steps
+
+![Flow editor](docs/screenshots/flows-edit.png)
+
+| Step                             | Sends |
+| -------------------------------- | ----- |
+| Message                          | `say -1 text` to Everyone, or `say <number> text` to the Player |
+| Player list                      | The names of everyone online |
+| Wait                             | Nothing: pauses before the next step |
+| Lock / Unlock / Shut down server | `#lock`, `#unlock`, `#shutdown` |
+| Kick / Ban                       | Kicks or bans (by GUID) the Player |
+| Kick everyone                    | Kicks every player online |
+| If                               | Runs its steps only when its condition is true |
+| Stop flow                        | Ends the run there |
+| RCON command                     | Any command, as typed |
+
+Move a step with its arrows, or drag it by the `⋮⋮` handle. Moving an If moves everything inside it. Anything missing is shown in red under the row.
+
+**When stopped:** Schedule and Manual flows can also have steps that are sent if someone presses Stop before the run ends, such as *Server restart cancelled.* and Unlock server.
+
+### Placeholders
+
+Click a placeholder under the steps to insert it into the text box you were typing in. It's filled in when the step runs.
+
+| Placeholder | Is | Works in |
+| ----------- | -- | -------- |
+| `{players_online}` | How many players are online | Every flow |
+| `{player_name}` `{player_id}` | The player's name and number | On join, Player message |
+| `{player_ping}` `{player_ip}` `{player_guid}` | Their ping, IP address and GUID | On join, Player message |
+| `{player_role}` | Player, Mod or Admin | On join, Player message |
+| `{message}` | Everything they typed | Player message |
+
+### If, Else if, Else
+
+An If compares one thing, such as `{player_ping}`, and runs its steps when the comparison is true. **+ Else if** adds more comparisons of the same thing; the first one that's true runs. **+ Else** runs when none are. Ifs can go inside other Ifs.
+
+| Compare | Operators |
+| ------- | --------- |
+| `{message}` | **contains** any of the words, or a `"quoted phrase"`, as whole words. **starts with**: the first word is one of the words, so `!discord` matches "!discord please" but not "!discordx". Case is ignored |
+| `{player_name}` `{player_ip}` `{player_guid}` | `==` `!=` ignoring case, or **matches** with `*` wildcards: `*admin*`, `192.168.*` |
+| `{player_id}` `{player_ping}` `{players_online}` | `==` `!=` `>` `>=` `<` `<=` |
+| `{player_role}` | The same, against Player, Mod or Admin (Player < Mod < Admin) |
+
+![If / Else in the editor](docs/screenshots/flows-edit-if.png)
+
+Some examples:
+
+- Schedule: **If** `{players_online} > 0` Kick everyone, **Else** Shut down server.
+- On join: **If** `{player_ping} >= 500` Kick, reason *Ping too high ({player_ping})*.
+- Player message: **If** `{message}` starts with `!discord`, Message to Player *Join us at discord.gg/...*.
+
+### Schedules
+
+A schedule is a standard 5-field cron expression, `minute hour day-of-month month day-of-week`, in the container's `TZ`. As you type, the editor explains it in plain English and lists the next runs, delay included.
+
+| Cron           | Runs |
+| -------------- | ---- |
+| `0 6 * * *`    | Every day at 06:00 |
+| `0 */6 * * *`  | 00:00, 06:00, 12:00 and 18:00 |
+| `0 5/6 * * *`  | 05:00, 11:00, 17:00 and 23:00 |
+| `30 4 * * 1,4` | Mondays and Thursdays at 04:30 |
+| `0 5 * * 1-5`  | Weekdays at 05:00 |
+
+`*` is any value, `1,4` a list, `1-5` a range and `*/15` every 15th. Months and weekdays also accept names (`jan`-`dec`, `sun`-`sat`); Sunday is 0 or 7.
+
+Whenever ReCON logs in to the game server (on start, and after a server restart), it sends `#unlock`. A restart flow can therefore lock the server, shut it down and leave the unlock to ReCON.
+
+### Example flows
+
+[`examples/flows.json`](examples/flows.json) has three ready-made flows to Import: a **Welcome Player** greeting (which also kicks anyone still named *Survivor*), an **MOTD** every 20 minutes, and a **Server Restart** countdown with warnings from 60 minutes out. The file format is the same as Export's:
+
+```json
+{
+  "flows": [
+    {
+      "name": "MOTD",
+      "trigger": "schedule",
+      "schedule": "*/20 * * * *",
+      "delay": "3s",
+      "steps": [
+        { "type": "message", "to": "all", "text": "Admins are active, please play respectfully." },
+        { "type": "wait", "time": "2s" },
+        { "type": "message", "to": "all", "text": "If you need admin assistance, send a message in game or type !help." }
+      ]
+    }
+  ]
+}
 ```
 
-- `-60m` runs 60 minutes **before** the scheduled time, `0m` runs **on** it, and `+90` runs 90 seconds **after** it. The units are `s`, `m` and `h`; with no unit the number is in seconds.
-- `$minutes` and `$seconds` are replaced with how long before the scheduled time that step runs.
-- `cancel | ...` lines run only if you press Stop before the scheduled time.
-- `kickall [reason]` (or `#kickall`) kicks every connected player.
-- Lines starting with `//` are comments.
+---
 
-**Schedule.** A schedule is a standard 5-field cron expression (`minute hour day-of-month month day-of-week`) in the container's `TZ`. As you type, the dialog explains the expression in plain English and shows the next run times.
+## 5. Chat commands and roles
 
-| Cron          | Runs                       |
-| ------------- | -------------------------- |
-| `0 6 * * *`   | Every day at 06:00         |
-| `0 */6 * * *` | Every 6 hours              |
-| `30 4 * * 1,4`| Mondays and Thursdays 04:30 |
-| `@daily`      | Every day at midnight      |
+Players type these in game chat. They start with `!` because DayZ drops chat messages that start with `/`.
 
-**Player-join flows.** Leave the schedule blank (or enter `* * * * *`) and press **Enable**. The flow then runs once for every player who joins, instead of on the clock:
+| Command | Who | Does |
+| ------- | --- | ---- |
+| `!help` | Everyone | Lists the commands; `!help !vote` explains one |
+| `!shout <message>` | Everyone | Sends the message to everyone |
+| `!whisper <number> <message>` | Everyone | Private message to that player |
+| `!players` | Everyone | Lists everyone online with their number |
+| `!vote <question>` | Everyone | Starts a server-wide vote; everyone answers `!vote y` or `!vote n`, and more yes than no passes |
+| `!code` | Everyone | Sends the player's code (the last 6 characters of their GUID) to the mods and admins online |
+| `!kick <code> <reason>` | Mods, Admins | Kicks that player |
+| `!ban <code> <reason>` | Mods, Admins | Bans that player permanently, even if they've left |
 
-```text
-Flow name: Welcome player!
-Schedule:  * * * * *
-Steps:     0s | say $player Welcome to our server!
-```
+- **Roles** are set on the Players page, under **Details → Permissions**, and are stored with the player's GUID, so they survive a name change. New players are Players.
+- Mods can kick and ban Players. Admins can also kick and ban Mods. Nobody can kick or ban an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
+- Every mod and admin online is told about each kick and ban. With **Announce** on, everyone is told.
+- Only a command that works gets a reply. A typo, a cooldown or a missing permission is silently ignored, though the line still appears in the player's chat history.
 
-- `$player` becomes the joining player's number, which is what `say` and `kick` need. `$name` becomes their name.
-- Offsets count from when the join is seen (joins are checked every 5 seconds), so use `0s` or `+` offsets only.
-- A player still loading in can miss a `0s` message. Use `+30` or so if messages go unseen.
-- Players already online when the container starts aren't greeted. After a server restart, everyone who reconnects is.
-- A flow that uses `$player` or `$name` can't be started with Run or given a clock schedule.
-- A flow with a blank schedule that stays disabled can still be started by hand with Run.
+**Chat commands** on the Flows page turns each command on or off, sets its cooldown and edits the wording of everything ReCON sends. Cooldowns are server-wide: once anyone uses a command, it's ignored for everyone until the time is up.
 
-### Console
+| Chat command settings | Permissions |
+| :---: | :---: |
+| ![Chat command settings](docs/screenshots/flows-chat-commands.png) | ![Details: Permissions](docs/screenshots/details-permissions.png) |
 
-The container includes a command-line RCON tool called `rcon`.
+---
 
-Run one command:
+## 6. Steam profiles
+
+BattlEye only reports a GUID, which is a one-way hash of the player's SteamID. ReCON finds the SteamID by checking Steam account IDs until one matches the GUID. Older accounts are found in seconds; newer ones take longer. Once found, the SteamID is saved with the player, so the lookup only happens once.
+
+- In the default `manual` mode, a player with no SteamID gets a **Search Steam ID** button on their Steam Profile tab, which shows the lookup's progress. In `auto` mode, ReCON starts a lookup for each new player who joins without one.
+- `STEAM_SEARCH_CORES` and `STEAM_SEARCH_PRIORITY` set how much CPU a lookup may use.
+
+Without `STEAM_API_KEY`, the tab shows only the SteamID and a link to the profile. With a key it also shows:
+
+- VAC and game bans (from any game), community and trade bans
+- account age, Steam level, country, and when they were last online
+- DayZ hours (total and the last two weeks), and a warning when DayZ isn't in their library, which can mean they're playing on a Family Sharing copy
+- games owned, friend count, and which of their Steam friends have played on your server
+
+Profiles are kept for 30 minutes; **Refresh** fetches one again. Private profiles hide most of these.
+
+---
+
+## 7. Command line
+
+The image includes a command-line RCON tool, `recon` (also available as `rcon`). It logs in with the container's settings.
 
 ```bash
-docker exec dayz-recon rcon players
-docker exec dayz-recon rcon say -1 "Hello everyone"
-docker exec dayz-recon rcon "#lock"
-docker exec dayz-recon rcon kickall "Server restarting"
+docker exec recon recon players
+docker exec recon recon say -1 "Hello everyone"
+docker exec recon recon "#lock"
+docker exec recon recon kickall "Server restarting"
 ```
 
 Interactive mode stays logged in until you type `exit`:
 
 ```bash
-docker exec -it dayz-recon rcon -i
+docker exec -it recon recon -i
 rcon> players
 rcon> say -1 Restart in 5 minutes
-rcon> kickall Restarting now
 rcon> exit
 ```
 
-Tips:
+Quote anything that starts with `#`, or the shell treats it as a comment. Use single quotes around messages that contain `!`.
 
-- Quote anything starting with `#` (`"#lock"`), or the shell treats it as a comment.
-- Use single quotes around messages that contain `!`.
-- `kickall` without a reason kicks players with no reason text.
+### Common RCON commands
 
-### API
+| Command | Effect |
+| ------- | ------ |
+| `players` | List connected players |
+| `say -1 <message>` | Message everyone |
+| `say <player#> <message>` | Message one player |
+| `kick <player#> <reason>` | Kick one player |
+| `bans` | List bans |
+| `addBan <guid> <minutes> <reason>` | Ban a GUID (0 = permanent) |
+| `removeBan <#>` | Remove a ban by its number in `bans` |
+| `#lock` / `#unlock` | Block or allow new connections |
+| `#shutdown` | Stop the server |
+| `kickall [reason]` | ReCON's own command: kick everyone online |
 
-Every response is JSON. Failed requests return `{"ok": false, "error": "..."}`.
+---
 
-#### Run any RCON command: `/rcon`
+## 8. HTTP API
+
+Every response is JSON. Failed requests return `{"ok": false, "error": "..."}`. The examples use `http://<host>:8080`.
+
+### Run any RCON command
 
 ```bash
-# GET (URL-encode the command)
-curl "http://<host>:8080/rcon?cmd=players"
+curl "http://<host>:8080/rcon?cmd=players"                       # GET, URL-encoded
 
-# POST with JSON
 curl -X POST http://<host>:8080/rcon \
   -H "Content-Type: application/json" \
-  -d '{"command":"say -1 Restart in 5 minutes"}'
+  -d '{"command":"say -1 Restart in 5 minutes"}'                 # POST, JSON
 
-# POST with the command as plain text
-curl -X POST http://<host>:8080/rcon -d '#lock'
+curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain text
 ```
-
-Response:
 
 ```json
 {"ok": true, "command": "players", "acked": true, "output": "Players on server: ..."}
 ```
 
-`acked: false` means the server never confirmed it received the command, so the result is uncertain.
+`acked: false` means the server never confirmed it received the command.
 
-#### Kick everyone: `POST /kickall`
+### Kick everyone
 
-The JSON body is optional. Every field has a default:
+`POST /kickall` with an optional `{"reason": "..."}` (default `Server restarting`). The `result` lists who was kicked (`order`), kicks the server didn't acknowledge (`unacked`) and anyone still connected (`remaining`).
 
-| Field      | Default             | Description                                      |
-| ---------- | ------------------- | ------------------------------------------------ |
-| `reason`   | `Server restarting` | Kick reason                                      |
-| `lock`     | `false`             | Send `#lock` first so nobody can rejoin          |
-| `shutdown` | `false`             | Send `#shutdown` after the kicks                 |
+### Players
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| GET  | `/api/players` | | Online players, offline players and ban statuses |
+| GET  | `/api/players/all` | | Every player ever seen, from the database (works while RCON is down) |
+| POST | `/api/players/<id>/message` | `{"message": "..."}` | Private message, by player number |
+| POST | `/api/players/<id>/kick` | `{"reason": "..."}` | Kick, by player number |
+| POST | `/api/players/<id>/ban` | `{"reason": "...", "minutes": 0}` | Ban by GUID (0 = permanent) and kick, by player number |
+| GET  | `/api/players/<guid>/details` | | Everything the Details dialog shows |
+| GET  | `/api/players/<guid>/chat` | | Chat history, oldest first |
+| POST | `/api/players/<guid>/chat` | `{"message": "..."}` | Private message, by GUID |
+| POST | `/api/players/<guid>/note` | `{"note": "..."}` | Save the admin note (an empty note deletes it) |
+| POST | `/api/players/<guid>/role` | `{"role": 0}` | 0 Player, 1 Mod, 2 Admin |
+| GET  | `/api/players/<guid>/steam` | | The Steam Profile tab; `?refresh=1` fetches it again |
+| POST | `/api/players/<guid>/steam/search` | | Start looking up the player's SteamID |
+
+`<id>` is the player number from the `players` command. It's reused when a player leaves, so the GUID routes are safer for scripts.
+
+### Bans
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| GET  | `/api/bans` | | The GUID bans |
+| POST | `/api/bans/<guid>/ban` | `{"reason": "...", "minutes": 0}` (optional) | Ban any player ReCON has seen, online or not. Online players are kicked too |
+| POST | `/api/bans/<guid>/unban` | | Remove every ban for that GUID |
+
+### Console
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| GET  | `/api/console?after=N` | | Server messages and console commands newer than `N`, plus `last` to pass next time |
+| POST | `/api/console` | `{"command": "..."}` | Run a command exactly as typed and add it to the console log |
+
+### Flows
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| GET  | `/api/flows` | | Every flow with its next and last run, and each flow's latest run log |
+| POST | `/api/flows` | `{"id", "name", "trigger", "schedule", "delay", "steps", "onStop"}` | Create (`id` 0) or update a flow |
+| POST | `/api/flows/<id>/run` | `{"minutes": N}` (optional) | Run now. `minutes` replaces the flow's delay for this run |
+| POST | `/api/flows/<id>/stop` | | Stop a running flow |
+| POST | `/api/flows/<id>/enable` | | Turn the trigger on |
+| POST | `/api/flows/<id>/disable` | | Turn the trigger off |
+| POST | `/api/flows/<id>/delete` | | Delete a flow |
+| GET  | `/api/flows/export` | | Download `flows.json` |
+| POST | `/api/flows/import` | `{"flows": [...]}` | Add flows from an export |
+| POST | `/api/flows/command` | `{"command": "lock"}` | `lock`, `unlock`, `shutdown` or `kickall` |
+| GET  | `/api/chat-commands` | | Chat command settings and defaults |
+| POST | `/api/chat-commands` | `{"settings": {...}}` | Save chat command settings |
+
+For example, to start a manual restart flow with a 10-minute delay from a script:
 
 ```bash
-curl -X POST http://<host>:8080/kickall \
-  -H "Content-Type: application/json" \
-  -d '{"reason":"Restarting now","lock":true}'
+curl -X POST http://<host>:8080/api/flows/3/run \
+  -H "Content-Type: application/json" -d '{"minutes":10}'
 ```
 
-The response lists who was kicked (`order`) and who is still connected (`remaining`). `lock` does not unlock afterwards, so send `#unlock` yourself, or use a flow with a `+90 | #unlock` step.
+### Status
 
-#### Players
+`GET /health` returns `{"ok": true}`. `GET /api/status` returns the RCON state the pages show: `{"ok": true, "rcon": "connected"}` (or `retrying` / `unavailable`).
 
-| Method | Path                         | Body                                   | Description                         |
-| ------ | ---------------------------- | -------------------------------------- | ----------------------------------- |
-| GET    | `/api/players`               |                                        | Online and offline players          |
-| GET    | `/api/players/all`           |                                        | Every player ever seen, from the saved player list (works while RCON is down) |
-| POST   | `/api/players/<id>/message`  | `{"message": "text"}`                  | Private message to one player       |
-| POST   | `/api/players/<id>/kick`     | `{"reason": "text"}`                   | Kick one player                     |
-| POST   | `/api/players/<id>/ban`      | `{"reason": "text", "minutes": 0}`     | Ban by GUID (0 = permanent) and kick |
+### From a task scheduler
 
-`<id>` is the player number shown in `/players` or by the `players` command.
+Any tool with a "POST to a URI" action can call these routes. For example: URI `http://<host>:8080/kickall`, content type `application/json`, payload `{"reason":"Restarting now"}`. For a full restart sequence, a Schedule or Manual flow is usually simpler.
 
-#### Bans
+---
 
-| Method | Path                       | Description                        |
-| ------ | -------------------------- | ---------------------------------- |
-| GET    | `/api/bans`                | List the GUID bans                 |
-| POST   | `/api/bans/<guid>/ban`     | Ban a known player by GUID, online or not. Optional body `{"reason": "text", "minutes": 0}`; `minutes` defaults to 0 (permanent). Online players are kicked too |
-| POST   | `/api/bans/<guid>/unban`   | Remove every ban for that GUID     |
+## 9. Development
 
-#### Flows
+ReCON is a single Go program with no dependencies besides the SQLite driver.
 
-| Method | Path                         | Body                                         | Description                                         |
-| ------ | ---------------------------- | -------------------------------------------- | --------------------------------------------------- |
-| GET    | `/api/flows`                 |                                              | All flows, with their next run and latest run log   |
-| POST   | `/api/flows`                 | `{"id", "name", "script", "schedule", "scheduleEnabled"}` | Create (`id` 0) or update a flow       |
-| POST   | `/api/flows/<id>/run`        | optional `{"minutes": N}`                    | Run now; with `minutes`, the scheduled time is N minutes from now and earlier steps are skipped |
-| POST   | `/api/flows/<id>/stop`       |                                              | Stop a running flow                                 |
-| POST   | `/api/flows/<id>/enable`     |                                              | Turn the schedule on                                |
-| POST   | `/api/flows/<id>/disable`    |                                              | Turn the schedule off                               |
-| POST   | `/api/flows/<id>/delete`     |                                              | Delete a flow                                       |
-| POST   | `/api/flows/command`         | `{"command": "lock"}`                        | Quick command: `lock`, `unlock`, `shutdown` or `kickall` |
+| File | Contents |
+| ---- | -------- |
+| `main.go` | Startup, configuration and the command-line tool |
+| `rcon.go` | The BattlEye RCON protocol, the shared session and server messages |
+| `web.go` | HTTP routes, the JSON API and page rendering |
+| `db.go` | SQLite storage and the poller that mirrors the server into it |
+| `flows.go` | Flows (steps, triggers, runner, scheduler) and the chat commands |
+| `steam.go` | SteamID lookups and Steam profiles |
+| `templates/` | The HTML pages, embedded into the binary at build time |
+| `examples/flows.json` | Example flows to import |
+| `docs/preview/` | The static preview pages |
+| `docs/screenshots/` | The images in this README |
 
-Starting a 10-minute restart countdown from a script or task scheduler:
+### Rebuilding the preview
+
+The preview pages are generated from the real templates, so they never drift from the app:
 
 ```bash
-curl -X POST http://<host>:8080/api/flows/1/run \
-  -H "Content-Type: application/json" \
-  -d '{"minutes":10}'
+RECON_PREVIEW=1 go test -run TestPreview .
 ```
 
-#### Health check
+This rewrites `docs/preview/players.html`, `bans.html`, `flows.html` and `data.js`. The sample players, bans and flows, and the stand-in for the API, are in `docs/preview/preview.js`. A plain `go test` skips this test.
 
-`GET /health` returns `{"ok": true}`.
+## License
 
-#### Calling it from a task scheduler
-
-Tools with a "POST to a URI" action can call any of the endpoints above. For example:
-
-| Field        | Value                                            |
-| ------------ | ------------------------------------------------ |
-| URI          | `http://<host>:8080/kickall`                     |
-| Payload      | `{"reason":"Restarting now","lock":true}`        |
-| Content Type | `application/json`                               |
-
-For a full restart sequence, a flow is usually simpler: schedule it on the Flows page, or trigger it with `POST /api/flows/<id>/run`.
-
-### Common RCON commands
-
-| Command                            | Effect                                  |
-| ---------------------------------- | --------------------------------------- |
-| `players`                          | List connected players                  |
-| `say -1 <message>`                 | Message everyone                        |
-| `say <player#> <message>`          | Message one player                      |
-| `kick <player#> <reason>`          | Kick one player                         |
-| `bans`                             | List bans                               |
-| `addBan <guid> <minutes> <reason>` | Ban a GUID (0 = permanent)              |
-| `removeBan <#>`                    | Remove a ban by its number              |
-| `#lock` / `#unlock`                | Block or allow new connections          |
-| `#shutdown`                        | Stop the server                         |
+[MIT](LICENSE)
