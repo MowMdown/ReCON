@@ -1255,6 +1255,19 @@ func stepsJSON(list []Step) string {
 	return string(b)
 }
 
+// triggerLabel is a trigger's name as the page shows it.
+func triggerLabel(t string) string {
+	switch t {
+	case triggerSchedule:
+		return "Schedule"
+	case triggerJoin:
+		return "On join"
+	case triggerChat:
+		return "Player message"
+	}
+	return "Manual"
+}
+
 // normalizeTrigger checks the trigger the page sent. Empty means manual.
 func normalizeTrigger(t string) (string, error) {
 	switch t = strings.ToLower(strings.TrimSpace(t)); t {
@@ -1373,9 +1386,10 @@ func flowsWithNextRun() ([]Flow, error) {
 // validateAndSaveFlow checks a flow from the page (or an import) and stores
 // it. Every error it returns is a user-facing message.
 //
-// New flows are saved disabled, manual flows are never enabled, and an edit
-// that changes a flow's trigger saves it disabled, so switching an enabled
-// restart flow to On player join can't make it fire without pressing Enable.
+// New flows are saved disabled and manual flows are never enabled. A saved
+// flow's trigger can't be changed (a restart flow must never turn into one
+// that fires on every join), and saving an edit keeps it enabled or disabled
+// as it was.
 func validateAndSaveFlow(f Flow) (int64, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Schedule = strings.TrimSpace(f.Schedule)
@@ -1392,6 +1406,15 @@ func validateAndSaveFlow(f Flow) (int64, error) {
 		return 0, err
 	}
 	f.Trigger = trig
+	var old Flow
+	if f.ID != 0 {
+		if old, err = globalDatabase.GetFlow(f.ID); err != nil {
+			return 0, errors.New("this flow no longer exists; reload the page")
+		}
+		if old.Trigger != f.Trigger {
+			return 0, fmt.Errorf("a saved flow's trigger can't be changed (this one is %s); make a new flow instead", triggerLabel(old.Trigger))
+		}
+	}
 	f.Steps, f.OnStop = fixSteps(f.Steps), fixSteps(f.OnStop)
 	if f.Trigger != triggerSchedule && f.Trigger != triggerManual {
 		f.OnStop = []Step{}
@@ -1400,11 +1423,7 @@ func validateAndSaveFlow(f Flow) (int64, error) {
 		return 0, err
 	}
 	f.Schedule = storedSchedule(f)
-	if f.Trigger == triggerManual || f.ID == 0 {
-		f.ScheduleEnabled = false
-	} else if old, err := globalDatabase.GetFlow(f.ID); err == nil && old.Trigger != f.Trigger {
-		f.ScheduleEnabled = false
-	}
+	f.ScheduleEnabled = f.ID != 0 && f.Trigger != triggerManual && old.ScheduleEnabled
 	id, err := globalDatabase.SaveFlow(f, stepsJSON(f.Steps), stepsJSON(f.OnStop))
 	if err != nil {
 		return 0, errors.New("could not save (is the name already used?)")
