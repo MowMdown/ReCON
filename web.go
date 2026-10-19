@@ -54,6 +54,7 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("GET /api/players/{guid}/details", handlePlayerDetails) // Details dialog: sessions, IPs, ban, note
 	mux.HandleFunc("POST /api/players/{guid}/note", handleSaveNote)        // {"note": ...}, up to 500 characters
 	mux.HandleFunc("POST /api/players/{guid}/role", handleSetRole)         // {"role": 0|1|2}: Player, Mod, Admin
+	mux.HandleFunc("GET /api/players/{guid}/steam", handlePlayerSteam)     // Steam Profile tab (steam.go); ?refresh=1 fetches now
 
 	// RCON console on the Players page.
 	mux.HandleFunc("GET /api/console", handleConsoleEvents)   // ?after=N: server messages and commands since N
@@ -107,14 +108,14 @@ var quietPaths = map[string]bool{
 
 // isQuiet reports whether a request is a routine read: a quietPaths GET, or
 // the Message and Details dialogs reading one player
-// (/api/players/<guid>/chat, /api/players/<guid>/details).
+// (/api/players/<guid>/chat, /details, /steam).
 func isQuiet(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
 	p := r.URL.Path
 	return quietPaths[p] || (strings.HasPrefix(p, "/api/players/") &&
-		(strings.HasSuffix(p, "/chat") || strings.HasSuffix(p, "/details")))
+		(strings.HasSuffix(p, "/chat") || strings.HasSuffix(p, "/details") || strings.HasSuffix(p, "/steam")))
 }
 
 // logRequests logs each request (method, path+query, remote address,

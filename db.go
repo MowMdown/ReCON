@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 //   - players / sessions / IP history (SyncPlayers, OfflinePlayers, ...)
 //   - player details and admin notes (PlayerDetails, SaveNote)
 //   - chat history (AddChatMessage, ChatHistory)
+//   - SteamIDs filled in by guidsearch (SteamIDByGUID, PlayersBySteamIDs)
 //   - player roles for the chat commands (PlayerRole, SetPlayerRole, ...)
 //   - settings, such as the chat commands' (Setting, SaveSetting)
 //   - bans (BanUser, SyncBans, BanNames, DeleteBan)
@@ -425,6 +427,53 @@ func (db *Database) PlayerByGUID(guid string) (Player, error) {
 	err := db.QueryRow("SELECT username, last_ip, guid FROM players WHERE lower(guid) = lower(?)", guid).
 		Scan(&p.Name, &p.IP, &p.GUID)
 	return p, err
+}
+
+// SteamIDByGUID returns a player's SteamID64 as guidsearch stored it in
+// players.steam_id ("" until it has). known is false if the GUID was never
+// seen. ReCON reads this column but never writes it.
+func (db *Database) SteamIDByGUID(guid string) (steamID string, known bool, err error) {
+	var s sql.NullString
+	err = db.QueryRow("SELECT steam_id FROM players WHERE lower(guid) = lower(?)", guid).Scan(&s)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	} else if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(s.String), true, nil
+}
+
+// PlayersBySteamIDs returns the known players whose steam_id is one of ids,
+// sorted by name (the Steam Profile tab's friends who have played here).
+func (db *Database) PlayersBySteamIDs(ids []string) ([]sharedPlayer, error) {
+	out := []sharedPlayer{}
+	const chunk = 500 // stay well under SQLite's limit on ? placeholders
+	for start := 0; start < len(ids); start += chunk {
+		part := ids[start:min(start+chunk, len(ids))]
+		args := make([]any, len(part))
+		for i, id := range part {
+			args[i] = id
+		}
+		rows, err := db.Query("SELECT guid, username FROM players WHERE steam_id IN (?"+
+			strings.Repeat(",?", len(part)-1)+")", args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var p sharedPlayer
+			if err := rows.Scan(&p.GUID, &p.Name); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, p)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out, nil
 }
 
 // GUIDByName returns the GUID of the most recently seen player with this
