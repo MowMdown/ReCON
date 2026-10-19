@@ -80,7 +80,7 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("POST /api/flows/import", handleFlowImport)    // {flows: [...]}
 	mux.HandleFunc("POST /api/flows/command", handleQuickCommand) // {command: lock|unlock|shutdown|kickall}
 
-	// Built-in chat commands (/help, /shout, ...): their settings, edited on the Flows page.
+	// Built-in chat commands (!help, !shout, ...): their settings, edited on the Flows page.
 	mux.HandleFunc("GET /api/chat-commands", handleChatCommandsGet)
 	mux.HandleFunc("POST /api/chat-commands", handleChatCommandsSave) // {settings: {...}}
 
@@ -423,7 +423,7 @@ type banResult struct {
 }
 
 // banByGUID bans player p by GUID. online says whether p is connected right
-// now (p.ID is only meaningful then). The pages, flows and the /ban chat
+// now (p.ID is only meaningful then). The pages, flows and the !ban chat
 // command all ban through it; logAs labels the rcon log lines.
 //
 //  1. `addBan <guid> <minutes> <reason>` (0 minutes = permanent).

@@ -37,8 +37,8 @@ import (
 // {player_guid}, {player_role} and {message} are filled in from them.
 // Schedule and Manual flows have no player, so they message everyone only.
 //
-// The same file runs the built-in chat commands (/help, /shout, /whisper,
-// /players, /vote, /code, /kick, /ban), since they also react to chat.
+// The same file runs the built-in chat commands (!help, !shout, !whisper,
+// !players, !vote, !code, !kick, !ban), since they also react to chat.
 //
 // Sections: times, steps and conditions, validation, the runner, cron, flow
 // definitions, run bookkeeping, the scheduler, the join and chat triggers,
@@ -357,7 +357,7 @@ func containsWord(s, t string) bool {
 
 // matchWords checks {message}. contains: any of the words or phrases appears
 // as whole words. starts with: the message's first word is one of the words
-// (so /discord matches "/discord please" but not "/discordx"). Case is ignored.
+// (so !discord matches "!discord please" but not "!discordx"). Case is ignored.
 func matchWords(op, msg, value string) bool {
 	m := strings.ToLower(strings.TrimSpace(msg))
 	first := ""
@@ -1925,7 +1925,7 @@ type chatCommandDef struct {
 	Cool     string      `json:"cool"`     // default cooldown
 	Announce bool        `json:"announce"` // has the Announce setting
 	Length   bool        `json:"length"`   // has the vote length setting
-	Help     string      `json:"help"`     // what /help /<cmd> sends
+	Help     string      `json:"help"`     // what !help !<cmd> sends
 	Fields   []chatField `json:"fields"`
 }
 
@@ -1937,27 +1937,27 @@ type chatField struct {
 }
 
 var chatCommandDefs = []chatCommandDef{
-	{Cmd: "help", Cool: "0", Help: "/help lists the commands. /help /<command> explains one.",
-		Fields: []chatField{{"list", "/help reply (to the player)", "Commands: {commands}. Type /help /<command> for details.", []string{"commands"}}}},
-	{Cmd: "shout", Cool: "10s", Help: "/shout <message> sends your message to everyone on the server.",
+	{Cmd: "help", Cool: "0", Help: "!help lists the commands. !help !<command> explains one.",
+		Fields: []chatField{{"list", "!help reply (to the player)", "Commands: {commands}. Type !help !<command> for details.", []string{"commands"}}}},
+	{Cmd: "shout", Cool: "10s", Help: "!shout <message> sends your message to everyone on the server.",
 		Fields: []chatField{{"msg", "Message (to everyone)", "({player_name}): {message}", []string{"player_name", "message"}}}},
-	{Cmd: "whisper", Cool: "0", Help: "/whisper <player number> <message> sends a private message to that player.",
+	{Cmd: "whisper", Cool: "0", Help: "!whisper <player number> <message> sends a private message to that player.",
 		Fields: []chatField{{"msg", "Message (to the player number they typed)", "({player_name}): {message}", []string{"player_name", "message"}}}},
-	{Cmd: "players", Cool: "10s", Help: "/players lists everyone online with their player number, for /whisper.",
+	{Cmd: "players", Cool: "10s", Help: "!players lists everyone online with their player number, for !whisper.",
 		Fields: []chatField{{"entry", "Each player in the list (5 per line, a line every 3 seconds, to the player)", "{target_name}:{target_id}", []string{"target_name", "target_id"}}}},
-	{Cmd: "vote", Cool: "10m", Length: true, Help: "/vote <question> starts a server-wide vote on the topic you choose. Everyone answers with /vote y or /vote n.",
+	{Cmd: "vote", Cool: "10m", Length: true, Help: "!vote <question> starts a server-wide vote on the topic you choose. Everyone answers with !vote y or !vote n.",
 		Fields: []chatField{
-			{"start", "Vote question (to everyone)", "({player_name}) {topic}? Yes or No? Type /vote y or /vote n", []string{"player_name", "topic"}},
+			{"start", "Vote question (to everyone)", "({player_name}) {topic}? Yes or No? Type !vote y or !vote n", []string{"player_name", "topic"}},
 			{"result", "Result (to everyone, when the vote ends)", "The server has spoken and the result is {vote_result}!", []string{"vote_result", "yes", "no", "topic"}},
 		}},
-	{Cmd: "code", Cool: "0", Help: "/code sends your player code to the admins and mods online, so they can find you.",
+	{Cmd: "code", Cool: "0", Help: "!code sends your player code to the admins and mods online, so they can find you.",
 		Fields: []chatField{{"staff", "Message (to each mod and admin online)", "Code for {player_name} (#{player_id}): {code}", []string{"player_name", "player_id", "code"}}}},
-	{Cmd: "kick", Staff: true, Cool: "0", Announce: true, Help: "/kick <code> <reason> kicks the player with that code. Ask them to type /code first.",
+	{Cmd: "kick", Staff: true, Cool: "0", Announce: true, Help: "!kick <code> <reason> kicks the player with that code. Ask them to type !code first.",
 		Fields: []chatField{
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been kicked by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
 			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been kicked", []string{"target_name", "reason"}},
 		}},
-	{Cmd: "ban", Staff: true, Cool: "0", Announce: true, Help: "/ban <code> <reason> permanently bans the player with that code (the last 6 characters of their GUID). Ask them to type /code first.",
+	{Cmd: "ban", Staff: true, Cool: "0", Announce: true, Help: "!ban <code> <reason> permanently bans the player with that code (the last 6 characters of their GUID). Ask them to type !code first.",
 		Fields: []chatField{
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been banned by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
 			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been banned", []string{"target_name", "reason"}},
@@ -2003,8 +2003,14 @@ func defaultChatSettings() chatSettings {
 	return out
 }
 
+// oldCmdRe finds "!help" style command names in a default message, to
+// recognise the same message saved when commands started with "/".
+var oldCmdRe = regexp.MustCompile(`!([\w<])`)
+
 // mergeChatSettings lays saved settings over the defaults, so a command or
-// message added later gets its default and unknown keys are dropped.
+// message added later gets its default and unknown keys are dropped. A
+// message still set to its old default from when commands started with "/"
+// (DayZ drops chat lines starting with "/") gets the new default.
 func mergeChatSettings(saved chatSettings) chatSettings {
 	out := defaultChatSettings()
 	for _, d := range chatCommandDefs {
@@ -2021,7 +2027,7 @@ func mergeChatSettings(saved chatSettings) chatSettings {
 			m.Length = s.Length
 		}
 		for _, f := range d.Fields {
-			if v, ok := s.Msgs[f.Key]; ok {
+			if v, ok := s.Msgs[f.Key]; ok && v != oldCmdRe.ReplaceAllString(f.Def, "/$1") {
 				m.Msgs[f.Key] = v
 			}
 		}
@@ -2155,13 +2161,13 @@ var chatSay = func(to Player, everyone bool, text string) bool {
 	return err == nil && acked
 }
 
-// chatKick kicks a player for /kick. Tests replace it.
+// chatKick kicks a player for !kick. Tests replace it.
 var chatKick = func(p Player, reason string) bool {
 	_, acked, err := runShared(fmt.Sprintf("kick %d %s", p.ID, reason), 2*time.Second, false, "chat")
 	return err == nil && acked
 }
 
-// playersLinePause is the gap between the lines /players sends.
+// playersLinePause is the gap between the lines !players sends.
 var playersLinePause = 3 * time.Second
 
 // codeOf is a player's code: the last 6 characters of their GUID, lower case.
@@ -2224,7 +2230,7 @@ func markUsed(cmd string) {
 func handleChatCommand(p Player, role int, text string) {
 	text = strings.TrimSpace(text)
 	fields := strings.Fields(text)
-	if len(fields) == 0 || !strings.HasPrefix(fields[0], "/") {
+	if len(fields) == 0 || !strings.HasPrefix(fields[0], "!") {
 		return
 	}
 	cmd := strings.ToLower(fields[0][1:])
@@ -2249,7 +2255,7 @@ func handleChatCommand(p Player, role int, text string) {
 			var names []string
 			for _, d := range chatCommandDefs {
 				if all[d.Cmd].On && (!d.Staff || role >= roleMod) {
-					names = append(names, "/"+d.Cmd)
+					names = append(names, "!"+d.Cmd)
 				}
 			}
 			if chatSay(p, false, fillTemplate(set.Msgs["list"], map[string]string{"commands": strings.Join(names, ", ")})) {
@@ -2257,7 +2263,7 @@ func handleChatCommand(p Player, role int, text string) {
 			}
 			return
 		}
-		d := chatDef(strings.ToLower(strings.TrimPrefix(args[0], "/")))
+		d := chatDef(strings.ToLower(strings.TrimPrefix(args[0], "!")))
 		if d == nil || !all[d.Cmd].On || d.Staff && role < roleMod {
 			return
 		}
@@ -2339,7 +2345,7 @@ func handleChatCommand(p Player, role int, text string) {
 	}
 }
 
-// chatVoteCommand handles /vote <question> (start a vote) and /vote y|n.
+// chatVoteCommand handles !vote <question> (start a vote) and !vote y|n.
 func chatVoteCommand(p Player, set chatSetting, rest string) {
 	answer := strings.ToLower(rest)
 	if answer == "y" || answer == "yes" || answer == "n" || answer == "no" {
@@ -2389,10 +2395,10 @@ func chatVoteCommand(p Player, set chatSetting, rest string) {
 	}()
 }
 
-// chatPunish handles /kick <code> [reason] and /ban <code> [reason]. Mods
+// chatPunish handles !kick <code> [reason] and !ban <code> [reason]. Mods
 // can kick and ban Players; Admins can also kick and ban Mods. Nobody can
 // kick or ban themselves, or anyone of their own rank or higher, from chat.
-// /ban is always permanent and also finds players who have left.
+// !ban is always permanent and also finds players who have left.
 func chatPunish(cmd string, p Player, role int, set chatSetting, args []string) {
 	if len(args) == 0 || !codeRe.MatchString(args[0]) {
 		return
@@ -2412,7 +2418,7 @@ func chatPunish(cmd string, p Player, role int, set chatSetting, args []string) 
 	if !online && cmd == "ban" && globalDatabase != nil {
 		known, err := globalDatabase.PlayersByCode(code)
 		if err != nil {
-			log.Printf("chat: /ban lookup: %v", err)
+			log.Printf("chat: !ban lookup: %v", err)
 			return
 		}
 		matches = known
@@ -2432,7 +2438,7 @@ func chatPunish(cmd string, p Player, role int, set chatSetting, args []string) 
 	} else {
 		done = "banned"
 		if res := banStep(t, online, 0, reason, "chat"); !res.OK {
-			log.Printf("chat: /ban of %s failed: %s", bareName(t.Name), res.Error)
+			log.Printf("chat: !ban of %s failed: %s", bareName(t.Name), res.Error)
 			return
 		}
 	}
