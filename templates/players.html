@@ -917,9 +917,9 @@ function renderDetails(keepDraft) {
 
 // What each role can do, shown under its name. [x] is shown as code.
 const ROLE_INFO = [
-	{ tag: 'normal user (default)', can: ['Can use ', ['/help'], ', ', ['/shout'], ', ', ['/whisper'], ', ', ['/players'], ', ', ['/vote'], ' and ', ['/code'], '.'] },
-	{ tag: 'moderator', can: ['Everything a Player can, plus ', ['/kick'], ' and ', ['/ban'], ' on Players. Gets every ', ['/code'], ' and every kick and ban notice.'] },
-	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['/kick'], ' and ', ['/ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] }
+	{ tag: 'normal user (default)', can: ['Can use ', ['!help'], ', ', ['!shout'], ', ', ['!whisper'], ', ', ['!players'], ', ', ['!vote'], ' and ', ['!code'], '.'] },
+	{ tag: 'moderator', can: ['Everything a Player can, plus ', ['!kick'], ' and ', ['!ban'], ' on Players. Gets every ', ['!code'], ' and every kick and ban notice.'] },
+	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['!kick'], ' and ', ['!ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] }
 ];
 
 function renderRoleBadge() {

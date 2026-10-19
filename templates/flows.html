@@ -223,7 +223,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 <div id="cmdModal" class="modal">
 	<div class="box cmdbox" role="dialog" aria-labelledby="cmdTitle">
 		<h2 id="cmdTitle">Chat commands</h2>
-		<p class="intro">Built-in commands players type in game chat. Turn each on or off, set its cooldown (server-wide: after anyone uses it, it's ignored for everyone until the time is up; 0 = none; times are seconds, or h m s such as <code>1m30s</code>), and change the wording and order of what ReCON sends. Words in braces such as <code>{player_name}</code> are filled in when the message is sent. Who may use /kick and /ban is set on the Players page: Details, Permissions.</p>
+		<p class="intro">Built-in commands players type in game chat. Turn each on or off, set its cooldown (server-wide: after anyone uses it, it's ignored for everyone until the time is up; 0 = none; times are seconds, or h m s such as <code>1m30s</code>), and change the wording and order of what ReCON sends. Words in braces such as <code>{player_name}</code> are filled in when the message is sent. Who may use !kick and !ban is set on the Players page: Details, Permissions.</p>
 		<div class="cmdlist" id="cmdList"></div>
 		<div class="cmdfoot">
 			<button type="button" id="cmdReset">Reset to defaults</button>
@@ -314,7 +314,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<table>
 				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
 				<tbody>
-					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>/discord</code> catches "/discord please" but not "/discordx". Case is ignored.</td></tr>
+					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>!discord</code> catches "!discord please" but not "!discordx". Case is ignored.</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td><code>==</code> <code>!=</code> ignoring case, or <b>matches</b> with <code>*</code> for any characters: <code>*admin*</code>, <code>192.168.*</code></td></tr>
 					<tr><td><code>{player_id}</code> <code>{player_ping}</code> <code>{players_online}</code></td><td><code>==</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td></tr>
 					<tr><td><code>{player_role}</code></td><td>The same, against Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
@@ -324,7 +324,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<ul>
 				<li>Schedule: <b>If</b> <code>{players_online} &gt; 0</code> Kick everyone, <b>Else</b> Shut down server.</li>
 				<li>On join: <b>If</b> <code>{player_ping} &gt;= 500</code> Kick, reason <i>Ping too high ({player_ping})</i>.</li>
-				<li>Player message: <b>If</b> <code>{message}</code> starts with <code>/discord</code>, Message to Player <i>Visit us at discord.gg/...</i>.</li>
+				<li>Player message: <b>If</b> <code>{message}</code> starts with <code>!discord</code>, Message to Player <i>Visit us at discord.gg/...</i>.</li>
 			</ul>
 			<p>The run log under the table shows each decision, e.g. <code>If {player_ping} &gt;= 500: no</code>.</p>
 		</div>
@@ -369,18 +369,18 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 		<div class="helppane" data-pane="chat">
 			<h3>Built-in chat commands</h3>
-			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) turns each on or off, sets its cooldown and changes the wording ReCON sends. Who may use /kick and /ban is set on the Players page: <b>Details</b>, <b>Permissions</b>.</p>
+			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) turns each on or off, sets its cooldown and changes the wording ReCON sends. Who may use !kick and !ban is set on the Players page: <b>Details</b>, <b>Permissions</b>.</p>
 			<table>
 				<thead><tr><th>Command</th><th>Does</th></tr></thead>
 				<tbody>
-					<tr><td><code>/help</code></td><td>Lists the commands; <code>/help /vote</code> explains one</td></tr>
-					<tr><td><code>/shout &lt;message&gt;</code></td><td>Sends the message to everyone</td></tr>
-					<tr><td><code>/whisper &lt;number&gt; &lt;message&gt;</code></td><td>Private message to that player</td></tr>
-					<tr><td><code>/players</code></td><td>Lists everyone online with their number</td></tr>
-					<tr><td><code>/vote &lt;question&gt;</code></td><td>Starts a server-wide vote; everyone answers <code>/vote y</code> or <code>/vote n</code>. More yes than no passes.</td></tr>
-					<tr><td><code>/code</code></td><td>Sends the player's code (last 6 characters of their GUID) to the mods and admins online</td></tr>
-					<tr><td><code>/kick &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
-					<tr><td><code>/ban &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently, even if they have left</td></tr>
+					<tr><td><code>!help</code></td><td>Lists the commands; <code>!help !vote</code> explains one</td></tr>
+					<tr><td><code>!shout &lt;message&gt;</code></td><td>Sends the message to everyone</td></tr>
+					<tr><td><code>!whisper &lt;number&gt; &lt;message&gt;</code></td><td>Private message to that player</td></tr>
+					<tr><td><code>!players</code></td><td>Lists everyone online with their number</td></tr>
+					<tr><td><code>!vote &lt;question&gt;</code></td><td>Starts a server-wide vote; everyone answers <code>!vote y</code> or <code>!vote n</code>. More yes than no passes.</td></tr>
+					<tr><td><code>!code</code></td><td>Sends the player's code (last 6 characters of their GUID) to the mods and admins online</td></tr>
+					<tr><td><code>!kick &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
+					<tr><td><code>!ban &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently, even if they have left</td></tr>
 				</tbody>
 			</table>
 			<ul>
@@ -765,8 +765,8 @@ function defaultCond(subject) {
 
 // {message}: the value is words and "quoted phrases"; any one is a match.
 // contains: the word or phrase appears as whole words. starts with: the
-// message's first word is one of them (so /help matches "/help vote" but
-// not "/helpme").
+// message's first word is one of them (so !help matches "!help vote" but
+// not "!helpme").
 // Case is ignored.
 function terms(value) {
 	const out = [];
@@ -1102,7 +1102,7 @@ function field(s, p, key) {
 	const inp = el('input', { class: cls, value: s[p.k] == null ? '' : s[p.k], placeholder: p.ph || '', 'aria-label': p.k, autocomplete: 'off', spellcheck: p.kind === 'text' && !p.mono ? 'true' : 'false', style: p.mono ? 'font-family:var(--mono);font-size:13px' : null });
 	if (p.kind === 'val') {
 		const kind = subjectOf(s)[2];
-		inp.placeholder = kind === 'num' ? '0' : kind === 'word' ? (s.op === 'starts' ? '/discord' : 'noob idiot "a phrase"') : s.op === 'wild' ? '*admin* or 192.168.*' : 'exact value';
+		inp.placeholder = kind === 'num' ? '0' : kind === 'word' ? (s.op === 'starts' ? '!discord' : 'noob idiot "a phrase"') : s.op === 'wild' ? '*admin* or 192.168.*' : 'exact value';
 	}
 	if (p.kind === 'dur') {
 		const chk = () => inp.classList.toggle('bad', !(parseDur(inp.value) > 0));
@@ -1477,7 +1477,7 @@ async function updateTrigHint() {
 		return;
 	}
 	if (t.type === 'chat') {
-		h.textContent = 'Runs for every chat message a player sends. ReCON finds the sender by name among the players online, then uses their GUID, so {player_id}, {player_guid} and the rest are theirs and Player messages go back to them. {message} is what they typed: use an If on it, with contains (any of the words, or a "quoted phrase") or starts with (the first word, such as /discord). Case is ignored.' + delayText;
+		h.textContent = 'Runs for every chat message a player sends. ReCON finds the sender by name among the players online, then uses their GUID, so {player_id}, {player_guid} and the rest are theirs and Player messages go back to them. {message} is what they typed: use an If on it, with contains (any of the words, or a "quoted phrase") or starts with (the first word, such as !discord). Case is ignored.' + delayText;
 		return;
 	}
 	if (t.type === 'manual') {
@@ -1583,7 +1583,7 @@ function renderCmds() {
 	list.textContent = '';
 	for (const c of CMDS) {
 		const s = draft[c.cmd];
-		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '/' + c.cmd, c.staff ? el('span', { class: 'who', text: 'MODS & ADMINS' }) : null));
+		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.staff ? el('span', { class: 'who', text: 'MODS & ADMINS' }) : null));
 		const on = el('input', { type: 'checkbox', checked: s.on, id: 'on-' + c.cmd });
 		head.append(el('label', { class: 'opt', for: 'on-' + c.cmd }, on, 'On'));
 		head.append(el('label', { class: 'opt', for: 'cool-' + c.cmd }, 'Cooldown', durInput('cool-' + c.cmd, s.cool, '0', true, (v) => { s.cool = v; })));
