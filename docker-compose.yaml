@@ -1,35 +1,66 @@
 services:
-  rcon-bridge-deerisle:
+  recon-deerisle:
     container_name: deerisle
-    build: ./rcon-bridge
+    image: git.plexraid.stream/mowmdown/recon:testing
     restart: unless-stopped
-    networks: 
+    networks:
       - proxy-net
     environment:
+      TZ: America/New_York
       RCON_HOST: 10.0.1.40
       RCON_PORT: "2305"
       RCON_PASSWORD: ${RCON_PASSWORD1}
       DB_PATH: /data/players.db
+      STEAM_API_KEY: ${STEAM_API_KEY}
+      STEAM_SEARCH_MODE: "auto"
+      STEAM_SEARCH_CORES: "4"
+      STEAM_SEARCH_PRIORITY: "high"
     volumes:
-      - /mnt/user/appdata/rcon/deerisle:/data
+      - /mnt/user/appdata/recon/deerisle:/data
     ports:
-      - "9998:8080"
+      - "9996:8080"
 
-  rcon-bridge-namalsk:
+  recon-namalsk:
     container_name: namalsk
-    build: ./rcon-bridge
+    image: git.plexraid.stream/mowmdown/recon:testing
     restart: unless-stopped
-    networks: 
+    networks:
       - proxy-net
     environment:
+      TZ: America/New_York
       RCON_HOST: 10.0.1.40
       RCON_PORT: "2309"
       RCON_PASSWORD: ${RCON_PASSWORD2}
       DB_PATH: /data/players.db
+      STEAM_API_KEY: ${STEAM_API_KEY}
+      STEAM_SEARCH_MODE: "auto"
+      STEAM_SEARCH_CORES: "4"
+      STEAM_SEARCH_PRIORITY: "high"
     volumes:
-      - /mnt/user/appdata/rcon/namalsk:/data
+      - /mnt/user/appdata/recon/namalsk:/data
     ports:
       - "9997:8080"
+
+  recon-nasdara:
+    container_name: nasdara
+    image: git.plexraid.stream/mowmdown/recon:testing
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    environment:
+      TZ: America/New_York
+      RCON_HOST: 10.0.1.40
+      RCON_PORT: "2313"
+      RCON_PASSWORD: ${RCON_PASSWORD3}
+      DB_PATH: /data/players.db
+      STEAM_API_KEY: ${STEAM_API_KEY}
+      STEAM_SEARCH_MODE: "auto"
+      STEAM_SEARCH_CORES: "4"
+      STEAM_SEARCH_PRIORITY: "high"
+    volumes:
+      - /mnt/user/appdata/recon/nasdara:/data
+    ports:
+      - "9998:8080"
 
 networks:
   proxy-net:
