@@ -313,10 +313,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<table>
 				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
 				<tbody>
-					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>!discord</code> catches "!discord please" but not "!discordx". Case is ignored.</td></tr>
-					<tr><td><code>{player_name}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td><code>==</code> <code>!=</code> ignoring case, or <b>matches</b> with <code>*</code> for any characters: <code>*admin*</code>, <code>192.168.*</code></td></tr>
-					<tr><td><code>{player_id}</code> <code>{player_ping}</code> <code>{players_online}</code></td><td><code>==</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td></tr>
-					<tr><td><code>{player_role}</code></td><td>The same, against Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
+					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>!discord</code> catches "!discord please" but not "!discordx". <b>is exactly</b>: the whole message is the value. Case is ignored.</td></tr>
+					<tr><td><code>{player_name}</code> <code>{player_ip}</code></td><td><b>is</b> / <b>is not</b> ignoring case, <b>matches</b> with <code>*</code> for any characters (<code>*admin*</code>, <code>192.168.*</code>), or <b>contains</b> any part of it</td></tr>
+					<tr><td><code>{player_id}</code> <code>{player_guid}</code></td><td><b>is</b> / <b>is not</b></td></tr>
+					<tr><td><code>{player_ping}</code> <code>{players_online}</code></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td></tr>
+					<tr><td><code>{player_role}</code></td><td><b>is</b>, <b>is not</b>, <b>is at least</b> or <b>is at most</b> Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
 				</tbody>
 			</table>
 			<h3>Examples</h3>
@@ -736,28 +737,32 @@ const NEED_TEXT = {
 	player: 'needs a player: use the On join or Player message trigger',
 	chat: 'needs the Player message trigger'
 };
-// Kinds: word = the chat message, matched by words; text = exact or
-// wildcard; num = numbers; role = Player < Mod < Admin.
-const WORD_OPS = [['has', 'contains'], ['starts', 'starts with']];
-const TEXT_OPS = [['eq', '=='], ['ne', '!='], ['wild', 'matches']];
-const NUM_OPS = [['eq', '=='], ['ne', '!='], ['gt', '>'], ['ge', '>='], ['lt', '<'], ['le', '<=']];
+// Kinds: word = the chat message, matched by words; text = exact, wildcard
+// or contains; ident = a player number or GUID (is / is not only); num =
+// numbers; role = Player < Mod < Admin.
+const WORD_OPS = [['has', 'contains'], ['starts', 'starts with'], ['exact', 'is exactly']];
+const TEXT_OPS = [['eq', 'is'], ['ne', 'is not'], ['wild', 'matches'], ['has', 'contains']];
+const IDENT_OPS = [['eq', 'is'], ['ne', 'is not']];
+const NUM_OPS = [['eq', '='], ['ne', '!='], ['gt', '>'], ['ge', '>='], ['lt', '<'], ['le', '<=']];
+const ROLE_OPS = [['eq', 'is'], ['ne', 'is not'], ['ge', 'is at least'], ['le', 'is at most']];
 const ROLES = [['0', 'Player'], ['1', 'Mod'], ['2', 'Admin']];
 const SUBJECTS = [
 	['message', '{message}', 'word', 'chat'],
 	['player_name', '{player_name}', 'text', 'player'],
-	['player_id', '{player_id}', 'num', 'player'],
+	['player_id', '{player_id}', 'ident', 'player'],
 	['player_ping', '{player_ping}', 'num', 'player'],
 	['player_ip', '{player_ip}', 'text', 'player'],
-	['player_guid', '{player_guid}', 'text', 'player'],
+	['player_guid', '{player_guid}', 'ident', 'player'],
 	['player_role', '{player_role}', 'role', 'player'],
 	['players_online', '{players_online}', 'num', '']
 ];
 const subjectOf = (s) => SUBJECTS.find((x) => x[0] === s.subject) || SUBJECTS[1];
-const opsFor = (sub) => sub[2] === 'word' ? WORD_OPS : sub[2] === 'text' ? TEXT_OPS : NUM_OPS;
+const OPS_BY_KIND = { word: WORD_OPS, text: TEXT_OPS, ident: IDENT_OPS, num: NUM_OPS, role: ROLE_OPS };
+const opsFor = (sub) => OPS_BY_KIND[sub[2]] || NUM_OPS;
 function defaultCond(subject) {
 	const kind = (SUBJECTS.find((x) => x[0] === subject) || SUBJECTS[1])[2];
 	if (kind === 'word') return { subject, op: 'has', value: '' };
-	if (kind === 'text') return { subject, op: 'eq', value: '' };
+	if (kind === 'text' || kind === 'ident') return { subject, op: 'eq', value: '' };
 	if (kind === 'role') return { subject, op: 'ge', value: '1' };
 	return { subject, op: 'ge', value: '0' };
 }
@@ -880,7 +885,9 @@ function stepNeeds(s) {
 function condErr(c, b) {
 	const sub = subjectOf(b);
 	if (!c[sub[3]]) return sub[1] + ' ' + NEED_TEXT[sub[3]];
-	if ((sub[2] === 'num' || sub[2] === 'role') && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
+	if ((sub[2] === 'num' || sub[0] === 'player_id') && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
+	if (sub[2] === 'role' && !ROLES.some(([v]) => v === String(b.value).trim())) return 'Pick Player, Mod or Admin';
+	if (sub[0] === 'player_guid' && !/^[0-9a-fA-F]{32}$/.test(String(b.value).trim())) return 'Enter a GUID (32 letters and digits, 0-9 and a-f)';
 	if (sub[2] === 'word' && !terms(b.value).length) return 'Enter a word, several words, or a "quoted phrase"';
 	return '';
 }
@@ -939,7 +946,8 @@ function sendsText(s) {
 function describeIf(s) {
 	const sub = subjectOf(s);
 	const op = opsFor(sub).find((o) => o[0] === s.op) || opsFor(sub)[0];
-	const val = sub[2] === 'role' ? (ROLES.find((r) => r[0] === String(s.value)) || ROLES[0])[1] : sub[2] === 'num' || sub[2] === 'word' || s.op === 'wild' ? s.value : '"' + s.value + '"';
+	const val = sub[2] === 'role' ? (ROLES.find((r) => r[0] === String(s.value)) || ROLES[0])[1] :
+		sub[2] === 'num' || sub[2] === 'ident' || (sub[2] === 'word' && s.op !== 'exact') || s.op === 'wild' ? s.value : '"' + s.value + '"';
 	return sub[1] + ' ' + op[1] + ' ' + val;
 }
 
@@ -1101,7 +1109,9 @@ function field(s, p, key) {
 	const inp = el('input', { class: cls, value: s[p.k] == null ? '' : s[p.k], placeholder: p.ph || '', 'aria-label': p.k, autocomplete: 'off', spellcheck: p.kind === 'text' && !p.mono ? 'true' : 'false', style: p.mono ? 'font-family:var(--mono);font-size:13px' : null });
 	if (p.kind === 'val') {
 		const kind = subjectOf(s)[2];
-		inp.placeholder = kind === 'num' ? '0' : kind === 'word' ? (s.op === 'starts' ? '!discord' : 'noob idiot "a phrase"') : s.op === 'wild' ? '*admin* or 192.168.*' : 'exact value';
+		inp.placeholder = kind === 'num' ? '0' : kind === 'ident' ? (s.subject === 'player_id' ? '3' : '32-character GUID') :
+			kind === 'word' ? (s.op === 'starts' ? '!discord' : s.op === 'exact' ? '!rules' : 'noob idiot "a phrase"') :
+			s.op === 'wild' ? '*admin* or 192.168.*' : s.op === 'has' ? 'part of the value' : 'exact value';
 	}
 	if (p.kind === 'dur') {
 		const chk = () => inp.classList.toggle('bad', !(parseDur(inp.value) > 0));

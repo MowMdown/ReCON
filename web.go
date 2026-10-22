@@ -63,7 +63,7 @@ func runWebServer(addr string) error {
 
 	// Bans.
 	mux.HandleFunc("GET /bans", pageHandler(bansPage))
-	mux.HandleFunc("GET /api/bans", handleBansJSON)            // list GUID bans (also syncs to DB)
+	mux.HandleFunc("GET /api/bans", handleBansJSON)            // list GUID bans (from the DB, kept in step with BattlEye)
 	mux.HandleFunc("POST /api/bans/{guid}/ban", handleBanGUID) // ban a known player, online or not
 	mux.HandleFunc("POST /api/bans/{guid}/unban", handleUnban) // remove every entry for a GUID
 
@@ -429,12 +429,15 @@ type banResult struct {
 // command all ban through it; logAs labels the rcon log lines.
 //
 //  1. `addBan <guid> <minutes> <reason>` (0 minutes = permanent).
-//  2. If online, kick with the same reason. A failed kick is only reported (Kicked).
-//  3. Record GUID/name/IP/reason in SQLite (the IP is informational, not banned).
+//  2. Record GUID/name/IP/reason and when it runs out in SQLite (the IP is
+//     informational, not banned). This comes before the kick so the player's
+//     session is closed as "banned", not "kicked".
+//  3. If online, kick with the same reason. A failed kick is only reported (Kicked).
 func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResult {
 	banListLock.Lock()
 	defer banListLock.Unlock()
 	res := banResult{Online: online, Perm: minutes == 0, code: http.StatusOK}
+	placed := time.Now()
 	_, guidAck, guidErr := runShared(fmt.Sprintf("addBan %s %d %s", p.GUID, minutes, reason), 1500*time.Millisecond, false, logAs)
 	if guidErr != nil {
 		res.Error, res.code = guidErr.Error(), http.StatusBadGateway
@@ -445,6 +448,8 @@ func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResu
 		return res
 	}
 	res.GUIDBan = true
+	dbErr := globalDatabase.BanUser(p.GUID, bareName(p.Name), p.IP, reason, res.Perm, placed.Add(time.Duration(minutes)*time.Minute))
+	refreshBanExpiry()
 	if online {
 		_, kickAck, kickErr := runShared(fmt.Sprintf("kick %d %s", p.ID, reason), 1500*time.Millisecond, false, logAs)
 		res.Kicked = kickErr == nil && kickAck
@@ -452,12 +457,8 @@ func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResu
 			log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
 		}
 	}
-	perm := 0
-	if res.Perm {
-		perm = 1
-	}
-	if err := globalDatabase.BanUser(p.GUID, bareName(p.Name), p.IP, reason, perm); err != nil {
-		log.Printf("error recording ban in DB: %v", err)
+	if dbErr != nil {
+		log.Printf("error recording ban in DB: %v", dbErr)
 		res.Error, res.code = "GUID ban succeeded but database update failed", http.StatusInternalServerError
 		return res
 	}
@@ -757,33 +758,17 @@ func recordConsoleSay(cmd string) {
 // Ban API
 // ---------------------------------------------------------------------------
 
-// handleBansJSON serves GET /api/bans. It syncs first (so viewing the page
-// refreshes the DB too). Names come from the DB since BattlEye only stores
-// GUIDs; a GUID listed more than once is shown once.
+// handleBansJSON serves GET /api/bans: every ban, from the bans table. The
+// poller keeps that table in step with BattlEye (syncBanList, db.go), and
+// ban and unban update it straight away, so the page never waits on RCON.
+// "connected" is false while the game server isn't answering.
 func handleBansJSON(w http.ResponseWriter, r *http.Request) {
-	bans, err := syncBanList()
-	if bans == nil {
-		rconUnavailable(w, err.Error())
+	list, err := globalDatabase.BanList()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err != nil {
-		log.Printf("error syncing bans to DB: %v", err)
-	}
-	names, _ := globalDatabase.BanNames()
-	seen := map[string]bool{}
-	list := make([]Ban, 0, len(bans))
-	for _, b := range bans {
-		if seen[b.GUID] {
-			continue
-		}
-		seen[b.GUID] = true
-		b.Name = names[b.GUID]
-		if b.Name == "" {
-			b.Name = "Unknown"
-		}
-		list = append(list, b)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": true, "bans": list, "count": len(list)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": rconStatus() == "connected", "bans": list, "count": len(list)})
 }
 
 // guidParam returns the {guid} path value, lower-cased. ok is false (and a
@@ -847,7 +832,9 @@ func handleBanGUID(w http.ResponseWriter, r *http.Request) {
 // one GUID can be listed more than once. So it loops: re-read the list, find
 // the first entry for the GUID, removeBan <index>, until the GUID is gone
 // (safety cap: 20). Then `writeBans` (best effort, reported as "saved") and
-// the DB row is deleted. Partial states are reported via be_removed/db_removed.
+// the DB row is deleted, which is the only way a permanent ban leaves the
+// database (syncBanList puts back any permanent ban BattlEye loses). Partial
+// states are reported via be_removed/db_removed.
 func handleUnban(w http.ResponseWriter, r *http.Request) {
 	guid, ok := guidParam(w, r)
 	if !ok {
@@ -889,7 +876,9 @@ func handleUnban(w http.ResponseWriter, r *http.Request) {
 
 	_, saved, _ := runShared("writeBans", 1500*time.Millisecond, false, "web") // persist bans.txt, best effort
 
-	if err := globalDatabase.DeleteBan(guid); err != nil {
+	err := globalDatabase.DeleteBan(guid)
+	refreshBanExpiry()
+	if err != nil {
 		log.Printf("error deleting ban from DB: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "be_removed": true, "db_removed": false, "error": "unbanned in BattlEye but database update failed"})
 		return
