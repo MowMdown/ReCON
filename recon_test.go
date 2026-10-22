@@ -161,25 +161,119 @@ func TestOpenDatabasePragmasOnEveryConnection(t *testing.T) {
 	}
 }
 
-func TestOpenDatabaseAddsColumnsToOldTables(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
+// previousSchema is the tables as the previous release created them.
+const previousSchema = `
+CREATE TABLE players (guid TEXT PRIMARY KEY, username TEXT NOT NULL, last_ip TEXT NOT NULL,
+	first_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	total_playtime_seconds INTEGER NOT NULL DEFAULT 0, role INTEGER NOT NULL DEFAULT 0, steam_id TEXT);
+CREATE TABLE active_sessions (guid TEXT PRIMARY KEY, ip TEXT NOT NULL,
+	connected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY(guid) REFERENCES players(guid) ON DELETE CASCADE);
+CREATE TABLE session_history (id INTEGER PRIMARY KEY AUTOINCREMENT, guid TEXT NOT NULL, ip TEXT NOT NULL,
+	connected_at DATETIME NOT NULL, disconnected_at DATETIME NOT NULL, duration_seconds INTEGER NOT NULL,
+	FOREIGN KEY(guid) REFERENCES players(guid) ON DELETE CASCADE);
+CREATE TABLE bans (guid TEXT PRIMARY KEY, player_name TEXT NOT NULL, ip TEXT NOT NULL, reason TEXT NOT NULL,
+	perm INTEGER NOT NULL DEFAULT 0, steam_id TEXT);
+CREATE TABLE player_ips (guid TEXT NOT NULL, ip TEXT NOT NULL, first_seen DATETIME NOT NULL,
+	last_seen DATETIME NOT NULL, PRIMARY KEY (guid, ip),
+	FOREIGN KEY(guid) REFERENCES players(guid) ON DELETE CASCADE);
+CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, at DATETIME NOT NULL, guid TEXT NOT NULL,
+	direction TEXT NOT NULL, line TEXT NOT NULL);
+CREATE TABLE player_notes (guid TEXT PRIMARY KEY, note TEXT NOT NULL, updated_at DATETIME NOT NULL);
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE flows (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, script TEXT NOT NULL,
+	cancel TEXT NOT NULL DEFAULT '', timer TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL DEFAULT '',
+	schedule_enabled INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0);
+`
+
+// TestUpgradeFromPreviousRelease opens a database written by the previous
+// release, as ReCON does on startup, and checks that everything still works
+// with no separate migration step.
+func TestUpgradeFromPreviousRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "players.db")
 	old, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := old.Exec(`CREATE TABLE bans (guid TEXT PRIMARY KEY, player_name TEXT NOT NULL, ip TEXT NOT NULL,
-		reason TEXT NOT NULL, perm INTEGER NOT NULL DEFAULT 0, steam_id TEXT)`); err != nil {
+	if _, err := old.Exec(previousSchema); err != nil {
 		t.Fatal(err)
 	}
+	t0 := time.Date(2026, 9, 1, 20, 0, 0, 0, time.UTC)
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{"INSERT INTO players (guid, username, last_ip, first_seen, last_seen, total_playtime_seconds, role) VALUES (?, 'Survivor', '1.2.3.4', ?, ?, 3600, 1)", []any{testGUID, t0, t0}},
+		{"INSERT INTO players (guid, username, last_ip, first_seen, last_seen) VALUES ('-', 'New Guy (Lobby)', '5.6.7.8', ?, ?)", []any{t0, t0}},
+		{"INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds) VALUES (?, '1.2.3.4', ?, ?, 3600)", []any{testGUID, t0, t0.Add(time.Hour)}},
+		{"INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds) VALUES ('-', '5.6.7.8', ?, ?, 60)", []any{t0, t0.Add(time.Minute)}},
+		{"INSERT INTO player_ips (guid, ip, first_seen, last_seen) VALUES ('-', '5.6.7.8', ?, ?)", []any{t0, t0}},
+		{"INSERT INTO active_sessions (guid, ip, connected_at) VALUES (?, '1.2.3.4', ?)", []any{testGUID, t0}},
+		{"INSERT INTO chat_messages (at, guid, direction, line) VALUES (?, '-', 'in', '(Global) New Guy: hi')", []any{t0}},
+		{"INSERT INTO bans (guid, player_name, ip, reason, perm) VALUES (?, 'Cheater', '9.9.9.9', 'aimbot', 1)", []any{testGUID2}},
+		{"INSERT INTO bans (guid, player_name, ip, reason, perm) VALUES ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'Toxic', '8.8.8.8', 'spam', 0)", nil},
+	} {
+		if _, err := old.Exec(q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
+		}
+	}
 	old.Close()
+
 	db, err := OpenDatabase(path)
+	if err != nil {
+		t.Fatalf("opening the old database: %v", err)
+	}
+	defer db.Close()
+	globalDatabase = db
+	tracker.byID, tracker.ended = map[int]*trackedPlayer{}, map[string]time.Time{}
+	if err := initFlows(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The unverified-player rows are gone, with everything hanging off them.
+	for _, table := range []string{"players", "session_history", "player_ips", "chat_messages"} {
+		var n int
+		db.QueryRow("SELECT COUNT(*) FROM " + table + " WHERE guid = '-'").Scan(&n)
+		if n != 0 {
+			t.Errorf("%s still has %d row(s) under the GUID \"-\"", table, n)
+		}
+	}
+	// Real players keep their history.
+	d, err := db.PlayerDetails(testGUID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	if _, err := db.Exec("UPDATE bans SET expires_unix = 1, be_index = 0"); err != nil {
-		t.Fatalf("new ban columns missing: %v", err)
+	if d.Player.PlaytimeSeconds != 3600 || d.Player.Role != roleMod || d.Sessions.Count != 1 {
+		t.Fatalf("details after upgrade = %+v", d)
 	}
+	// An old open session (no player number, no loaded_at) closes normally.
+	if err := db.CloseSession(testGUID, t0.Add(30*time.Minute), endDisconnected); err != nil {
+		t.Fatal(err)
+	}
+	if h := history(t, db, testGUID); len(h) != 2 || h[1].duration != 1800 || h[1].loaded || h[1].ended != endDisconnected {
+		t.Fatalf("history after upgrade = %+v", h)
+	}
+	// Old bans: the permanent one is permanent; the timed one has no end
+	// until BattlEye's list is read, and is never expired before that.
+	states, err := db.BanStates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := states[testGUID2]; !st.Banned || !st.Perm {
+		t.Errorf("permanent ban = %+v", st)
+	}
+	if st := states["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]; !st.Banned || st.Perm || st.MinutesLeft != -1 {
+		t.Errorf("timed ban = %+v", st)
+	}
+	if n, _ := db.ExpireBans(time.Now().Add(1000 * time.Hour)); n != 0 {
+		t.Errorf("expired %d old timed ban(s) with no known end", n)
+	}
+	// Opening it again (the next restart) changes nothing and doesn't fail.
+	db2, err := OpenDatabase(path)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	db2.Close()
 }
 
 func TestSyncBans(t *testing.T) {

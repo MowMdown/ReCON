@@ -227,6 +227,20 @@ func OpenDatabase(filepath string) (*Database, error) {
 			return nil, fmt.Errorf("failed to add %s.%s: %w", c.table, c.column, err)
 		}
 	}
+	// Earlier releases stored players BattlEye hadn't verified yet under the
+	// GUID "-" (every such player merged into one row). That isn't a player:
+	// drop it, with its sessions and IPs (ON DELETE CASCADE), chat and note.
+	// Does nothing once they're gone.
+	for _, q := range []string{
+		"DELETE FROM players WHERE guid IN ('-', '')",
+		"DELETE FROM chat_messages WHERE guid IN ('-', '')",
+		"DELETE FROM player_notes WHERE guid IN ('-', '')",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to remove unverified-player rows: %w", err)
+		}
+	}
 	return &Database{db}, nil
 }
 
