@@ -880,7 +880,10 @@ function renderDetails(keepDraft) {
 	tb.textContent = '';
 	s.recent.forEach(function (x) {
 		let tr = document.createElement('tr');
-		[fmtStamp(x.connected), x.current ? 'Online now' : fmtStamp(x.disconnected), fmtDuration(x.seconds), x.ip].forEach(function (v, i) {
+		// A kick or ban is noted after the time; a plain disconnect shows just the time.
+		let left = x.current ? 'Online now' : fmtStamp(x.disconnected) +
+			(x.ended === 'kicked' || x.ended === 'banned' ? ' (' + x.ended + ')' : '');
+		[fmtStamp(x.connected), left, fmtDuration(x.seconds), x.ip].forEach(function (v, i) {
 			let td = document.createElement('td');
 			td.textContent = v;
 			if (i === 3) td.className = 'mono';

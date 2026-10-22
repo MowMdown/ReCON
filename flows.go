@@ -262,19 +262,21 @@ var tokenRe = regexp.MustCompile(`\{(\w+)\}`)
 
 // condSubject is something an If can compare. kind decides the operators:
 //
-//	word  the chat message: contains, starts with
-//	text  ==, !=, matches (* wildcard), ignoring case
-//	num   == != > >= < <=
-//	role  like num, with the value picked from Player, Mod, Admin
+//	word   the chat message: contains, starts with, is exactly
+//	text   is, is not, matches (* wildcard), contains, ignoring case
+//	ident  is, is not: a player number or GUID, which have no order
+//	num    = != > >= < <=
+//	role   is, is not, is at least, is at most, with the value picked
+//	       from Player, Mod, Admin (stored as 0, 1, 2)
 type condSubject struct{ kind, need string }
 
 var condSubjects = map[string]condSubject{
 	"message":     {"word", needChat},
 	"player_name": {"text", needPlayer},
-	"player_id":   {"num", needPlayer},
+	"player_id":   {"ident", needPlayer},
 	"player_ping": {"num", needPlayer},
 	"player_ip":   {"text", needPlayer},
-	"player_guid": {"text", needPlayer},
+	"player_guid": {"ident", needPlayer},
 	"player_role": {"role", needPlayer},
 	// How many players are online, from the 5-second player check. Works on
 	// every trigger: "If {players_online} > 0, Kick everyone, else Shut down".
@@ -282,17 +284,24 @@ var condSubjects = map[string]condSubject{
 }
 
 var condOps = map[string][]string{
-	"word": {"has", "starts"},
-	"text": {"eq", "ne", "wild"},
-	"num":  {"eq", "ne", "gt", "ge", "lt", "le"},
-	"role": {"eq", "ne", "gt", "ge", "lt", "le"},
+	"word":  {"has", "starts", "exact"},
+	"text":  {"eq", "ne", "wild", "has"},
+	"ident": {"eq", "ne"},
+	"num":   {"eq", "ne", "gt", "ge", "lt", "le"},
+	"role":  {"eq", "ne", "ge", "le"},
 }
 
-var opText = map[string]string{"has": "contains", "starts": "starts with", "eq": "==", "ne": "!=",
-	"wild": "matches", "gt": ">", "ge": ">=", "lt": "<", "le": "<="}
+// opText is how each kind's operators read on the page and in the run log.
+var opText = map[string]map[string]string{
+	"word":  {"has": "contains", "starts": "starts with", "exact": "is exactly"},
+	"text":  {"eq": "is", "ne": "is not", "wild": "matches", "has": "contains"},
+	"ident": {"eq": "is", "ne": "is not"},
+	"num":   {"eq": "=", "ne": "!=", "gt": ">", "ge": ">=", "lt": "<", "le": "<="},
+	"role":  {"eq": "is", "ne": "is not", "ge": "is at least", "le": "is at most"},
+}
 
 // describeCond writes a condition the way the page shows it, for the run log:
-// {player_ping} >= 500, {player_name} == "Survivor".
+// {player_ping} >= 500, {player_name} is "Survivor", {player_role} is at least Mod.
 func describeCond(b Branch) string {
 	sub := condSubjects[b.Subject]
 	val := b.Value
@@ -300,10 +309,10 @@ func describeCond(b Branch) string {
 	case sub.kind == "role":
 		n, _ := strconv.Atoi(b.Value)
 		val = roleName(n)
-	case sub.kind == "text" && b.Op != "wild":
+	case sub.kind == "text" && b.Op != "wild", sub.kind == "word" && b.Op == "exact":
 		val = `"` + b.Value + `"`
 	}
-	return "{" + b.Subject + "} " + opText[b.Op] + " " + val
+	return "{" + b.Subject + "} " + opText[sub.kind][b.Op] + " " + val
 }
 
 // terms splits a {message} value into words and "quoted phrases", lower case.
@@ -357,8 +366,12 @@ func containsWord(s, t string) bool {
 
 // matchWords checks {message}. contains: any of the words or phrases appears
 // as whole words. starts with: the message's first word is one of the words
-// (so !discord matches "!discord please" but not "!discordx"). Case is ignored.
+// (so !discord matches "!discord please" but not "!discordx"). is exactly: the
+// whole message is the value. Case is ignored.
 func matchWords(op, msg, value string) bool {
+	if op == "exact" {
+		return strings.EqualFold(strings.Join(strings.Fields(msg), " "), strings.Join(strings.Fields(value), " "))
+	}
 	m := strings.ToLower(strings.TrimSpace(msg))
 	first := ""
 	if f := strings.Fields(m); len(f) > 0 {
@@ -394,9 +407,20 @@ func evalCond(b Branch, v string) bool {
 			return strings.EqualFold(v, b.Value)
 		case "ne":
 			return !strings.EqualFold(v, b.Value)
+		case "has":
+			return strings.Contains(strings.ToLower(v), strings.ToLower(b.Value))
 		}
 		return wildMatch(b.Value, v)
+	case "ident":
+		same := strings.EqualFold(v, strings.TrimSpace(b.Value))
+		if a, err1 := strconv.Atoi(v); err1 == nil {
+			if c, err2 := strconv.Atoi(strings.TrimSpace(b.Value)); err2 == nil {
+				same = a == c // player numbers: "03" is 3
+			}
+		}
+		return same == (b.Op == "eq")
 	}
+	// num and role: role values are compared as 0 Player, 1 Mod, 2 Admin.
 	a, err1 := strconv.Atoi(v)
 	c, err2 := strconv.Atoi(strings.TrimSpace(b.Value))
 	if err1 != nil || err2 != nil {
@@ -557,12 +581,20 @@ func (c *stepChecker) checkIf(s *Step, depth int) error {
 		if !okOp {
 			return fmt.Errorf("%s %d: pick an operator", c.where, num)
 		}
-		switch sub.kind {
-		case "num", "role":
+		switch {
+		case sub.kind == "num" || first == "player_id":
 			if _, err := strconv.Atoi(strings.TrimSpace(b.Value)); err != nil {
 				return fmt.Errorf("%s %d: Enter a whole number", c.where, num)
 			}
-		case "word":
+		case sub.kind == "role":
+			if n, err := strconv.Atoi(strings.TrimSpace(b.Value)); err != nil || n < rolePlayer || n > roleAdmin {
+				return fmt.Errorf("%s %d: pick Player, Mod or Admin", c.where, num)
+			}
+		case first == "player_guid":
+			if !guidPattern.MatchString(strings.TrimSpace(b.Value)) {
+				return fmt.Errorf("%s %d: Enter a GUID (32 letters and digits, 0-9 and a-f)", c.where, num)
+			}
+		case sub.kind == "word":
 			if len(terms(b.Value)) == 0 {
 				return fmt.Errorf(`%s %d: Enter a word, several words, or a "quoted phrase"`, c.where, num)
 			}
@@ -661,6 +693,15 @@ func (x *job) value(name string) (string, bool) {
 		return x.p.message, true
 	}
 	return "", false
+}
+
+// condValue is what an If compares: the same as value, except that a role
+// is its number (0 Player, 1 Mod, 2 Admin) so "is at least Mod" can work.
+func (x *job) condValue(name string) (string, bool) {
+	if name == "player_role" && x.p != nil {
+		return strconv.Itoa(x.p.role), true
+	}
+	return x.value(name)
 }
 
 // fill replaces the placeholders in a step's text. Unknown {words} are left
@@ -780,7 +821,7 @@ func (x *job) exec(list []Step) bool {
 		case "if":
 			ran := false
 			for k, b := range s.Branches {
-				v, _ := x.value(b.Subject)
+				v, _ := x.condValue(b.Subject)
 				ok := evalCond(b, v)
 				word := "If "
 				if k > 0 {

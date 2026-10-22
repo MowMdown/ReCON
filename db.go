@@ -21,40 +21,41 @@ import (
 // Every SQL statement in the program lives in this file:
 //
 //   - schema setup (OpenDatabase) and the flows table (EnsureFlowsTable)
-//   - players / sessions / IP history (SyncPlayers, OfflinePlayers, ...)
+//   - players / sessions / IP history (OpenSession, CloseSession, OfflinePlayers, ...)
 //   - player details and admin notes (PlayerDetails, SaveNote)
 //   - chat history (AddChatMessage, ChatHistory)
 //   - SteamIDs (SteamIDByGUID, PlayersBySteamIDs, PendingSteamGUIDs, SetSteamID)
 //   - player roles for the chat commands (PlayerRole, SetPlayerRole, ...)
 //   - settings, such as the chat commands' (Setting, SaveSetting)
-//   - bans (BanUser, SyncBans, BanNames, DeleteBan)
+//   - bans (BanUser, SyncBans, ExpireBans, BanList, BanStates, DeleteBan)
 //   - flows storage (ListFlows, GetFlow, SaveFlow, ...): steps are kept as JSON
 //
 // The bottom section keeps the database in step with the game server: the
-// background poller, the BattlEye -> DB ban mirror (and the in-memory ban
-// status it leaves behind), and the chat recorder. Those are the only parts
-// here that call into rcon.go.
+// background poller, the BattlEye <-> DB ban sync, and the chat recorder.
+// Those are the only parts here that call into rcon.go. Player sessions are
+// driven by the server's messages, in players.go.
 // ============================================================================
 
 type Database struct {
 	*sql.DB
 }
 
+// sqliteParams are applied by the driver to every connection it opens.
+// database/sql keeps a pool of connections, and busy_timeout and foreign_keys
+// only last for the connection they were set on, so setting them with one
+// Exec would leave the others without them. _txlock=immediate takes the write
+// lock when a transaction begins, so a transaction that reads and then writes
+// waits its turn instead of failing with "database is locked".
+const sqliteParams = "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
+
 func OpenDatabase(filepath string) (*Database, error) {
-	db, err := sql.Open("sqlite", filepath)
+	db, err := sql.Open("sqlite", filepath+sqliteParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	pragmas := []string{
-		"PRAGMA journal_mode = WAL;",
-		"PRAGMA busy_timeout = 5000;",
-		"PRAGMA foreign_keys = ON;",
-	}
-	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to apply pragma %q: %w", pragma, err)
-		}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	schema := `
 	CREATE TABLE IF NOT EXISTS players (
@@ -135,6 +136,12 @@ func OpenDatabase(filepath string) (*Database, error) {
 		ON players(steam_id);
 	CREATE INDEX IF NOT EXISTS idx_bans_steam_id
 		ON bans(steam_id);
+	-- GUID lookups are written as lower(guid) = lower(?) so case never
+	-- matters; these let them use an index instead of reading every row.
+	CREATE INDEX IF NOT EXISTS idx_players_guid_lower
+		ON players(lower(guid));
+	CREATE INDEX IF NOT EXISTS idx_bans_guid_lower
+		ON bans(lower(guid));
 
 	-- Read-only views with friendlier column names. The tables above are
 	-- what the app writes to; these are just for browsing in sqlite3.
@@ -201,7 +208,39 @@ func OpenDatabase(filepath string) (*Database, error) {
 		db.Close()
 		return nil, fmt.Errorf("failed to create schema: %w", err)
 	}
+	// Columns added after the first release. CREATE TABLE IF NOT EXISTS
+	// leaves an existing table as it is, so they are added here when missing.
+	for _, c := range []struct{ table, column, decl string }{
+		// The player's number while connected, and when "(Lobby)" left their name.
+		{"active_sessions", "player_id", "INTEGER NOT NULL DEFAULT -1"},
+		{"active_sessions", "loaded_at", "DATETIME"},
+		{"session_history", "loaded_at", "DATETIME"},
+		// How the session ended: disconnected, kicked or banned ('' before this was kept).
+		{"session_history", "ended", "TEXT NOT NULL DEFAULT ''"},
+		// Unix seconds when a timed ban runs out (NULL for permanent bans, or
+		// until the first ban list read), and its position in BattlEye's list.
+		{"bans", "expires_unix", "INTEGER"},
+		{"bans", "be_index", "INTEGER NOT NULL DEFAULT -1"},
+	} {
+		if err := addColumnIfMissing(db, c.table, c.column, c.decl); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to add %s.%s: %w", c.table, c.column, err)
+		}
+	}
 	return &Database{db}, nil
+}
+
+// addColumnIfMissing adds a column to an existing table unless it is there.
+func addColumnIfMissing(db *sql.DB, table, column, decl string) error {
+	var n int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", table, column).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -215,151 +254,100 @@ func (db *Database) ClearActiveSessions() error {
 	return err
 }
 
-func (db *Database) SyncPlayers(currentPlayers []Player) error {
+// Session endings, stored in session_history.ended.
+const (
+	endDisconnected = "disconnected"
+	endKicked       = "kicked"
+	endBanned       = "banned"
+)
+
+// OpenSession records a player coming online (players.go calls it once per
+// session, when their GUID is known): their name and IP, the IP in their IP
+// history, and an open session starting at connectedAt. A session already
+// open for the GUID is left as it is.
+func (db *Database) OpenSession(guid, name, ip string, playerID int, connectedAt time.Time) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	now := time.Now().UTC()
-	activeMap := make(map[string]Player, len(currentPlayers))
-	for _, p := range currentPlayers {
-		if p.GUID == "" {
-			continue
-		}
-		activeMap[p.GUID] = p
+	at := connectedAt.UTC()
+	if _, err := tx.Exec(`
+		INSERT INTO players (guid, username, last_ip, first_seen, last_seen)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(guid) DO UPDATE SET
+			username = excluded.username,
+			last_ip = excluded.last_ip,
+			last_seen = excluded.last_seen`,
+		guid, name, ip, at, at); err != nil {
+		return err
 	}
-	rows, err := tx.Query(
-		"SELECT guid, ip, connected_at FROM active_sessions",
-	)
+	if _, err := tx.Exec(`
+		INSERT INTO player_ips (guid, ip, first_seen, last_seen)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(guid, ip) DO UPDATE SET
+			last_seen = excluded.last_seen`,
+		guid, ip, at, at); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO active_sessions (guid, ip, connected_at, player_id)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(guid) DO NOTHING`,
+		guid, ip, at, playerID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// MarkLoaded records when a player finished loading ("(Lobby)" left their name).
+func (db *Database) MarkLoaded(guid string, at time.Time) error {
+	_, err := db.Exec("UPDATE active_sessions SET loaded_at = ? WHERE guid = ? AND loaded_at IS NULL", at.UTC(), guid)
+	return err
+}
+
+// CloseSession ends a player's open session at `at`: it goes into
+// session_history with how it ended, its length is added to their playtime,
+// and last_seen becomes `at`. Nothing happens if no session is open.
+func (db *Database) CloseSession(guid string, at time.Time, ended string) error {
+	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	type existingSession struct {
-		guid        string
-		ip          string
-		connectedAt time.Time
-	}
-	dbSessions := make(map[string]existingSession)
-	for rows.Next() {
-		var s existingSession
-		if err := rows.Scan(
-			&s.guid,
-			&s.ip,
-			&s.connectedAt,
-		); err != nil {
-			rows.Close()
-			return err
-		}
-		dbSessions[s.guid] = s
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
+	defer tx.Rollback()
+	var ip string
+	var connectedAt time.Time
+	var loadedAt sql.NullTime
+	err = tx.QueryRow("SELECT ip, connected_at, loaded_at FROM active_sessions WHERE guid = ?", guid).Scan(&ip, &connectedAt, &loadedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
 		return err
 	}
-	rows.Close()
-	for guid, sess := range dbSessions {
-		if _, stillOnline := activeMap[guid]; !stillOnline {
-			duration := int(
-				now.Sub(sess.connectedAt).Seconds(),
-			)
-			if duration < 0 {
-				duration = 0
-			}
-			_, err = tx.Exec(`
-				INSERT INTO session_history (
-					guid,
-					ip,
-					connected_at,
-					disconnected_at,
-					duration_seconds
-				)
-				VALUES (?, ?, ?, ?, ?)`,
-				guid,
-				sess.ip,
-				sess.connectedAt,
-				now,
-				duration,
-			)
-			if err != nil {
-				return err
-			}
-			_, err = tx.Exec(`
-				UPDATE players
-				SET
-					last_seen = ?,
-					total_playtime_seconds =
-						total_playtime_seconds + ?
-				WHERE guid = ?`,
-				now,
-				duration,
-				guid,
-			)
-			if err != nil {
-				return err
-			}
-			_, err = tx.Exec(
-				"DELETE FROM active_sessions WHERE guid = ?",
-				guid,
-			)
-			if err != nil {
-				return err
-			}
-		}
+	at = at.UTC()
+	duration := int(at.Sub(connectedAt).Seconds())
+	if duration < 0 {
+		duration = 0
 	}
-	for guid, p := range activeMap {
-		_, err = tx.Exec(`
-			INSERT INTO players (
-				guid,
-				username,
-				last_ip,
-				first_seen,
-				last_seen
-			)
-			VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT(guid) DO UPDATE SET
-				username = excluded.username,
-				last_ip = excluded.last_ip,
-				last_seen = excluded.last_seen`,
-			guid,
-			p.Name,
-			p.IP,
-			now,
-			now,
-		)
-		if err != nil {
-			return err
-		}
-		// Remember every IP this player has connected from.
-		_, err = tx.Exec(`
-			INSERT INTO player_ips (guid, ip, first_seen, last_seen)
-			VALUES (?, ?, ?, ?)
-			ON CONFLICT(guid, ip) DO UPDATE SET
-				last_seen = excluded.last_seen`,
-			guid,
-			p.IP,
-			now,
-			now,
-		)
-		if err != nil {
-			return err
-		}
-		if _, exists := dbSessions[guid]; !exists {
-			_, err = tx.Exec(`
-				INSERT INTO active_sessions (
-					guid,
-					ip,
-					connected_at
-				)
-				VALUES (?, ?, ?)`,
-				guid,
-				p.IP,
-				now,
-			)
-			if err != nil {
-				return err
-			}
-		}
+	var loaded any // NULL when they never finished loading
+	if loadedAt.Valid {
+		loaded = loadedAt.Time.UTC()
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds, loaded_at, ended)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		guid, ip, connectedAt.UTC(), at, duration, loaded, ended); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		UPDATE players
+		SET last_seen = ?, total_playtime_seconds = total_playtime_seconds + ?
+		WHERE guid = ?`,
+		at, duration, guid); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM active_sessions WHERE guid = ?", guid); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -641,6 +629,7 @@ type detailsSession struct {
 	Seconds      int64  `json:"seconds"`
 	IP           string `json:"ip"`
 	Current      bool   `json:"current"`
+	Ended        string `json:"ended,omitempty"` // disconnected, kicked or banned ("" for older sessions)
 }
 
 type sharedPlayer struct {
@@ -754,7 +743,7 @@ func (db *Database) PlayerDetails(guid string) (*playerDetails, error) {
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	rows, err := db.Query(`SELECT connected_at, disconnected_at, duration_seconds, ip
+	rows, err := db.Query(`SELECT connected_at, disconnected_at, duration_seconds, ip, ended
 		FROM session_history WHERE guid = ? ORDER BY id DESC LIMIT ?`, g, recentSessionsKept)
 	if err != nil {
 		return nil, err
@@ -762,7 +751,7 @@ func (db *Database) PlayerDetails(guid string) (*playerDetails, error) {
 	for rows.Next() {
 		var c, x any
 		var s detailsSession
-		if err := rows.Scan(&c, &x, &s.Seconds, &s.IP); err != nil {
+		if err := rows.Scan(&c, &x, &s.Seconds, &s.IP, &s.Ended); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -905,128 +894,164 @@ func (db *Database) ChatHistory(guid string, limit int) ([]chatLine, error) {
 // Bans
 // ---------------------------------------------------------------------------
 
-func (db *Database) BanUser(
-	guid string,
-	playerName string,
-	ip string,
-	reason string,
-	perm int,
-) error {
-	// steam_id is copied from players when the player's SteamID is known.
+// BanUser records a ban ReCON just placed. expires is when a timed ban runs
+// out (ignored for a permanent one). steam_id is copied from players when the
+// player's SteamID is known.
+func (db *Database) BanUser(guid, playerName, ip, reason string, perm bool, expires time.Time) error {
+	var exp any // NULL for a permanent ban
+	if !perm {
+		exp = expires.Unix()
+	}
 	_, err := db.Exec(`
-		INSERT INTO bans (
-			guid,
-			player_name,
-			ip,
-			reason,
-			perm,
-			steam_id
-		)
-		VALUES (?, ?, ?, ?, ?, (SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = lower(?)))
+		INSERT INTO bans (guid, player_name, ip, reason, perm, expires_unix, steam_id)
+		VALUES (?, ?, ?, ?, ?, ?, (SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = lower(?)))
 		ON CONFLICT(guid) DO UPDATE SET
 			player_name = excluded.player_name,
 			ip = excluded.ip,
 			reason = excluded.reason,
 			perm = excluded.perm,
+			expires_unix = excluded.expires_unix,
 			steam_id = COALESCE(NULLIF(bans.steam_id, ''), excluded.steam_id)`,
-		guid,
-		playerName,
-		ip,
-		reason,
-		perm,
-		guid,
-	)
+		strings.ToLower(guid), playerName, ip, reason, boolInt(perm), exp, guid)
 	return err
 }
 
-// SyncBans mirrors the BattlEye GUID ban list into the bans table:
-// bans missing from the DB are inserted (name/IP/SteamID looked up from players),
-// existing rows get their reason/perm refreshed, and rows no longer in
-// BattlEye (expired or removed) are deleted. Callers must pass a list
-// parsed from a complete, recognised `bans` reply.
-func (db *Database) SyncBans(bans []Ban) error {
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// storedBan is a bans row that SyncBans wants put back on the server.
+type storedBan struct {
+	GUID   string
+	Reason string
+}
+
+// SyncBans brings the bans table in line with BattlEye's GUID ban list, read
+// at readAt:
+//   - a ban BattlEye lists is added if missing (name, IP and SteamID looked up
+//     from players), or has its reason, type and list position refreshed. A
+//     timed ban's expiry is readAt plus the minutes left, re-set only when it
+//     moves by more than a minute (the minutes are rounded).
+//   - a timed ban BattlEye no longer lists (it ran out, or was removed some
+//     other way) is deleted.
+//   - a permanent ban BattlEye no longer lists is kept and returned: only
+//     Unban on the web pages removes a permanent ban, so the caller puts it
+//     back with addBan.
+//
+// Callers must pass a list parsed from a complete, recognised `bans` reply.
+func (db *Database) SyncBans(bans []Ban, readAt time.Time) ([]storedBan, error) {
 	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
-	live := make(map[string]struct{}, len(bans))
+	live := make(map[string]Ban, len(bans))
 	for _, b := range bans {
 		g := strings.ToLower(b.GUID)
-		if _, dup := live[g]; dup {
-			continue // BattlEye can list the same GUID more than once
+		if old, dup := live[g]; dup && !longerBan(b, old) {
+			continue // BattlEye can list the same GUID more than once: keep the longest
 		}
-		live[g] = struct{}{}
-		perm := 0
-		if b.Perm {
-			perm = 1
+		live[g] = b
+	}
+	for g, b := range live {
+		var exp any // NULL for a permanent ban
+		if !b.Perm {
+			m, _ := strconv.Atoi(b.Minutes)
+			exp = readAt.Add(time.Duration(m) * time.Minute).Unix()
 		}
 		_, err := tx.Exec(`
-			INSERT INTO bans (guid, player_name, ip, reason, perm, steam_id)
+			INSERT INTO bans (guid, player_name, ip, reason, perm, expires_unix, be_index, steam_id)
 			VALUES (
 				?,
-				COALESCE((SELECT username FROM players WHERE guid = ?), 'Unknown'),
-				COALESCE((SELECT last_ip FROM players WHERE guid = ?), ''),
-				?, ?,
+				COALESCE((SELECT username FROM players WHERE lower(guid) = ?), 'Unknown'),
+				COALESCE((SELECT last_ip FROM players WHERE lower(guid) = ?), ''),
+				?, ?, ?, ?,
 				(SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = ?)
 			)
 			ON CONFLICT(guid) DO UPDATE SET
 				reason = excluded.reason,
 				perm = excluded.perm,
+				be_index = excluded.be_index,
+				expires_unix = CASE
+					WHEN excluded.perm = 1 THEN NULL
+					WHEN bans.expires_unix IS NULL OR abs(bans.expires_unix - excluded.expires_unix) > 60 THEN excluded.expires_unix
+					ELSE bans.expires_unix
+				END,
 				steam_id = COALESCE(NULLIF(bans.steam_id, ''), excluded.steam_id)`,
-			g, g, g, b.Reason, perm, g,
+			g, g, g, b.Reason, boolInt(b.Perm), exp, b.Index, g,
 		)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	rows, err := tx.Query("SELECT guid FROM bans")
+	rows, err := tx.Query("SELECT guid, perm, reason FROM bans")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var stale []string
+	var gone []string
+	var readd []storedBan
 	for rows.Next() {
-		var g string
-		if err := rows.Scan(&g); err != nil {
+		var g, reason string
+		var perm int
+		if err := rows.Scan(&g, &perm, &reason); err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
-		if _, ok := live[strings.ToLower(g)]; !ok {
-			stale = append(stale, g)
+		if _, ok := live[strings.ToLower(g)]; ok {
+			continue
+		}
+		if perm == 1 {
+			readd = append(readd, storedBan{GUID: strings.ToLower(g), Reason: reason})
+		} else {
+			gone = append(gone, g)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return err
+		return nil, err
 	}
 	rows.Close()
 
-	for _, g := range stale {
+	for _, g := range gone {
 		if _, err := tx.Exec("DELETE FROM bans WHERE guid = ?", g); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-// BanNames returns guid (lowercase) -> player_name for every row in bans.
-func (db *Database) BanNames() (map[string]string, error) {
-	rows, err := db.Query("SELECT guid, player_name FROM bans")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	names := map[string]string{}
-	for rows.Next() {
-		var g, n string
-		if err := rows.Scan(&g, &n); err != nil {
 			return nil, err
 		}
-		names[strings.ToLower(g)] = n
 	}
-	return names, rows.Err()
+	for _, b := range readd {
+		if _, err := tx.Exec("UPDATE bans SET be_index = -1 WHERE guid = ?", b.GUID); err != nil {
+			return nil, err
+		}
+	}
+	return readd, tx.Commit()
+}
+
+// ExpireBans deletes the timed bans whose time ran out by `now`.
+func (db *Database) ExpireBans(now time.Time) (int64, error) {
+	res, err := db.Exec("DELETE FROM bans WHERE perm = 0 AND expires_unix IS NOT NULL AND expires_unix <= ?", now.Unix())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// NextBanExpiry is when the next timed ban runs out (Unix seconds), or 0 when
+// no timed ban has a known end.
+func (db *Database) NextBanExpiry() (int64, error) {
+	var next sql.NullInt64
+	err := db.QueryRow("SELECT MIN(expires_unix) FROM bans WHERE perm = 0 AND expires_unix IS NOT NULL").Scan(&next)
+	return next.Int64, err
+}
+
+// IsBanned reports whether a GUID (case-insensitive) is in the bans table.
+func (db *Database) IsBanned(guid string) (bool, error) {
+	var n int
+	err := db.QueryRow("SELECT COUNT(*) FROM bans WHERE lower(guid) = lower(?)", guid).Scan(&n)
+	return n > 0, err
 }
 
 // DeleteBan removes a ban row by GUID (case-insensitive).
@@ -1035,24 +1060,77 @@ func (db *Database) DeleteBan(guid string) error {
 	return err
 }
 
-// storedBans reads the bans table as ban states (permanent vs timed is
-// known, the minutes left are not). Used before the first BattlEye read.
-func (db *Database) storedBans() (map[string]banState, error) {
-	rows, err := db.Query("SELECT guid, reason, perm FROM bans")
+// banColumns and scanBan read one bans row for the pages.
+const banColumns = "lower(guid), player_name, reason, perm, expires_unix, be_index"
+
+func scanBan(sc interface{ Scan(...any) error }, now time.Time) (Ban, banState, error) {
+	var b Ban
+	var perm int
+	var exp sql.NullInt64
+	if err := sc.Scan(&b.GUID, &b.Name, &b.Reason, &perm, &exp, &b.Index); err != nil {
+		return b, banState{}, err
+	}
+	b.Perm = perm == 1
+	st := banState{Banned: true, Perm: b.Perm, MinutesLeft: -1, Reason: b.Reason}
+	switch {
+	case b.Perm:
+		b.Minutes = "perm"
+	case exp.Valid:
+		left := int((exp.Int64 - now.Unix() + 59) / 60) // round up: 30 seconds left shows as 1 minute
+		st.MinutesLeft = max(left, 0)
+		b.Minutes = strconv.Itoa(st.MinutesLeft)
+	default:
+		b.Minutes = "?" // timed, but not read from BattlEye yet
+	}
+	return b, st, nil
+}
+
+// BanList returns every ban for the Bans page, in BattlEye's list order
+// (bans not placed in BattlEye's list yet go last).
+func (db *Database) BanList() ([]Ban, error) {
+	rows, err := db.Query("SELECT " + banColumns + " FROM bans ORDER BY be_index < 0, be_index, player_name COLLATE NOCASE")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]banState{}
+	now := time.Now()
+	out := []Ban{}
 	for rows.Next() {
-		var g, reason string
-		var perm int
-		if err := rows.Scan(&g, &reason, &perm); err != nil {
+		b, _, err := scanBan(rows, now)
+		if err != nil {
 			return nil, err
 		}
-		out[strings.ToLower(g)] = banState{Banned: true, Perm: perm == 1, MinutesLeft: -1, Reason: reason}
+		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// BanStates returns every banned GUID's status, by lower-case GUID.
+func (db *Database) BanStates() (map[string]banState, error) {
+	rows, err := db.Query("SELECT " + banColumns + " FROM bans")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	now := time.Now()
+	out := map[string]banState{}
+	for rows.Next() {
+		b, st, err := scanBan(rows, now)
+		if err != nil {
+			return nil, err
+		}
+		out[b.GUID] = st
+	}
+	return out, rows.Err()
+}
+
+// BanState is one GUID's ban status (Banned false when not banned).
+func (db *Database) BanState(guid string) (banState, error) {
+	_, st, err := scanBan(db.QueryRow("SELECT "+banColumns+" FROM bans WHERE lower(guid) = lower(?)", guid), time.Now())
+	if errors.Is(err, sql.ErrNoRows) {
+		return banState{MinutesLeft: -1}, nil
+	}
+	return st, err
 }
 
 // ---------------------------------------------------------------------------
@@ -1187,60 +1265,55 @@ func (db *Database) DeleteFlow(id int64) error {
 // list and delete a ban that was just added.
 var banListLock sync.Mutex
 
-// syncBanList reads the BattlEye list and mirrors it into the DB, and keeps
-// it in memory for the ban status the pages show (rememberBans).
-// Holds banListLock for the whole read+mirror so it can't interleave with a
-// ban/unban. Return values matter to callers:
-//   - (nil, err)   -> couldn't read the live list at all
-//   - (bans, err)  -> list was read fine, but the DB mirror failed
-//   - (bans, nil)  -> fully synced
-func syncBanList() ([]Ban, error) {
+// banSyncEvery is how often the poller reads BattlEye's ban list. It also
+// reads it after every RCON login (bansStale), so after a server restart.
+const banSyncEvery = 5 * time.Minute
+
+// bansStale is set after each RCON login (connectShared, reloginShared in
+// rcon.go); the poller then reads the ban list at its next good poll.
+var bansStale atomic.Bool
+
+// syncBanList reads BattlEye's ban list and brings the bans table in line
+// with it (SyncBans), then puts back any permanent ban the server has lost
+// (`addBan <guid> 0 <reason>`) and saves the list with writeBans. Holds
+// banListLock so it can't interleave with a ban or unban.
+func syncBanList() error {
 	banListLock.Lock()
 	defer banListLock.Unlock()
+	readAt := time.Now()
 	bans, err := readBanList()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	rememberBans(bans)
-	if err := globalDatabase.SyncBans(bans); err != nil {
-		return bans, err
+	readd, err := globalDatabase.SyncBans(bans, readAt)
+	refreshBanExpiry()
+	if err != nil {
+		return err
 	}
-	return bans, nil
+	added := 0
+	for _, b := range readd {
+		cmd := strings.TrimSpace(fmt.Sprintf("addBan %s 0 %s", b.GUID, cleanReason(b.Reason)))
+		_, acked, err := runShared(cmd, 1500*time.Millisecond, false, "bans")
+		if err != nil || !acked {
+			log.Printf("bans: re-adding permanent ban %s failed (acked=%v err=%v)", b.GUID, acked, err)
+			continue
+		}
+		log.Printf("bans: re-added permanent ban %s (missing from BattlEye's list)", b.GUID)
+		added++
+	}
+	if added > 0 {
+		runShared("writeBans", 1500*time.Millisecond, false, "bans") // persist bans.txt, best effort
+	}
+	return nil
 }
 
 // banState is one player's ban as the pages show it. MinutesLeft is -1 when
-// it isn't known (a permanent ban, or only the database copy is available).
+// it isn't known (a permanent ban, or a timed one not read from BattlEye yet).
 type banState struct {
 	Banned      bool   `json:"banned"`
 	Perm        bool   `json:"perm"`
 	MinutesLeft int    `json:"minutesLeft"`
 	Reason      string `json:"reason"`
-}
-
-// banCache is the BattlEye ban list as last read by syncBanList, by
-// lower-case GUID, so the pages can show "Banned - 2d 4h left" without
-// asking the server each time.
-var banCache = struct {
-	sync.Mutex
-	ok     bool
-	readAt time.Time
-	byGUID map[string]Ban
-}{}
-
-// rememberBans keeps a freshly read ban list. A GUID listed more than once
-// keeps its longest ban.
-func rememberBans(bans []Ban) {
-	m := make(map[string]Ban, len(bans))
-	for _, b := range bans {
-		g := strings.ToLower(b.GUID)
-		if old, dup := m[g]; dup && !longerBan(b, old) {
-			continue
-		}
-		m[g] = b
-	}
-	banCache.Lock()
-	banCache.ok, banCache.readAt, banCache.byGUID = true, time.Now(), m
-	banCache.Unlock()
 }
 
 // longerBan reports whether a outlasts b.
@@ -1253,36 +1326,9 @@ func longerBan(a, b Ban) bool {
 	return am > bm
 }
 
-// stateOf turns a ban list entry into a banState, counting down the minutes
-// since the list was read.
-func stateOf(b Ban, readAt time.Time) banState {
-	st := banState{Banned: true, Perm: b.Perm, MinutesLeft: -1, Reason: b.Reason}
-	if !b.Perm {
-		if m, err := strconv.Atoi(b.Minutes); err == nil {
-			left := m - int(time.Since(readAt)/time.Minute)
-			if left < 0 {
-				left = 0 // expired since the last read; gone at the next sync
-			}
-			st.MinutesLeft = left
-		}
-	}
-	return st
-}
-
-// banStatuses returns every banned GUID's status. Before the first ban list
-// read it falls back to the bans table.
+// banStatuses returns every banned GUID's status, from the bans table.
 func banStatuses() map[string]banState {
-	banCache.Lock()
-	if banCache.ok {
-		out := make(map[string]banState, len(banCache.byGUID))
-		for g, b := range banCache.byGUID {
-			out[g] = stateOf(b, banCache.readAt)
-		}
-		banCache.Unlock()
-		return out
-	}
-	banCache.Unlock()
-	out, err := globalDatabase.storedBans()
+	out, err := globalDatabase.BanStates()
 	if err != nil {
 		log.Printf("bans: reading the bans table: %v", err)
 		return map[string]banState{}
@@ -1292,10 +1338,45 @@ func banStatuses() map[string]banState {
 
 // banStatusOf is one player's ban status (Banned false when not banned).
 func banStatusOf(guid string) banState {
-	if st, ok := banStatuses()[strings.ToLower(guid)]; ok {
-		return st
+	st, err := globalDatabase.BanState(guid)
+	if err != nil {
+		log.Printf("bans: reading %s: %v", guid, err)
+		return banState{MinutesLeft: -1}
 	}
-	return banState{MinutesLeft: -1}
+	return st
+}
+
+// nextBanExpiry is when the next timed ban runs out (Unix seconds, 0 for
+// none), so the poller only deletes expired bans when one is due.
+var nextBanExpiry atomic.Int64
+
+// refreshBanExpiry re-reads nextBanExpiry after the bans table changed.
+func refreshBanExpiry() {
+	next, err := globalDatabase.NextBanExpiry()
+	if err != nil {
+		log.Printf("bans: reading the next expiry: %v", err)
+		return
+	}
+	nextBanExpiry.Store(next)
+}
+
+// expireDueBans deletes timed bans whose time has run out, if one is due.
+// BattlEye drops them by itself, and nothing ever adds one back.
+func expireDueBans(now time.Time) {
+	if next := nextBanExpiry.Load(); next == 0 || now.Unix() < next {
+		return
+	}
+	banListLock.Lock()
+	defer banListLock.Unlock()
+	n, err := globalDatabase.ExpireBans(now)
+	if err != nil {
+		log.Printf("bans: deleting expired bans: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("bans: %d timed ban(s) ran out", n)
+	}
+	refreshBanExpiry()
 }
 
 // guidForChat finds who wrote a chat line: an online player with that name,
@@ -1343,30 +1424,33 @@ var (
 	rconFails  atomic.Int32
 )
 
-// startBackgroundSync tracks players (and periodically the ban list) in the
-// background so the DB stays current without any web page open, and starts
-// the chat recorder. It is the only caller of SyncPlayers.
+// startBackgroundSync keeps the database in step with the game server
+// without any web page open: it starts the chat recorder and the player
+// tracker (players.go), then polls in the background.
 //
 // Every `interval`:
+//   - Delete timed bans that have run out, if one is due.
 //   - Poll `players` (single attempt, 3s wait).
 //   - On failure, count consecutive failures. At exactly 3 in a row the server
-//     is assumed down and SyncPlayers(nil) closes all open sessions once, so
+//     is assumed down: every open session is closed once (serverLost), so
 //     playtime stops accruing while it's offline. From the 3rd miss on, each
 //     round logs in again on the same RCON socket (reloginShared, rcon.go).
-//   - On success, reset the failure counter, sync the parsed list into the DB,
-//     start SteamID searches for new players (auto mode, steamPlayersSeen)
-//     and pass it to playersPolled, which starts player-join flows.
-//   - On the 1st poll and every 6th after (~30s at a 5s interval), also
-//     reconcile the ban list, since it changes rarely.
+//   - On success, reset the failure counter and hand the list to the tracker
+//     (playersPolledTracker), the SteamID search (auto mode) and the flows
+//     (playersPolled, which starts player-join flows).
+//   - Read the ban list after an RCON login and every banSyncEvery.
 func startBackgroundSync(interval time.Duration) {
 	startChatRecorder()
+	startPlayerTracker()
+	refreshBanExpiry()
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		fails := 0
-		n := 0
+		var lastBanSync time.Time
 		for range t.C {
-			n++
+			expireDueBans(time.Now())
+			sentAt := time.Now()
 			out, acked, err := runShared("players", 3*time.Second, false, "")
 			rconPolled.Store(true)
 			if err != nil || !acked {
@@ -1375,9 +1459,7 @@ func startBackgroundSync(interval time.Duration) {
 				// Server probably down: close open sessions once so
 				// playtime doesn't keep accruing while it's offline.
 				if fails == 3 {
-					if err := globalDatabase.SyncPlayers(nil); err != nil {
-						log.Printf("poller: close sessions: %v", err)
-					}
+					serverLost()  // players.go
 					playersLost() // greet everyone again when they reconnect (flows.go)
 				}
 				// From the 3rd miss on, log in again on the same socket each
@@ -1391,15 +1473,14 @@ func startBackgroundSync(interval time.Duration) {
 			fails = 0
 			rconFails.Store(0)
 			players := parsePlayers(out)
-			if err := globalDatabase.SyncPlayers(players); err != nil {
-				log.Printf("poller: sync: %v", err)
-			}
-			steamPlayersSeen(players) // STEAM_SEARCH_MODE=auto: find new players' SteamIDs (steam.go)
-			playersPolled(players) // keeps the list for flows and chat commands, starts join flows (flows.go)
-			// Ban list changes rarely: reconcile at start and every 6th poll (~30s).
-			if n%6 == 1 {
-				if _, err := syncBanList(); err != nil {
+			playersPolledTracker(players, sentAt) // sessions (players.go)
+			steamPlayersSeen(players)             // STEAM_SEARCH_MODE=auto: find new players' SteamIDs (steam.go)
+			playersPolled(players)                // keeps the list for flows and chat commands, starts join flows (flows.go)
+			if bansStale.Swap(false) || time.Since(lastBanSync) >= banSyncEvery {
+				lastBanSync = time.Now()
+				if err := syncBanList(); err != nil {
 					log.Printf("poller: bans: %v", err)
+					lastBanSync = time.Now().Add(time.Minute - banSyncEvery) // try again in a minute
 				}
 			}
 		}

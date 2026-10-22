@@ -74,7 +74,7 @@ async function refresh() {
 		document.getElementById('bans').innerHTML = d.bans.map(function(b) {
 			let n = esc(b.name);
 			return '<tr>' +
-				'<td>' + b.index + '</td>' +
+				'<td>' + (b.index >= 0 ? b.index : '-') + '</td>' +
 				'<td title="' + n + '">' + n + '</td>' +
 				'<td class="mono">' + esc(b.guid) + '</td>' +
 				'<td>' + fmtMinutes(b) + '</td>' +

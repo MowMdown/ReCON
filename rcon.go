@@ -450,6 +450,7 @@ func connectShared() (*persistentConnection, error) {
 	}
 	_, acked, uerr := s.runRaw("#unlock", 2*time.Second)
 	log.Printf("rcon: logged in, sent #unlock (acked=%v err=%v)", acked, uerr)
+	bansStale.Store(true) // the server may have restarted: re-read its ban list (db.go)
 	sharedConnection.connection = s
 	return s, nil
 }
@@ -471,6 +472,7 @@ func reloginShared() {
 	}
 	_, acked, uerr := c.runRaw("#unlock", 2*time.Second)
 	log.Printf("rcon: no reply from the server; logged in again on the same connection, sent #unlock (acked=%v err=%v)", acked, uerr)
+	bansStale.Store(true)
 }
 
 // runShared runs a command on the shared session.
@@ -504,10 +506,13 @@ func runShared(command string, wait time.Duration, allowRetry bool, logAs string
 	}
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		more := attempt+1 < maxAttempts // only pause when another attempt follows
 		s, err := connectShared()
 		if err != nil {
 			lastErr = err
-			time.Sleep(1 * time.Second)
+			if more {
+				time.Sleep(1 * time.Second)
+			}
 			continue
 		}
 		out, acked, err := s.runRaw(command, wait)
@@ -518,7 +523,7 @@ func runShared(command string, wait time.Duration, allowRetry bool, logAs string
 			return out, true, nil
 		}
 		lastErr = err // nil when the command was merely unacknowledged
-		if allowRetry {
+		if more {
 			time.Sleep(1 * time.Second)
 		}
 	}
@@ -663,7 +668,9 @@ func (h *eventHub) publish(ev ServerEvent) {
 	h.seq++
 	ev.Seq = h.seq
 	h.recent = append(h.recent, ev)
-	if len(h.recent) > recentEventsKept {
+	// Trim only once twice the limit has built up, so the copy happens once
+	// per recentEventsKept events instead of on every one.
+	if len(h.recent) >= 2*recentEventsKept {
 		h.recent = append([]ServerEvent(nil), h.recent[len(h.recent)-recentEventsKept:]...)
 	}
 	for ch := range h.subs {
@@ -713,7 +720,11 @@ func (h *eventHub) afterWithLast(seq int64) ([]ServerEvent, int64) {
 		seq = 0 // ReCON restarted since the caller last asked
 	}
 	out := []ServerEvent{}
-	for _, ev := range h.recent {
+	kept := h.recent
+	if len(kept) > recentEventsKept {
+		kept = kept[len(kept)-recentEventsKept:]
+	}
+	for _, ev := range kept {
 		if ev.Seq > seq {
 			out = append(out, ev)
 		}
@@ -783,6 +794,9 @@ func parsePlayers(out string) []Player {
 			continue
 		}
 		guid, _, _ := strings.Cut(fields[3], "(") // strip the (OK)/(?) suffix
+		if !guidPattern.MatchString(guid) {
+			guid = "" // "-": not verified yet; picked up on a later poll
+		}
 		name := strings.Join(fields[4:], " ")
 		players = append(players, Player{ID: id, IP: host, Port: port, Ping: ping, GUID: guid, Name: name})
 	}

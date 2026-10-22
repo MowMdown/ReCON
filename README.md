@@ -153,7 +153,7 @@ Details works for online and offline players. It has these tabs:
 | Tab           | Shows |
 | ------------- | ----- |
 | Overview      | First and last seen, total time, sessions, average session, last IP, ban status, and a warning when the player shares an IP with anyone else |
-| Sessions      | Each visit: connected, disconnected, duration and IP |
+| Sessions      | Each visit: connected, disconnected (noted when they were kicked or banned), duration and IP |
 | IPs           | Every IP they used, and anyone else seen on the same IP. Names are links to that player's details |
 | Steam Profile | Their Steam account (see [Steam profiles](#6-steam-profiles)) |
 | Chat          | Their chat history. While they're online you can message them from here |
@@ -169,6 +169,8 @@ The **Ban** / **Unban** button at the bottom works whether the player is online 
 ### Server Bans: `/bans`
 
 Lists the server's GUID bans with the player's name, time left and reason, refreshed every 10 seconds. A GUID ReCON has never seen shows as *Unknown*. **Unban** removes every entry for that GUID and saves the ban file.
+
+The list comes from ReCON's database, which follows the server's ban list: ReCON reads the list when it logs in to RCON (so after every server restart) and every 5 minutes. A ban added on the server some other way shows up at the next read. A timed ban leaves the list when its time runs out, as it does on the server. A **permanent** ban only leaves through **Unban** here: if it goes missing from the server's list, ReCON adds it back.
 
 **Ban Player** (top right) bans anyone who has ever played on the server, online or not. Pick them by name (online players are marked, and the start of the GUID tells apart players with the same name), enter a reason (the player sees it), and leave the duration at **0 for permanent** or enter minutes. An online player is kicked straight away.
 
@@ -255,10 +257,11 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 
 | Compare | Operators |
 | ------- | --------- |
-| `{message}` | **contains** any of the words, or a `"quoted phrase"`, as whole words. **starts with**: the first word is one of the words, so `!discord` matches "!discord please" but not "!discordx". Case is ignored |
-| `{player_name}` `{player_ip}` `{player_guid}` | `==` `!=` ignoring case, or **matches** with `*` wildcards: `*admin*`, `192.168.*` |
-| `{player_id}` `{player_ping}` `{players_online}` | `==` `!=` `>` `>=` `<` `<=` |
-| `{player_role}` | The same, against Player, Mod or Admin (Player < Mod < Admin) |
+| `{message}` | **contains** any of the words, or a `"quoted phrase"`, as whole words. **starts with**: the first word is one of the words, so `!discord` matches "!discord please" but not "!discordx". **is exactly**: the whole message is the value. Case is ignored |
+| `{player_name}` `{player_ip}` | **is** / **is not** ignoring case, **matches** with `*` wildcards (`*admin*`, `192.168.*`), or **contains** |
+| `{player_id}` `{player_guid}` | **is** / **is not** |
+| `{player_ping}` `{players_online}` | `=` `!=` `>` `>=` `<` `<=` |
+| `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Mod or Admin (Player < Mod < Admin) |
 
 ![If / Else in the editor](docs/screenshots/flows-edit-if.png)
 
@@ -496,7 +499,8 @@ ReCON is a single Go program with no dependencies besides the SQLite driver.
 | `main.go` | Startup, configuration and the command-line tool |
 | `rcon.go` | The BattlEye RCON protocol, the shared session and server messages |
 | `web.go` | HTTP routes, the JSON API and page rendering |
-| `db.go` | SQLite storage and the poller that mirrors the server into it |
+| `db.go` | SQLite storage and the poller that keeps it in step with the server |
+| `players.go` | Player sessions, from the server's connect, GUID, kick and disconnect messages |
 | `flows.go` | Flows (steps, triggers, runner, scheduler) and the chat commands |
 | `steam.go` | SteamID lookups and Steam profiles |
 | `templates/` | The HTML pages, embedded into the binary at build time |
