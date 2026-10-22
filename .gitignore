@@ -1,0 +1,38 @@
+# Build output (go build names the binary after the module)
+/recon
+/recon.exe
+/bin/
+/dist/
+
+# Go test and profiling output
+*.test
+*.out
+*.prof
+coverage.*
+/vendor/
+go.work
+go.work.sum
+
+# Runtime data: the SQLite database (players.db plus WAL/SHM files)
+# and steam2guid lookup tables, if run outside Docker
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+/data/
+steam2guid-*.bin
+
+# Secrets (docker-compose.yaml reads RCON_PASSWORD*, STEAM_API_KEY from .env)
+.env
+.env.*
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
