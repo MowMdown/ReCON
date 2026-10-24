@@ -880,62 +880,6 @@ func (db *Database) AddChatMessage(at time.Time, guid, direction, line string) e
 	return err
 }
 
-// lastChat is the newest line a player wrote in chat.
-type lastChat struct {
-	Text    string    // what they typed, without the "(Global) Name: " prefix
-	Channel string    // Global, Side, Direct, Vehicle, ...
-	At      time.Time // when it was sent
-}
-
-// LastChats returns, by lower-case GUID, the newest line each given player
-// wrote in chat during their current session (the open session in
-// active_sessions). Messages ReCON sent to them don't count, and neither does
-// anything from an earlier session: a player who hasn't chatted since they
-// connected is left out. The Players page asks only for the players online.
-func (db *Database) LastChats(guids []string) (map[string]lastChat, error) {
-	out := map[string]lastChat{}
-	if len(guids) == 0 {
-		return out, nil
-	}
-	args := make([]any, 0, len(guids)+1)
-	args = append(args, chatIn)
-	for _, g := range guids {
-		args = append(args, strings.ToLower(g))
-	}
-	rows, err := db.Query(`
-		SELECT c.guid, c.at, c.line, a.connected_at
-		FROM chat_messages c
-		JOIN active_sessions a ON a.guid = c.guid
-		WHERE c.id IN (
-			SELECT MAX(id) FROM chat_messages
-			WHERE direction = ? AND guid IN (?`+strings.Repeat(",?", len(guids)-1)+`)
-			GROUP BY guid
-		)`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var g, line string
-		var at, since any
-		if err := rows.Scan(&g, &at, &line, &since); err != nil {
-			return nil, err
-		}
-		// Times are compared here, not in SQL: they're stored as text that
-		// doesn't sort reliably.
-		sent := unixOf(at)
-		if sent < unixOf(since) {
-			continue // their newest line is from an earlier session
-		}
-		c := lastChat{Text: line, At: time.Unix(sent, 0)}
-		if ev := parseServerMessage(line, c.At); ev.Kind == eventChat {
-			c.Text, c.Channel = ev.Message, ev.Channel
-		}
-		out[g] = c
-	}
-	return out, rows.Err()
-}
-
 // ChatHistory returns a player's newest `limit` lines, oldest first.
 func (db *Database) ChatHistory(guid string, limit int) ([]chatLine, error) {
 	rows, err := db.Query(`

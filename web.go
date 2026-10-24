@@ -288,20 +288,12 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 			players[i].Role = roles[strings.ToLower(players[i].GUID)]
 		}
 	}
-	// The Last Message column: the newest line each online player wrote this session.
-	guids := make([]string, 0, len(players))
-	for _, p := range players {
-		if p.GUID != "" {
-			guids = append(guids, p.GUID)
-		}
-	}
-	if last, err := globalDatabase.LastChats(guids); err != nil {
-		log.Printf("error reading last chat lines: %v", err)
-	} else {
-		for i := range players {
-			if c, ok := last[strings.ToLower(players[i].GUID)]; ok {
-				players[i].LastMessage, players[i].LastMessageChannel, players[i].LastMessageUnix = c.Text, c.Channel, c.At.Unix()
-			}
+	// The Last Message column: the newest line each online player wrote
+	// this session, kept in memory by the player tracker (players.go).
+	last := lastChats()
+	for i := range players {
+		if c, ok := last[players[i].ID]; ok && strings.EqualFold(c.guid, players[i].GUID) {
+			players[i].LastMessage, players[i].LastMessageChannel, players[i].LastMessageUnix = c.chat.Text, c.chat.Channel, c.chat.At.Unix()
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

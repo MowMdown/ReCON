@@ -648,49 +648,41 @@ func TestConnectSharedPacesNewSockets(t *testing.T) {
 	}
 }
 
-func TestLastChatsCurrentSessionOnly(t *testing.T) {
+func TestLastChatFromServerMessages(t *testing.T) {
 	db := testDB(t)
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	const guid3 = "0000000000000000000000000000beef"
-	// Survivor's session began at t0+30s; Quiet's at t0; Old Timer's at t0+10m.
-	for _, s := range []struct {
-		guid string
-		at   time.Time
-	}{{testGUID, t0.Add(30 * time.Second)}, {testGUID2, t0}, {guid3, t0.Add(10 * time.Minute)}} {
-		if err := db.OpenSession(s.guid, "name", "1.2.3.4", 1, s.at); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, c := range []struct {
-		at        time.Time
-		guid, dir string
-		line      string
-	}{
-		{t0, testGUID, chatIn, "(Global) Survivor: from last session"},
-		{t0.Add(time.Minute), testGUID, chatIn, "(Side) Survivor: anyone at NWAF?"},
-		{t0.Add(2 * time.Minute), testGUID, chatOut, "> say 3 hello from the admins"},
-		{t0.Add(time.Minute), testGUID2, chatOut, "> say 4 welcome"},
-		{t0.Add(5 * time.Minute), guid3, chatIn, "(Global) Old Timer: before they reconnected"},
-	} {
-		if err := db.AddChatMessage(c.at, c.guid, c.dir, c.line); err != nil {
-			t.Fatal(err)
-		}
-	}
-	last, err := db.LastChats([]string{strings.ToUpper(testGUID), testGUID2, guid3})
-	if err != nil {
+	line("Player #0 Survivor (1.2.3.4:2304) connected", t0)
+	line("Player #0 Survivor - BE GUID: "+testGUID, t0)
+	line("Player #1 Quiet (5.6.7.8:2304) connected", t0)
+	line("Player #1 Quiet - BE GUID: "+testGUID2, t0)
+
+	line("(Global) Survivor: first", t0.Add(time.Minute))
+	line("(Side) Survivor: anyone at NWAF?", t0.Add(2*time.Minute))
+	// ReCON's replies are commands it sends, not lines from the server, and
+	// are only written to the chat history.
+	if err := db.AddChatMessage(t0.Add(3*time.Minute), testGUID, chatOut, "> say 0 hello from the admins"); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := last[testGUID]
-	if !ok || got.Text != "anyone at NWAF?" || got.Channel != "Side" || !got.At.Equal(t0.Add(time.Minute)) {
-		t.Fatalf("last chat = %+v (a reply sent to them must not count)", got)
+	last := lastChats()
+	if c := last[0]; c.guid != testGUID || c.chat.Text != "anyone at NWAF?" || c.chat.Channel != "Side" || !c.chat.At.Equal(t0.Add(2*time.Minute)) {
+		t.Fatalf("Survivor's last chat = %+v", c)
 	}
-	if _, ok := last[testGUID2]; ok {
-		t.Fatal("a player who only received messages has a last message")
+	if _, ok := last[1]; ok {
+		t.Fatal("a player who hasn't chatted has a last message")
 	}
-	if _, ok := last[guid3]; ok {
-		t.Fatal("a message from an earlier session is shown")
+
+	// Two players with the same name: the line can't be placed, so neither gets it.
+	line("Player #2 Quiet (9.9.9.9:2304) connected", t0)
+	line("(Global) Quiet: who said that?", t0.Add(4*time.Minute))
+	if _, ok := lastChats()[1]; ok {
+		t.Fatal("an ambiguous chat line was given to a player")
 	}
-	if none, err := db.LastChats(nil); err != nil || len(none) != 0 {
-		t.Fatalf("no players: %v %v", none, err)
+
+	// It goes when they leave: a new session starts empty.
+	line("Player #0 Survivor disconnected", t0.Add(5*time.Minute))
+	line("Player #0 Survivor (1.2.3.4:2304) connected", t0.Add(6*time.Minute))
+	line("Player #0 Survivor - BE GUID: "+testGUID, t0.Add(6*time.Minute))
+	if _, ok := lastChats()[0]; ok {
+		t.Fatal("the last session's message is still shown")
 	}
 }
