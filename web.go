@@ -288,7 +288,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 			players[i].Role = roles[strings.ToLower(players[i].GUID)]
 		}
 	}
-	// The Last Message column: the newest line each online player wrote.
+	// The Last Message column: the newest line each online player wrote this session.
 	guids := make([]string, 0, len(players))
 	for _, p := range players {
 		if p.GUID != "" {

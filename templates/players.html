@@ -382,8 +382,8 @@ async function refresh() {
 }
 
 // lastMessageCell is the Last Message column: the newest line the player
-// wrote in chat (messages sent to them don't count), with the channel and
-// time in the tooltip. Empty when they haven't chatted.
+// wrote in chat this session (messages sent to them don't count), with the
+// channel and time in the tooltip. Empty until they chat.
 function lastMessageCell(p) {
 	if (!p.lastMessage) return '<td class="lastmsg"></td>';
 	let tip = (p.lastMessageChannel ? '(' + p.lastMessageChannel + ') ' : '') + fmtLastSeen(p.lastMessageUnix) + ': ' + p.lastMessage;

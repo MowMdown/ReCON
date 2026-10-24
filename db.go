@@ -887,10 +887,11 @@ type lastChat struct {
 	At      time.Time // when it was sent
 }
 
-// LastChats returns each given player's newest chat line, by lower-case
-// GUID. Only lines they wrote count, not messages ReCON sent to them.
-// Players who never chatted are left out. The Players page asks only for
-// the players online.
+// LastChats returns, by lower-case GUID, the newest line each given player
+// wrote in chat during their current session (the open session in
+// active_sessions). Messages ReCON sent to them don't count, and neither does
+// anything from an earlier session: a player who hasn't chatted since they
+// connected is left out. The Players page asks only for the players online.
 func (db *Database) LastChats(guids []string) (map[string]lastChat, error) {
 	out := map[string]lastChat{}
 	if len(guids) == 0 {
@@ -902,7 +903,10 @@ func (db *Database) LastChats(guids []string) (map[string]lastChat, error) {
 		args = append(args, strings.ToLower(g))
 	}
 	rows, err := db.Query(`
-		SELECT guid, at, line FROM chat_messages WHERE id IN (
+		SELECT c.guid, c.at, c.line, a.connected_at
+		FROM chat_messages c
+		JOIN active_sessions a ON a.guid = c.guid
+		WHERE c.id IN (
 			SELECT MAX(id) FROM chat_messages
 			WHERE direction = ? AND guid IN (?`+strings.Repeat(",?", len(guids)-1)+`)
 			GROUP BY guid
@@ -913,11 +917,17 @@ func (db *Database) LastChats(guids []string) (map[string]lastChat, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var g, line string
-		var at any
-		if err := rows.Scan(&g, &at, &line); err != nil {
+		var at, since any
+		if err := rows.Scan(&g, &at, &line, &since); err != nil {
 			return nil, err
 		}
-		c := lastChat{Text: line, At: time.Unix(unixOf(at), 0)}
+		// Times are compared here, not in SQL: they're stored as text that
+		// doesn't sort reliably.
+		sent := unixOf(at)
+		if sent < unixOf(since) {
+			continue // their newest line is from an earlier session
+		}
+		c := lastChat{Text: line, At: time.Unix(sent, 0)}
 		if ev := parseServerMessage(line, c.At); ev.Kind == eventChat {
 			c.Text, c.Channel = ev.Message, ev.Channel
 		}

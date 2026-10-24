@@ -814,7 +814,7 @@ type Player struct {
 	TotalPlaytimeSecs int64  `json:"totalPlaytimeSeconds"`
 	LastSeenUnix      int64  `json:"lastSeenUnix"` // offline players: when they were last seen (Unix seconds)
 	Role              int    `json:"role"`         // 0 Player, 1 Mod, 2 Admin (from the database; filled in by the pages' API)
-	// Online players: the newest line they wrote in chat (not messages sent
+	// Online players: the newest line they wrote in chat this session (not messages sent
 	// to them), its channel and when (Unix seconds). Filled in by /api/players.
 	LastMessage        string `json:"lastMessage,omitempty"`
 	LastMessageChannel string `json:"lastMessageChannel,omitempty"`

@@ -648,33 +648,47 @@ func TestConnectSharedPacesNewSockets(t *testing.T) {
 	}
 }
 
-func TestLastChatsIgnoresMessagesSentToThem(t *testing.T) {
+func TestLastChatsCurrentSessionOnly(t *testing.T) {
 	db := testDB(t)
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	const guid3 = "0000000000000000000000000000beef"
+	// Survivor's session began at t0+30s; Quiet's at t0; Old Timer's at t0+10m.
+	for _, s := range []struct {
+		guid string
+		at   time.Time
+	}{{testGUID, t0.Add(30 * time.Second)}, {testGUID2, t0}, {guid3, t0.Add(10 * time.Minute)}} {
+		if err := db.OpenSession(s.guid, "name", "1.2.3.4", 1, s.at); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, c := range []struct {
 		at        time.Time
 		guid, dir string
 		line      string
 	}{
-		{t0, testGUID, chatIn, "(Global) Survivor: first"},
+		{t0, testGUID, chatIn, "(Global) Survivor: from last session"},
 		{t0.Add(time.Minute), testGUID, chatIn, "(Side) Survivor: anyone at NWAF?"},
 		{t0.Add(2 * time.Minute), testGUID, chatOut, "> say 3 hello from the admins"},
-		{t0, testGUID2, chatOut, "> say 4 welcome"},
+		{t0.Add(time.Minute), testGUID2, chatOut, "> say 4 welcome"},
+		{t0.Add(5 * time.Minute), guid3, chatIn, "(Global) Old Timer: before they reconnected"},
 	} {
 		if err := db.AddChatMessage(c.at, c.guid, c.dir, c.line); err != nil {
 			t.Fatal(err)
 		}
 	}
-	last, err := db.LastChats([]string{strings.ToUpper(testGUID), testGUID2})
+	last, err := db.LastChats([]string{strings.ToUpper(testGUID), testGUID2, guid3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, ok := last[testGUID]
 	if !ok || got.Text != "anyone at NWAF?" || got.Channel != "Side" || !got.At.Equal(t0.Add(time.Minute)) {
-		t.Fatalf("last chat = %+v", got)
+		t.Fatalf("last chat = %+v (a reply sent to them must not count)", got)
 	}
 	if _, ok := last[testGUID2]; ok {
 		t.Fatal("a player who only received messages has a last message")
+	}
+	if _, ok := last[guid3]; ok {
+		t.Fatal("a message from an earlier session is shown")
 	}
 	if none, err := db.LastChats(nil); err != nil || len(none) != 0 {
 		t.Fatalf("no players: %v %v", none, err)
