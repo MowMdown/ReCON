@@ -258,19 +258,20 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 	</div>
 </div>
 
-<!-- Kick / Ban dialog -->
+<!-- Kick / Ban dialog (online players and Details). Laid out like the Bans
+     page's Ban Player dialog, so banning looks the same everywhere. -->
 <div id="modal" class="modal">
 	<div class="box">
 		<h2 id="title"></h2>
 		<div id="durationWrap">
-			<label>Duration (minutes)</label>
-			<input id="minutes" type="number" min="0" step="1">
+			<label>Duration (minutes, 0 = permanent)</label>
+			<input id="minutes" type="number" min="0" step="1" value="0">
 		</div>
-		<label id="textLabel"></label>
-		<textarea id="text" rows="4"></textarea>
+		<label>Reason</label>
+		<input id="text" type="text" maxlength="200" placeholder="Short message shown to the player">
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
-			<button id="submit">Submit</button>
+			<button id="submit"></button>
 		</div>
 	</div>
 </div>
@@ -440,11 +441,12 @@ function openModal(id, a, name, guid) {
 	current = id;
 	action = a;
 	banGuid = guid || null;
-	document.getElementById('title').textContent = a[0].toUpperCase() + a.slice(1) + ' ' + name;
+	let verb = a[0].toUpperCase() + a.slice(1);
+	document.getElementById('title').textContent = verb + ' ' + name;
+	document.getElementById('submit').textContent = verb;
 	document.getElementById('durationWrap').style.display = a === 'ban' ? 'block' : 'none';
-	document.getElementById('textLabel').textContent = 'Reason';
 	document.getElementById('text').value = '';
-	document.getElementById('minutes').value = '';
+	document.getElementById('minutes').value = '0';
 	document.getElementById('modal').style.display = 'flex';
 }
 
