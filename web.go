@@ -98,7 +98,7 @@ func routes() *http.ServeMux {
 	// Flows.
 	mux.HandleFunc("GET /flows", pageHandler(flowsPage))
 	mux.HandleFunc("GET /api/flows", handleFlowsList)                   // flows + current/last run of each
-	mux.HandleFunc("POST /api/flows", handleFlowSave)                   // create/update {id, name, trigger, schedule, delay, steps, onStop}
+	mux.HandleFunc("POST /api/flows", handleFlowSave)                   // update {id, name, trigger, schedule, delay, steps, onStop}; no id creates
 	mux.HandleFunc("POST /api/flows/{id}/run", withFlow(handleFlowRun)) // optional {"minutes": N}
 	mux.HandleFunc("POST /api/flows/{id}/stop", withFlow(handleFlowStop))
 	mux.HandleFunc("POST /api/flows/{id}/enable", withFlow(handleFlowEnable))
@@ -992,13 +992,27 @@ func handleFlowsList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "flows": flows, "runs": snapshotRuns()})
 }
 
+// handleFlowSave serves POST /api/flows: with "id" it updates that flow;
+// without one (or with "id": null) it creates a new flow, which gets the
+// lowest free number from 0. 0 is an ordinary flow number.
 func handleFlowSave(w http.ResponseWriter, r *http.Request) {
-	var f Flow
-	if err := decodeBody(w, r, &f); err != nil {
+	var req struct {
+		Flow
+		ID *int64 `json:"id"` // nil: a new flow (shadows Flow.ID when decoding)
+	}
+	if err := decodeBody(w, r, &req); err != nil {
 		fail(w, http.StatusBadRequest, "bad JSON")
 		return
 	}
-	id, err := validateAndSaveFlow(f)
+	f := req.Flow
+	if req.ID != nil {
+		if *req.ID < 0 {
+			fail(w, http.StatusBadRequest, "invalid flow id")
+			return
+		}
+		f.ID = *req.ID
+	}
+	id, err := validateAndSaveFlow(f, req.ID == nil)
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
@@ -1011,7 +1025,7 @@ func handleFlowSave(w http.ResponseWriter, r *http.Request) {
 func withFlow(h func(http.ResponseWriter, *http.Request, Flow)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil || id <= 0 {
+		if err != nil || id < 0 {
 			fail(w, http.StatusNotFound, "invalid flow id")
 			return
 		}
@@ -1164,7 +1178,7 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 			name = clipName(base, maxFlowNameLen-len(suffix)) + suffix
 		}
 		if _, err := validateAndSaveFlow(Flow{Name: name, Trigger: e.Trigger, Schedule: e.Schedule,
-			Delay: e.Delay, Steps: e.Steps, OnStop: e.OnStop}); err != nil {
+			Delay: e.Delay, Steps: e.Steps, OnStop: e.OnStop}, true); err != nil {
 			skipped = append(skipped, base+": "+err.Error())
 			continue
 		}

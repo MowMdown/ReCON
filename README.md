@@ -467,7 +467,7 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 | Method | Path | Body | Description |
 | ------ | ---- | ---- | ----------- |
 | GET  | `/api/flows` | | Every flow with its next and last run, and each flow's latest run log |
-| POST | `/api/flows` | `{"id", "name", "trigger", "schedule", "delay", "steps", "onStop"}` | Create (`id` 0) or update a flow |
+| POST | `/api/flows` | `{"id", "name", "trigger", "schedule", "delay", "steps", "onStop"}` | Update flow `id`, or create a flow when `id` is left out (or `null`). `0` is an ordinary flow number |
 | POST | `/api/flows/<id>/run` | `{"minutes": N}` (optional) | Run now. `minutes` replaces the flow's delay for this run |
 | POST | `/api/flows/<id>/stop` | | Stop a running flow |
 | POST | `/api/flows/<id>/enable` | | Turn the trigger on |
@@ -478,6 +478,8 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 | POST | `/api/flows/command` | `{"command": "lock"}` | `lock`, `unlock`, `shutdown` or `kickall` |
 | GET  | `/api/chat-commands` | | Chat command settings and defaults |
 | POST | `/api/chat-commands` | `{"settings": {...}}` | Save chat command settings |
+
+A flow's `<id>` is its number, shown as *Flow #N* next to the title when you edit it. Numbers start at 0, and a flow keeps its number for as long as it exists. A new flow gets the lowest free number, so deleting flows frees their numbers for the next ones: four flows deleted and four created are 0-3 again, not 4-7.
 
 For example, to start a manual restart flow with a 10-minute delay from a script:
 

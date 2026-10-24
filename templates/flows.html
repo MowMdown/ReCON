@@ -71,6 +71,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .box.fb { width: min(1000px, 96vw); max-height: 92vh; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; overflow: hidden; }
 .fb-head { display: flex; align-items: center; gap: 12px; }
 .fb-head h2 { margin: 0; flex: 1; }
+.fb-head h2 .fnum { margin-left: 10px; font-size: 13px; font-weight: 400; color: #777; font-family: var(--mono); }
 .fb-scroll { overflow-y: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 16px; padding-right: 4px; }
 .fb input, .fb select { width: auto; margin: 0; padding: 5px 7px; box-sizing: border-box; background: #111; color: #eee; border: 1px solid #555; border-radius: 4px; font: inherit; font-size: 14px; min-width: 0; }
 .fb select:focus, .fb input:focus { border-color: var(--accent); }
@@ -197,7 +198,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 <!-- Flow editor -->
 <div id="editModal" class="modal">
 	<div class="box fb" role="dialog" aria-labelledby="edTitle">
-		<div class="fb-head"><h2 id="edTitle">Edit flow</h2></div>
+		<div class="fb-head"><h2><span id="edTitle">Edit flow</span><span id="edNum" class="fnum"></span></h2></div>
 		<div class="fb-scroll">
 			<label class="f">Name<input id="fName" maxlength="48" autocomplete="off"></label>
 			<div class="sect">
@@ -1500,7 +1501,8 @@ let lastText = null;
 
 function toEditor(f) {
 	return {
-		id: f.id || 0, name: f.name || '', scheduleEnabled: !!f.scheduleEnabled,
+		// null for a new flow: ReCON gives it the lowest free number (0 is a real one).
+		id: typeof f.id === 'number' ? f.id : null, name: f.name || '', scheduleEnabled: !!f.scheduleEnabled,
 		trigger: { type: f.trigger || 'manual', cron: f.trigger === 'schedule' ? (f.schedule || '') : '0 6 * * *', delay: f.delay || '' },
 		steps: clone(f.steps || []), onStop: clone(f.onStop || [])
 	};
@@ -1519,6 +1521,7 @@ function openEditor(f, title) {
 	ed = toEditor(f);
 	edSaved = JSON.stringify(fromEditor());
 	$('edTitle').textContent = title;
+	$('edNum').textContent = ed.id === null ? '' : 'Flow #' + ed.id;
 	$('edMsg').textContent = '';
 	$('editModal').style.display = 'flex';
 	renderAll();
@@ -1552,7 +1555,7 @@ function renderTrigger() {
 	const seg = $('trigSeg');
 	seg.textContent = '';
 	// A saved flow keeps its trigger: only a new flow can pick one.
-	const locked = ed.id !== 0;
+	const locked = ed.id !== null;
 	for (const [id, label] of TRIGGERS) {
 		seg.append(el('button', {
 			type: 'button', 'aria-pressed': String(ed.trigger.type === id), text: label,
@@ -1603,7 +1606,7 @@ async function updateTrigHint() {
 		return;
 	}
 	if (t.type === 'manual') {
-		h.textContent = 'Runs only when you press Run (or POST /api/flows/<id>/run).' + delayText + lenText;
+		h.textContent = 'Runs only when you press Run (or POST /api/flows/' + (ed.id === null ? '<id>' : ed.id) + '/run).' + delayText + lenText;
 		return;
 	}
 	const sent = JSON.stringify([t.cron, t.delay]);
