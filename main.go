@@ -2,10 +2,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,11 +31,7 @@ import (
 //	          built-in chat commands
 // ============================================================================
 
-var (
-	rconAddress    string    // "host:port" of the DayZ/BattlEye RCON endpoint, set in main()
-	rconPassword   string    // RCON password, read from the RCON_PASSWORD env var
-	globalDatabase *Database // player database, opened in main()
-)
+var globalDatabase *Database // player database, opened in main()
 
 // environmentOrDefault returns the value of the environment variable `key`,
 // or `def` when the variable is unset or empty.
@@ -43,34 +42,112 @@ func environmentOrDefault(key, def string) string {
 	return def
 }
 
+// ---------------------------------------------------------------------------
+// RCON settings
+// ---------------------------------------------------------------------------
+
+// rconSettings is where ReCON finds the game server's RCON. The defaults
+// come from the environment (docker-compose.yaml): RCON_HOST (default
+// 127.0.0.1), RCON_PORT (default 2306) and RCON_PASSWORD. RCON Settings on
+// the Players page can override any of them; what it saves is kept in the
+// settings table under rconSettingsKey, and a field left empty uses the
+// default. The CLI reads the same saved settings.
+type rconSettings struct {
+	Host     string `json:"host"`
+	Port     string `json:"port"`
+	Password string `json:"password"`
+}
+
+// rconSettingsKey is where the overrides are stored in the settings table.
+const rconSettingsKey = "rcon"
+
+// rconDefaults are the settings from the environment.
+func rconDefaults() rconSettings {
+	return rconSettings{
+		Host:     environmentOrDefault("RCON_HOST", "127.0.0.1"),
+		Port:     environmentOrDefault("RCON_PORT", "2306"),
+		Password: os.Getenv("RCON_PASSWORD"),
+	}
+}
+
+// clean trims the fields and checks them. Empty fields are fine (they use
+// the defaults). Errors are user-facing.
+func (s rconSettings) clean() (rconSettings, error) {
+	s.Host, s.Port = strings.TrimSpace(s.Host), strings.TrimSpace(s.Port)
+	if strings.ContainsAny(s.Host, " \t/") {
+		return s, errors.New("Server IP: enter an IP address or host name, such as 10.0.0.5")
+	}
+	if s.Port != "" {
+		if n, err := strconv.Atoi(s.Port); err != nil || n < 1 || n > 65535 {
+			return s, errors.New("Port: enter a number from 1 to 65535")
+		}
+	}
+	return s, nil
+}
+
+// effective fills the empty fields from the defaults and returns the RCON
+// endpoint ("host:port") and password to use.
+func (s rconSettings) effective() (address, password string) {
+	d := rconDefaults()
+	if s.Host == "" {
+		s.Host = d.Host
+	}
+	if s.Port == "" {
+		s.Port = d.Port
+	}
+	if s.Password == "" {
+		s.Password = d.Password
+	}
+	return net.JoinHostPort(s.Host, s.Port), s.Password
+}
+
+// savedRconSettings reads the overrides saved in RCON Settings (all empty
+// when nothing was saved).
+func savedRconSettings() rconSettings {
+	var s rconSettings
+	raw, ok, err := globalDatabase.Setting(rconSettingsKey)
+	if err != nil {
+		log.Printf("rcon: reading saved RCON settings: %v", err)
+	} else if ok {
+		if err := json.Unmarshal([]byte(raw), &s); err != nil {
+			log.Printf("rcon: saved RCON settings unreadable, using the defaults: %v", err)
+			return rconSettings{}
+		}
+	}
+	return s
+}
+
 // main wires everything together:
-//  1. Reads config from the environment:
-//     RCON_PASSWORD (required), RCON_HOST (default 127.0.0.1),
-//     RCON_PORT (default 2306), DB_PATH (default /data/players.db),
-//     LISTEN_ADDR (default :8080).
-//  2. Opens the player database.
+//  1. Opens the player database (DB_PATH, default /data/players.db).
+//  2. Works out where the game server's RCON is: the environment's
+//     RCON_HOST, RCON_PORT and RCON_PASSWORD, overridden by anything saved
+//     in RCON Settings (rconSettings).
 //  3. If command-line args were given, runs CLI mode and returns.
 //  4. Otherwise runs as a server: clears stale sessions, prepares the flows
 //     table, starts the background player sync and the flow scheduler, and
-//     serves HTTP forever.
+//     serves HTTP (LISTEN_ADDR, default :8080) forever.
 func main() {
-	rconPassword = os.Getenv("RCON_PASSWORD")
-	if rconPassword == "" {
-		log.Fatal("RCON_PASSWORD is required")
-	}
-	rconAddress = net.JoinHostPort(environmentOrDefault("RCON_HOST", "127.0.0.1"), environmentOrDefault("RCON_PORT", "2306"))
-
 	dbPath := environmentOrDefault("DB_PATH", "/data/players.db")
 	var err error
 	globalDatabase, err = OpenDatabase(dbPath)
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
+	address, password := savedRconSettings().effective()
+	setTarget(address, password)
 
 	// CLI mode: `prog kickall ...`, `prog -i`, `prog players`, etc.
 	if len(os.Args) > 1 {
+		if password == "" {
+			log.Fatal(errNoPassword)
+		}
 		runCommandLine(os.Args[1:])
 		return
+	}
+	// The web pages still start without a password, so one can be entered
+	// in RCON Settings; until then every RCON call fails with errNoPassword.
+	if password == "" {
+		log.Printf("rcon: %v", errNoPassword)
 	}
 
 	// Drop sessions left open by a previous run so restart gaps aren't counted as playtime.
@@ -86,7 +163,7 @@ func main() {
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	startBackgroundSync(5 * time.Second) // periodic player/ban polling (db.go)
-	log.Printf("listening on %s -> RCON %s", addr, rconAddress)
+	log.Printf("listening on %s -> RCON %s", addr, address)
 	log.Fatal(runWebServer(addr)) // web.go
 }
 

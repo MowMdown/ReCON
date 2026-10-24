@@ -67,8 +67,8 @@ async function refresh() {
 	try {
 		let r = await fetch('/api/bans');
 		let d = await r.json();
-		if (!d.ok) { setStatusCount('rcon', ''); return; } // the status bar shows why
-		setStatusCount('rcon', d.count + ' ban(s)');
+		if (!d.ok) { setStatusCount(''); return; } // the status bar shows why
+		setStatusCount(d.count + ' ban(s)');
 		banned = {};
 		d.bans.forEach(function(b) { banned[b.guid] = true; });
 		document.getElementById('bans').innerHTML = d.bans.map(function(b) {
@@ -83,7 +83,7 @@ async function refresh() {
 			'</tr>';
 		}).join('');
 	} catch(e) {
-		setStatusCount('rcon', ''); // the status bar shows that ReCON can't be reached
+		setStatusCount(''); // the status bar shows that ReCON can't be reached
 	}
 }
 

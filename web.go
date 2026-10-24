@@ -53,9 +53,15 @@ func routes() *http.ServeMux {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
-	// The status bar on every page: {"rcon": "connected" | "retrying" | "unavailable"}.
+	// The status bar on every page: {"rcon": "connected" | "retrying" |
+	// "unavailable"}, and while not connected "retryInMs": time until the next
+	// check of the game server.
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "rcon": rconStatus()})
+		st := map[string]any{"ok": true, "rcon": rconStatus()}
+		if st["rcon"] != "connected" {
+			st["retryInMs"] = max(time.Until(rconNextCheck()).Milliseconds(), 0)
+		}
+		writeJSON(w, 200, st)
 	})
 
 	// Raw RCON, for schedulers and scripts.
@@ -74,6 +80,10 @@ func routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/players/{guid}/role", handleSetRole)             // {"role": 0|1|2}: Player, Mod, Admin
 	mux.HandleFunc("GET /api/players/{guid}/steam", handlePlayerSteam)         // Steam Profile tab (steam.go); ?refresh=1 fetches now
 	mux.HandleFunc("POST /api/players/{guid}/steam/search", handleSteamSearch) // find a player's SteamID from their GUID (steam.go)
+
+	// RCON Settings on the Players page: override the docker-compose RCON settings.
+	mux.HandleFunc("GET /api/rcon-settings", handleRconSettingsGet)
+	mux.HandleFunc("POST /api/rcon-settings", handleRconSettingsConnect) // {host, port, password}: connect, then save
 
 	// RCON console on the Players page.
 	mux.HandleFunc("GET /api/console", handleConsoleEvents)   // ?after=N: server messages and commands since N
@@ -154,7 +164,6 @@ func fail(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"ok": false, "error": msg})
 }
 
-// rconUnavailable is the 503 the pages read as "retrying...".
 // rconStatus is the game server connection as the 5-second poller last saw
 // it: connected, retrying (one or two failed checks, or none done yet), or
 // unavailable (3 or more failed checks in a row, the point where the poller
@@ -171,6 +180,19 @@ func rconStatus() string {
 	return "retrying"
 }
 
+// rconNextCheck is when ReCON next tries the game server: the poller's next
+// check, or, while it waits between logins (connectShared), the first check
+// after that wait.
+func rconNextCheck() time.Time {
+	next := time.UnixMilli(rconNextPoll.Load())
+	if dial := nextDialAt(); pollInterval > 0 && dial.After(next) {
+		k := (dial.Sub(next) + pollInterval - 1) / pollInterval
+		next = next.Add(k * pollInterval)
+	}
+	return next
+}
+
+// rconUnavailable is the 503 the pages read as "retrying...".
 func rconUnavailable(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": msg})
 }
@@ -772,6 +794,57 @@ func recordConsoleSay(cmd string) {
 	if err := globalDatabase.AddChatMessage(time.Now(), p.GUID, chatOut, "> "+cmd); err != nil {
 		log.Printf("chat: store: %v", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// RCON Settings (the Players page's RCON Settings dialog)
+// ---------------------------------------------------------------------------
+
+// handleRconSettingsGet serves GET /api/rcon-settings: the saved overrides
+// ("settings", empty fields use the defaults), the defaults from
+// docker-compose.yaml ("defaults"; the password itself is never sent, only
+// whether one is set) and the endpoint ReCON uses now ("address").
+func handleRconSettingsGet(w http.ResponseWriter, r *http.Request) {
+	d := rconDefaults()
+	address, _ := currentTarget()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"settings": savedRconSettings(),
+		"defaults": map[string]any{"host": d.Host, "port": d.Port, "passwordSet": d.Password != ""},
+		"address":  address,
+		"rcon":     rconStatus(),
+	})
+}
+
+// handleRconSettingsConnect serves POST /api/rcon-settings {host, port,
+// password}: empty fields use the defaults. It logs in with those settings
+// on a new connection first (a new handshake, even when nothing changed);
+// only if the server accepts does that become ReCON's RCON session and are
+// the settings saved. A wrong address or password changes nothing.
+func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
+	var req rconSettings
+	if err := decodeBody(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	req, err := req.clean()
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	address, password := req.effective()
+	if err := reconnectShared(address, password); err != nil {
+		log.Printf("rcon: RCON Settings: connecting to %s failed: %v", address, err)
+		fail(w, http.StatusBadGateway, "Could not log in to "+address+": "+err.Error()+". Nothing was changed.")
+		return
+	}
+	b, _ := json.Marshal(req)
+	if err := globalDatabase.SaveSetting(rconSettingsKey, string(b)); err != nil {
+		log.Printf("rcon: saving RCON settings: %v", err)
+		fail(w, http.StatusInternalServerError, "Connected to "+address+", but the settings could not be saved, so a restart goes back to the old ones: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "address": address})
 }
 
 // ---------------------------------------------------------------------------
