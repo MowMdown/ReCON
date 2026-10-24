@@ -880,6 +880,52 @@ func (db *Database) AddChatMessage(at time.Time, guid, direction, line string) e
 	return err
 }
 
+// lastChat is the newest line a player wrote in chat.
+type lastChat struct {
+	Text    string    // what they typed, without the "(Global) Name: " prefix
+	Channel string    // Global, Side, Direct, Vehicle, ...
+	At      time.Time // when it was sent
+}
+
+// LastChats returns each given player's newest chat line, by lower-case
+// GUID. Only lines they wrote count, not messages ReCON sent to them.
+// Players who never chatted are left out. The Players page asks only for
+// the players online.
+func (db *Database) LastChats(guids []string) (map[string]lastChat, error) {
+	out := map[string]lastChat{}
+	if len(guids) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(guids)+1)
+	args = append(args, chatIn)
+	for _, g := range guids {
+		args = append(args, strings.ToLower(g))
+	}
+	rows, err := db.Query(`
+		SELECT guid, at, line FROM chat_messages WHERE id IN (
+			SELECT MAX(id) FROM chat_messages
+			WHERE direction = ? AND guid IN (?`+strings.Repeat(",?", len(guids)-1)+`)
+			GROUP BY guid
+		)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var g, line string
+		var at any
+		if err := rows.Scan(&g, &at, &line); err != nil {
+			return nil, err
+		}
+		c := lastChat{Text: line, At: time.Unix(unixOf(at), 0)}
+		if ev := parseServerMessage(line, c.At); ev.Kind == eventChat {
+			c.Text, c.Channel = ev.Message, ev.Channel
+		}
+		out[g] = c
+	}
+	return out, rows.Err()
+}
+
 // ChatHistory returns a player's newest `limit` lines, oldest first.
 func (db *Database) ChatHistory(guid string, limit int) ([]chatLine, error) {
 	rows, err := db.Query(`
@@ -1486,6 +1532,7 @@ func startBackgroundSync(interval time.Duration) {
 			}
 			fails = 0
 			rconFails.Store(0)
+			resetReloginPace() // rcon.go
 			players := parsePlayers(out)
 			playersPolledTracker(players, sentAt) // sessions (players.go)
 			steamPlayersSeen(players)             // STEAM_SEARCH_MODE=auto: find new players' SteamIDs (steam.go)

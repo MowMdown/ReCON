@@ -270,11 +270,12 @@ func livePlayers(w http.ResponseWriter) ([]Player, bool) {
 	return parsePlayers(out), true
 }
 
-// handlePlayersJSON serves GET /api/players: online players plus offline ones
-// from the DB. It answers straight away even while RCON is down
-// ("connected": false, no online players), so the offline list always shows. (each with its role, for the Mod/Admin badge), and "bans":
-// lower-case GUID -> ban status for everyone banned (the offline table's Ban
-// Status column).
+// handlePlayersJSON serves GET /api/players: online players (each with their
+// role, for the Mod/Admin badge, and the last line they wrote in chat), the
+// offline ones from the DB, and "bans": lower-case GUID -> ban status for
+// everyone banned (the offline table's Ban Status column). It answers
+// straight away even while RCON is down ("connected": false, no online
+// players), so the offline list always shows.
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	players, connected := onlinePlayersForPage()
 	offlinePlayers, err := globalDatabase.OfflinePlayers()
@@ -285,6 +286,22 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	if roles, err := globalDatabase.Roles(); err == nil {
 		for i := range players {
 			players[i].Role = roles[strings.ToLower(players[i].GUID)]
+		}
+	}
+	// The Last Message column: the newest line each online player wrote.
+	guids := make([]string, 0, len(players))
+	for _, p := range players {
+		if p.GUID != "" {
+			guids = append(guids, p.GUID)
+		}
+	}
+	if last, err := globalDatabase.LastChats(guids); err != nil {
+		log.Printf("error reading last chat lines: %v", err)
+	} else {
+		for i := range players {
+			if c, ok := last[strings.ToLower(players[i].GUID)]; ok {
+				players[i].LastMessage, players[i].LastMessageChannel, players[i].LastMessageUnix = c.Text, c.Channel, c.At.Unix()
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1236,7 +1253,7 @@ var pageSettings = struct {
 	PlayerWidth:         "190px",
 	IPWidth:             "150px",
 	GUIDWidth:           "300px", // the widest column: a 32-character GUID
-	PingWidth:           "56px",  // Bans/other pages; on the Players page Ping takes the spare width
+	PingWidth:           "56px",  // on the Players page Last Message takes the spare width
 	ActionsWidth:        "290px", // online players: Message, Kick, Ban and Details (~255px) plus padding and font slack
 	ModalWidth:          "420px",
 	ModalPadding:        "20px",

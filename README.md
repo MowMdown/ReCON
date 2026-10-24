@@ -131,7 +131,7 @@ On the Players and Server Bans pages you can drag table headers to reorder the c
 
 ### Players: `/players`
 
-The top table lists the players online now (refreshed every 5 seconds). Mods and Admins have a badge after their name.
+The top table lists the players online now (refreshed every 5 seconds). Mods and Admins have a badge after their name. **Last Message** shows the newest thing each player wrote in chat (hover for the channel, time and full text); messages sent to them from ReCON or RCON don't count.
 
 | Button  | What it does |
 | ------- | ------------ |
