@@ -19,6 +19,7 @@ td { white-space: nowrap; }
 /* Ban Status | Reason fills the rest of the row; a long reason ends in "..."
    and shows in full on hover. */
 td.ban-cell { text-overflow: ellipsis; }
+td.lastmsg { text-overflow: ellipsis; color: #ccc; }
 /* Online table: Ping takes the spare width, so the Actions column (just wide
    enough for its four buttons) sits at the right edge of the page, with its
    header and buttons on its left. */
@@ -156,11 +157,12 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 		<col style="width: {{.PlayerWidth}}">
 		<col style="width: {{.IPWidth}}">
 		<col style="width: {{.GUIDWidth}}">
+		<col style="width: {{.PingWidth}}">
 		<col>
 		<col style="width: {{.ActionsWidth}}">
 	</colgroup>
 	<thead>
-		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Actions</th></tr>
+		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th>Actions</th></tr>
 	</thead>
 	<tbody id="players"></tbody>
 </table>
@@ -334,7 +336,7 @@ async function refresh() {
 		// the offline list (from the database) still shows.
 		setStatusCount('rcon', d.connected ? d.count + ' player(s) online' : '');
 		document.getElementById('players').innerHTML = !d.connected ?
-			'<tr><td colspan="6" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
+			'<tr><td colspan="7" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
 			d.players.map(function(p) {
 			let n = esc(p.name);
 			let g = esc(p.guid);
@@ -344,6 +346,7 @@ async function refresh() {
 				'<td class="mono">' + esc(p.ip) + '</td>' +
 				'<td class="mono">' + g + '</td>' +
 				'<td>' + p.ping + '</td>' +
+				lastMessageCell(p) +
 				'<td class="act">' +
 					'<button data-id="' + p.id + '" data-guid="' + g + '" data-action="message" data-name="' + n + '" onclick="handleActionClick(this)">Message</button>' +
 					'<button data-id="' + p.id + '" data-action="kick" data-name="' + n + '" onclick="handleActionClick(this)">Kick</button>' +
@@ -376,6 +379,15 @@ async function refresh() {
 	} catch(e) {
 		setStatusCount('rcon', ''); // the status bar shows that ReCON can't be reached
 	}
+}
+
+// lastMessageCell is the Last Message column: the newest line the player
+// wrote in chat this session (messages sent to them don't count), with the
+// channel and time in the tooltip. Empty until they chat.
+function lastMessageCell(p) {
+	if (!p.lastMessage) return '<td class="lastmsg"></td>';
+	let tip = (p.lastMessageChannel ? '(' + p.lastMessageChannel + ') ' : '') + fmtLastSeen(p.lastMessageUnix) + ': ' + p.lastMessage;
+	return '<td class="lastmsg" title="' + esc(tip) + '">' + esc(p.lastMessage) + '</td>';
 }
 
 // fmtLastSeen formats Unix seconds as MM-DD-YYYY - HH:MM (24-hour) in the

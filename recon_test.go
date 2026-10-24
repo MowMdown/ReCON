@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"database/sql"
+	"net"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -494,5 +496,193 @@ func TestTrackerMissedLines(t *testing.T) {
 	serverLost()
 	if countRows(t, db, "active_sessions") != 0 || len(history(t, db, testGUID)) != 2 {
 		t.Fatal("serverLost didn't close the session")
+	}
+}
+
+// fakeBE is a minimal BattlEye RCON server on localhost that counts the
+// login packets and commands it gets, and can be told to stop answering.
+type fakeBE struct {
+	conn     net.PacketConn
+	mu       sync.Mutex
+	silent   bool // take packets but don't answer, like a server still starting
+	logins   int
+	commands []string
+}
+
+func newFakeBE(t *testing.T) *fakeBE {
+	t.Helper()
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeBE{conn: c}
+	t.Cleanup(func() { c.Close() })
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, from, err := c.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			typ, p, ok := parsePacket(buf[:n])
+			if !ok {
+				continue
+			}
+			f.mu.Lock()
+			silent := f.silent
+			switch typ {
+			case 0:
+				f.logins++
+			case 1:
+				if len(p) > 1 {
+					f.commands = append(f.commands, string(p[1:]))
+				}
+			}
+			f.mu.Unlock()
+			if silent {
+				continue
+			}
+			switch typ {
+			case 0:
+				c.WriteTo(buildPacket(0, []byte{1}), from)
+			case 1:
+				c.WriteTo(buildPacket(1, p[:1]), from) // ack with the same seq
+			}
+		}
+	}()
+	return f
+}
+
+func (f *fakeBE) set(silent bool) { f.mu.Lock(); f.silent = silent; f.mu.Unlock() }
+
+func (f *fakeBE) counts() (logins, unlocks int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.commands {
+		if c == "#unlock" {
+			unlocks++
+		}
+	}
+	return f.logins, unlocks
+}
+
+// TestReloginIsPaced checks that a server which stops answering doesn't get
+// a login packet on every poll (each queued packet becomes another
+// "RCon admin logged in" when the server catches up), and that one accepted
+// login is followed by exactly one #unlock.
+func TestReloginIsPaced(t *testing.T) {
+	f := newFakeBE(t)
+	oldAddr, oldPass := rconAddress, rconPassword
+	oldWait, oldFirst, oldMax, oldSettle := reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle
+	t.Cleanup(func() {
+		rconAddress, rconPassword = oldAddr, oldPass
+		reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = oldWait, oldFirst, oldMax, oldSettle
+		sharedConnection.Lock()
+		if sharedConnection.connection != nil {
+			sharedConnection.connection.close()
+		}
+		sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
+		sharedConnection.Unlock()
+		resetReloginPace()
+	})
+	rconAddress, rconPassword = f.conn.LocalAddr().String(), "pw"
+	reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = 20*time.Millisecond, 200*time.Millisecond, 400*time.Millisecond, time.Second
+	resetReloginPace()
+
+	if _, err := connectShared(); err != nil {
+		t.Fatal(err)
+	}
+	if l, u := f.counts(); l != 1 || u != 1 {
+		t.Fatalf("first login: %d login(s), %d #unlock(s); want 1 and 1", l, u)
+	}
+
+	// The server stops answering. The poller calls reloginShared on every
+	// round; here it's called every 10ms for 1s (100 calls).
+	f.set(true)
+	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		reloginShared()
+	}
+	l, _ := f.counts()
+	// Allowed: one now, then 200ms and 400ms (capped) waits: about 4 in 1s.
+	if sent := l - 1; sent < 2 || sent > 5 {
+		t.Fatalf("%d login packets while the server wasn't answering; want a paced few", sent)
+	}
+
+	// The server answers again: one login, one #unlock, and nothing more
+	// while it settles even though polls may still miss.
+	f.set(false)
+	time.Sleep(reloginMaxWait)
+	before, unlocksBefore := f.counts()
+	for end := time.Now().Add(500 * time.Millisecond); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		reloginShared()
+	}
+	after, unlocks := f.counts()
+	if after-before != 1 || unlocks-unlocksBefore != 1 {
+		t.Fatalf("after the server came back: %d login(s), %d #unlock(s); want 1 and 1", after-before, unlocks-unlocksBefore)
+	}
+}
+
+// TestConnectSharedPacesNewSockets checks that when no session can be
+// opened, callers don't each dial a new socket (and queue a new login).
+func TestConnectSharedPacesNewSockets(t *testing.T) {
+	f := newFakeBE(t)
+	f.set(true)
+	oldAddr, oldPass := rconAddress, rconPassword
+	oldWait, oldFirst := reloginReplyWait, reloginFirstWait
+	t.Cleanup(func() {
+		rconAddress, rconPassword = oldAddr, oldPass
+		reloginReplyWait, reloginFirstWait = oldWait, oldFirst
+		sharedConnection.Lock()
+		sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
+		sharedConnection.Unlock()
+	})
+	rconAddress, rconPassword = f.conn.LocalAddr().String(), "pw"
+	reloginReplyWait, reloginFirstWait = 20*time.Millisecond, time.Hour
+	for i := 0; i < 20; i++ {
+		if _, err := connectShared(); err == nil {
+			t.Fatal("connected to a server that doesn't answer")
+		}
+	}
+	if l, _ := f.counts(); l != 1 {
+		t.Fatalf("%d login packets from 20 calls; want 1", l)
+	}
+}
+
+func TestLastChatFromServerMessages(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	line("Player #0 Survivor (1.2.3.4:2304) connected", t0)
+	line("Player #0 Survivor - BE GUID: "+testGUID, t0)
+	line("Player #1 Quiet (5.6.7.8:2304) connected", t0)
+	line("Player #1 Quiet - BE GUID: "+testGUID2, t0)
+
+	line("(Global) Survivor: first", t0.Add(time.Minute))
+	line("(Side) Survivor: anyone at NWAF?", t0.Add(2*time.Minute))
+	// ReCON's replies are commands it sends, not lines from the server, and
+	// are only written to the chat history.
+	if err := db.AddChatMessage(t0.Add(3*time.Minute), testGUID, chatOut, "> say 0 hello from the admins"); err != nil {
+		t.Fatal(err)
+	}
+	last := lastChats()
+	if c := last[0]; c.guid != testGUID || c.chat.Text != "anyone at NWAF?" || c.chat.Channel != "Side" || !c.chat.At.Equal(t0.Add(2*time.Minute)) {
+		t.Fatalf("Survivor's last chat = %+v", c)
+	}
+	if _, ok := last[1]; ok {
+		t.Fatal("a player who hasn't chatted has a last message")
+	}
+
+	// Two players with the same name: the line can't be placed, so neither gets it.
+	line("Player #2 Quiet (9.9.9.9:2304) connected", t0)
+	line("(Global) Quiet: who said that?", t0.Add(4*time.Minute))
+	if _, ok := lastChats()[1]; ok {
+		t.Fatal("an ambiguous chat line was given to a player")
+	}
+
+	// It goes when they leave: a new session starts empty.
+	line("Player #0 Survivor disconnected", t0.Add(5*time.Minute))
+	line("Player #0 Survivor (1.2.3.4:2304) connected", t0.Add(6*time.Minute))
+	line("Player #0 Survivor - BE GUID: "+testGUID, t0.Add(6*time.Minute))
+	if _, ok := lastChats()[0]; ok {
+		t.Fatal("the last session's message is still shown")
 	}
 }

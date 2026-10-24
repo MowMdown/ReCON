@@ -1486,6 +1486,7 @@ func startBackgroundSync(interval time.Duration) {
 			}
 			fails = 0
 			rconFails.Store(0)
+			resetReloginPace() // rcon.go
 			players := parsePlayers(out)
 			playersPolledTracker(players, sentAt) // sessions (players.go)
 			steamPlayersSeen(players)             // STEAM_SEARCH_MODE=auto: find new players' SteamIDs (steam.go)
