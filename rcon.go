@@ -92,14 +92,17 @@ func isTimeout(err error) bool {
 // "failed". Usually a wrong password or the client IP not being whitelisted.
 var errLoginRejected = errors.New("RCON login rejected (wrong password or IP not allowed)")
 
-// login authenticates on an already-dialed UDP connection. UDP is lossy, so it
-// sends the login packet up to 3 times, waiting 1 second for a reply each time.
-func login(conn net.Conn, buf []byte) error {
-	for attempt := 0; attempt < 3; attempt++ {
+// login authenticates on an already-dialed UDP connection. It sends the
+// login packet up to `tries` times, waiting `wait` for a reply each time.
+// The CLI and console try 3 times (UDP is lossy); the shared session sends
+// one packet, because every packet a busy server queues becomes another
+// "RCon admin logged in" when it catches up.
+func login(conn net.Conn, buf []byte, tries int, wait time.Duration) error {
+	for attempt := 0; attempt < tries; attempt++ {
 		if _, err := conn.Write(buildPacket(0, []byte(rconPassword))); err != nil {
 			return err
 		}
-		conn.SetReadDeadline(time.Now().Add(time.Second))
+		conn.SetReadDeadline(time.Now().Add(wait))
 		for {
 			n, err := conn.Read(buf)
 			if err != nil {
@@ -118,7 +121,7 @@ func login(conn net.Conn, buf []byte) error {
 			return nil
 		}
 	}
-	return errors.New("no reply to RCON login after 3 tries: RCon not enabled (no RConPassword), wrong port, or UDP blocked")
+	return errors.New("no reply to RCON login: RCon not enabled (no RConPassword), wrong port, UDP blocked, or the server is still starting")
 }
 
 // addPart stores one command-reply body (the payload after the seq byte) and
@@ -175,13 +178,19 @@ type persistentConnection struct {
 }
 
 // dialPersistent connects, logs in, and starts the background reader (and
-// the keepalive heartbeat when enableKeepalive is true).
+// the keepalive heartbeat when enableKeepalive is true). The shared session
+// (sharedSource) sends one login and waits 3s; the CLI and console try 3
+// times, 1s apart.
 func dialPersistent(src string, enableKeepalive bool) (*persistentConnection, error) {
 	conn, err := net.Dial("udp", rconAddress) // resolves hostnames, e.g. a compose service name
 	if err != nil {
 		return nil, err
 	}
-	if err := login(conn, make([]byte, 4096)); err != nil {
+	tries, wait := 3, time.Second
+	if src == sharedSource {
+		tries, wait = 1, reloginReplyWait
+	}
+	if err := login(conn, make([]byte, 4096), tries, wait); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -318,36 +327,41 @@ func (l *persistentConnection) keepalive() {
 	}
 }
 
+// reloginReplyWait is how long relogin waits for the answer to its one
+// login packet.
+var reloginReplyWait = 3 * time.Second
+
 // relogin logs in again on this same socket. BattlEye keys admin slots by
 // IP and port, so the server keeps the slot it already gave this socket
 // instead of opening a new one (and leaving the old one behind until it
-// times out). Like login(), it sends the login packet up to 3 times, 1s
-// apart. On success the command sequence starts again at 0.
+// times out). It sends ONE login packet: while the server is restarting, its
+// port can take packets without answering and then handle the whole backlog
+// at once, so every extra packet becomes another "RCon admin logged in" (see
+// reloginShared for the pacing). On success the command sequence starts
+// again at 0.
 func (l *persistentConnection) relogin() error {
 	l.commandLock.Lock() // no command in flight while logging in
 	defer l.commandLock.Unlock()
 	for len(l.logins) > 0 {
 		<-l.logins // late answers to an earlier login
 	}
-	for attempt := 0; attempt < 3; attempt++ {
-		if err := l.write(buildPacket(0, []byte(rconPassword))); err != nil {
-			return err
-		}
-		select {
-		case ok := <-l.logins:
-			if ok != 1 {
-				return errLoginRejected
-			}
-			l.writeLock.Lock()
-			l.seq = 0
-			l.writeLock.Unlock()
-			return nil
-		case <-time.After(time.Second):
-		case <-l.done:
-			return l.err
-		}
+	if err := l.write(buildPacket(0, []byte(rconPassword))); err != nil {
+		return err
 	}
-	return errors.New("no reply to RCON login after 3 tries")
+	select {
+	case ok := <-l.logins:
+		if ok != 1 {
+			return errLoginRejected
+		}
+		l.writeLock.Lock()
+		l.seq = 0
+		l.writeLock.Unlock()
+		return nil
+	case <-time.After(reloginReplyWait):
+		return errors.New("no reply to RCON login")
+	case <-l.done:
+		return l.err
+	}
 }
 
 // isResponsive probes the session with an empty command and reports whether
@@ -422,7 +436,13 @@ func (l *persistentConnection) runRaw(command string, wait time.Duration) (strin
 var sharedConnection = struct {
 	sync.Mutex
 	connection *persistentConnection
+	nextDial   time.Time     // no new socket before this, after a failed login
+	dialWait   time.Duration // the wait used after the last failed login
+	lastErr    error         // returned while waiting for nextDial
 }{}
+
+// sharedSource is the shared session's label in log lines.
+const sharedSource = "web"
 
 // connectShared returns the shared session, dialing a new one if there is
 // none or the current one has died. The lock is held while dialing, so
@@ -444,10 +464,20 @@ func connectShared() (*persistentConnection, error) {
 		c.close()
 		sharedConnection.connection = nil
 	}
-	s, err := dialPersistent("web", false)
+	// Every call would otherwise dial (the poller, every page refresh), and
+	// each new socket leaves a login queued at a server that isn't answering:
+	// after a failed login, wait as reloginShared does before dialing again.
+	if time.Now().Before(sharedConnection.nextDial) {
+		return nil, sharedConnection.lastErr
+	}
+	s, err := dialPersistent(sharedSource, false)
 	if err != nil {
+		sharedConnection.dialWait = min(max(2*sharedConnection.dialWait, reloginFirstWait), reloginMaxWait)
+		sharedConnection.nextDial = time.Now().Add(sharedConnection.dialWait)
+		sharedConnection.lastErr = fmt.Errorf("%w (next login in %s)", err, sharedConnection.dialWait)
 		return nil, err
 	}
+	sharedConnection.nextDial, sharedConnection.dialWait = time.Time{}, 0
 	_, acked, uerr := s.runRaw("#unlock", 2*time.Second)
 	log.Printf("rcon: logged in, sent #unlock (acked=%v err=%v)", acked, uerr)
 	bansStale.Store(true) // the server may have restarted: re-read its ban list (db.go)
@@ -455,11 +485,43 @@ func connectShared() (*persistentConnection, error) {
 	return s, nil
 }
 
+// Pacing for reloginShared while the server isn't answering. A login that
+// gets no reply waits reloginFirstWait before the next try, doubling up to
+// reloginMaxWait, so a long restart leaves only a few login packets queued
+// at the server. After a login is accepted, no new one is sent for
+// reloginSettle: a server that is still starting up can accept a login
+// before it answers `players`, and logging in again then would only add
+// another "logged in" line and another #unlock.
+var (
+	reloginFirstWait = 10 * time.Second
+	reloginMaxWait   = 30 * time.Second
+	reloginSettle    = 60 * time.Second
+)
+
+// reloginPace is when reloginShared may next send a login, and the wait to
+// use after the next unanswered one. Only the poller goroutine touches it.
+var reloginPace struct {
+	next time.Time
+	wait time.Duration
+}
+
+// resetReloginPace is called by the poller when the server answers again, so
+// the next outage starts with an immediate login and the shortest wait.
+func resetReloginPace() {
+	reloginPace.next, reloginPace.wait = time.Time{}, 0
+}
+
 // reloginShared is called by the poller when the server has missed 3 checks
 // in a row (it may have restarted and forgotten us). It logs in again on the
 // same socket, so the server keeps our admin slot, then sends #unlock as a
-// new login does. If there is no live session, the next command opens one.
+// new login does. Calls are paced (see reloginFirstWait): one between
+// allowed times does nothing. If there is no live session, the next command
+// opens one.
 func reloginShared() {
+	now := time.Now()
+	if now.Before(reloginPace.next) {
+		return
+	}
 	sharedConnection.Lock()
 	c := sharedConnection.connection
 	sharedConnection.Unlock()
@@ -467,9 +529,12 @@ func reloginShared() {
 		return
 	}
 	if err := c.relogin(); err != nil {
-		log.Printf("rcon: no reply from the server; logging in again failed (%v), will retry", err)
+		reloginPace.wait = min(max(2*reloginPace.wait, reloginFirstWait), reloginMaxWait)
+		reloginPace.next = time.Now().Add(reloginPace.wait)
+		log.Printf("rcon: no reply from the server; logging in again failed (%v), next try in %s", err, reloginPace.wait)
 		return
 	}
+	reloginPace.next, reloginPace.wait = time.Now().Add(reloginSettle), 0
 	_, acked, uerr := c.runRaw("#unlock", 2*time.Second)
 	log.Printf("rcon: no reply from the server; logged in again on the same connection, sent #unlock (acked=%v err=%v)", acked, uerr)
 	bansStale.Store(true)
@@ -749,6 +814,11 @@ type Player struct {
 	TotalPlaytimeSecs int64  `json:"totalPlaytimeSeconds"`
 	LastSeenUnix      int64  `json:"lastSeenUnix"` // offline players: when they were last seen (Unix seconds)
 	Role              int    `json:"role"`         // 0 Player, 1 Mod, 2 Admin (from the database; filled in by the pages' API)
+	// Online players: the newest line they wrote in chat this session (not messages sent
+	// to them), its channel and when (Unix seconds). Filled in by /api/players.
+	LastMessage        string `json:"lastMessage,omitempty"`
+	LastMessageChannel string `json:"lastMessageChannel,omitempty"`
+	LastMessageUnix    int64  `json:"lastMessageUnix,omitempty"`
 }
 
 // Ban is one entry of the GUID section of the BattlEye `bans` output, also the

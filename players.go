@@ -18,6 +18,8 @@ import (
 //	`players` poll without "(Lobby)" in the name   -> finished loading
 //	Player #3 Name (<guid>) has been kicked by ... -> the session will end as kicked
 //	Player #3 Name disconnected                    -> the session closes
+//	(Global) Name: text                            -> their last message, for the
+//	                                                  Players page (memory only)
 //
 // The database is only written when one of those happens, never for a player
 // who simply stays online; offline players are history and aren't touched.
@@ -42,6 +44,18 @@ type trackedPlayer struct {
 	opened      bool      // the session is in the database
 	kickedAt    time.Time // set by a kick line; the session ends as kicked (or banned)
 	misses      int       // polls in a row that didn't list them
+	lastChat    lastChat  // the newest line they wrote in chat this session
+}
+
+// lastChat is a line a player wrote in chat. It is kept only in memory, on
+// the player's tracker entry, so it goes when they disconnect. Messages sent
+// to a player are commands ReCON sends, not chat lines from the server, so
+// they never end up here. The chat history in the database is separate
+// (startChatRecorder, db.go).
+type lastChat struct {
+	Text    string    // what they typed, without the "(Global) Name: " prefix
+	Channel string    // Global, Side, Direct, Vehicle, ...
+	At      time.Time // when it was sent
 }
 
 // tracker is every player the server has told us about. ended remembers when
@@ -72,12 +86,29 @@ func startPlayerTracker() {
 // trackEvent updates the tracker (and the database) for one server message.
 func trackEvent(ev ServerEvent) {
 	switch ev.Kind {
-	case eventConnect, eventGUID, eventKick, eventDisconnect:
+	case eventConnect, eventGUID, eventKick, eventDisconnect, eventChat:
 	default:
 		return
 	}
 	tracker.Lock()
 	defer tracker.Unlock()
+	if ev.Kind == eventChat {
+		// Chat lines carry only the name: the line goes to the one tracked
+		// player with that name, and is dropped if two players share it.
+		var sender *trackedPlayer
+		for _, t := range tracker.byID {
+			if t.name == ev.Name {
+				if sender != nil {
+					return
+				}
+				sender = t
+			}
+		}
+		if sender != nil {
+			sender.lastChat = lastChat{Text: ev.Message, Channel: ev.Channel, At: ev.Time}
+		}
+		return
+	}
 	t := tracker.byID[ev.PlayerID]
 	switch ev.Kind {
 	case eventConnect:
@@ -203,6 +234,27 @@ func playersPolledTracker(players []Player, sentAt time.Time) {
 			delete(tracker.ended, g)
 		}
 	}
+}
+
+// onlineChat is an online player's last chat line, with their GUID so the
+// caller can check the player number still belongs to the same player.
+type onlineChat struct {
+	guid string
+	chat lastChat
+}
+
+// lastChats returns the last chat line of every player online who has
+// written one this session, by player number.
+func lastChats() map[int]onlineChat {
+	tracker.Lock()
+	defer tracker.Unlock()
+	out := map[int]onlineChat{}
+	for id, t := range tracker.byID {
+		if t.lastChat.Text != "" {
+			out[id] = onlineChat{t.guid, t.lastChat}
+		}
+	}
+	return out
 }
 
 // serverLost closes every open session when the game server stops answering
