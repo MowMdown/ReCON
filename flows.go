@@ -1418,13 +1418,14 @@ func flowsWithNextRun() ([]Flow, error) {
 }
 
 // validateAndSaveFlow checks a flow from the page (or an import) and stores
-// it. Every error it returns is a user-facing message.
+// it: a new flow when isNew, else an update of flow f.ID. Every error it
+// returns is a user-facing message.
 //
 // New flows are saved disabled and manual flows are never enabled. A saved
 // flow's trigger can't be changed (a restart flow must never turn into one
 // that fires on every join), and saving an edit keeps it enabled or disabled
 // as it was.
-func validateAndSaveFlow(f Flow) (int64, error) {
+func validateAndSaveFlow(f Flow, isNew bool) (int64, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Schedule = strings.TrimSpace(f.Schedule)
 	f.Delay = strings.ToLower(strings.TrimSpace(f.Delay))
@@ -1440,7 +1441,7 @@ func validateAndSaveFlow(f Flow) (int64, error) {
 	}
 	f.Trigger = trig
 	var old Flow
-	if f.ID != 0 {
+	if !isNew {
 		if old, err = globalDatabase.GetFlow(f.ID); err != nil {
 			return 0, errors.New("this flow no longer exists; reload the page")
 		}
@@ -1456,8 +1457,8 @@ func validateAndSaveFlow(f Flow) (int64, error) {
 		return 0, err
 	}
 	f.Schedule = storedSchedule(f)
-	f.ScheduleEnabled = f.ID != 0 && f.Trigger != triggerManual && old.ScheduleEnabled
-	id, err := globalDatabase.SaveFlow(f, stepsJSON(f.Steps), stepsJSON(f.OnStop))
+	f.ScheduleEnabled = !isNew && f.Trigger != triggerManual && old.ScheduleEnabled
+	id, err := globalDatabase.SaveFlow(f, isNew, stepsJSON(f.Steps), stepsJSON(f.OnStop))
 	if err != nil {
 		return 0, errors.New("could not save (is the name already used?)")
 	}
@@ -1787,6 +1788,17 @@ func runScheduleTick(now time.Time) {
 	if err != nil {
 		log.Printf("scheduler: %v", err)
 		return
+	}
+	// Forget deleted flows: their numbers are reused by new flows, which
+	// must not look as if they had already run.
+	exists := make(map[int64]bool, len(flows))
+	for _, f := range flows {
+		exists[f.ID] = true
+	}
+	for id := range lastFired {
+		if !exists[id] {
+			delete(lastFired, id)
+		}
 	}
 	for _, f := range flows {
 		if !f.ScheduleEnabled || f.Trigger != triggerSchedule || checkFlow(f) != nil {

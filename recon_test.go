@@ -882,3 +882,156 @@ func TestStatusReportsNextRetry(t *testing.T) {
 		t.Fatal("retryInMs sent while connected")
 	}
 }
+
+// testFlow is a minimal valid manual flow.
+func testFlow(name string) Flow {
+	return Flow{Name: name, Trigger: triggerManual, Steps: []Step{{Type: "message", To: "all", Text: "hi"}}}
+}
+
+func flowIDs(t *testing.T) []int64 {
+	t.Helper()
+	flows, err := globalDatabase.ListFlows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []int64{}
+	for _, f := range flows {
+		ids = append(ids, f.ID)
+	}
+	return ids
+}
+
+func TestFlowNumbersReuseFreedOnes(t *testing.T) {
+	db := testDB(t)
+	if err := db.EnsureFlowsTable(); err != nil {
+		t.Fatal(err)
+	}
+	add := func(name string) int64 {
+		t.Helper()
+		id, err := validateAndSaveFlow(testFlow(name), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	for i, name := range []string{"a", "b", "c", "d"} {
+		if id := add(name); id != int64(i) {
+			t.Fatalf("flow %s got #%d, want #%d", name, id, i)
+		}
+	}
+	for _, id := range flowIDs(t) {
+		if err := deleteFlow(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Four deleted, four new: 0-3 again, not 4-7.
+	for i, name := range []string{"e", "f", "g", "h"} {
+		if id := add(name); id != int64(i) {
+			t.Fatalf("after deleting all, flow %s got #%d, want #%d", name, id, i)
+		}
+	}
+	// Deleting one in the middle leaves the others as they are; its number
+	// goes to the next new flow, then numbering carries on after the last.
+	if err := deleteFlow(1); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(flowIDs(t)); got != "[0 2 3]" {
+		t.Fatalf("after deleting #1: %s", got)
+	}
+	if id := add("i"); id != 1 {
+		t.Fatalf("next flow got #%d, want #1", id)
+	}
+	if id := add("j"); id != 4 {
+		t.Fatalf("next flow got #%d, want #4", id)
+	}
+	// Flow 0 is an ordinary flow: it can be edited.
+	f, err := db.GetFlow(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Name = "renamed"
+	if id, err := validateAndSaveFlow(f, false); err != nil || id != 0 {
+		t.Fatalf("editing #0: id %d, %v", id, err)
+	}
+	if f, _ := db.GetFlow(0); f.Name != "renamed" {
+		t.Fatalf("flow #0 = %q", f.Name)
+	}
+}
+
+func TestFlowsTableLosesAutoincrement(t *testing.T) {
+	db := testDB(t)
+	if _, err := db.Exec(`CREATE TABLE flows (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+		script TEXT NOT NULL, cancel TEXT NOT NULL DEFAULT '', timer TEXT NOT NULL DEFAULT '',
+		schedule TEXT NOT NULL DEFAULT '', schedule_enabled INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO flows (id, name, script, schedule, schedule_enabled, position) VALUES (5, 'MOTD', '[{"type":"message","to":"all","text":"hi"}]', '*/20 * * * *', 1, 1)`,
+		`INSERT INTO flows (id, name, script, schedule, position) VALUES (7, 'Restart', '[{"type":"lock"}]', 'manual', 2)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.EnsureFlowsTable(); err != nil {
+		t.Fatal(err)
+	}
+	var sqlText string
+	db.QueryRow("SELECT sql FROM sqlite_master WHERE name = 'flows'").Scan(&sqlText)
+	if strings.Contains(strings.ToUpper(sqlText), "AUTOINCREMENT") {
+		t.Fatalf("still AUTOINCREMENT: %s", sqlText)
+	}
+	// Existing flows keep their numbers, settings and order.
+	if got := fmt.Sprint(flowIDs(t)); got != "[5 7]" {
+		t.Fatalf("flows after the move: %s", got)
+	}
+	if f, err := db.GetFlow(5); err != nil || f.Name != "MOTD" || !f.ScheduleEnabled || f.Trigger != triggerSchedule || len(f.Steps) != 1 {
+		t.Fatalf("flow #5 = %+v, %v", f, err)
+	}
+	// New flows take the free numbers from 0.
+	if id, err := validateAndSaveFlow(testFlow("new"), true); err != nil || id != 0 {
+		t.Fatalf("new flow: #%d, %v", id, err)
+	}
+	if err := db.EnsureFlowsTable(); err != nil { // a later start: nothing to do
+		t.Fatal(err)
+	}
+}
+
+func TestFlowAPIUsesMissingIDForNew(t *testing.T) {
+	db := testDB(t)
+	if err := db.EnsureFlowsTable(); err != nil {
+		t.Fatal(err)
+	}
+	mux := routes()
+	post := func(path, body string) (int, map[string]any) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	steps := `"trigger": "manual", "steps": [{"type": "message", "to": "all", "text": "hi"}]`
+	if code, out := post("/api/flows", `{"name": "First", `+steps+`}`); code != 200 || out["id"] != float64(0) {
+		t.Fatalf("create without id: %d %v", code, out)
+	}
+	if code, out := post("/api/flows", `{"id": null, "name": "Second", `+steps+`}`); code != 200 || out["id"] != float64(1) {
+		t.Fatalf("create with id null: %d %v", code, out)
+	}
+	// id 0 updates flow #0 rather than creating another flow.
+	if code, out := post("/api/flows", `{"id": 0, "name": "First (renamed)", `+steps+`}`); code != 200 || out["id"] != float64(0) {
+		t.Fatalf("update #0: %d %v", code, out)
+	}
+	if got := fmt.Sprint(flowIDs(t)); got != "[0 1]" {
+		t.Fatalf("flows: %s", got)
+	}
+	if f, _ := db.GetFlow(0); f.Name != "First (renamed)" {
+		t.Fatalf("flow #0 = %q", f.Name)
+	}
+	// Flow 0 is reachable through the per-flow routes.
+	if code, _ := post("/api/flows/0/delete", ""); code != 200 {
+		t.Fatalf("delete #0: %d", code)
+	}
+	if code, _ := post("/api/flows", `{"id": -1, "name": "x", `+steps+`}`); code != http.StatusBadRequest {
+		t.Fatalf("negative id: %d", code)
+	}
+}

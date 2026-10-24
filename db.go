@@ -1151,27 +1151,59 @@ func (db *Database) BanState(guid string) (banState, error) {
 // Flows storage (the Flow type and all flow logic live in flows.go)
 // ---------------------------------------------------------------------------
 
-// EnsureFlowsTable creates the flows table if it doesn't exist yet. A new
-// database starts with no flows.
+// flowsTableSQL creates the flows table. The id is a plain INTEGER PRIMARY
+// KEY, not AUTOINCREMENT: SaveFlow gives a new flow the lowest free number
+// (from 0), so deleting flows frees their numbers for the next ones.
 //
 // Columns: script holds the steps as JSON, cancel the When stopped steps,
 // timer the delay before step 1, and schedule the trigger: "manual",
 // "on-join", "on-chat" or a cron expression (see triggerOf in flows.go).
+const flowsTableSQL = `CREATE TABLE %s (
+	id INTEGER PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE,
+	script TEXT NOT NULL,
+	cancel TEXT NOT NULL DEFAULT '',
+	timer TEXT NOT NULL DEFAULT '',
+	schedule TEXT NOT NULL DEFAULT '',
+	schedule_enabled INTEGER NOT NULL DEFAULT 0,
+	position INTEGER NOT NULL DEFAULT 0
+)`
+
+// EnsureFlowsTable creates the flows table if it doesn't exist yet (a new
+// database starts with no flows). A table from an earlier release, made with
+// AUTOINCREMENT (which never hands a number out twice), is copied into a new
+// one without it. Every flow keeps its number; only new flows reuse the
+// numbers of deleted ones.
 func (db *Database) EnsureFlowsTable() error {
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS flows (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL UNIQUE,
-			script TEXT NOT NULL,
-			cancel TEXT NOT NULL DEFAULT '',
-			timer TEXT NOT NULL DEFAULT '',
-			schedule TEXT NOT NULL DEFAULT '',
-			schedule_enabled INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
-		)`); err != nil {
+	var existing string
+	err := db.QueryRow("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'flows'").Scan(&existing)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, err = db.Exec(fmt.Sprintf(flowsTableSQL, "flows"))
+		return err
+	} else if err != nil {
 		return err
 	}
-	return nil
+	if !strings.Contains(strings.ToUpper(existing), "AUTOINCREMENT") {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		fmt.Sprintf(flowsTableSQL, "flows_new"),
+		`INSERT INTO flows_new (id, name, script, cancel, timer, schedule, schedule_enabled, position)
+			SELECT id, name, script, cancel, timer, schedule, schedule_enabled, position FROM flows`,
+		"DROP TABLE flows",
+		"ALTER TABLE flows_new RENAME TO flows",
+		"DELETE FROM sqlite_sequence WHERE name = 'flows'",
+	} {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("moving flows to the new table: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 // ListFlows returns every flow in display order, read with flowFromRow.
@@ -1211,17 +1243,27 @@ func (db *Database) GetFlow(id int64) (Flow, error) {
 	return f, nil
 }
 
-// SaveFlow inserts a new flow (ID 0, placed last) or updates an existing one.
-// f.Schedule must already be in stored form ("manual", "on-join", "on-chat"
-// or cron); script and cancel are the steps as JSON. Updating a missing ID
-// returns sql.ErrNoRows.
-func (db *Database) SaveFlow(f Flow, script, cancel string) (int64, error) {
+// SaveFlow inserts a new flow (isNew; placed last, with the lowest free
+// number from 0) or updates flow f.ID. f.Schedule must already be in stored
+// form ("manual", "on-join", "on-chat" or cron); script and cancel are the
+// steps as JSON. Updating a missing ID returns sql.ErrNoRows.
+func (db *Database) SaveFlow(f Flow, isNew bool, script, cancel string) (int64, error) {
 	en := 0
 	if f.ScheduleEnabled {
 		en = 1
 	}
-	if f.ID == 0 {
-		res, err := db.Exec("INSERT INTO flows (name, script, cancel, timer, schedule, schedule_enabled, position) VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM flows))",
+	if isNew {
+		// One statement, so two flows saved at once can't take the same number.
+		res, err := db.Exec(`
+			INSERT INTO flows (id, name, script, cancel, timer, schedule, schedule_enabled, position)
+			VALUES (
+				(SELECT CASE
+					WHEN NOT EXISTS (SELECT 1 FROM flows WHERE id = 0) THEN 0
+					ELSE (SELECT MIN(f.id) + 1 FROM flows f WHERE NOT EXISTS (SELECT 1 FROM flows g WHERE g.id = f.id + 1))
+				END),
+				?, ?, ?, ?, ?, ?,
+				(SELECT COALESCE(MAX(position), 0) + 1 FROM flows)
+			)`,
 			f.Name, script, cancel, f.Delay, f.Schedule, en)
 		if err != nil {
 			return 0, err
