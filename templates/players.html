@@ -1474,7 +1474,7 @@ async function openRconSettings() {
 	host.placeholder = d.defaults.host;
 	port.placeholder = d.defaults.port;
 	pw.placeholder = d.defaults.passwordSet ? '•••••••• (from docker-compose)' : 'No default password set';
-	let state = { connected: 'connected', retrying: 'retrying', unavailable: 'not answering' }[d.rcon] || d.rcon;
+	let state = d.rcon === 'connected' ? 'connected' : 'unavailable, retrying';
 	let now = document.getElementById('rcsNow');
 	now.textContent = 'Now using ';
 	let b = document.createElement('b');

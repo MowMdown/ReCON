@@ -479,6 +479,17 @@ var sharedConnection = struct {
 	lastErr    error         // returned while waiting for nextDial
 }{}
 
+// nextDialAt is when connectShared may next open a new socket after a failed
+// login, or zero when it isn't waiting (a session is open, or it may dial now).
+func nextDialAt() time.Time {
+	sharedConnection.Lock()
+	defer sharedConnection.Unlock()
+	if c := sharedConnection.connection; c != nil && !c.isClosed() {
+		return time.Time{}
+	}
+	return sharedConnection.nextDial
+}
+
 // sharedSource is the shared session's label in log lines.
 const sharedSource = "web"
 

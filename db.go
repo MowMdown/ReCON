@@ -1436,6 +1436,11 @@ func startChatRecorder() {
 var (
 	rconPolled atomic.Bool
 	rconFails  atomic.Int32
+	// rconNextPoll is when the poller checks the game server next (Unix
+	// milliseconds), for the status bar's retry countdown (rconNextCheck, web.go).
+	rconNextPoll atomic.Int64
+	// pollInterval is the poller's interval (set by startBackgroundSync).
+	pollInterval time.Duration
 )
 
 // startBackgroundSync keeps the database in step with the game server
@@ -1457,12 +1462,15 @@ func startBackgroundSync(interval time.Duration) {
 	startChatRecorder()
 	startPlayerTracker()
 	refreshBanExpiry()
+	pollInterval = interval
+	rconNextPoll.Store(time.Now().Add(interval).UnixMilli())
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		fails := 0
 		var lastBanSync time.Time
-		for range t.C {
+		for tick := range t.C {
+			rconNextPoll.Store(tick.Add(interval).UnixMilli())
 			expireDueBans(time.Now())
 			sentAt := time.Now()
 			out, acked, err := runShared("players", 3*time.Second, false, "")

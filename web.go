@@ -53,9 +53,15 @@ func routes() *http.ServeMux {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
-	// The status bar on every page: {"rcon": "connected" | "retrying" | "unavailable"}.
+	// The status bar on every page: {"rcon": "connected" | "retrying" |
+	// "unavailable"}, and while not connected "retryInMs": time until the next
+	// check of the game server.
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "rcon": rconStatus()})
+		st := map[string]any{"ok": true, "rcon": rconStatus()}
+		if st["rcon"] != "connected" {
+			st["retryInMs"] = max(time.Until(rconNextCheck()).Milliseconds(), 0)
+		}
+		writeJSON(w, 200, st)
 	})
 
 	// Raw RCON, for schedulers and scripts.
@@ -158,7 +164,6 @@ func fail(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"ok": false, "error": msg})
 }
 
-// rconUnavailable is the 503 the pages read as "retrying...".
 // rconStatus is the game server connection as the 5-second poller last saw
 // it: connected, retrying (one or two failed checks, or none done yet), or
 // unavailable (3 or more failed checks in a row, the point where the poller
@@ -175,6 +180,19 @@ func rconStatus() string {
 	return "retrying"
 }
 
+// rconNextCheck is when ReCON next tries the game server: the poller's next
+// check, or, while it waits between logins (connectShared), the first check
+// after that wait.
+func rconNextCheck() time.Time {
+	next := time.UnixMilli(rconNextPoll.Load())
+	if dial := nextDialAt(); pollInterval > 0 && dial.After(next) {
+		k := (dial.Sub(next) + pollInterval - 1) / pollInterval
+		next = next.Add(k * pollInterval)
+	}
+	return next
+}
+
+// rconUnavailable is the 503 the pages read as "retrying...".
 func rconUnavailable(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": msg})
 }

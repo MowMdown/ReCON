@@ -839,3 +839,46 @@ func TestNoPasswordDoesNotDial(t *testing.T) {
 		t.Fatalf("err = %v, want errNoPassword", err)
 	}
 }
+
+func TestStatusReportsNextRetry(t *testing.T) {
+	resetShared(t)
+	oldInterval, oldNext, oldFails, oldPolled := pollInterval, rconNextPoll.Load(), rconFails.Load(), rconPolled.Load()
+	t.Cleanup(func() {
+		pollInterval = oldInterval
+		rconNextPoll.Store(oldNext)
+		rconFails.Store(oldFails)
+		rconPolled.Store(oldPolled)
+	})
+	pollInterval = 5 * time.Second
+	rconPolled.Store(true)
+	now := time.Now()
+	rconNextPoll.Store(now.Add(2 * time.Second).UnixMilli())
+
+	// No login wait: the next try is the next poll.
+	if got := rconNextCheck(); !got.Equal(time.UnixMilli(now.Add(2 * time.Second).UnixMilli())) {
+		t.Fatalf("next check = %v, want the next poll", got.Sub(now))
+	}
+	// Waiting 13s between logins: the first poll after that, 2s + 3*5s = 17s.
+	sharedConnection.Lock()
+	sharedConnection.nextDial = now.Add(13 * time.Second)
+	sharedConnection.Unlock()
+	if d := rconNextCheck().Sub(now); d < 16900*time.Millisecond || d > 17100*time.Millisecond {
+		t.Fatalf("next check in %v, want 17s", d)
+	}
+
+	status := func() map[string]any {
+		rec := httptest.NewRecorder()
+		routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	rconFails.Store(1)
+	if ms, ok := status()["retryInMs"].(float64); !ok || ms < 16000 || ms > 17100 {
+		t.Fatalf("retryInMs = %v while unavailable", status()["retryInMs"])
+	}
+	rconFails.Store(0)
+	if _, ok := status()["retryInMs"]; ok {
+		t.Fatal("retryInMs sent while connected")
+	}
+}

@@ -31,18 +31,21 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .st.connected { color: #81c995; }
 .st.retrying { color: #fdd663; }
 .st.unavailable { color: #f28b82; }
+.statusbar .retry { color: #777; font-size: 12px; margin-left: 6px; font-variant-numeric: tabular-nums; }
 </style>{{end}}
 
 {{define "statusbar"}}<div class="statusbar">
-	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b></span>
+	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
 </div>
 <script>
 // Status bar shown on every page. RCON is the game server as ReCON's
-// 5-second player check last saw it (GET /api/status). WebGUI is whether this
-// page can reach ReCON: Retrying after a failed check, Unavailable after 3
-// in a row. While ReCON can't be reached, RCON's state can't be known, so it
-// shows the same as WebGUI.
+// 5-second player check last saw it (GET /api/status): Connected, or
+// "Unavailable - Retrying..." with a grey countdown to ReCON's next try
+// (ReCON keeps retrying in the background). WebGUI is whether this page can
+// reach ReCON: Retrying after a failed check, Unavailable after 3 in a row.
+// While ReCON can't be reached, RCON's state can't be known: it shows
+// Unavailable - Retrying... with no countdown.
 //
 // A page puts its count after "Connected" with setStatusCount('rcon' or
 // 'web', text), e.g. "Connected - 2 player(s) online". The count is only
@@ -52,13 +55,27 @@ var setStatusCount;
 	var fails = 0;
 	var text = { connected: 'Connected', retrying: 'Retrying ...', unavailable: 'Unavailable' };
 	var state = {}, count = {};
+	var retryAt = 0; // when ReCON next tries the game server (this browser's clock), 0 = unknown
 	function show(id, s) {
 		if (s) state[id] = s;
 		var el = document.getElementById(id);
 		if (!state[id]) return;
-		el.textContent = (text[state[id]] || state[id]) +
-			(state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
-		el.className = 'st ' + state[id];
+		var label = text[state[id]] || state[id];
+		var cls = state[id];
+		if (id === 'rconStatus' && state[id] !== 'connected') {
+			// Not answering for one check or many: ReCON retries either way.
+			label = 'Unavailable - Retrying...';
+			cls = 'unavailable';
+		}
+		el.textContent = label + (state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
+		el.className = 'st ' + cls;
+	}
+	// tickRetry shows the countdown to the next try next to the RCON status.
+	function tickRetry() {
+		var el = document.getElementById('rconRetry');
+		if (state.rconStatus === 'connected' || !retryAt) { el.textContent = ''; return; }
+		var s = Math.ceil((retryAt - Date.now()) / 1000);
+		el.textContent = s > 0 ? 'next try in ' + (s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's') : 'trying now...';
 	}
 	setStatusCount = function (which, t) {
 		var id = which === 'rcon' ? 'rconStatus' : 'webStatus';
@@ -69,17 +86,21 @@ var setStatusCount;
 		try {
 			var d = await (await fetch('/api/status', { cache: 'no-store' })).json();
 			fails = 0;
+			retryAt = typeof d.retryInMs === 'number' ? Date.now() + d.retryInMs : 0;
 			show('webStatus', 'connected');
 			show('rconStatus', d.rcon);
 		} catch (e) {
 			fails++;
+			retryAt = 0;
 			var state = fails >= 3 ? 'unavailable' : 'retrying';
 			show('webStatus', state);
 			show('rconStatus', state);
 		}
+		tickRetry();
 	}
 	check();
 	setInterval(check, 5000);
+	setInterval(tickRetry, 1000);
 })();
 </script>{{end}}
 
