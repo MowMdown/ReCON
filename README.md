@@ -77,7 +77,7 @@ docker logs -f recon
 # rcon: logged in, sent #unlock (acked=true err=<nil>)
 ```
 
-Then open `http://<host>:8080/players`.
+Then open `http://<host>:8080` (it goes to the Players page).
 
 ### More than one DayZ server
 
