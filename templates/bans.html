@@ -7,7 +7,7 @@
 {{template "style" .}}
 <style>
 td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
-select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.InputPadding}}; background: #111; color: #eee; border: 1px solid #555; }
+select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; background: #111; color: #eee; border: 1px solid #555; }
 </style>
 </head>
 <body>
@@ -19,9 +19,9 @@ select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.In
 </div>
 <table>
 	<colgroup>
-		<col style="width: {{.IDWidth}}">
-		<col style="width: {{.PlayerWidth}}">
-		<col style="width: {{.GUIDWidth}}">
+		<col style="width: 60px">
+		<col style="width: 190px">
+		<col style="width: 300px">
 		<col style="width: 130px">
 		<col>
 		<col style="width: 120px">
@@ -160,7 +160,7 @@ document.getElementById('banSubmit').onclick = async function() {
 };
 
 refresh();
-setInterval(refresh, {{.BansRefreshInterval.Milliseconds}});
+setInterval(refresh, 10000);
 </script>
 {{template "reorder" .}}
 </body>

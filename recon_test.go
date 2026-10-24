@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -684,5 +686,19 @@ func TestLastChatFromServerMessages(t *testing.T) {
 	line("Player #0 Survivor - BE GUID: "+testGUID, t0.Add(6*time.Minute))
 	if _, ok := lastChats()[0]; ok {
 		t.Fatal("the last session's message is still shown")
+	}
+}
+
+func TestRootRedirectsToPlayers(t *testing.T) {
+	mux := routes()
+	for path, want := range map[string]int{"/": http.StatusFound, "/plyers": http.StatusNotFound} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != want {
+			t.Errorf("GET %s = %d, want %d", path, rec.Code, want)
+		}
+		if want == http.StatusFound && rec.Header().Get("Location") != "/players" {
+			t.Errorf("GET %s redirects to %q", path, rec.Header().Get("Location"))
+		}
 	}
 }

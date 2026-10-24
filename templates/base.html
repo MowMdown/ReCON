@@ -1,13 +1,13 @@
 {{define "style"}}<style>
-body { font-family: system-ui, sans-serif; margin: {{.PageMargin}}; background: #111; color: #eee; }
-table { width: {{.TableWidth}}; border-collapse: collapse; table-layout: fixed; }
-th, td { padding: {{.CellPadding}}; height: {{.RowHeight}}; border-bottom: 1px solid #333; text-align: left; font-size: {{.BodyFontSize}}; vertical-align: middle; overflow: hidden; }
-th { font-size: {{.HeaderFontSize}}; }
-button { margin-right: 5px; padding: {{.ButtonPadding}}; }
+body { font-family: system-ui, sans-serif; margin: 24px; background: #111; color: #eee; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th, td { padding: 9px; height: 42px; border-bottom: 1px solid #333; text-align: left; font-size: 14px; vertical-align: middle; overflow: hidden; }
+th { font-size: 14px; }
+button { margin-right: 5px; padding: 6px 10px; }
 #status { margin-bottom: 15px; color: #aaa; }
 .modal { display: none; position: fixed; inset: 0; background: #0009; align-items: center; justify-content: center; }
-.box { background: #222; padding: {{.ModalPadding}}; border-radius: 8px; width: min({{.ModalWidth}}, 90vw); }
-input, textarea { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: {{.InputPadding}}; background: #111; color: #eee; border: 1px solid #555; }
+.box { background: #222; padding: 20px; border-radius: 8px; width: min(420px, 90vw); }
+input, textarea { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; background: #111; color: #eee; border: 1px solid #555; }
 /* Text fields: no browser focus highlight; the blinking cursor shows which
    one is active. */
 input:focus, textarea:focus { outline: none; }
@@ -79,7 +79,7 @@ var setStatusCount;
 		}
 	}
 	check();
-	setInterval(check, {{.RefreshInterval.Milliseconds}});
+	setInterval(check, 5000);
 })();
 </script>{{end}}
 

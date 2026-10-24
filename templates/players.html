@@ -153,13 +153,13 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 <div class="tablewrap">
 <table id="onlineTable">
 	<colgroup>
-		<col style="width: {{.IDWidth}}">
-		<col style="width: {{.PlayerWidth}}">
-		<col style="width: {{.IPWidth}}">
-		<col style="width: {{.GUIDWidth}}">
-		<col style="width: {{.PingWidth}}">
+		<col style="width: 60px">
+		<col style="width: 190px">
+		<col style="width: 150px">
+		<col style="width: 300px">
+		<col style="width: 56px">
 		<col>
-		<col style="width: {{.ActionsWidth}}">
+		<col style="width: 290px">
 	</colgroup>
 	<thead>
 		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th>Actions</th></tr>
@@ -173,9 +173,9 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 	<div class="tablewrap">
 	<table id="offlineTable">
 		<colgroup>
-			<col style="width: {{.PlayerWidth}}">
-			<col style="width: {{.IPWidth}}">
-			<col style="width: {{.GUIDWidth}}">
+			<col style="width: 190px">
+			<col style="width: 150px">
+			<col style="width: 300px">
 			<col style="width: 160px">
 			<col style="width: 200px">
 			<col style="width: 90px">
@@ -1410,7 +1410,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 refresh();
-setInterval(refresh, {{.RefreshInterval.Milliseconds}});
+setInterval(refresh, 5000);
 </script>
 {{template "reorder" .}}
 </body>

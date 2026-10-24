@@ -28,10 +28,28 @@ import (
 // banListLock (db.go), so a background sync can never act on a stale list.
 // ============================================================================
 
-// runWebServer registers every route and serves until the listener fails.
-// Patterns use Go 1.22 method and {wildcard} routing.
+// runWebServer serves every route (routes) until the listener fails.
 func runWebServer(addr string) error {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           logRequests(routes()),
+		ReadHeaderTimeout: 5 * time.Second, // guards against slowloris-style header stalls
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      120 * time.Second, // generous: kickall can take a while
+	}
+	return srv.ListenAndServe()
+}
+
+// routes registers every route. Patterns use Go 1.22 method and {wildcard}
+// routing.
+func routes() *http.ServeMux {
 	mux := http.NewServeMux()
+	// The bare address opens the Players page. {$} matches "/" only, so a
+	// mistyped path still gets a 404. 302, not 301: browsers keep a 301, and
+	// a page at / later would never be seen.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/players", http.StatusFound)
+	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
@@ -86,14 +104,7 @@ func runWebServer(addr string) error {
 	mux.HandleFunc("GET /api/chat-commands", handleChatCommandsGet)
 	mux.HandleFunc("POST /api/chat-commands", handleChatCommandsSave) // {settings: {...}}
 
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           logRequests(mux),
-		ReadHeaderTimeout: 5 * time.Second, // guards against slowloris-style header stalls
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      120 * time.Second, // generous: kickall can take a while
-	}
-	return srv.ListenAndServe()
+	return mux
 }
 
 // ---------------------------------------------------------------------------
@@ -1213,53 +1224,12 @@ var (
 	flowsPage   = loadPage("flows.html")
 )
 
-// pageSettings holds the tweakable layout values (widths, paddings, font
-// sizes) and the browser polling intervals; it is every page's template data.
-var pageSettings = struct {
-	PageMargin          string
-	TableWidth          string
-	CellPadding         string
-	RowHeight           string
-	HeaderFontSize      string
-	BodyFontSize        string
-	IDWidth             string
-	PlayerWidth         string
-	IPWidth             string
-	GUIDWidth           string
-	PingWidth           string
-	ActionsWidth        string
-	ModalWidth          string
-	ModalPadding        string
-	InputPadding        string
-	ButtonPadding       string
-	RefreshInterval     time.Duration // how often the players and flows pages poll
-	BansRefreshInterval time.Duration // how often the bans page polls /api/bans
-}{
-	PageMargin:          "24px",
-	TableWidth:          "100%",
-	CellPadding:         "9px",
-	RowHeight:           "42px",
-	HeaderFontSize:      "14px",
-	BodyFontSize:        "14px",
-	IDWidth:             "60px",
-	PlayerWidth:         "190px",
-	IPWidth:             "150px",
-	GUIDWidth:           "300px", // the widest column: a 32-character GUID
-	PingWidth:           "56px",  // on the Players page Last Message takes the spare width
-	ActionsWidth:        "290px", // online players: Message, Kick, Ban and Details (~255px) plus padding and font slack
-	ModalWidth:          "420px",
-	ModalPadding:        "20px",
-	InputPadding:        "9px",
-	ButtonPadding:       "6px 10px",
-	RefreshInterval:     5 * time.Second,
-	BansRefreshInterval: 10 * time.Second,
-}
-
-// pageHandler serves an HTML page rendered with pageSettings.
+// pageHandler serves an HTML page. Its layout values (widths, paddings, font
+// sizes) and polling intervals are written in the page's own HTML.
 func pageHandler(page *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := page.Execute(w, pageSettings); err != nil {
+		if err := page.Execute(w, nil); err != nil {
 			log.Printf("template %s: %v", page.Name(), err)
 		}
 	}

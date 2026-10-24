@@ -707,7 +707,7 @@ flowsBody.addEventListener('drop', async function(e) {
 flowsBody.addEventListener('dragend', endDrag);
 
 refresh();
-setInterval(refresh, {{.RefreshInterval.Milliseconds}});
+setInterval(refresh, 5000);
 setInterval(tickCountdowns, 1000);
 
 // ---------------------------------------------------------------------------
