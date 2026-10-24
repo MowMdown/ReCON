@@ -196,7 +196,7 @@ A flow is a list of steps ReCON runs for you: send a message, wait, lock the ser
 | Delete           | Deletes the flow (stop it first). This is the only action that asks first |
 | New flow         | Creates a flow |
 | Help             | The full guide: steps, placeholders, If / Else, triggers, cron and chat commands |
-| Export / Import  | Download every flow as `flows.json`, or add the flows in a file (they're added at the bottom, disabled) |
+| Export / Import  | Download every flow as `flows.json`, or add flows from a file: Import lists the file's flows with a checkbox each (and **Select all**), and only the ticked ones are added, at the bottom, disabled |
 | Chat commands    | The [chat command settings](#5-chat-commands-and-roles) |
 
 Drag rows to reorder the list. Each flow's latest run log is shown under the table: every message sent, every If decision, and how the run ended.

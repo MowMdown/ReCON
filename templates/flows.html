@@ -32,6 +32,20 @@ button:disabled { opacity: 0.4; cursor: default; }
 .modal { z-index: 10; padding: 12px; box-sizing: border-box; }
 #confirmModal { z-index: 30; }
 
+/* Import dialog: pick which flows in the file to import */
+.box.importbox { width: min(560px, 95vw); max-height: 88vh; display: flex; flex-direction: column; box-sizing: border-box; }
+.importbox h2 { margin: 0 0 6px; }
+.importbox .intro { margin: 0 0 12px; font-size: 13px; color: #aaa; }
+.importbox input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; flex: none; }
+.importbox label.pick { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #333; cursor: pointer; }
+.importbox label.pick:hover { background: #2a2a2a; }
+.importbox label.all { border-bottom: 1px solid #555; font-weight: 600; }
+.importlist { overflow-y: auto; min-height: 0; flex: 1; }
+.importbox .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
+.importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
+.importbox .buttons { margin-top: 12px; flex: none; }
+
 /* Help dialog */
 .box.helpbox { width: min(860px, 95vw); height: min(680px, 88vh); display: flex; flex-direction: column; box-sizing: border-box; }
 .helpbox h2 { margin: 0 0 12px; }
@@ -241,6 +255,19 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<div class="buttons">
 			<button id="confirmCancel" onclick="closeConfirm()">Cancel</button>
 			<button id="confirmOk">Confirm</button>
+		</div>
+	</div>
+</div>
+<!-- Import: the flows in the chosen file, each with a checkbox -->
+<div id="importModal" class="modal" onclick="if (event.target === this) closeImport()">
+	<div class="box importbox" role="dialog" aria-labelledby="importTitle">
+		<h2 id="importTitle">Import flows</h2>
+		<p class="intro" id="importIntro"></p>
+		<label class="pick all"><input type="checkbox" id="importAll" onchange="importSelectAll(this.checked)"><span class="nm">Select all</span></label>
+		<div class="importlist" id="importList"></div>
+		<div class="buttons">
+			<button type="button" onclick="closeImport()">Cancel</button>
+			<button type="button" id="importGo" onclick="importChosen()">Import</button>
 		</div>
 	</div>
 </div>
@@ -592,13 +619,98 @@ async function sendQuick(cmd) {
 
 function exportFlows() { location.href = '/api/flows/export'; }
 
+// Import: reading the file opens a list of its flows, each with a checkbox,
+// so only the ones picked are imported (all are picked to start with).
+let importing = []; // the flows in the chosen file
+
 async function importFlows(input) {
 	let file = input.files[0];
 	input.value = '';
 	if (!file) return;
 	let data;
 	try { data = JSON.parse(await file.text()); } catch(e) { showMessage('Import failed', 'That file is not valid JSON.'); return; }
-	let d = await post('/api/flows/import', data);
+	if (!data || !Array.isArray(data.flows) || !data.flows.length) { showMessage('Import failed', 'No flows in that file.'); return; }
+	importing = data.flows;
+	let taken = {};
+	flows.forEach(function(f) { taken[String(f.name).toLowerCase()] = true; });
+	let list = document.getElementById('importList');
+	list.textContent = '';
+	let span = function(cls, text, title) {
+		let e = document.createElement('span');
+		e.className = cls;
+		e.textContent = text;
+		if (title) e.title = title;
+		return e;
+	};
+	importing.forEach(function(f, i) {
+		let name = String((f && f.name) || '').trim();
+		let row = document.createElement('label');
+		row.className = 'pick';
+		let box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = true;
+		box.setAttribute('data-i', i);
+		box.onchange = updateImportPicks;
+		row.append(box, span('nm', name || '(no name)', name));
+		if (taken[name.toLowerCase()]) row.append(span('taken', 'name in use', 'A flow already has this name; the import gets " (2)" added'));
+		row.append(span('info', importSummary(f)));
+		list.append(row);
+	});
+	document.getElementById('importIntro').textContent = file.name + ': ' + importing.length + ' flow(s). Picked flows are added at the bottom of the list, disabled.';
+	updateImportPicks();
+	document.getElementById('importModal').style.display = 'flex';
+}
+
+// importSummary is a flow's trigger and size, e.g. "Schedule · 4 steps".
+function importSummary(f) {
+	let t = { schedule: 'Schedule', join: 'On join', chat: 'Player message' }[f && f.trigger] || 'Manual';
+	let n = importStepCount(f && f.steps);
+	return t + ' · ' + n + ' step' + (n === 1 ? '' : 's');
+}
+
+// importStepCount counts a file's steps, inside Ifs too, as the editor does.
+function importStepCount(list) {
+	if (!Array.isArray(list)) return 0;
+	let n = 0;
+	list.forEach(function(s) {
+		n++;
+		if (s && s.type === 'if') {
+			(s.branches || []).forEach(function(b) { n += importStepCount(b && b.steps); });
+			n += importStepCount(s.else);
+		}
+	});
+	return n;
+}
+
+function importBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#importList input[type=checkbox]')); }
+
+function importSelectAll(on) {
+	importBoxes().forEach(function(b) { b.checked = on; });
+	updateImportPicks();
+}
+
+// updateImportPicks keeps Select all and the Import button in step with the
+// checkboxes: Select all is ticked when every flow is, half-ticked when some are.
+function updateImportPicks() {
+	let boxes = importBoxes(), n = boxes.filter(function(b) { return b.checked; }).length;
+	let all = document.getElementById('importAll');
+	all.checked = n > 0 && n === boxes.length;
+	all.indeterminate = n > 0 && n < boxes.length;
+	let go = document.getElementById('importGo');
+	go.disabled = n === 0;
+	go.textContent = n ? 'Import ' + n + ' flow' + (n === 1 ? '' : 's') : 'Import';
+}
+
+function closeImport() { document.getElementById('importModal').style.display = 'none'; importing = []; }
+
+async function importChosen() {
+	let picked = importBoxes().filter(function(b) { return b.checked; }).map(function(b) { return importing[+b.getAttribute('data-i')]; });
+	if (!picked.length) return;
+	let go = document.getElementById('importGo');
+	go.disabled = true;
+	let d;
+	try { d = await post('/api/flows/import', { flows: picked }); } catch(e) { d = { ok: false, error: 'ReCON could not be reached; nothing was imported.' }; }
+	closeImport();
 	if (!d.ok) { showMessage('Import failed', d.error || 'Import failed'); return; }
 	let msg = 'Imported ' + d.added + ' flow(s) at the bottom of the list. They start disabled.';
 	if (d.skipped && d.skipped.length) msg += '\n\nSkipped:\n' + d.skipped.join('\n');
@@ -635,6 +747,7 @@ document.addEventListener('keydown', function(e) {
 	if (e.key !== 'Escape') return;
 	if (document.querySelector('.menu:not([hidden])')) return; // the editor closes its menu
 	if (document.getElementById('confirmModal').style.display === 'flex') closeConfirm();
+	else if (document.getElementById('importModal').style.display === 'flex') closeImport();
 	else if (document.getElementById('helpModal').style.display === 'flex') closeHelp();
 	else if (cmdsOpen()) document.getElementById('cmdCancel').click();
 	else if (editorOpen()) cancelEditor();
