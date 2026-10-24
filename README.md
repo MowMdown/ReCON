@@ -105,7 +105,7 @@ Everything is set with environment variables.
 
 | Variable                | Default            | Description |
 | ----------------------- | ------------------ | ----------- |
-| `RCON_PASSWORD`         | required           | BattlEye RCON password |
+| `RCON_PASSWORD`         | none               | BattlEye RCON password. Needed unless you enter one in **RCON Settings** |
 | `RCON_HOST`             | `127.0.0.1`        | IP or hostname of the DayZ server |
 | `RCON_PORT`             | `2306`             | BattlEye RCON UDP port (`RConPort` in `BEServer_x64.cfg`) |
 | `LISTEN_ADDR`           | `:8080`            | Address the web server listens on inside the container |
@@ -115,6 +115,8 @@ Everything is set with environment variables.
 | `STEAM_SEARCH_MODE`     | `manual`           | `manual`: look up a player's SteamID only when you press **Search Steam ID**. `auto`: also start a lookup for every new player who joins without one |
 | `STEAM_SEARCH_CORES`    | `1`                | CPU cores a SteamID lookup may use (capped at the cores available) |
 | `STEAM_SEARCH_PRIORITY` | `medium`           | How much of each core it uses: `low` 33%, `medium` 66%, `high` 99% |
+
+`RCON_HOST`, `RCON_PORT` and `RCON_PASSWORD` are the defaults: **RCON Settings** on the Players page can override any of them without editing `docker-compose.yaml` (see below).
 
 Mount `/data` as a volume, or everything ReCON has recorded is lost when the container is recreated. The container runs as UID 99 / GID 100, so the data folder must be writable by that user.
 
@@ -141,6 +143,8 @@ The top table lists the players online now (refreshed every 5 seconds). Mods and
 | Details | Opens everything ReCON has recorded about them (below) |
 
 **Offline Players** lists everyone who has played before: last IP, total time on the server, when they were last seen, and their ban status and reason. If the game server stops answering, this list still shows from the database.
+
+**RCON Settings** (top right) changes where ReCON connects: Server IP, Port and RCON password. A field left empty uses the default from `docker-compose.yaml`, shown greyed out (the default password itself is never shown). **Connect** logs in with those settings on a new connection, even if nothing changed. Only if the server accepts the login does ReCON switch to it and save the settings, so a typo can't cut ReCON off; otherwise nothing changes and the dialog says why. Saved settings survive restarts and are used by the command-line tool too. **Use defaults** empties the fields, so the next Connect goes back to the `docker-compose.yaml` settings.
 
 **Console** (top right) opens a live RCON console. It shows everything the server reports (connects, disconnects, GUIDs, chat, kicks, admin logins) as it happens, and runs any command you type exactly as typed. Up and Down recall earlier commands. Commands sent by flows and buttons aren't shown here; the Flows page and the container log record those.
 
@@ -453,6 +457,8 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 
 | Method | Path | Body | Description |
 | ------ | ---- | ---- | ----------- |
+| GET  | `/api/rcon-settings` | | The saved RCON overrides, the `docker-compose.yaml` defaults (whether a default password is set, not the password) and the address in use |
+| POST | `/api/rcon-settings` | `{"host": "...", "port": "...", "password": "..."}` | Log in with these (empty = default); if accepted, switch to it and save them |
 | GET  | `/api/console?after=N` | | Server messages and console commands newer than `N`, plus `last` to pass next time |
 | POST | `/api/console` | `{"command": "..."}` | Run a command exactly as typed and add it to the console log |
 

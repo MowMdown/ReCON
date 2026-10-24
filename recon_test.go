@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -506,7 +508,8 @@ func TestTrackerMissedLines(t *testing.T) {
 type fakeBE struct {
 	conn     net.PacketConn
 	mu       sync.Mutex
-	silent   bool // take packets but don't answer, like a server still starting
+	silent   bool   // take packets but don't answer, like a server still starting
+	password string // when set, other passwords are rejected
 	logins   int
 	commands []string
 }
@@ -531,7 +534,7 @@ func newFakeBE(t *testing.T) *fakeBE {
 				continue
 			}
 			f.mu.Lock()
-			silent := f.silent
+			silent, accept := f.silent, f.password == "" || string(p) == f.password
 			switch typ {
 			case 0:
 				f.logins++
@@ -546,7 +549,11 @@ func newFakeBE(t *testing.T) *fakeBE {
 			}
 			switch typ {
 			case 0:
-				c.WriteTo(buildPacket(0, []byte{1}), from)
+				ok := byte(0)
+				if accept {
+					ok = 1
+				}
+				c.WriteTo(buildPacket(0, []byte{ok}), from)
 			case 1:
 				c.WriteTo(buildPacket(1, p[:1]), from) // ack with the same seq
 			}
@@ -556,6 +563,8 @@ func newFakeBE(t *testing.T) *fakeBE {
 }
 
 func (f *fakeBE) set(silent bool) { f.mu.Lock(); f.silent = silent; f.mu.Unlock() }
+
+func (f *fakeBE) setPassword(pw string) { f.mu.Lock(); f.password = pw; f.mu.Unlock() }
 
 func (f *fakeBE) counts() (logins, unlocks int) {
 	f.mu.Lock()
@@ -574,10 +583,10 @@ func (f *fakeBE) counts() (logins, unlocks int) {
 // login is followed by exactly one #unlock.
 func TestReloginIsPaced(t *testing.T) {
 	f := newFakeBE(t)
-	oldAddr, oldPass := rconAddress, rconPassword
+	oldAddr, oldPass := currentTarget()
 	oldWait, oldFirst, oldMax, oldSettle := reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle
 	t.Cleanup(func() {
-		rconAddress, rconPassword = oldAddr, oldPass
+		setTarget(oldAddr, oldPass)
 		reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = oldWait, oldFirst, oldMax, oldSettle
 		sharedConnection.Lock()
 		if sharedConnection.connection != nil {
@@ -587,7 +596,7 @@ func TestReloginIsPaced(t *testing.T) {
 		sharedConnection.Unlock()
 		resetReloginPace()
 	})
-	rconAddress, rconPassword = f.conn.LocalAddr().String(), "pw"
+	setTarget(f.conn.LocalAddr().String(), "pw")
 	reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = 20*time.Millisecond, 200*time.Millisecond, 400*time.Millisecond, time.Second
 	resetReloginPace()
 
@@ -629,16 +638,16 @@ func TestReloginIsPaced(t *testing.T) {
 func TestConnectSharedPacesNewSockets(t *testing.T) {
 	f := newFakeBE(t)
 	f.set(true)
-	oldAddr, oldPass := rconAddress, rconPassword
+	oldAddr, oldPass := currentTarget()
 	oldWait, oldFirst := reloginReplyWait, reloginFirstWait
 	t.Cleanup(func() {
-		rconAddress, rconPassword = oldAddr, oldPass
+		setTarget(oldAddr, oldPass)
 		reloginReplyWait, reloginFirstWait = oldWait, oldFirst
 		sharedConnection.Lock()
 		sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
 		sharedConnection.Unlock()
 	})
-	rconAddress, rconPassword = f.conn.LocalAddr().String(), "pw"
+	setTarget(f.conn.LocalAddr().String(), "pw")
 	reloginReplyWait, reloginFirstWait = 20*time.Millisecond, time.Hour
 	for i := 0; i < 20; i++ {
 		if _, err := connectShared(); err == nil {
@@ -700,5 +709,133 @@ func TestRootRedirectsToPlayers(t *testing.T) {
 		if want == http.StatusFound && rec.Header().Get("Location") != "/players" {
 			t.Errorf("GET %s redirects to %q", path, rec.Header().Get("Location"))
 		}
+	}
+}
+
+// resetShared closes the shared session and restores the RCON target after a test.
+func resetShared(t *testing.T) {
+	oldAddr, oldPass := currentTarget()
+	t.Cleanup(func() {
+		setTarget(oldAddr, oldPass)
+		sharedConnection.Lock()
+		if sharedConnection.connection != nil {
+			sharedConnection.connection.close()
+		}
+		sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
+		sharedConnection.Unlock()
+	})
+}
+
+func TestReconnectSharedOnlySwitchesOnSuccess(t *testing.T) {
+	resetShared(t)
+	a, b := newFakeBE(t), newFakeBE(t)
+	a.setPassword("apw")
+	b.setPassword("bpw")
+	addrA, addrB := a.conn.LocalAddr().String(), b.conn.LocalAddr().String()
+	setTarget(addrA, "apw")
+	old, err := connectShared()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wrong password for B: nothing changes.
+	if err := reconnectShared(addrB, "nope"); err == nil {
+		t.Fatal("a rejected login was accepted")
+	}
+	if addr, _ := currentTarget(); addr != addrA {
+		t.Fatalf("target moved to %s after a failed connect", addr)
+	}
+	if c, _ := connectShared(); c != old || old.isClosed() {
+		t.Fatal("the working session was replaced or closed after a failed connect")
+	}
+
+	// Right password: B becomes the session and the target; A's session closes.
+	if err := reconnectShared(addrB, "bpw"); err != nil {
+		t.Fatal(err)
+	}
+	if addr, pass := currentTarget(); addr != addrB || pass != "bpw" {
+		t.Fatalf("target = %s %q", addr, pass)
+	}
+	if c, _ := connectShared(); c == old {
+		t.Fatal("still on the old session")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !old.isClosed() {
+		t.Fatal("the old session was left open")
+	}
+	if _, unlocks := b.counts(); unlocks != 1 {
+		t.Fatalf("B got %d #unlock(s), want 1", unlocks)
+	}
+
+	// Connecting again to the same place does a fresh handshake.
+	before, _ := b.counts()
+	if err := reconnectShared(addrB, "bpw"); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := b.counts(); after != before+1 {
+		t.Fatalf("reconnecting sent %d login(s), want 1", after-before)
+	}
+}
+
+func TestRconSettingsPage(t *testing.T) {
+	testDB(t)
+	resetShared(t)
+	f := newFakeBE(t)
+	f.setPassword("secret")
+	host, port, _ := net.SplitHostPort(f.conn.LocalAddr().String())
+	t.Setenv("RCON_HOST", "10.9.9.9")
+	t.Setenv("RCON_PORT", "2306")
+	t.Setenv("RCON_PASSWORD", "compose-password")
+	mux := routes()
+	call := func(method, body string) (int, map[string]any) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, "/api/rcon-settings", strings.NewReader(body))
+		mux.ServeHTTP(rec, req)
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+
+	// GET shows the defaults, but never the default password.
+	code, got := call(http.MethodGet, "")
+	d, _ := got["defaults"].(map[string]any)
+	if code != 200 || d["host"] != "10.9.9.9" || d["port"] != "2306" || d["passwordSet"] != true {
+		t.Fatalf("GET = %d %v", code, got)
+	}
+	if strings.Contains(fmt.Sprint(got), "compose-password") {
+		t.Fatal("GET sent the default password to the page")
+	}
+
+	// Bad input and a wrong password change nothing.
+	if code, _ := call(http.MethodPost, `{"port": "70000"}`); code != http.StatusBadRequest {
+		t.Fatalf("port 70000: %d", code)
+	}
+	if code, _ := call(http.MethodPost, `{"host": "`+host+`", "port": "`+port+`", "password": "wrong"}`); code != http.StatusBadGateway {
+		t.Fatalf("wrong password: %d", code)
+	}
+	if s := savedRconSettings(); s != (rconSettings{}) {
+		t.Fatalf("saved after a failed connect: %+v", s)
+	}
+
+	// The right settings connect, are saved, and become the target.
+	if code, got := call(http.MethodPost, `{"host": " `+host+` ", "port": "`+port+`", "password": "secret"}`); code != 200 || got["ok"] != true {
+		t.Fatalf("connect = %d %v", code, got)
+	}
+	if s := savedRconSettings(); s.Host != host || s.Port != port || s.Password != "secret" {
+		t.Fatalf("saved = %+v", s)
+	}
+	if addr, pass := savedRconSettings().effective(); addr != net.JoinHostPort(host, port) || pass != "secret" {
+		t.Fatalf("effective = %s %q", addr, pass)
+	}
+
+	// Empty fields use the defaults.
+	if addr, pass := (rconSettings{Port: "1234"}).effective(); addr != "10.9.9.9:1234" || pass != "compose-password" {
+		t.Fatalf("defaults = %s %q", addr, pass)
+	}
+}
+
+func TestNoPasswordDoesNotDial(t *testing.T) {
+	if _, err := dialTo("127.0.0.1:1", "", sharedSource, false); err != errNoPassword {
+		t.Fatalf("err = %v, want errNoPassword", err)
 	}
 }

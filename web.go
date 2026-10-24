@@ -75,6 +75,10 @@ func routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/players/{guid}/steam", handlePlayerSteam)         // Steam Profile tab (steam.go); ?refresh=1 fetches now
 	mux.HandleFunc("POST /api/players/{guid}/steam/search", handleSteamSearch) // find a player's SteamID from their GUID (steam.go)
 
+	// RCON Settings on the Players page: override the docker-compose RCON settings.
+	mux.HandleFunc("GET /api/rcon-settings", handleRconSettingsGet)
+	mux.HandleFunc("POST /api/rcon-settings", handleRconSettingsConnect) // {host, port, password}: connect, then save
+
 	// RCON console on the Players page.
 	mux.HandleFunc("GET /api/console", handleConsoleEvents)   // ?after=N: server messages and commands since N
 	mux.HandleFunc("POST /api/console", handleConsoleCommand) // {"command": ...}, run exactly as typed
@@ -772,6 +776,57 @@ func recordConsoleSay(cmd string) {
 	if err := globalDatabase.AddChatMessage(time.Now(), p.GUID, chatOut, "> "+cmd); err != nil {
 		log.Printf("chat: store: %v", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// RCON Settings (the Players page's RCON Settings dialog)
+// ---------------------------------------------------------------------------
+
+// handleRconSettingsGet serves GET /api/rcon-settings: the saved overrides
+// ("settings", empty fields use the defaults), the defaults from
+// docker-compose.yaml ("defaults"; the password itself is never sent, only
+// whether one is set) and the endpoint ReCON uses now ("address").
+func handleRconSettingsGet(w http.ResponseWriter, r *http.Request) {
+	d := rconDefaults()
+	address, _ := currentTarget()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"settings": savedRconSettings(),
+		"defaults": map[string]any{"host": d.Host, "port": d.Port, "passwordSet": d.Password != ""},
+		"address":  address,
+		"rcon":     rconStatus(),
+	})
+}
+
+// handleRconSettingsConnect serves POST /api/rcon-settings {host, port,
+// password}: empty fields use the defaults. It logs in with those settings
+// on a new connection first (a new handshake, even when nothing changed);
+// only if the server accepts does that become ReCON's RCON session and are
+// the settings saved. A wrong address or password changes nothing.
+func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
+	var req rconSettings
+	if err := decodeBody(w, r, &req); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	req, err := req.clean()
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	address, password := req.effective()
+	if err := reconnectShared(address, password); err != nil {
+		log.Printf("rcon: RCON Settings: connecting to %s failed: %v", address, err)
+		fail(w, http.StatusBadGateway, "Could not log in to "+address+": "+err.Error()+". Nothing was changed.")
+		return
+	}
+	b, _ := json.Marshal(req)
+	if err := globalDatabase.SaveSetting(rconSettingsKey, string(b)); err != nil {
+		log.Printf("rcon: saving RCON settings: %v", err)
+		fail(w, http.StatusInternalServerError, "Connected to "+address+", but the settings could not be saved, so a restart goes back to the old ones: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "address": address})
 }
 
 // ---------------------------------------------------------------------------

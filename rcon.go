@@ -92,14 +92,41 @@ func isTimeout(err error) bool {
 // "failed". Usually a wrong password or the client IP not being whitelisted.
 var errLoginRejected = errors.New("RCON login rejected (wrong password or IP not allowed)")
 
+// rconTarget is the game server's RCON endpoint ("host:port") and password:
+// the docker-compose settings, or what was saved in RCON Settings on the
+// Players page (rconSettings, main.go). It changes while ReCON runs when
+// RCON Settings connects somewhere new, so it is read under its lock.
+var rconTarget struct {
+	sync.RWMutex
+	address, password string
+}
+
+// currentTarget returns the RCON endpoint and password new sessions use.
+func currentTarget() (address, password string) {
+	rconTarget.RLock()
+	defer rconTarget.RUnlock()
+	return rconTarget.address, rconTarget.password
+}
+
+// setTarget changes the RCON endpoint and password new sessions use.
+func setTarget(address, password string) {
+	rconTarget.Lock()
+	rconTarget.address, rconTarget.password = address, password
+	rconTarget.Unlock()
+}
+
+// errNoPassword is returned instead of dialing when no RCON password is set
+// (neither RCON_PASSWORD nor RCON Settings).
+var errNoPassword = errors.New("no RCON password set: set RCON_PASSWORD, or enter one in RCON Settings on the Players page")
+
 // login authenticates on an already-dialed UDP connection. It sends the
 // login packet up to `tries` times, waiting `wait` for a reply each time.
 // The CLI and console try 3 times (UDP is lossy); the shared session sends
 // one packet, because every packet a busy server queues becomes another
 // "RCon admin logged in" when it catches up.
-func login(conn net.Conn, buf []byte, tries int, wait time.Duration) error {
+func login(conn net.Conn, buf []byte, password string, tries int, wait time.Duration) error {
 	for attempt := 0; attempt < tries; attempt++ {
-		if _, err := conn.Write(buildPacket(0, []byte(rconPassword))); err != nil {
+		if _, err := conn.Write(buildPacket(0, []byte(password))); err != nil {
 			return err
 		}
 		conn.SetReadDeadline(time.Now().Add(wait))
@@ -165,6 +192,7 @@ const seenWindow = 32
 type persistentConnection struct {
 	src         string        // label for log lines ("web", "console", "cli")
 	conn        net.Conn      // UDP connection
+	password    string        // what it logged in with, for relogin()
 	writeLock   sync.Mutex    // serialises socket writes and seq allocation
 	commandLock sync.Mutex    // ensures only one command is in flight at a time
 	seq         byte          // next command sequence number (wraps at 255)
@@ -177,12 +205,21 @@ type persistentConnection struct {
 	seen        []byte        // recent server-message seqs; only reader() touches it
 }
 
-// dialPersistent connects, logs in, and starts the background reader (and
-// the keepalive heartbeat when enableKeepalive is true). The shared session
-// (sharedSource) sends one login and waits 3s; the CLI and console try 3
-// times, 1s apart.
+// dialPersistent connects to the current target (currentTarget), logs in,
+// and starts the background reader (and the keepalive heartbeat when
+// enableKeepalive is true). The shared session (sharedSource) sends one
+// login and waits 3s; the CLI and console try 3 times, 1s apart.
 func dialPersistent(src string, enableKeepalive bool) (*persistentConnection, error) {
-	conn, err := net.Dial("udp", rconAddress) // resolves hostnames, e.g. a compose service name
+	address, password := currentTarget()
+	return dialTo(address, password, src, enableKeepalive)
+}
+
+// dialTo is dialPersistent for a given endpoint and password.
+func dialTo(address, password, src string, enableKeepalive bool) (*persistentConnection, error) {
+	if password == "" {
+		return nil, errNoPassword
+	}
+	conn, err := net.Dial("udp", address) // resolves hostnames, e.g. a compose service name
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +227,7 @@ func dialPersistent(src string, enableKeepalive bool) (*persistentConnection, er
 	if src == sharedSource {
 		tries, wait = 1, reloginReplyWait
 	}
-	if err := login(conn, make([]byte, 4096), tries, wait); err != nil {
+	if err := login(conn, make([]byte, 4096), password, tries, wait); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -198,12 +235,13 @@ func dialPersistent(src string, enableKeepalive bool) (*persistentConnection, er
 	_ = conn.SetReadDeadline(time.Time{})
 
 	l := &persistentConnection{
-		src:     src,
-		conn:    conn,
-		replies: make(chan []byte, 32),
-		logins:  make(chan byte, 4),
-		done:    make(chan struct{}),
-		stop:    make(chan struct{}),
+		src:      src,
+		conn:     conn,
+		password: password,
+		replies:  make(chan []byte, 32),
+		logins:   make(chan byte, 4),
+		done:     make(chan struct{}),
+		stop:     make(chan struct{}),
 	}
 	go l.reader()
 	if enableKeepalive {
@@ -345,7 +383,7 @@ func (l *persistentConnection) relogin() error {
 	for len(l.logins) > 0 {
 		<-l.logins // late answers to an earlier login
 	}
-	if err := l.write(buildPacket(0, []byte(rconPassword))); err != nil {
+	if err := l.write(buildPacket(0, []byte(l.password))); err != nil {
 		return err
 	}
 	select {
@@ -483,6 +521,30 @@ func connectShared() (*persistentConnection, error) {
 	bansStale.Store(true) // the server may have restarted: re-read its ban list (db.go)
 	sharedConnection.connection = s
 	return s, nil
+}
+
+// reconnectShared logs the shared session in to address with password on a
+// new socket and, only if the server accepts it, makes that the shared
+// session and the target for later logins, closing the old session. This is
+// RCON Settings' Connect button: a wrong address or password changes
+// nothing. Like every new login it sends #unlock and re-reads the ban list.
+func reconnectShared(address, password string) error {
+	sharedConnection.Lock()
+	defer sharedConnection.Unlock()
+	s, err := dialTo(address, password, sharedSource, false)
+	if err != nil {
+		return err
+	}
+	setTarget(address, password)
+	if old := sharedConnection.connection; old != nil {
+		old.close()
+	}
+	sharedConnection.connection = s
+	sharedConnection.nextDial, sharedConnection.dialWait = time.Time{}, 0
+	_, acked, uerr := s.runRaw("#unlock", 2*time.Second)
+	log.Printf("rcon: connected to %s from RCON Settings, sent #unlock (acked=%v err=%v)", address, acked, uerr)
+	bansStale.Store(true)
+	return nil
 }
 
 // Pacing for reloginShared while the server isn't answering. A login that
