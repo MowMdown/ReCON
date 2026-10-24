@@ -127,7 +127,7 @@ Mount `/data` as a volume, or everything ReCON has recorded is lost when the con
 Every page shows two status lines at the top:
 
 - **RCON Status:** whether ReCON can reach the game server (checked every 5 seconds): *Connected*, or *Unavailable - Retrying...* with a small grey countdown to ReCON's next try. ReCON keeps retrying in the background on its own; after a few failed logins it waits longer between tries (up to 30 seconds).
-- **WebGUI Status:** whether your browser can reach ReCON.
+- **WebGUI Status:** whether your browser can reach ReCON. While it can, the page's count follows *Connected*: players online, bans or flows.
 
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
 

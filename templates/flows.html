@@ -495,14 +495,14 @@ async function refresh() {
 	try {
 		let r = await fetch('/api/flows');
 		let d = await r.json();
-		if (!d.ok) { setStatusCount('web', ''); return; } // the status bar shows why
+		if (!d.ok) { setStatusCount(''); return; } // the status bar shows why
 		if (editorOpen()) { // keep the list fresh for the editor, but don't rebuild under a drag in it
 			flows = d.flows || flows;
 		}
 		flows = d.flows || [];
 		let runs = {};
 		(d.runs || []).forEach(function(x) { runs[x.flowId] = x; });
-		setStatusCount('web', flows.length + ' flow(s)');
+		setStatusCount(flows.length + ' flow(s)');
 		document.getElementById('flows').innerHTML = flows.map(function(f) {
 			let run = runs[f.id];
 			let active = !!(run && run.active);
@@ -529,7 +529,7 @@ async function refresh() {
 				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
 		}).join('');
 	} catch(e) {
-		setStatusCount('web', ''); // the status bar shows that ReCON can't be reached
+		setStatusCount(''); // the status bar shows that ReCON can't be reached
 	}
 }
 

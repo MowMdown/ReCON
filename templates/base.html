@@ -47,9 +47,10 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 // While ReCON can't be reached, RCON's state can't be known: it shows
 // Unavailable - Retrying... with no countdown.
 //
-// A page puts its count after "Connected" with setStatusCount('rcon' or
-// 'web', text), e.g. "Connected - 2 player(s) online". The count is only
-// shown while that line is Connected; pass '' to clear it.
+// A page puts its count (players, bans, flows) after WebGUI's "Connected"
+// with setStatusCount(text), e.g. "Connected - 2 player(s) online". The
+// RCON line never shows a count. The count is only shown while WebGUI is
+// Connected; pass '' to clear it.
 var setStatusCount;
 (function () {
 	var fails = 0;
@@ -77,10 +78,9 @@ var setStatusCount;
 		var s = Math.ceil((retryAt - Date.now()) / 1000);
 		el.textContent = s > 0 ? 'next try in ' + (s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's') : 'trying now...';
 	}
-	setStatusCount = function (which, t) {
-		var id = which === 'rcon' ? 'rconStatus' : 'webStatus';
-		count[id] = t;
-		show(id);
+	setStatusCount = function (t) {
+		count.webStatus = t;
+		show('webStatus');
 	};
 	async function check() {
 		try {

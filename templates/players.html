@@ -376,10 +376,10 @@ async function refresh() {
 	try {
 		let r = await api('/api/players');
 		let d = await r.json();
-		if (!d.ok) { setStatusCount('rcon', ''); return; } // the status bar shows why
+		if (!d.ok) { setStatusCount(''); return; } // the status bar shows why
 		// While the game server isn't answering, the online table says so and
 		// the offline list (from the database) still shows.
-		setStatusCount('rcon', d.connected ? d.count + ' player(s) online' : '');
+		setStatusCount(d.connected ? d.count + ' player(s) online' : '');
 		document.getElementById('players').innerHTML = !d.connected ?
 			'<tr><td colspan="7" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
 			d.players.map(function(p) {
@@ -422,7 +422,7 @@ async function refresh() {
 			'</tr>';
 		}).join('');
 	} catch(e) {
-		setStatusCount('rcon', ''); // the status bar shows that ReCON can't be reached
+		setStatusCount(''); // the status bar shows that ReCON can't be reached
 	}
 }
 
