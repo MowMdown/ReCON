@@ -9,18 +9,23 @@
 td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
 .offline-section { margin-top: 42px; }
-.top .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
-.topbtns { display: flex; gap: 8px; }
+.top .icon-btn, .statusrow .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+.statusrow { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.statusrow .statusbar { margin-bottom: 0; }
+.statusrow button { margin-right: 0; }
+/* Settings and Console, stacked on the right: the same width, so they line up. */
+.hdrbtn { width: 104px; justify-content: center; box-sizing: border-box; }
 
 /* RCON Settings dialog. Empty fields use the docker-compose defaults, shown
    as the greyed-out placeholder text. */
-.rcset .intro { margin: 0 0 14px; font-size: 13px; color: #aaa; line-height: 1.5; }
 .rcset input::placeholder { color: #666; }
 .rcset .row { display: flex; gap: 10px; }
 .rcset .row > div:first-child { flex: 1; }
 .rcset .row > div:last-child { width: 110px; }
-.rcset .now { font-size: 13px; color: #aaa; margin: -4px 0 12px; }
-.rcset .now b { color: #eee; font-weight: 600; }
+.rcset .now { font-size: 13px; margin: -4px 0 14px; }
+.rcset .now.on { color: #81c995; }
+.rcset .now.off { color: #f28b82; }
+.rcset .now b { font-weight: 600; }
 .rcset #rcsMsg { font-size: 13px; margin: 0 0 10px; min-height: 1em; white-space: pre-line; }
 .rcset #rcsMsg.ok { color: #81c995; }
 .rcset #rcsMsg.err { color: #f28b82; }
@@ -158,19 +163,20 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 </head>
 <body>
 <nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<!-- The status lines, with RCON Settings on the same row (right, above Console) -->
+<div class="statusrow">
 {{template "statusbar" .}}
+	<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+		Settings
+	</button>
+</div>
 <div class="top">
 	<h1>DayZ Players</h1>
-	<div class="topbtns">
-		<button type="button" class="icon-btn" onclick="openRconSettings()">
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-			RCON Settings
-		</button>
-		<button type="button" class="icon-btn" onclick="openConsole()">
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-			Console
-		</button>
-	</div>
+	<button type="button" class="icon-btn hdrbtn" onclick="openConsole()">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+		Console
+	</button>
 </div>
 <div class="tablewrap">
 <table id="onlineTable">
@@ -302,17 +308,15 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 <div id="rconSettingsModal" class="modal" onclick="if (event.target === this) closeRconSettings()">
 	<div class="box rcset" role="dialog" aria-labelledby="rcsTitle">
 		<h2 id="rcsTitle">RCON Settings</h2>
-		<p class="intro">Where ReCON connects to the game server's RCON. Leave a field empty to use the default from docker-compose.yaml (shown greyed out). <b>Connect</b> logs in with these settings and saves them only if the server accepts the login.</p>
 		<p class="now" id="rcsNow"></p>
 		<div class="row">
 			<div><label for="rcsHost">Server IP</label><input id="rcsHost" type="text" autocomplete="off" spellcheck="false"></div>
 			<div><label for="rcsPort">Port</label><input id="rcsPort" type="text" inputmode="numeric" autocomplete="off"></div>
 		</div>
 		<label for="rcsPassword">RCON password</label>
-		<input id="rcsPassword" type="password" autocomplete="new-password">
+		<input id="rcsPassword" type="text" autocomplete="off" spellcheck="false">
 		<p id="rcsMsg"></p>
 		<div class="buttons">
-			<button type="button" onclick="clearRconSettings()" title="Empty every field, so Connect uses the docker-compose defaults">Use defaults</button>
 			<span class="spacer"></span>
 			<button type="button" onclick="closeRconSettings()">Cancel</button>
 			<button type="button" id="rcsConnect" onclick="connectRcon()">Connect</button>
@@ -1457,8 +1461,8 @@ function rcsMsg(text, cls) {
 }
 
 // openRconSettings shows the saved overrides in the fields; the defaults
-// from docker-compose.yaml are the greyed-out placeholders. The default
-// password is never sent to the page, so its placeholder only says one is set.
+// from docker-compose.yaml, the password included, are the greyed-out
+// placeholders.
 async function openRconSettings() {
 	rcsMsg('');
 	document.getElementById('rcsNow').textContent = '';
@@ -1473,27 +1477,30 @@ async function openRconSettings() {
 	pw.value = d.settings.password || '';
 	host.placeholder = d.defaults.host;
 	port.placeholder = d.defaults.port;
-	pw.placeholder = d.defaults.passwordSet ? '•••••••• (from docker-compose)' : 'No default password set';
-	let state = d.rcon === 'connected' ? 'connected' : 'unavailable, retrying';
-	let now = document.getElementById('rcsNow');
-	now.textContent = 'Now using ';
-	let b = document.createElement('b');
-	b.textContent = d.address;
-	now.append(b, ' (' + state + ').');
+	pw.placeholder = d.defaults.password || 'No default password set';
+	showRconNow(d.address, d.rcon === 'connected');
 	host.focus();
+}
+
+// showRconNow is the line under the title: the server ReCON connects to, and
+// whether it is answering (green) or not (red).
+function showRconNow(address, connected) {
+	let now = document.getElementById('rcsNow');
+	let b = document.createElement('b');
+	b.textContent = address;
+	now.className = 'now ' + (connected ? 'on' : 'off');
+	now.textContent = connected ? 'Connected to ' : 'Can\'t reach ';
+	now.append(b);
 }
 
 function closeRconSettings() { document.getElementById('rconSettingsModal').style.display = 'none'; }
 
-function clearRconSettings() {
-	['rcsHost', 'rcsPort', 'rcsPassword'].forEach(id => document.getElementById(id).value = '');
-	rcsMsg('Fields cleared: Connect will use the docker-compose defaults.');
-}
-
-// connectRcon logs in with the fields (a new handshake, even if nothing
-// changed). The settings are saved only if the server accepts the login.
+// connectRcon logs in with the fields: one attempt per press (a new
+// handshake, even if nothing changed). Empty fields use the docker-compose
+// defaults. The settings are saved only if the server accepts the login.
 async function connectRcon() {
 	let btn = document.getElementById('rcsConnect');
+	if (btn.disabled) return; // an attempt is already waiting for its answer
 	btn.disabled = true;
 	rcsMsg('Connecting...');
 	let d;
@@ -1513,12 +1520,8 @@ async function connectRcon() {
 		btn.disabled = false;
 	}
 	if (!d.ok) { rcsMsg(d.error || 'Connect failed.', 'err'); return; }
-	rcsMsg('Connected to ' + d.address + ' and saved.', 'ok');
-	let now = document.getElementById('rcsNow');
-	now.textContent = 'Now using ';
-	let b = document.createElement('b');
-	b.textContent = d.address;
-	now.append(b, ' (connected).');
+	rcsMsg('Saved.', 'ok');
+	showRconNow(d.address, true);
 	refresh();
 }
 

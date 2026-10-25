@@ -13,9 +13,31 @@
 	--mono: ui-monospace, Consolas, monospace;
 }
 [hidden] { display: none !important; }
-.quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Commands stays at the top right; on a very narrow window only the flow
+   buttons on the left fold onto a second line. */
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
+.toolbar .flowbtns { display: flex; flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+.quick { display: flex; align-items: center; gap: 6px; margin-left: auto; position: relative; flex: none; }
+.icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Commands dialog */
+.box.srvbox { width: min(380px, 92vw); }
+.srvbox h2 { margin: 0 0 12px; }
+.srvlist { display: flex; flex-direction: column; gap: 8px; }
+.srvlist button { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 10px 12px; text-align: left; color: var(--fg); background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px; cursor: pointer; }
+.srvlist button:hover, .srvlist button:focus-visible { background: #333; border-color: #555; outline: none; }
+.srvlist b { display: block; font-size: 14px; font-weight: 600; }
+.srvlist small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.srvlist .ic { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; flex: none; }
+.srvlist .ic.lock { color: var(--warn); background: #2e2a18; }
+.srvlist .ic.unlock { color: var(--ok); background: #1a2a1f; }
+.srvlist .ic.kick { color: var(--c-player); background: #2e2318; }
+.srvlist .ic.power { color: var(--err); background: #2e1c1c; }
+.srvbox .buttons { margin-top: 14px; }
 .quick button { margin-right: 0; }
-#quickMsg { color: #aaa; font-size: 13px; margin-right: 8px; }
+/* A command's result ("#lock sent"), just above the Commands button. Placed
+   outside the row's flow, so it doesn't push the buttons around. */
+#quickMsg { position: absolute; right: 0; bottom: 100%; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
 .run { margin-top: 24px; }
 #confirmText { white-space: pre-line; }
 .sub { color: #aaa; font-size: 12px; }
@@ -126,12 +148,25 @@ button:disabled { opacity: 0.4; cursor: default; }
 .fb .tools button.addelse { font-size: 12px; color: var(--c-logic); }
 .empty { color: var(--faint); font-size: 13px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 6px; text-align: center; }
 .addrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; position: relative; }
-.menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; background: #1e1e1e; border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px; width: min(560px, calc(100vw - 48px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 14px; box-shadow: 0 10px 30px #000a; }
+.menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; background: #1e1e1e; border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px; width: min(620px, calc(100vw - 48px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px 18px; box-shadow: 0 10px 30px #000a; }
 .menu .grp { display: flex; flex-direction: column; gap: 3px; }
-.menu .gl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 2px; }
-.fb .menu button { text-align: left; background: transparent; border: 1px solid transparent; padding: 4px 6px; }
-.fb .menu button:hover:not(:disabled) { background: #2b2b2b; }
-.menu button small { display: block; color: var(--faint); font-size: 11px; }
+/* Each group heading takes its steps' colour, as in the step list's badges. */
+.menu .gl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 2px; padding-left: 6px; border-left: 3px solid currentColor; }
+.menu .grp.msg .gl { color: var(--c-msg); }
+.menu .grp.time .gl { color: var(--c-time); }
+.menu .grp.server .gl { color: var(--c-server); }
+.menu .grp.player .gl { color: var(--c-player); }
+.menu .grp.logic .gl { color: var(--c-logic); }
+.menu .grp.adv .gl { color: var(--c-adv); }
+/* Buttons have no colour of their own, so the label is set here: without it
+   it fell back to the browser's black, unreadable on the dark menu. */
+.fb .menu button { text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 7px; color: var(--fg); font-size: 14px; cursor: pointer; }
+.fb .menu button:hover:not(:disabled), .fb .menu button:focus-visible { background: #2e2e2e; border-color: #444; outline: none; }
+.menu button small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; line-height: 1.35; }
+/* A step the trigger can't use: still readable, with the reason in yellow
+   (not the page's 40% opacity for disabled buttons). */
+.fb .menu button:disabled { opacity: 1; color: #8a8a8a; cursor: not-allowed; }
+.fb .menu button:disabled small { color: var(--warn); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
 .fb .chips button { font: 12px var(--mono); padding: 2px 7px; border-radius: 10px; }
 
@@ -170,15 +205,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 {{template "statusbar" .}}
 <div class="top">
 	<h1>Flows</h1>
+</div>
+<!-- One row: the flow buttons on the left, the server quick buttons on the right -->
+<div class="toolbar">
+	<div class="flowbtns"><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><button onclick="openCmds()">Chat commands</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></div>
 	<div class="quick">
 		<span id="quickMsg"></span>
-		<button onclick="quick('lock')">#Lock</button>
-		<button onclick="quick('unlock')">#Unlock</button>
-		<button onclick="quick('shutdown')">#Shutdown</button>
-		<button onclick="quick('kickall')">#Kick All</button>
+		<button type="button" class="icon-btn" onclick="openServerCmds()" title="#lock, #unlock, #shutdown, kickall"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg> Commands</button>
 	</div>
 </div>
-<p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><button onclick="openCmds()">Chat commands</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></p>
 <table>
 	<colgroup>
 		<col style="width: 340px">
@@ -259,6 +294,20 @@ button:disabled { opacity: 0.4; cursor: default; }
 		</div>
 	</div>
 </div>
+<!-- Commands: the server commands that used to be four buttons -->
+<div id="srvModal" class="modal" onclick="if (event.target === this) closeServerCmds()">
+	<div class="box srvbox" role="dialog" aria-labelledby="srvTitle">
+		<h2 id="srvTitle">Commands</h2>
+		<div class="srvlist">
+			<button type="button" onclick="serverCmd('lock')"><span class="ic lock"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span><span><b>Lock server</b><small>#lock: no new players can join</small></span></button>
+			<button type="button" onclick="serverCmd('unlock')"><span class="ic unlock"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg></span><span><b>Unlock server</b><small>#unlock: players can join again</small></span></button>
+			<button type="button" onclick="serverCmd('kickall')"><span class="ic kick"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="18" y1="8" x2="23" y2="13"></line><line x1="23" y1="8" x2="18" y2="13"></line></svg></span><span><b>Kick everyone</b><small>kickall: kicks every connected player</small></span></button>
+			<button type="button" onclick="serverCmd('shutdown')"><span class="ic power"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg></span><span><b>Shut down server</b><small>#shutdown: stops the server now</small></span></button>
+		</div>
+		<div class="buttons"><button type="button" onclick="closeServerCmds()">Close</button></div>
+	</div>
+</div>
+
 <!-- Import: the flows in the chosen file, each with a checkbox -->
 <div id="importModal" class="modal" onclick="if (event.target === this) closeImport()">
 	<div class="box importbox" role="dialog" aria-labelledby="importTitle">
@@ -578,6 +627,18 @@ function quick(cmd) {
 	showConfirm(c.title, c.text, c.ok, function() { sendQuick(cmd); });
 }
 
+// The Commands dialog: picking a command closes it, then sends the command
+// (Kick everyone and Shut down ask first). The result shows above the button.
+function openServerCmds() {
+	document.getElementById('srvModal').style.display = 'flex';
+	document.querySelector('#srvModal .srvlist button').focus();
+}
+function closeServerCmds() { document.getElementById('srvModal').style.display = 'none'; }
+function serverCmd(cmd) {
+	closeServerCmds();
+	quick(cmd);
+}
+
 // showConfirm and showMessage use the page's own dialog instead of the
 // browser's confirm()/alert(), which browsers can block or warn about.
 function showConfirm(title, text, okLabel, onOk) {
@@ -749,6 +810,7 @@ document.addEventListener('keydown', function(e) {
 	if (document.querySelector('.menu:not([hidden])')) return; // the editor closes its menu
 	if (document.getElementById('confirmModal').style.display === 'flex') closeConfirm();
 	else if (document.getElementById('importModal').style.display === 'flex') closeImport();
+	else if (document.getElementById('srvModal').style.display === 'flex') closeServerCmds();
 	else if (document.getElementById('helpModal').style.display === 'flex') closeHelp();
 	else if (cmdsOpen()) document.getElementById('cmdCancel').click();
 	else if (editorOpen()) cancelEditor();
@@ -1408,7 +1470,7 @@ function openMenu(key) {
 	for (const g of GROUPS) {
 		const items = Object.entries(STEPS).filter(([t, d]) => d.group === g && (key === 'steps' || STOP_TYPES.includes(t)));
 		if (!items.length) continue;
-		const grp = el('div', { class: 'grp' }, el('div', { class: 'gl', text: g }));
+		const grp = el('div', { class: 'grp ' + items[0][1].cat }, el('div', { class: 'gl', text: g }));
 		for (const [type, d] of items) {
 			const why = whyDisabled(type, key);
 			grp.append(el('button', { type: 'button', disabled: !!why, title: why || d.desc, onclick: () => addStep(key, type) }, d.label, el('small', { text: why || d.desc })));
