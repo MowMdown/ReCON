@@ -126,12 +126,25 @@ button:disabled { opacity: 0.4; cursor: default; }
 .fb .tools button.addelse { font-size: 12px; color: var(--c-logic); }
 .empty { color: var(--faint); font-size: 13px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 6px; text-align: center; }
 .addrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; position: relative; }
-.menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; background: #1e1e1e; border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px; width: min(560px, calc(100vw - 48px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 14px; box-shadow: 0 10px 30px #000a; }
+.menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; background: #1e1e1e; border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px; width: min(620px, calc(100vw - 48px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px 18px; box-shadow: 0 10px 30px #000a; }
 .menu .grp { display: flex; flex-direction: column; gap: 3px; }
-.menu .gl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 2px; }
-.fb .menu button { text-align: left; background: transparent; border: 1px solid transparent; padding: 4px 6px; }
-.fb .menu button:hover:not(:disabled) { background: #2b2b2b; }
-.menu button small { display: block; color: var(--faint); font-size: 11px; }
+/* Each group heading takes its steps' colour, as in the step list's badges. */
+.menu .gl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 2px; padding-left: 6px; border-left: 3px solid currentColor; }
+.menu .grp.msg .gl { color: var(--c-msg); }
+.menu .grp.time .gl { color: var(--c-time); }
+.menu .grp.server .gl { color: var(--c-server); }
+.menu .grp.player .gl { color: var(--c-player); }
+.menu .grp.logic .gl { color: var(--c-logic); }
+.menu .grp.adv .gl { color: var(--c-adv); }
+/* Buttons have no colour of their own, so the label is set here: without it
+   it fell back to the browser's black, unreadable on the dark menu. */
+.fb .menu button { text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 7px; color: var(--fg); font-size: 14px; cursor: pointer; }
+.fb .menu button:hover:not(:disabled), .fb .menu button:focus-visible { background: #2e2e2e; border-color: #444; outline: none; }
+.menu button small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; line-height: 1.35; }
+/* A step the trigger can't use: still readable, with the reason in yellow
+   (not the page's 40% opacity for disabled buttons). */
+.fb .menu button:disabled { opacity: 1; color: #8a8a8a; cursor: not-allowed; }
+.fb .menu button:disabled small { color: var(--warn); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
 .fb .chips button { font: 12px var(--mono); padding: 2px 7px; border-radius: 10px; }
 
@@ -1408,7 +1421,7 @@ function openMenu(key) {
 	for (const g of GROUPS) {
 		const items = Object.entries(STEPS).filter(([t, d]) => d.group === g && (key === 'steps' || STOP_TYPES.includes(t)));
 		if (!items.length) continue;
-		const grp = el('div', { class: 'grp' }, el('div', { class: 'gl', text: g }));
+		const grp = el('div', { class: 'grp ' + items[0][1].cat }, el('div', { class: 'gl', text: g }));
 		for (const [type, d] of items) {
 			const why = whyDisabled(type, key);
 			grp.append(el('button', { type: 'button', disabled: !!why, title: why || d.desc, onclick: () => addStep(key, type) }, d.label, el('small', { text: why || d.desc })));
