@@ -362,7 +362,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td>Kick / Ban</td><td>Kicks or bans (by GUID) the Player</td></tr>
 					<tr><td>Kick everyone</td><td>Kicks every player online</td></tr>
 					<tr><td>If</td><td>Runs its steps only when its condition is true (see <i>If / Else</i>)</td></tr>
-					<tr><td>For each player</td><td>Runs the steps inside it once for every player online, with that player as the Player (see <i>For each player</i>)</td></tr>
+					<tr><td>For each</td><td>Runs the steps inside it once per player online, or per new chat message, with that player as the Player (see <i>For each</i>)</td></tr>
 					<tr><td>Stop flow</td><td>Ends the run there</td></tr>
 					<tr><td>RCON command</td><td>Any command, as typed</td></tr>
 				</tbody>
@@ -387,9 +387,14 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<h3>If, Else if, Else</h3>
 			<p>An If compares one thing, such as <code>{player_ping}</code>, and runs its steps when the comparison is true. <b>+ Else if</b> adds more comparisons of the same thing, checked top to bottom: the first one that is true runs, and the rest are skipped. <b>+ Else</b> runs when none are true. Each If has its own End if, so they can't come apart, and Ifs can go inside other Ifs.</p>
 			<p>Reorder Else ifs with their arrows; moving one above the first makes it the If. Removing an Else if or the Else keeps its steps: they move below the End if.</p>
-			<h3>For each player</h3>
-			<p>Runs the steps inside it (down to its End for each) once for every player online, one after another, with that player as the Player. So Kick, Ban, a Message to the Player, <code>{player_name}</code>, <code>{player_ping}</code> and the other player placeholders and If comparisons work inside it, in any trigger, Schedule and Manual included. The players are the latest 5-second player check's; players BattlEye hasn't verified yet are skipped. Stop flow inside it ends the whole run. A For each player can't go inside another one.</p>
-			<p>Example, a Schedule flow every minute (<code>* * * * *</code>): <b>For each player</b>, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. In a flow without a player of its own, Add step puts If inside the For each player at the end of the list, and Kick, Ban and Message into the innermost block there, so these three clicks build it. The run log lists each player a condition matched, not every player checked.</p>
+			<h3>For each</h3>
+			<p><b>For each</b> runs the steps inside it (down to its End for each) once per item, with that item's player as the Player, so Kick, Ban, a Message to the Player, the player placeholders and If comparisons work inside it in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies; it acts only when the flow runs. Pick what it goes through:</p>
+			<ul>
+				<li><b>player</b>: every player online (the latest 5-second player check's), one after another. <code>{message}</code> is that player's latest chat line this session (empty if they haven't chatted).</li>
+				<li><b>message</b>: every chat line players online sent this session that this flow hasn't handled yet, oldest first, as the player who sent it. <code>{message}</code> is the line. A flow every minute sees each line once.</li>
+			</ul>
+			<p>Players BattlEye hasn't verified yet are left out. Stop flow inside it ends the whole run. A For each can't go inside another one. The run log lists each player a condition matched, not every one checked.</p>
+			<p>Examples for a Schedule flow every minute (<code>* * * * *</code>): <b>For each</b> player, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. Or <b>For each</b> message, <b>If</b> <code>{message}</code> contains <code>noob</code>, <b>Message</b> the Player <i>Please keep chat friendly</i>. In a flow without a player of its own, Add step puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so three clicks build either one.</p>
 			<h3>What you can compare</h3>
 			<table>
 				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
@@ -915,7 +920,7 @@ const TOKENS = [
 	{ tok: '{players_online}', need: '', title: 'How many players are online (works in every flow)' }
 ];
 const NEED_TEXT = {
-	player: 'needs a player: put it inside a For each player, or use the On join or Player message trigger',
+	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
 	chat: 'needs the Player message trigger'
 };
 // Kinds: word = the chat message, matched by words; text = exact, wildcard
@@ -995,8 +1000,8 @@ const STEPS = {
 		parts: ['reason', { k: 'reason', kind: 'text', ph: 'Server restart' }], def: { reason: 'Server restart' } },
 	if:         { label: 'If', cat: 'logic', group: 'Logic', desc: 'Run steps only when… (comes with its End if)',
 		parts: [{ k: 'subject', kind: 'select', opts: 'subjects' }, { k: 'op', kind: 'select', opts: 'ops' }, { k: 'value', kind: 'val' }], def: { subject: 'player_ping', op: 'ge', value: '500' } },
-	forEach:    { label: 'For each player', cat: 'logic', group: 'Logic', desc: 'Run steps once for every player online (comes with its End for each)',
-		parts: ['online: the steps inside run once per player, as the Player'], def: {} },
+	forEach:    { label: 'For each', cat: 'logic', group: 'Logic', desc: 'Run steps once per player online, or per new chat message (comes with its End for each)',
+		parts: [{ k: 'of', kind: 'select', opts: [['player', 'player'], ['message', 'message']] }], def: { of: 'player' } },
 	stop:       { label: 'Stop flow', cat: 'logic', group: 'Logic', desc: 'End the run here', parts: ['end the run here'], def: {} },
 	command:    { label: 'RCON command', cat: 'adv', group: 'Advanced', desc: 'Any command, placeholders allowed',
 		parts: [{ k: 'cmd', kind: 'text', ph: 'kick {player_id} Example', mono: true }], def: { cmd: '' } }
@@ -1018,17 +1023,20 @@ function el(tag, attrs, ...kids) {
 	for (const c of kids.flat(Infinity)) if (c != null) n.append(c);
 	return n;
 }
-// ctx is what the trigger provides. Inside a For each player there is
-// always a player (each one in turn) and no chat message (it isn't theirs).
+// ctx is what the trigger provides. Inside a For each there is always a
+// player (each one in turn) and a {message}: the chat line (For each
+// message) or that player's latest one this session (For each player).
 function ctx(f, inLoop) {
 	const t = f.trigger.type;
-	if (inLoop) return { '': true, player: true, chat: false };
+	if (inLoop) return { '': true, player: true, chat: true };
 	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat' };
 }
 const secsOf = (v) => parseDur(v) || 0;
 // An If: { type: 'if', branches: [{ subject, op, value, steps }, ...], else: [steps] | null }.
 // branches[0] is the If, the rest are Else ifs (checked in order), then the Else.
-// A For each player: { type: 'forEach', steps: [...] }, run once per player online.
+// A For each: { type: 'forEach', of: 'player' | 'message', steps: [...] }, run once
+// per player online, or per chat line players online sent that the flow hasn't
+// handled yet.
 // Both are blocks: steps that hold other steps.
 const isBlock = (s) => s.type === 'if' || s.type === 'forEach';
 const lists = (s) => s.type === 'forEach' ? [s.steps] : s.branches.map((b) => b.steps).concat(s.else ? [s.else] : []);
@@ -1053,7 +1061,7 @@ function runLength(list) {
 	for (const s of list) {
 		if (s.type === 'wait') len += secsOf(s.time);
 		else if (s.type === 'if') len += Math.max(0, ...lists(s).map(runLength));
-		else if (s.type === 'forEach') len += runLength(s.steps); // once; it repeats per player
+		else if (s.type === 'forEach') len += runLength(s.steps); // once; it repeats per player or message
 	}
 	return len;
 }
@@ -1091,7 +1099,7 @@ function stepErr(c, s) {
 	return '';
 }
 // Step numbers in the order the rows are shown (Else and End rows have none),
-// and which steps are inside a For each player.
+// and which steps are inside a For each.
 function numbering(list, map = new Map(), loop = new Set(), inLoop = false) {
 	for (const s of list) {
 		map.set(s, map.size + 1);
@@ -1114,7 +1122,7 @@ function validate(f, list) {
 			}
 			continue;
 		}
-		const e = s.type === 'forEach' && loop.has(s) ? 'A For each player can\'t go inside another one' : stepErr(c, s);
+		const e = s.type === 'forEach' && loop.has(s) ? 'A For each can\'t go inside another one' : stepErr(c, s);
 		if (e) { errs.set(s, e); if (first == null) first = n; }
 	}
 	return { errs, first, nums, loop };
@@ -1135,6 +1143,12 @@ function sendsText(s) {
 		case 'command': return s.cmd || '';
 	}
 	return '';
+}
+// forEachText explains a For each under its row.
+function forEachText(s) {
+	return s.of === 'message'
+		? 'once for each chat line a player online sent since this flow last ran, as the Player who sent it, with {message} the line'
+		: 'once for each player online, as the Player, with {message} their latest chat line this session';
 }
 
 function describeIf(s) {
@@ -1222,7 +1236,7 @@ function renderSteps(key) {
 			const err = el('div', { class: 'err' });
 			const atTop = r.list === list && r.i === 0;
 			const atBottom = r.list === list && r.i === list.length - 1;
-			const blockName = s.type === 'if' ? 'If' : 'For each player';
+			const blockName = s.type === 'if' ? 'If' : 'For each';
 			const what = isBlock(s) ? blockName + ' block on step ' + n : 'step ' + n;
 			row = el('div', { class: 'step', 'data-r': ri, 'data-if': isBlock(s) ? ifId(s) : null, style },
 				el('span', { class: 'grip', title: isBlock(s) ? 'Drag to move the whole ' + blockName + ' block' : 'Drag to move', 'aria-hidden': 'true', text: '⋮⋮' }),
@@ -1328,7 +1342,8 @@ function updateDerivedRows(key, errs) {
 	for (const j of jointRefs[key]) j.span.textContent = jointText(j.s, j.isElse);
 	for (const r of rowRefs[key]) {
 		let t = r.s.type ? sendsText(r.s) : '';
-		if (r.s.type === 'wait') {
+		if (r.s.type === 'forEach') t = 'runs the steps inside ' + forEachText(r.s);
+		else if (r.s.type === 'wait') {
 			const secs = secsOf(r.s.time);
 			t = secs > 0 ? 'waits ' + secs + ' second' + (secs === 1 ? '' : 's') : '';
 		} else if (t) t = 'sends: ' + t;
@@ -1484,7 +1499,7 @@ function setupDrag(box) {
 // ---------------------------------------------------------------------------
 function whyDisabled(type, key) {
 	if (key === 'onStop') return STOP_TYPES.includes(type) ? '' : 'not for Stop';
-	if ((type === 'kick' || type === 'ban') && !ctx(ed).player && !hasLoop(ed.steps)) return 'needs a For each player, or On join or Player message';
+	if ((type === 'kick' || type === 'ban') && !ctx(ed).player && !hasLoop(ed.steps)) return 'needs a For each, or On join or Player message';
 	return '';
 }
 function openMenu(key) {
@@ -1531,8 +1546,11 @@ function syncIfs(list) {
 		for (const l of lists(s)) syncIfs(l);
 	}
 }
-function newCond(inLoop) {
-	const c = ctx(ed, inLoop);
+// newCond is a new If's first condition: on what the place it goes has
+// (loopOf: inside a For each of 'player' or 'message').
+function newCond(loopOf) {
+	if (loopOf) return Object.assign(defaultCond(loopOf === 'message' ? 'message' : 'player_ping'), { steps: [] });
+	const c = ctx(ed);
 	return Object.assign(defaultCond(c.chat ? 'message' : c.player ? 'player_ping' : 'players_online'), { steps: [] });
 }
 function addStep(key, type) {
@@ -1541,13 +1559,13 @@ function addStep(key, type) {
 	if (type === 'playerList' && ed.trigger.type === 'chat') s.to = 'player';
 
 	// In a flow without a player of its own, steps that work on "the player"
-	// go into the For each player that ends the list: an If at the loop's
+	// go into the For each that ends the list: an If at the loop's
 	// level, a Kick, Ban or Message into the innermost block there (so For
 	// each player, If, Kick builds "kick each player the If matches").
 	const last = ed[key][ed[key].length - 1];
 	const intoLoop = key === 'steps' && !ctx(ed).player && last && last.type === 'forEach' &&
 		['kick', 'ban', 'if', 'message'].includes(type);
-	if (type === 'if') { delete s.subject; delete s.op; delete s.value; s.branches = [newCond(intoLoop)]; s.else = null; }
+	if (type === 'if') { delete s.subject; delete s.op; delete s.value; s.branches = [newCond(intoLoop ? last.of : null)]; s.else = null; }
 	if (type === 'forEach') s.steps = [];
 	if (intoLoop && type === 'message') s.to = 'player';
 	let into = ed[key];
@@ -1572,8 +1590,8 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.addrow')) cl
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 
 function renderChips() {
-	// A For each player makes the player placeholders usable (inside it).
-	const c = hasLoop(ed.steps) ? Object.assign(ctx(ed), { player: true }) : ctx(ed);
+	// A For each makes the player placeholders and {message} usable (inside it).
+	const c = hasLoop(ed.steps) ? ctx(ed, true) : ctx(ed);
 	const box = $('chips');
 	box.textContent = '';
 	box.append('Insert:');
@@ -1732,7 +1750,7 @@ async function updateTrigHint() {
 // ---------------------------------------------------------------------------
 function changed(structural) {
 	syncIfs(ed.steps);
-	if (structural) { renderSteps('steps'); renderSteps('onStop'); renderChips(); } // a For each player adds the player placeholders
+	if (structural) { renderSteps('steps'); renderSteps('onStop'); renderChips(); } // a For each adds the player placeholders
 	else { updateDerivedRows('steps'); updateDerivedRows('onStop'); }
 	if (ed.trigger.type !== 'schedule') updateTrigHint();
 }

@@ -1059,7 +1059,7 @@ func TestConnectTriesOnce(t *testing.T) {
 
 // pingKickFlow is the example: for each player, if ping is over 500, kick them.
 func pingKickFlow() []Step {
-	return []Step{{Type: "forEach", Steps: []Step{{Type: "if", Branches: []Branch{{
+	return []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "if", Branches: []Branch{{
 		Subject: "player_ping", Op: "gt", Value: "500",
 		Steps: []Step{{Type: "kick", Who: "player", Reason: "Ping too high ({player_ping})"}},
 	}}}}}}
@@ -1073,16 +1073,26 @@ func TestForEachValidation(t *testing.T) {
 	if err := checkSteps(triggerSchedule, pingKickFlow(), nil); err != nil {
 		t.Errorf("the ping-kick example: %v", err)
 	}
-	if err := checkSteps(triggerManual, []Step{{Type: "forEach", Steps: []Step{{Type: "message", To: "player", Text: "hi {player_name}"}}}}, nil); err != nil {
+	if err := checkSteps(triggerManual, []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "player", Text: "hi {player_name}"}}}}, nil); err != nil {
 		t.Errorf("a message to each player: %v", err)
 	}
-	nested := []Step{{Type: "forEach", Steps: []Step{{Type: "forEach", Steps: kick}}}}
+	nested := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "forEach", Of: "message", Steps: kick}}}}
 	if err := checkSteps(triggerSchedule, nested, nil); err == nil || !strings.Contains(err.Error(), "inside another") {
 		t.Errorf("a loop inside a loop: %v", err)
 	}
-	chat := []Step{{Type: "forEach", Steps: []Step{{Type: "message", To: "all", Text: "{message}"}}}}
-	if err := checkSteps(triggerChat, chat, nil); err == nil {
-		t.Error("{message} inside a For each player was accepted (it isn't the looped player's)")
+	// {message} is the looped player's line, in any trigger.
+	for _, of := range []string{"player", "message"} {
+		words := []Step{{Type: "forEach", Of: of, Steps: []Step{{Type: "if", Branches: []Branch{{
+			Subject: "message", Op: "has", Value: "noob", Steps: []Step{{Type: "message", To: "player", Text: "You said: {message}"}}}}}}}}
+		if err := checkSteps(triggerSchedule, words, nil); err != nil {
+			t.Errorf("For each %s with {message}: %v", of, err)
+		}
+	}
+	if err := checkSteps(triggerSchedule, []Step{{Type: "forEach", Of: "everything", Steps: kick}}, nil); err == nil {
+		t.Error("For each of an unknown kind was accepted")
+	}
+	if got := fixSteps([]Step{{Type: "forEach"}}); got[0].Of != "player" {
+		t.Errorf("a For each without a kind reads as %q, want player", got[0].Of)
 	}
 	afterLoop := append(pingKickFlow(), kick...)
 	if err := checkSteps(triggerSchedule, afterLoop, nil); err == nil {
@@ -1135,11 +1145,78 @@ func TestForEachKicksOnlyMatchingPlayers(t *testing.T) {
 
 	// Stop flow inside the loop ends the whole run.
 	sent = nil
-	stopFirst := []Step{{Type: "forEach", Steps: []Step{{Type: "message", To: "player", Text: "hi"}, {Type: "stop"}}}}
+	stopFirst := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "player", Text: "hi"}, {Type: "stop"}}}}
 	if x.exec(stopFirst) {
 		t.Fatal("Stop flow inside the loop didn't end the run")
 	}
 	if len(sent) != 1 || sent[0] != "say 1 hi" {
 		t.Fatalf("sent %q; the loop should stop after the first player (#1)", sent)
+	}
+}
+
+func TestForEachMessageHandlesEachLineOnce(t *testing.T) {
+	testDB(t)
+	var sent []string
+	oldSend := sendCommand
+	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
+	t.Cleanup(func() { sendCommand = oldSend })
+	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	line("Player #3 Survivor (1.2.3.4:2304) connected", t0)
+	line("Player #3 Survivor - BE GUID: "+testGUID, t0)
+	line("Player #5 Calm (5.6.7.8:2304) connected", t0)
+	line("Player #5 Calm - BE GUID: "+testGUID2, t0)
+	latest.Lock()
+	oldPlayers := latest.players
+	latest.players = []Player{{ID: 3, GUID: testGUID, Name: "Survivor", Ping: 40}, {ID: 5, GUID: testGUID2, Name: "Calm", Ping: 60}}
+	latest.Unlock()
+	t.Cleanup(func() { latest.Lock(); latest.players = oldPlayers; latest.Unlock() })
+	chat := func(seq int64, text string) {
+		ev := parseServerMessage(text, t0)
+		ev.Seq = seq
+		trackEvent(ev)
+	}
+	chat(10, "(Global) Survivor: hello all")
+	chat(11, "(Side) Calm: anyone noob here?")
+	chat(12, "(Global) Survivor: you noob")
+
+	warn := []Step{{Type: "forEach", Of: "message", Steps: []Step{{Type: "if", Branches: []Branch{{
+		Subject: "message", Op: "has", Value: "noob",
+		Steps: []Step{{Type: "message", To: "player", Text: "No insults: {message}"}}}}}}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &flowRun{flowID: 42, name: "language", ctx: ctx, cancel: cancel}
+	t.Cleanup(func() { forEachMarks.Lock(); delete(forEachMarks.byFlow, 42); forEachMarks.Unlock() })
+	x := &job{run: run, ctx: ctx}
+
+	if !x.exec(warn) {
+		t.Fatal("the run ended early")
+	}
+	want := []string{"say 5 No insults: anyone noob here?", "say 3 No insults: you noob"}
+	if fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Fatalf("first run sent %q, want %q", sent, want)
+	}
+	// The next run only sees lines sent since.
+	sent = nil
+	if !x.exec(warn) || len(sent) != 0 {
+		t.Fatalf("second run with no new lines sent %q", sent)
+	}
+	chat(13, "(Global) Calm: noob")
+	if !x.exec(warn) || fmt.Sprint(sent) != fmt.Sprint([]string{"say 5 No insults: noob"}) {
+		t.Fatalf("third run sent %q", sent)
+	}
+
+	// For each player sees each player's latest line as {message}.
+	sent = nil
+	latestLine := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "all", Text: "{player_name} last said: {message}"}}}}
+	if !x.exec(latestLine) {
+		t.Fatal("the run ended early")
+	}
+	if want := []string{"say -1 Survivor last said: you noob", "say -1 Calm last said: noob"}; fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Fatalf("For each player sent %q, want %q", sent, want)
+	}
+	// A player's lines go when they leave.
+	line("Player #3 Survivor disconnected", t0.Add(time.Hour))
+	if _, ok := latestChatOf(testGUID); ok {
+		t.Fatal("a player who left still has session lines")
 	}
 }
