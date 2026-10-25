@@ -756,9 +756,9 @@ func (h *heartbeat) beat() {
 }
 
 // pollPlayersNow reads `players` (not logged) and hands the list to the
-// tracker (who is online, sessions, players.go), the SteamID search (auto
-// mode, steam.go) and the join flows of players who just finished loading
-// (flows_join.go). It reports whether the server answered.
+// tracker (who is online, sessions, players.go) and the join flows of
+// players who just finished loading (flows_join.go). It reports whether the
+// server answered.
 func pollPlayersNow() bool {
 	sentAt := time.Now()
 	out, acked, err := runShared("players", 3*time.Second, false, "")
@@ -766,8 +766,6 @@ func pollPlayersNow() bool {
 		return false
 	}
 	joined := playersPolledTracker(parsePlayers(out), sentAt)
-	players, _ := onlinePlayers()
-	steamPlayersSeen(players)
 	startJoinFlows(joined) // flows_join.go
 	return true
 }

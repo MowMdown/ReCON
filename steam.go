@@ -41,15 +41,22 @@ import (
 // can't be reversed. So the search hashes every Steam account ID (0 to 2^32)
 // until the GUID matches, working up from the oldest accounts and down from
 // the newest at once (see steamSearchSplit). Old and new accounts turn up
-// soonest; a full pass takes several minutes. It runs in the background, one pass at a time, and a
-// pass looks for every GUID in players and bans that has no SteamID yet,
-// since many GUIDs cost the same as one. Each SteamID is written to players
-// and bans the moment it is found. A search asked for while a pass is running
-// waits for the next pass. STEAM_SEARCH_CORES and STEAM_SEARCH_PRIORITY set
-// how much CPU it uses (see steamSearchConfig; default 1 core, medium).
-// STEAM_SEARCH_MODE=auto also starts a search when a player without a
-// SteamID is first seen online (steamPlayersSeen); manual, the default, only
-// searches when the button is pressed.
+// soonest; a full pass takes several minutes. It runs in the background, one
+// pass at a time, and only for players with no SteamID yet. Each SteamID is
+// written to players and bans the moment it is found. A search asked for
+// while a pass is running waits for the next pass. STEAM_SEARCH_CORES and
+// STEAM_SEARCH_PRIORITY set how much CPU it uses (see steamSearchConfig;
+// default 1 core, medium).
+//
+// STEAM_SEARCH_MODE:
+//
+//	manual  (the default) the button searches for that one player.
+//	auto    when a player with no SteamID joins (steamPlayerJoined), the
+//	        table is read for them at once. If it can't answer, they wait for
+//	        a batch search: it starts 60 seconds after the first such join,
+//	        each further join adds 30 seconds, and it starts at once when 3
+//	        minutes have passed or 15 players are waiting, so a busy restart
+//	        costs one pass, not one per player (steamAutoBatch).
 //
 // steam2guid tables (STEAM_TABLE_DIR, default the folder players.db is in,
 // so /data): if a table built
@@ -504,9 +511,8 @@ func parseSteamSearchConfig(cores, priority string) steamSearchConfig {
 var steamSearchCfg = parseSteamSearchConfig(os.Getenv("STEAM_SEARCH_CORES"), os.Getenv("STEAM_SEARCH_PRIORITY"))
 
 // steamSearchAuto is STEAM_SEARCH_MODE: "manual" (the default) searches only
-// when someone presses Search Steam ID; "auto" also starts a search the
-// first time the player poller sees a player with no SteamID, so players
-// get one shortly after they join.
+// when someone presses Search Steam ID; "auto" also looks up every player
+// with no SteamID when they join (steamPlayerJoined).
 var steamSearchAuto = parseSteamSearchMode(os.Getenv("STEAM_SEARCH_MODE"))
 
 func parseSteamSearchMode(s string) bool {
@@ -521,47 +527,135 @@ func parseSteamSearchMode(s string) bool {
 }
 
 // steamAutoSeen is every GUID auto mode has already looked at since ReCON
-// started, so each player is checked once, not on every 5-second poll, and a
-// player no search could match isn't searched for again and again.
+// started, so a player who rejoins, or whom no search could match, isn't
+// looked up again and again.
 var steamAutoSeen = struct {
 	sync.Mutex
 	m map[string]bool
 }{m: map[string]bool{}}
 
-// steamPlayersSeen is called by the player poller (db.go) after each
-// successful poll. In auto mode it starts a SteamID search for any online
-// player seen for the first time this run who has no SteamID yet.
-func steamPlayersSeen(players []Player) {
+// The auto mode batch: how long it waits after the first join, how much each
+// further join adds, and when it stops waiting.
+var (
+	steamBatchFirstWait  = 60 * time.Second
+	steamBatchJoinWait   = 30 * time.Second
+	steamBatchMaxWait    = 3 * time.Minute
+	steamBatchMaxPlayers = 15
+)
+
+// steamAutoBatch is the players waiting for the next auto mode search.
+var steamAutoBatch = struct {
+	sync.Mutex
+	guids map[string]bool
+	first time.Time   // when the first of them joined
+	due   time.Time   // when the search starts
+	timer *time.Timer // fires at due
+}{guids: map[string]bool{}}
+
+// steamPlayerJoined is called by the tracker (players.go) when a player's
+// session opens. In auto mode, a player with no SteamID is looked up in the
+// steam2guid table straight away; one the table can't answer joins the
+// batch for the next search.
+func steamPlayerJoined(guid, name string) {
 	if !steamSearchAuto {
 		return
 	}
-	for _, p := range players {
-		g := strings.ToLower(p.GUID)
-		if !guidPattern.MatchString(g) {
-			continue
-		}
-		steamAutoSeen.Lock()
-		seen := steamAutoSeen.m[g]
-		steamAutoSeen.m[g] = true
-		steamAutoSeen.Unlock()
-		if seen {
-			continue
-		}
+	g := strings.ToLower(guid)
+	if !guidPattern.MatchString(g) {
+		return
+	}
+	steamAutoSeen.Lock()
+	seen := steamAutoSeen.m[g]
+	steamAutoSeen.m[g] = true
+	steamAutoSeen.Unlock()
+	if seen {
+		return
+	}
+	go func() {
 		id, known, err := globalDatabase.SteamIDByGUID(g)
 		if err != nil {
 			log.Printf("steam: auto search: reading %s: %v", g, err)
 			steamAutoSeen.Lock()
-			delete(steamAutoSeen.m, g) // try again on the next poll
+			delete(steamAutoSeen.m, g) // try again when they next join
 			steamAutoSeen.Unlock()
-			continue
+			return
 		}
 		if !known || id != "" {
-			continue
+			return
 		}
-		log.Printf("steam: %s (%s) has no SteamID; searching (STEAM_SEARCH_MODE=auto)", bareName(p.Name), g)
-		if err := startSteamSearch(g); err != nil {
-			log.Printf("steam: auto search for %s: %v", g, err)
+		if id, ok := lookupSteamTable(g); ok {
+			saveSteamID(g, id)
+			return
 		}
+		log.Printf("steam: %s (%s) has no SteamID; searching soon (STEAM_SEARCH_MODE=auto)", name, g)
+		addToSteamBatch(g, time.Now())
+	}()
+}
+
+// lookupSteamTable reads one GUID's SteamID64 from the steam2guid table, if
+// there is one and it has it.
+func lookupSteamTable(guid string) (uint64, bool) {
+	t := openSteamTable()
+	if t == nil {
+		return 0, false
+	}
+	defer t.close()
+	t.workers = steamSearchCfg.Cores
+	id, ok, err := t.lookup(guid)
+	if err != nil {
+		log.Printf("steam: table lookup of %s: %v", guid, err)
+		return 0, false
+	}
+	return id, ok
+}
+
+// addToSteamBatch adds a joined player to the auto mode batch and sets when
+// its search starts (see steamBatchFirstWait).
+func addToSteamBatch(guid string, now time.Time) {
+	b := &steamAutoBatch
+	b.Lock()
+	defer b.Unlock()
+	b.guids[guid] = true
+	if len(b.guids) == 1 {
+		b.first = now
+	}
+	b.due = steamBatchDue(b.first, b.due, len(b.guids), now)
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	b.timer = time.AfterFunc(max(b.due.Sub(now), 0), runSteamBatch)
+}
+
+// steamBatchDue is when a batch of n players, the first of whom joined at
+// first, should be searched for, now that another has joined; due is when it
+// was going to start.
+func steamBatchDue(first, due time.Time, n int, now time.Time) time.Time {
+	if n >= steamBatchMaxPlayers {
+		return now
+	}
+	if n == 1 {
+		due = now.Add(steamBatchFirstWait)
+	} else {
+		due = due.Add(steamBatchJoinWait)
+	}
+	return minTime(due, first.Add(steamBatchMaxWait))
+}
+
+// runSteamBatch starts the search for the auto mode batch.
+func runSteamBatch() {
+	b := &steamAutoBatch
+	b.Lock()
+	guids := make([]string, 0, len(b.guids))
+	for g := range b.guids {
+		guids = append(guids, g)
+	}
+	b.guids, b.timer = map[string]bool{}, nil
+	b.Unlock()
+	if len(guids) == 0 {
+		return
+	}
+	if err := startSteamSearch(guids...); err != nil {
+		log.Printf("steam: auto search: %v", err)
 	}
 }
 
@@ -653,34 +747,36 @@ var steamSearch = struct {
 	checked  atomic.Uint64
 }{queued: map[string]bool{}, notFound: map[string]time.Time{}}
 
-// startSteamSearch asks for guid's SteamID. If no pass is running it starts
-// one for guid plus every other GUID still missing a SteamID; if one is
-// running without guid, guid waits for the next pass.
-func startSteamSearch(guid string) error {
+// startSteamSearch asks for these GUIDs' SteamIDs. If no pass is running it
+// starts one for them; if one is running, those it isn't looking for wait
+// for the next pass.
+func startSteamSearch(guids ...string) error {
 	steamSearch.Lock()
 	defer steamSearch.Unlock()
-	delete(steamSearch.notFound, guid)
-	if steamSearch.running {
-		if !steamSearch.wanted[guid] {
-			steamSearch.queued[guid] = true
+	var list []string
+	for _, g := range guids {
+		g = strings.ToLower(g)
+		delete(steamSearch.notFound, g)
+		if !steamSearch.running {
+			list = append(list, g)
+		} else if !steamSearch.wanted[g] {
+			steamSearch.queued[g] = true
 		}
+	}
+	if steamSearch.running {
 		return nil
 	}
-	return beginSteamSearchLocked([]string{guid})
+	return beginSteamSearchLocked(list)
 }
 
-// beginSteamSearchLocked starts a pass for extra plus every GUID in players
-// and bans that has no SteamID. Caller holds steamSearch's lock.
-func beginSteamSearchLocked(extra []string) error {
-	pending, err := globalDatabase.PendingSteamGUIDs()
-	if err != nil {
-		return err
-	}
+// beginSteamSearchLocked starts a pass for the GUIDs in list. Caller holds
+// steamSearch's lock.
+func beginSteamSearchLocked(list []string) error {
 	wanted := map[string]bool{}
-	for _, g := range append(pending, extra...) {
+	for _, g := range list {
 		wanted[strings.ToLower(g)] = true
 	}
-	list := make([]string, 0, len(wanted))
+	list = make([]string, 0, len(wanted))
 	for g := range wanted {
 		list = append(list, g)
 	}
@@ -694,14 +790,19 @@ func beginSteamSearchLocked(extra []string) error {
 	return nil
 }
 
-func runSteamSearch(list []string) {
-	save := func(guid string, id uint64) {
-		if err := globalDatabase.SetSteamID(guid, strconv.FormatUint(id, 10)); err != nil {
-			log.Printf("steam: found %s for %s but couldn't save it: %v", strconv.FormatUint(id, 10), guid, err)
-			return
-		}
-		log.Printf("steam: %s is %d", guid, id)
+// saveSteamID stores a SteamID64 found for a GUID.
+func saveSteamID(guid string, id uint64) {
+	if err := globalDatabase.SetSteamID(guid, strconv.FormatUint(id, 10)); err != nil {
+		log.Printf("steam: found %s for %s but couldn't save it: %v", strconv.FormatUint(id, 10), guid, err)
+		return
 	}
+	log.Printf("steam: %s is %d", guid, id)
+}
+
+// runSteamSearch is one pass: the table first, then hashing what it couldn't
+// answer, then the next pass for anything queued meanwhile.
+func runSteamSearch(list []string) {
+	save := saveSteamID
 
 	// The table first, if there is one: it answers for every account below
 	// its MaxAccount, so only the IDs above that are left to hash.

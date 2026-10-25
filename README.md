@@ -112,7 +112,7 @@ Everything is set with environment variables.
 | `DB_PATH`               | `/data/players.db` | The SQLite database: players, sessions, IPs, chat, notes, roles, permanent bans, flows and settings (timed bans and RCON Settings are kept in memory only) |
 | `TZ`                    | `UTC`              | Time zone for flow schedules and the times shown, e.g. `America/New_York` |
 | `STEAM_API_KEY`         | none               | Turns on the full Steam Profile tab. Free at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
-| `STEAM_SEARCH_MODE`     | `manual`           | `manual`: look up a player's SteamID only when you press **Search Steam ID**. `auto`: also start a lookup for every new player who joins without one |
+| `STEAM_SEARCH_MODE`     | `manual`           | `manual`: look up a player's SteamID only when you press **Search Steam ID** (that player only). `auto`: also look up every player who joins without one: straight away in the steam2guid table, else in one search for everyone waiting, starting 60s after the first join (+30s per join, at most 3 minutes or 15 players) |
 | `STEAM_SEARCH_CORES`    | `1`                | CPU cores a SteamID lookup may use (capped at the cores available) |
 | `STEAM_SEARCH_PRIORITY` | `medium`           | How much of each core it uses: `low` 33%, `medium` 66%, `high` 99% |
 

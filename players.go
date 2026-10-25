@@ -208,6 +208,7 @@ func openTracked(t *trackedPlayer, at time.Time) {
 		return
 	}
 	t.opened = true
+	steamPlayerJoined(t.guid, t.name) // STEAM_SEARCH_MODE=auto (steam.go)
 }
 
 // closeTracked ends a player's session at `at` and forgets them. Caller
