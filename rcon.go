@@ -692,10 +692,10 @@ var loginPollDue atomic.Bool
 //     players.go) so playtime stops while it's offline. From then on, each
 //     round logs in again on the same RCON socket (reloginSharedSession, paced).
 //     This is the only place that decides the server isn't answering.
-//   - Answered: reset the count. Poll players after a login, and while
-//     playersPollWanted (players.go); read the ban list after a login and
-//     every banSyncEvery. Players who didn't come back after a restart in
-//     time are let go (forgetAwayPlayers).
+//   - Answered: reset the count. Poll players after a login, and while a
+//     Players page is open (playersPollWanted, players.go); read the ban
+//     list after a login and every banSyncEvery. Players who didn't come
+//     back after a restart in time are let go (forgetAwayPlayers).
 func startServerHeartbeat() {
 	pollInterval = heartbeatEvery
 	rconNextPoll.Store(time.Now().Add(heartbeatEvery).UnixMilli())
@@ -767,6 +767,9 @@ func pollPlayersNow() bool {
 	}
 	joined := playersPolledTracker(parsePlayersReply(out), sentAt)
 	startJoinFlows(joined) // flows_join.go
+	if anyoneInLobby() {
+		wakeLobbyWatcher() // someone was already loading (players.go)
+	}
 	return true
 }
 

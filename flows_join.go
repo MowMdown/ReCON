@@ -7,7 +7,7 @@ package main
 // finished loading in:
 //
 //	Player #3 Name (1.2.3.4:2304) connected   the join is queued (players.go)
-//	`players` every 5 seconds                 while they are in the lobby
+//	`players` every 3 seconds                 while they are in the lobby
 //	"(Lobby)" gone from their name            the join flows start, each
 //	                                          after its delay
 //

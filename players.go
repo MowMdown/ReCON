@@ -32,9 +32,10 @@ import (
 // The tracker is ReCON's list of who is online: flows, chat commands and the
 // Players page all read it (listOnlinePlayers). A `players` poll (pollPlayersNow,
 // rcon.go) fills in what the messages can't tell, and is only sent when
-// needed (playersPollWanted): after every RCON login, every 5 seconds while
-// someone is still loading (until "(Lobby)" leaves their name), while a
-// Players page is open (for pings), and right before a For each runs. A
+// needed: after every RCON login, every 3 seconds while someone is still
+// loading (until "(Lobby)" leaves their name, watchLobbyPlayers), every 5
+// seconds while a Players page is open (for pings, playersPollWanted), and
+// right before a For each runs. A
 // poll also catches anything missed while RCON wasn't listening: a player
 // it doesn't list is closed, one it lists that the tracker doesn't know is
 // opened.
@@ -110,8 +111,52 @@ func startPlayerTracker() {
 			if p, ok := trackServerEvent(ev); ok {
 				startJoinFlows([]Player{p}) // flows_join.go
 			}
+			if ev.Kind == eventConnect {
+				wakeLobbyWatcher()
+			}
 		}
 	}()
+	go watchLobbyPlayers()
+}
+
+// lobbyPollEvery is how often `players` is polled while someone is loading,
+// so join flows start soon after "(Lobby)" leaves their name.
+var lobbyPollEvery = 3 * time.Second
+
+// lobbyWake starts watchLobbyPlayers when someone connects.
+var lobbyWake = make(chan struct{}, 1)
+
+// wakeLobbyWatcher tells watchLobbyPlayers someone may be loading.
+func wakeLobbyWatcher() {
+	select {
+	case lobbyWake <- struct{}{}:
+	default: // already told
+	}
+}
+
+// watchLobbyPlayers polls `players` every lobbyPollEvery for as long as
+// anyone is still loading, then sleeps until the next connect.
+func watchLobbyPlayers() {
+	for range lobbyWake {
+		for anyoneInLobby() {
+			time.Sleep(lobbyPollEvery)
+			if anyoneInLobby() && currentRconStatus() != "unavailable" {
+				pollPlayersNow() // rcon.go
+			}
+		}
+	}
+}
+
+// anyoneInLobby reports whether a tracked player is still loading.
+func anyoneInLobby() bool {
+	tracker.Lock()
+	defer tracker.Unlock()
+	for _, t := range tracker.byID {
+		if t.lobby {
+			return true
+		}
+	}
+	return false
 }
 
 // trackServerEvent updates the tracker (and the database) for one server message.
@@ -431,18 +476,8 @@ func listOnlinePlayers() (players []Player, known bool) {
 var playersPageSeen atomic.Int64
 
 // playersPollWanted reports whether the heartbeat should poll `players`
-// now: someone is still loading, or a Players page asked within the last
-// two heartbeats.
+// now: a Players page asked within the last two heartbeats. (Players still
+// loading are polled for by watchLobbyPlayers.)
 func playersPollWanted(now time.Time) bool {
-	if now.Sub(time.UnixMilli(playersPageSeen.Load())) < 2*heartbeatEvery {
-		return true
-	}
-	tracker.Lock()
-	defer tracker.Unlock()
-	for _, t := range tracker.byID {
-		if t.lobby {
-			return true
-		}
-	}
-	return false
+	return now.Sub(time.UnixMilli(playersPageSeen.Load())) < 2*heartbeatEvery
 }

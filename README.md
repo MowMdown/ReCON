@@ -218,7 +218,7 @@ Drag rows to reorder the list. Each flow's latest run log is shown under the tab
 - A flow's trigger can't change after it's saved, so a restart flow can never start firing on every join by accident. To change it, make a new flow, or Export, edit `trigger` in the file and Import.
 - On join and Player message flows run for one player (who joined, or who typed), so Run can't start them. Several players can be in progress at once; they share one run log and one Stop button.
 - Schedules start right on time (plus the delay): ReCON watches the clock rather than checking every few seconds.
-- On join flows start for players ReCON sees connecting: ReCON asks the server for the player list every 5 seconds while someone is loading, and the flow starts when *(Lobby)* leaves their name. Players already online when ReCON starts aren't greeted. After a server restart, everyone who reconnects is.
+- On join flows start for players ReCON sees connecting: ReCON asks the server for the player list every 3 seconds while someone is loading, and the flow starts when *(Lobby)* leaves their name. Players already online when ReCON starts aren't greeted. After a server restart, everyone who reconnects is.
 
 ### Times
 

@@ -1400,20 +1400,19 @@ func TestRestartKeepsReturningPlayersSession(t *testing.T) {
 	}
 }
 
-func TestPlayersPollWanted(t *testing.T) {
+func TestLobbyWatching(t *testing.T) {
 	testDB(t)
-	playersPageSeen.Store(0)
 	now := time.Now()
-	if playersPollWanted(now) {
-		t.Fatal("poll wanted with nobody online")
+	if anyoneInLobby() {
+		t.Fatal("someone loading with nobody online")
 	}
 	line("Player #2 New (3.3.3.3:2304) connected", now)
-	if !playersPollWanted(now) {
-		t.Fatal("no poll while a player is loading")
+	if !anyoneInLobby() {
+		t.Fatal("a player who just connected isn't loading")
 	}
 	playersPolledTracker([]Player{{ID: 2, IP: "3.3.3.3", Name: "New"}}, now.Add(time.Second))
-	if playersPollWanted(now) {
-		t.Fatal("still polling after (Lobby) left the name")
+	if anyoneInLobby() {
+		t.Fatal("still loading after (Lobby) left the name")
 	}
 	if p, known := listOnlinePlayers(); !known || len(p) != 1 || p[0].Name != "New" {
 		t.Fatalf("listOnlinePlayers = %+v %v", p, known)
