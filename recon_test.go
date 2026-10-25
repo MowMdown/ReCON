@@ -1419,3 +1419,73 @@ func TestPlayersPollWanted(t *testing.T) {
 		t.Fatalf("onlinePlayers = %+v %v", p, known)
 	}
 }
+
+// TestSchedulerWakesForNextRun checks the clock-based scheduler: nothing
+// starts before a run is due, it returns the run's first step (cron time
+// plus delay) as its next wake-up, and starts the run once that has come.
+func TestSchedulerWakesForNextRun(t *testing.T) {
+	if err := testDB(t).EnsureFlowsTable(); err != nil {
+		t.Fatal(err)
+	}
+	oldSend := sendCommand
+	sendCommand = func(*flowRun, string) {}
+	t.Cleanup(func() { sendCommand = oldSend; lastFired = map[int64]time.Time{} })
+
+	f := Flow{Name: "hourly", Trigger: triggerSchedule, Schedule: "0 * * * *", Delay: "30s",
+		Steps: []Step{{Type: "message", To: "all", Text: "hi"}}}
+	id, err := validateAndSaveFlow(f, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := globalDatabase.SetFlowScheduleEnabled(id, true); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Truncate(time.Hour).Add(10 * time.Minute)
+	due := now.Truncate(time.Hour).Add(time.Hour + 30*time.Second)
+	if wake := runDueSchedules(now); !wake.Equal(due) {
+		t.Fatalf("wake at %v, want %v (next hour plus the delay)", wake, due)
+	}
+	if wake := runDueSchedules(due); !wake.Equal(due.Add(time.Hour)) {
+		t.Fatalf("after starting, wake at %v, want an hour later", wake)
+	}
+	// The run started, waiting for its first step at the (future) due time.
+	flowRuns.Lock()
+	run := flowRuns.byFlow[id]
+	started := run != nil && run.active && run.anchor.Equal(due)
+	flowRuns.Unlock()
+	if !started {
+		t.Fatal("the due run wasn't started")
+	}
+	stopFlow(id)
+	if _, again := lastFired[id]; !again {
+		t.Fatal("the cron time wasn't recorded")
+	}
+}
+
+// TestJoinFlowsWaitForLoading checks that a player seen connecting is handed
+// to the join flows once "(Lobby)" leaves their name, and only once; a
+// player who was already on when ReCON started is not.
+func TestJoinFlowsWaitForLoading(t *testing.T) {
+	testDB(t)
+	t0 := time.Now()
+	playersPolledTracker([]Player{{ID: 1, IP: "1.1.1.1", GUID: testGUID2, Name: "Already"}}, t0)
+	line("Player #3 New (1.2.3.4:2304) connected", t0.Add(time.Second))
+	line("Player #3 New - BE GUID: "+testGUID, t0.Add(time.Second))
+	both := func(lobby bool) []Player {
+		name := "New"
+		if lobby {
+			name += " (Lobby)"
+		}
+		return []Player{{ID: 1, IP: "1.1.1.1", GUID: testGUID2, Name: "Already"}, {ID: 3, IP: "1.2.3.4", GUID: testGUID, Name: name}}
+	}
+	if j := playersPolledTracker(both(true), t0.Add(5*time.Second)); len(j) != 0 {
+		t.Fatalf("joined while loading: %+v", j)
+	}
+	j := playersPolledTracker(both(false), t0.Add(10*time.Second))
+	if len(j) != 1 || j[0].ID != 3 || j[0].GUID != testGUID {
+		t.Fatalf("joined = %+v, want player 3", j)
+	}
+	if j := playersPolledTracker(both(false), t0.Add(15*time.Second)); len(j) != 0 {
+		t.Fatalf("joined twice: %+v", j)
+	}
+}

@@ -733,7 +733,6 @@ func (h *heartbeat) beat() {
 				down = now
 			}
 			serverLost(down) // players.go
-			playersLost()    // greet everyone again when they reconnect (flows.go)
 		}
 		if h.fails >= heartbeatMisses {
 			reloginShared()
@@ -758,18 +757,18 @@ func (h *heartbeat) beat() {
 
 // pollPlayersNow reads `players` (not logged) and hands the list to the
 // tracker (who is online, sessions, players.go), the SteamID search (auto
-// mode, steam.go) and flows (join flows, flows.go). It reports whether the
-// server answered.
+// mode, steam.go) and the join flows of players who just finished loading
+// (flows_join.go). It reports whether the server answered.
 func pollPlayersNow() bool {
 	sentAt := time.Now()
 	out, acked, err := runShared("players", 3*time.Second, false, "")
 	if err != nil || !acked {
 		return false
 	}
-	playersPolledTracker(parsePlayers(out), sentAt)
+	joined := playersPolledTracker(parsePlayers(out), sentAt)
 	players, _ := onlinePlayers()
 	steamPlayersSeen(players)
-	playersPolled(players)
+	startJoinFlows(joined) // flows_join.go
 	return true
 }
 

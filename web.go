@@ -1081,6 +1081,7 @@ func setFlowEnabled(w http.ResponseWriter, id int64, on bool) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	rescheduleFlows() // flows_schedule.go
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

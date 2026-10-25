@@ -27,22 +27,24 @@ import (
 //
 // Every flow has one trigger:
 //
-//	schedule  a cron schedule, while Enabled
-//	join      once for each player who finishes loading in, while Enabled
-//	chat      once for each chat message a player sends, while Enabled
-//	manual    only when Run is pressed
+//	schedule  a cron schedule, while Enabled             flows_schedule.go
+//	join      once for each player who finishes loading   flows_join.go
+//	          in, while Enabled
+//	chat      once for each chat message a player sends,  flows_message.go
+//	          while Enabled
+//	manual    only when Run is pressed                    flows_manual.go
 //
 // and an optional delay before step 1. "The player" is whoever triggered a
 // join or chat run; {player_name}, {player_id}, {player_ping}, {player_ip},
 // {player_guid}, {player_role} and {message} are filled in from them.
 // Schedule and Manual flows have no player, so they message everyone only.
 //
-// The same file runs the built-in chat commands (!help, !shout, !whisper,
-// !players, !vote, !code, !kick, !ban), since they also react to chat.
+// This file has what every trigger shares, and the built-in chat commands
+// (!help, !shout, !whisper, !players, !vote, !code, !kick, !ban).
 //
-// Sections: times, steps and conditions, validation, the runner, cron, flow
-// definitions, run bookkeeping, the scheduler, the join and chat triggers,
-// and the chat commands.
+// Sections: times, steps and conditions, validation, the runner (including
+// For each), flow definitions, runs, starting player flows, and the chat
+// commands.
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -1050,278 +1052,6 @@ func sleepUntil(ctx context.Context, t time.Time) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Cron
-// ---------------------------------------------------------------------------
-
-type cronExpr struct {
-	min, hour, dom, mon, dow []bool // allowed values, indexed by value
-	domStar, dowStar         bool   // field started with "*" (affects day matching)
-}
-
-var (
-	monthNames = map[string]int{"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-		"jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
-	dowNames = map[string]int{"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
-)
-
-func cronNum(tok string, names map[string]int) (int, error) {
-	if v, ok := names[tok]; ok {
-		return v, nil
-	}
-	return strconv.Atoi(tok)
-}
-
-func parseCronField(field string, lo, hi int, names map[string]int, label string) ([]bool, bool, error) {
-	set := make([]bool, hi+1)
-	star := strings.HasPrefix(field, "*")
-	for _, part := range strings.Split(field, ",") {
-		rng, stepStr, hasStep := strings.Cut(part, "/")
-		step := 1
-		if hasStep {
-			n, err := strconv.Atoi(stepStr)
-			if err != nil || n < 1 {
-				return nil, false, fmt.Errorf("%s: bad step %q", label, stepStr)
-			}
-			step = n
-		}
-		var a, b int
-		if rng == "*" {
-			a, b = lo, hi
-		} else {
-			from, to, isRange := strings.Cut(rng, "-")
-			x, err := cronNum(from, names)
-			if err != nil {
-				return nil, false, fmt.Errorf("%s: bad value %q", label, from)
-			}
-			a, b = x, x
-			if isRange {
-				y, err := cronNum(to, names)
-				if err != nil {
-					return nil, false, fmt.Errorf("%s: bad value %q", label, to)
-				}
-				b = y
-			} else if hasStep {
-				b = hi
-			}
-		}
-		if a < lo || b > hi || a > b {
-			return nil, false, fmt.Errorf("%s: %q is out of range (%d-%d)", label, part, lo, hi)
-		}
-		for v := a; v <= b; v += step {
-			set[v] = true
-		}
-	}
-	return set, star, nil
-}
-
-func parseCron(expr string) (*cronExpr, error) {
-	expr = strings.ToLower(strings.TrimSpace(expr))
-	f := strings.Fields(expr)
-	if len(f) != 5 {
-		return nil, errors.New("expected 5 fields: minute hour day-of-month month day-of-week (e.g. 0 6 * * *)")
-	}
-	c := &cronExpr{}
-	var err error
-	if c.min, _, err = parseCronField(f[0], 0, 59, nil, "minute"); err != nil {
-		return nil, err
-	}
-	if c.hour, _, err = parseCronField(f[1], 0, 23, nil, "hour"); err != nil {
-		return nil, err
-	}
-	if c.dom, c.domStar, err = parseCronField(f[2], 1, 31, nil, "day-of-month"); err != nil {
-		return nil, err
-	}
-	if c.mon, _, err = parseCronField(f[3], 1, 12, monthNames, "month"); err != nil {
-		return nil, err
-	}
-	if c.dow, c.dowStar, err = parseCronField(f[4], 0, 7, dowNames, "day-of-week"); err != nil {
-		return nil, err
-	}
-	if c.dow[7] { // 7 is also Sunday
-		c.dow[0] = true
-	}
-	return c, nil
-}
-
-// dayMatches follows standard cron: if both day-of-month and day-of-week are
-// restricted a day matches when EITHER does; otherwise both must match.
-func (c *cronExpr) dayMatches(t time.Time) bool {
-	if !c.mon[int(t.Month())] {
-		return false
-	}
-	domOK, dowOK := c.dom[t.Day()], c.dow[int(t.Weekday())]
-	if c.domStar || c.dowStar {
-		return domOK && dowOK
-	}
-	return domOK || dowOK
-}
-
-// next returns the first run time strictly after `after` (server local time).
-func (c *cronExpr) next(after time.Time) (time.Time, bool) {
-	loc := after.Location()
-	for d := 0; d <= 366*8; d++ {
-		day := time.Date(after.Year(), after.Month(), after.Day()+d, 0, 0, 0, 0, loc)
-		if !c.dayMatches(day) {
-			continue
-		}
-		for h := 0; h < 24; h++ {
-			if !c.hour[h] {
-				continue
-			}
-			for m := 0; m < 60; m++ {
-				if !c.min[m] {
-					continue
-				}
-				cand := time.Date(day.Year(), day.Month(), day.Day(), h, m, 0, 0, loc)
-				if cand.After(after) {
-					return cand, true
-				}
-			}
-		}
-	}
-	return time.Time{}, false
-}
-
-func cronValues(set []bool, lo, hi int) []int {
-	out := []int{}
-	for v := lo; v <= hi && v < len(set); v++ {
-		if set[v] {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-func joinAnd(items []string) string {
-	switch len(items) {
-	case 0:
-		return ""
-	case 1:
-		return items[0]
-	}
-	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
-}
-
-func intStrings(v []int) []string {
-	out := make([]string, len(v))
-	for i, n := range v {
-		out[i] = strconv.Itoa(n)
-	}
-	return out
-}
-
-func describeMinutes(mins []int) string {
-	if len(mins) == 1 {
-		if mins[0] == 0 {
-			return "Every hour, on the hour"
-		}
-		return fmt.Sprintf("At %d minutes past every hour", mins[0])
-	}
-	if mins[0] == 0 && mins[1] > 0 && 60%mins[1] == 0 && len(mins) == 60/mins[1] {
-		even := true
-		for i, m := range mins {
-			if m != i*mins[1] {
-				even = false
-			}
-		}
-		if even {
-			return fmt.Sprintf("Every %d minutes", mins[1])
-		}
-	}
-	return "At minutes " + joinAnd(intStrings(mins)) + " past every hour"
-}
-
-var (
-	longDays   = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
-	longMonths = []string{"", "January", "February", "March", "April", "May", "June", "July",
-		"August", "September", "October", "November", "December"}
-)
-
-// describe returns a plain-English sentence for the schedule.
-func (c *cronExpr) describe() string {
-	mins := cronValues(c.min, 0, 59)
-	hrs := cronValues(c.hour, 0, 23)
-	var when string
-	switch {
-	case len(mins) == 60 && len(hrs) == 24:
-		when = "Every minute"
-	case len(hrs) == 24:
-		when = describeMinutes(mins)
-	case len(mins) == 60:
-		hs := make([]string, len(hrs))
-		for i, h := range hrs {
-			hs[i] = fmt.Sprintf("%02d:00", h)
-		}
-		when = "Every minute during the " + joinAnd(hs) + " hour"
-		if len(hs) > 1 {
-			when += "s"
-		}
-	case len(hrs)*len(mins) <= 8:
-		ts := []string{}
-		for _, h := range hrs {
-			for _, m := range mins {
-				ts = append(ts, fmt.Sprintf("%02d:%02d", h, m))
-			}
-		}
-		when = "At " + joinAnd(ts)
-	default:
-		when = "At minute " + joinAnd(intStrings(mins)) + " past hour " + joinAnd(intStrings(hrs))
-	}
-
-	dom := cronValues(c.dom, 1, 31)
-	dow := cronValues(c.dow, 0, 6)
-	months := cronValues(c.mon, 1, 12)
-	domAll, dowAll := len(dom) == 31, len(dow) == 7
-	dowPhrase := func() string {
-		key := strings.Join(intStrings(dow), ",")
-		switch key {
-		case "1,2,3,4,5":
-			return "on weekdays"
-		case "0,6":
-			return "on weekends"
-		}
-		names := make([]string, len(dow))
-		for i, d := range dow {
-			names[i] = longDays[d]
-		}
-		return "on " + joinAnd(names)
-	}
-	domPhrase := "on day " + joinAnd(intStrings(dom)) + " of the month"
-	var day string
-	switch {
-	case domAll && dowAll:
-		day = ""
-	case dowAll:
-		day = domPhrase
-	case domAll:
-		day = dowPhrase()
-	case c.domStar || c.dowStar:
-		day = domPhrase + ", only when it falls " + dowPhrase()
-	default:
-		day = domPhrase + " and " + dowPhrase()
-	}
-	if len(months) != 12 {
-		ms := make([]string, len(months))
-		for i, m := range months {
-			ms[i] = longMonths[m]
-		}
-		if day == "" {
-			day = "every day"
-		}
-		day += ", in " + joinAnd(ms)
-	}
-	switch {
-	case day != "":
-		return when + ", " + day
-	case strings.HasPrefix(when, "Every"):
-		return when
-	}
-	return when + ", every day"
-}
-
-func fmtWhen(t time.Time) string { return t.Format("Mon 02 Jan 15:04 MST") }
-
-// ---------------------------------------------------------------------------
 // Flow definitions (stored in the flows table, see db.go)
 // ---------------------------------------------------------------------------
 
@@ -1601,6 +1331,7 @@ func validateAndSaveFlow(f Flow, isNew bool) (int64, error) {
 	if err != nil {
 		return 0, errors.New("could not save (is the name already used?)")
 	}
+	rescheduleFlows() // flows_schedule.go
 	return id, nil
 }
 
@@ -1787,40 +1518,6 @@ func snapshotRuns() []runView {
 	return out
 }
 
-// startFlow starts a run now (the Run button). minutes > 0 replaces the
-// flow's delay for this run. Join and chat flows run for a player, so Run
-// can't start them.
-func startFlow(f Flow, minutes int) error {
-	if err := checkFlow(f); err != nil {
-		return err
-	}
-	switch f.Trigger {
-	case triggerJoin:
-		return errors.New("this flow runs for each player who joins, so Run can't start it")
-	case triggerChat:
-		return errors.New("this flow runs for each player message, so Run can't start it")
-	}
-	delay, _ := delayOf(f)
-	if minutes > 0 {
-		delay = minutes * 60
-	}
-	return launch(f, time.Now().Add(time.Duration(delay)*time.Second), sourceManual, nil)
-}
-
-// stopFlow cancels the active run of a flow (the Stop button). The run sends
-// the When stopped steps as it stops.
-func stopFlow(id int64) error {
-	flowRuns.Lock()
-	run := flowRuns.byFlow[id]
-	active := run != nil && run.active
-	flowRuns.Unlock()
-	if !active {
-		return errFlowNotRunning
-	}
-	run.cancel()
-	return nil
-}
-
 // deleteFlow forgets a flow's last run and removes it from the database.
 func deleteFlow(id int64) error {
 	flowRuns.Lock()
@@ -1833,7 +1530,9 @@ func deleteFlow(id int64) error {
 	forEachMarks.Lock()
 	delete(forEachMarks.byFlow, id) // a new flow reusing the number starts afresh
 	forEachMarks.Unlock()
-	return globalDatabase.DeleteFlow(id)
+	err := globalDatabase.DeleteFlow(id)
+	rescheduleFlows()
+	return err
 }
 
 // launch starts a run of f whose first step goes at `start`. p is the player
@@ -1898,147 +1597,8 @@ func runJob(run *flowRun, f Flow, start time.Time, p *flowPlayer) (stopped bool)
 }
 
 // ---------------------------------------------------------------------------
-// Scheduler
+// Starting player flows (join and message triggers)
 // ---------------------------------------------------------------------------
-
-// scheduleGrace lets a run whose start just passed (a late tick, a restart a
-// few seconds in) still start instead of being skipped.
-const scheduleGrace = 15 * time.Second
-
-// scheduleTick is how often the scheduler checks for runs to start.
-const scheduleTick = 5 * time.Second
-
-// lastFired is the latest cron time started for each flow, so a finished or
-// stopped run isn't started again for the same time. Only the scheduler
-// goroutine touches it.
-var lastFired = map[int64]time.Time{}
-
-// launchDue reports whether a run that starts at `start` should be launched
-// at this tick. It looks one tick ahead: a run due before the next tick is
-// launched now and sleeps until the exact second.
-func launchDue(now, start time.Time) bool {
-	return !now.Add(scheduleTick).Before(start)
-}
-
-func startScheduler() {
-	go func() {
-		t := time.NewTicker(scheduleTick)
-		defer t.Stop()
-		for now := range t.C {
-			runScheduleTick(now)
-		}
-	}()
-}
-
-// runScheduleTick starts, for every enabled scheduled flow, the first cron
-// time that hasn't been started yet and whose first step (cron time plus the
-// delay) is now or before the next tick. A run more than scheduleGrace late
-// is skipped.
-func runScheduleTick(now time.Time) {
-	flows, err := globalDatabase.ListFlows()
-	if err != nil {
-		log.Printf("scheduler: %v", err)
-		return
-	}
-	// Forget deleted flows: their numbers are reused by new flows, which
-	// must not look as if they had already run.
-	exists := make(map[int64]bool, len(flows))
-	for _, f := range flows {
-		exists[f.ID] = true
-	}
-	for id := range lastFired {
-		if !exists[id] {
-			delete(lastFired, id)
-		}
-	}
-	for _, f := range flows {
-		if !f.ScheduleEnabled || f.Trigger != triggerSchedule || checkFlow(f) != nil {
-			continue
-		}
-		c, err := parseCron(f.Schedule)
-		if err != nil {
-			continue
-		}
-		delay, _ := delayOf(f)
-		d := time.Duration(delay) * time.Second
-		from := now.Add(-scheduleGrace - d)
-		if lf, ok := lastFired[f.ID]; ok && lf.After(from) {
-			from = lf
-		}
-		t, ok := c.next(from)
-		if !ok || !launchDue(now, t.Add(d)) {
-			continue
-		}
-		if err := launch(f, t.Add(d), sourceSchedule, nil); errors.Is(err, errFlowRunning) {
-			continue // busy: retry next tick
-		} else if err != nil {
-			log.Printf("scheduler: %s: %v", f.Name, err)
-		}
-		lastFired[f.ID] = t
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Player-join trigger, and the latest player list
-// ---------------------------------------------------------------------------
-
-// lobbySuffix is what BattlEye appends to a name while the player is still on
-// the loading screen.
-const lobbySuffix = "(Lobby)"
-
-func inLobby(p Player) bool {
-	f := strings.Fields(p.Name)
-	return len(f) > 0 && strings.EqualFold(f[len(f)-1], lobbySuffix)
-}
-
-// joinWatch remembers who was online at the last successful poll, by GUID
-// (player numbers get reused). Only the heartbeat goroutine (rcon.go) and
-// For each runs (after their poll) touch it, under its lock.
-var joinWatch = struct {
-	sync.Mutex
-	seen   map[string]bool
-	primed bool // false until the first successful poll after startup
-}{seen: map[string]bool{}}
-
-// playersPolled is called after every successful `players` poll with who
-// is online (pollPlayersNow, rcon.go). It starts the join flows for new
-// arrivals. The first call after startup only records who is online, so a
-// restart of ReCON doesn't greet everybody.
-func playersPolled(players []Player) {
-	joinWatch.Lock()
-	joined := newArrivals(players)
-	joinWatch.Unlock()
-	if len(joined) > 0 {
-		startJoinFlows(joined)
-	}
-}
-
-// newArrivals updates joinWatch and returns the players who have just
-// finished joining. A "(Lobby)" player is still loading, so they're left out
-// until the tag is gone; one already counted stays counted.
-func newArrivals(players []Player) []Player {
-	online := map[string]bool{}
-	var joined []Player
-	for _, p := range players {
-		if p.GUID == "" || (inLobby(p) && !joinWatch.seen[p.GUID]) {
-			continue
-		}
-		online[p.GUID] = true
-		if joinWatch.primed && !joinWatch.seen[p.GUID] {
-			joined = append(joined, p)
-		}
-	}
-	joinWatch.seen, joinWatch.primed = online, true
-	return joined
-}
-
-// playersLost is called when the game server stops answering. Everyone is
-// forgotten, so players are greeted again when they reconnect.
-func playersLost() {
-	joinWatch.Lock()
-	joinWatch.seen = map[string]bool{}
-	joinWatch.Unlock()
-}
 
 // playerRole reads a player's role (Player when unknown).
 func playerRole(guid string) int {
@@ -2066,43 +1626,9 @@ func startPlayerFlows(trigger, source string, p *flowPlayer) {
 	}
 }
 
-// startJoinFlows runs the join flows for each player who just joined.
-func startJoinFlows(joined []Player) {
-	for _, p := range joined {
-		startPlayerFlows(triggerJoin, sourceJoin, &flowPlayer{Player: p, role: playerRole(p.GUID)})
-	}
-}
-
 // ---------------------------------------------------------------------------
-// Chat: Player message flows and the built-in chat commands
+// Chat commands
 // ---------------------------------------------------------------------------
-
-// startChatWatcher reacts to every chat line for as long as ReCON runs:
-// built-in chat commands first, then the Player message flows.
-//
-// The sender is found by exact name among the players online (without the
-// "(Lobby)" tag). If nobody online has that name, or more than one player
-// does, the line is ignored; what they may do comes from their GUID's role.
-func startChatWatcher() {
-	events, _ := serverEvents.subscribe(256)
-	go func() {
-		for ev := range events {
-			if ev.Kind == eventChat {
-				handleChatLine(ev.Name, ev.Message)
-			}
-		}
-	}()
-}
-
-func handleChatLine(name, message string) {
-	p, ok := onlineByUniqueName(name)
-	if !ok || p.GUID == "" {
-		return
-	}
-	role := playerRole(p.GUID)
-	handleChatCommand(p, role, message)
-	startPlayerFlows(triggerChat, sourceChat, &flowPlayer{Player: p, role: role, message: strings.TrimSpace(message)})
-}
 
 // chatCommandDef is one built-in chat command as the settings dialog shows
 // it: its default cooldown, whether it has Announce and a vote length, its

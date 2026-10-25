@@ -59,6 +59,7 @@ type trackedPlayer struct {
 	opened      bool       // the session is in the database
 	kickedAt    time.Time  // set by a kick line; the session ends as kicked (or banned)
 	chats       []lastChat // what they wrote in chat this session, oldest first (up to maxSessionChats)
+	joining     bool       // seen connecting: join flows start once they have loaded in
 	historyID   int64      // after serverLost: the session's history row, for ResumeSession
 }
 
@@ -106,13 +107,17 @@ func startPlayerTracker() {
 	events, _ := serverEvents.subscribe(256)
 	go func() {
 		for ev := range events {
-			trackEvent(ev)
+			if p, ok := trackEvent(ev); ok {
+				startJoinFlows([]Player{p}) // flows_join.go
+			}
 		}
 	}()
 }
 
 // trackEvent updates the tracker (and the database) for one server message.
-func trackEvent(ev ServerEvent) {
+// It returns a player who has finished joining (see playersPolledTracker),
+// for the rare GUID line that arrives after they have loaded in.
+func trackEvent(ev ServerEvent) (joined Player, ok bool) {
 	switch ev.Kind {
 	case eventConnect, eventGUID, eventKick, eventDisconnect, eventChat:
 	default:
@@ -147,7 +152,7 @@ func trackEvent(ev ServerEvent) {
 			closeTracked(t, t.lastSeen)
 		}
 		tracker.byID[ev.PlayerID] = &trackedPlayer{id: ev.PlayerID, name: bareName(ev.Name), ip: ev.IP, port: ev.Port,
-			connectedAt: ev.Time, lastSeen: ev.Time, lobby: true}
+			connectedAt: ev.Time, lastSeen: ev.Time, lobby: true, joining: true}
 
 	case eventGUID:
 		if t == nil { // the connect line was missed: count from now
@@ -157,6 +162,10 @@ func trackEvent(ev ServerEvent) {
 		if t.guid == "" {
 			t.guid = ev.GUID
 			openTracked(t, ev.Time)
+		}
+		if t.joining && !t.lobby {
+			t.joining = false
+			return Player{ID: t.id, IP: t.ip, Port: t.port, Ping: t.ping, GUID: t.guid, Name: t.name}, true
 		}
 
 	case eventKick:
@@ -174,6 +183,7 @@ func trackEvent(ev ServerEvent) {
 		}
 		closeTracked(t, ev.Time)
 	}
+	return
 }
 
 // openTracked writes a player's new session once their GUID is known, or,
@@ -225,8 +235,9 @@ func closeTracked(t *trackedPlayer, at time.Time) {
 
 // playersPolledTracker reconciles the tracker with a `players` poll that
 // was sent at sentAt. A tracked player it doesn't list (and no disconnect
-// line came for) is closed at sentAt.
-func playersPolledTracker(players []Player, sentAt time.Time) {
+// line came for) is closed at sentAt. It returns the players who were seen
+// connecting and have now finished loading in, for the join flows.
+func playersPolledTracker(players []Player, sentAt time.Time) (joined []Player) {
 	tracker.Lock()
 	defer tracker.Unlock()
 	tracker.known = true
@@ -268,6 +279,10 @@ func playersPolledTracker(players []Player, sentAt time.Time) {
 				}
 			}
 		}
+		if t.joining && !t.lobby && t.guid != "" {
+			t.joining = false
+			joined = append(joined, Player{ID: t.id, IP: t.ip, Port: t.port, Ping: t.ping, GUID: t.guid, Name: t.name})
+		}
 	}
 	for id, t := range tracker.byID {
 		if listed[id] || !t.connectedAt.Before(sentAt) {
@@ -280,6 +295,16 @@ func playersPolledTracker(players []Player, sentAt time.Time) {
 			delete(tracker.ended, g)
 		}
 	}
+	return joined
+}
+
+// lobbySuffix is what BattlEye appends to a name while the player is still on
+// the loading screen.
+const lobbySuffix = "(Lobby)"
+
+func inLobby(p Player) bool {
+	f := strings.Fields(p.Name)
+	return len(f) > 0 && strings.EqualFold(f[len(f)-1], lobbySuffix)
 }
 
 // onlineChat is an online player's last chat line, with their GUID so the

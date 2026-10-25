@@ -28,8 +28,9 @@ import (
 //	web.go    HTTP routes, JSON API and the HTML pages
 //	db.go     SQLite storage and the ban sync and chat recorder that feed it
 //	players.go who is online and their sessions, from the console log
-//	flows.go  flows (steps, triggers, the runner and the scheduler) and the
-//	          built-in chat commands
+//	flows.go  flows (steps, conditions, the runner) and the built-in chat
+//	          commands; one file per trigger: flows_schedule.go,
+//	          flows_join.go, flows_message.go, flows_manual.go
 // ============================================================================
 
 var globalDatabase *Database // player database, opened in main()
@@ -161,8 +162,8 @@ func main() {
 		log.Fatalf("failed to initialize flows: %v", err)
 	}
 
-	startScheduler()   // runs enabled flows on their cron schedule (flows.go)
-	startChatWatcher() // chat commands and Player message flows (flows.go)
+	startScheduler()   // runs enabled flows on their cron schedule (flows_schedule.go)
+	startChatWatcher() // chat commands and Player message flows (flows_message.go)
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	startDatabaseSync()    // sessions and chat history from the console log (db.go)
