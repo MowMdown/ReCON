@@ -31,9 +31,9 @@ import (
 //   - flows storage (ListFlows, GetFlow, SaveFlow, ...): steps are kept as JSON
 //
 // The bottom section keeps the database in step with the game server: the
-// background poller, the BattlEye <-> DB ban sync, and the chat recorder.
-// Those are the only parts here that call into rcon.go. Player sessions are
-// driven by the server's messages, in players.go.
+// BattlEye <-> DB ban sync (run by the heartbeat, rcon.go) and the chat
+// recorder. Those are the only parts here that call into rcon.go. Player
+// sessions are driven by the server's messages, in players.go.
 // ============================================================================
 
 type Database struct {
@@ -217,6 +217,10 @@ func OpenDatabase(filepath string) (*Database, error) {
 		{"session_history", "loaded_at", "DATETIME"},
 		// How the session ended: disconnected, kicked or banned ('' before this was kept).
 		{"session_history", "ended", "TEXT NOT NULL DEFAULT ''"},
+		// Seconds of the session the server was down for (a restart the
+		// player came back from): not counted in its length or playtime.
+		{"active_sessions", "paused_seconds", "INTEGER NOT NULL DEFAULT 0"},
+		{"session_history", "paused_seconds", "INTEGER NOT NULL DEFAULT 0"},
 		// Unix seconds when a timed ban runs out (NULL for permanent bans, or
 		// until the first ban list read), and its position in BattlEye's list.
 		{"bans", "expires_unix", "INTEGER"},
@@ -321,46 +325,104 @@ func (db *Database) MarkLoaded(guid string, at time.Time) error {
 }
 
 // CloseSession ends a player's open session at `at`: it goes into
-// session_history with how it ended, its length is added to their playtime,
-// and last_seen becomes `at`. Nothing happens if no session is open.
-func (db *Database) CloseSession(guid string, at time.Time, ended string) error {
+// session_history with how it ended, its length (less any paused time) is
+// added to their playtime, and last_seen becomes `at`. It returns the
+// history row's id, or 0 if no session was open.
+func (db *Database) CloseSession(guid string, at time.Time, ended string) (int64, error) {
 	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
 	var ip string
 	var connectedAt time.Time
 	var loadedAt sql.NullTime
-	err = tx.QueryRow("SELECT ip, connected_at, loaded_at FROM active_sessions WHERE guid = ?", guid).Scan(&ip, &connectedAt, &loadedAt)
+	var paused int
+	err = tx.QueryRow("SELECT ip, connected_at, loaded_at, paused_seconds FROM active_sessions WHERE guid = ?", guid).
+		Scan(&ip, &connectedAt, &loadedAt, &paused)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return 0, nil
 	} else if err != nil {
-		return err
+		return 0, err
 	}
 	at = at.UTC()
-	duration := int(at.Sub(connectedAt).Seconds())
-	if duration < 0 {
-		duration = 0
-	}
+	duration := max(int(at.Sub(connectedAt).Seconds())-paused, 0)
 	var loaded any // NULL when they never finished loading
 	if loadedAt.Valid {
 		loaded = loadedAt.Time.UTC()
 	}
-	if _, err := tx.Exec(`
-		INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds, loaded_at, ended)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		guid, ip, connectedAt.UTC(), at, duration, loaded, ended); err != nil {
-		return err
+	res, err := tx.Exec(`
+		INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds, loaded_at, ended, paused_seconds)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		guid, ip, connectedAt.UTC(), at, duration, loaded, ended, paused)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
 	}
 	if _, err := tx.Exec(`
 		UPDATE players
 		SET last_seen = ?, total_playtime_seconds = total_playtime_seconds + ?
 		WHERE guid = ?`,
 		at, duration, guid); err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := tx.Exec("DELETE FROM active_sessions WHERE guid = ?", guid); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+// ResumeSession opens again a session CloseSession ended (history row
+// historyID) when the server went down, for a player back at `at` after the
+// restart: the history row goes, its length comes off their playtime, and
+// the session is open again as player number playerID, with the time from
+// the old end to `at` paused (not counted). It does nothing if the row is
+// gone or the player already has a session open.
+func (db *Database) ResumeSession(guid string, historyID int64, playerID int, at time.Time) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var ip string
+	var connectedAt, endedAt time.Time
+	var loadedAt sql.NullTime
+	var duration, paused int
+	err = tx.QueryRow(`SELECT ip, connected_at, disconnected_at, loaded_at, duration_seconds, paused_seconds
+		FROM session_history WHERE id = ? AND guid = ?`, historyID, guid).
+		Scan(&ip, &connectedAt, &endedAt, &loadedAt, &duration, &paused)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	var loaded any
+	if loadedAt.Valid {
+		loaded = loadedAt.Time.UTC()
+	}
+	paused += max(int(at.Sub(endedAt).Seconds()), 0)
+	res, err := tx.Exec(`
+		INSERT INTO active_sessions (guid, ip, connected_at, player_id, loaded_at, paused_seconds)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(guid) DO NOTHING`,
+		guid, ip, connectedAt.UTC(), playerID, loaded, paused)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil // a session is already open
+	}
+	if _, err := tx.Exec("DELETE FROM session_history WHERE id = ?", historyID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		UPDATE players
+		SET last_seen = ?, total_playtime_seconds = max(total_playtime_seconds - ?, 0)
+		WHERE guid = ?`,
+		at.UTC(), duration, guid); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -747,11 +809,12 @@ func (db *Database) PlayerDetails(guid string) (*playerDetails, error) {
 	// The session in progress (if any) first, then the finished ones.
 	d.Sessions.Recent = []detailsSession{}
 	var since, ip any
-	if err := db.QueryRow("SELECT connected_at, ip FROM active_sessions WHERE guid = ?", g).Scan(&since, &ip); err == nil {
+	var paused int64
+	if err := db.QueryRow("SELECT connected_at, ip, paused_seconds FROM active_sessions WHERE guid = ?", g).Scan(&since, &ip, &paused); err == nil {
 		c := unixOf(since)
 		s := detailsSession{Connected: c, IP: asString(ip), Current: true}
 		if c > 0 {
-			s.Seconds = time.Now().Unix() - c
+			s.Seconds = max(time.Now().Unix()-c-paused, 0)
 		}
 		d.Sessions.Recent = append(d.Sessions.Recent, s)
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -1399,7 +1462,7 @@ func banStatusOf(guid string) banState {
 }
 
 // nextBanExpiry is when the next timed ban runs out (Unix seconds, 0 for
-// none), so the poller only deletes expired bans when one is due.
+// none), so the heartbeat only deletes expired bans when one is due.
 var nextBanExpiry atomic.Int64
 
 // refreshBanExpiry re-reads nextBanExpiry after the bans table changed.

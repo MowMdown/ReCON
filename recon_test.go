@@ -31,7 +31,20 @@ func testDB(t *testing.T) *Database {
 	t.Cleanup(func() { db.Close() })
 	globalDatabase = db
 	tracker.byID, tracker.ended = map[int]*trackedPlayer{}, map[string]time.Time{}
+	tracker.away, tracker.known = map[string]*trackedPlayer{}, false
+	tracker.downAt, tracker.graceUntil = time.Time{}, time.Time{}
 	return db
+}
+
+// setOnline puts players in the tracker as if the console log and a poll
+// had told it about them (no database writes).
+func setOnline(players ...Player) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	tracker.byID, tracker.known = map[int]*trackedPlayer{}, true
+	for _, p := range players {
+		tracker.byID[p.ID] = &trackedPlayer{id: p.ID, name: bareName(p.Name), guid: p.GUID, ping: p.Ping, lobby: inLobby(p)}
+	}
 }
 
 func TestEvalCond(t *testing.T) {
@@ -253,7 +266,7 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 		t.Fatalf("details after upgrade = %+v", d)
 	}
 	// An old open session (no player number, no loaded_at) closes normally.
-	if err := db.CloseSession(testGUID, t0.Add(30*time.Minute), endDisconnected); err != nil {
+	if _, err := db.CloseSession(testGUID, t0.Add(30*time.Minute), endDisconnected); err != nil {
 		t.Fatal(err)
 	}
 	if h := history(t, db, testGUID); len(h) != 2 || h[1].duration != 1800 || h[1].loaded || h[1].ended != endDisconnected {
@@ -492,23 +505,19 @@ func TestTrackerMissedLines(t *testing.T) {
 	if countRows(t, db, "active_sessions") != 1 {
 		t.Fatal("poll didn't open a session for an untracked player")
 	}
-	playersPolledTracker(on, t0.Add(5*time.Second))
-	// Gone without a disconnect line: closed after two polls, at the last sighting.
+	// Gone without a disconnect line: the next poll closes them, at its time.
 	playersPolledTracker(nil, t0.Add(10*time.Second))
-	if countRows(t, db, "active_sessions") != 1 {
-		t.Fatal("closed after a single missed poll")
-	}
-	playersPolledTracker(nil, t0.Add(15*time.Second))
 	h := history(t, db, testGUID)
-	if len(h) != 1 || !h[0].at.Equal(t0.Add(5*time.Second)) || h[0].ended != endDisconnected {
+	if len(h) != 1 || !h[0].at.Equal(t0.Add(10*time.Second)) || h[0].ended != endDisconnected {
 		t.Fatalf("history = %+v", h)
 	}
 
-	// Server stops answering: every open session closes at the last sighting.
-	playersPolledTracker(on, t0.Add(time.Minute+20*time.Second))
-	serverLost()
-	if countRows(t, db, "active_sessions") != 0 || len(history(t, db, testGUID)) != 2 {
-		t.Fatal("serverLost didn't close the session")
+	// Server stops answering: every open session closes when it last answered.
+	playersPolledTracker(on, t0.Add(time.Minute))
+	serverLost(t0.Add(time.Minute + 5*time.Second))
+	h = history(t, db, testGUID)
+	if countRows(t, db, "active_sessions") != 0 || len(h) != 2 || !h[1].at.Equal(t0.Add(time.Minute+5*time.Second)) {
+		t.Fatalf("serverLost didn't close the session: %+v", h)
 	}
 }
 
@@ -721,9 +730,16 @@ func TestRootRedirectsToPlayers(t *testing.T) {
 	}
 }
 
-// resetShared closes the shared session and restores the RCON target after a test.
+// resetShared starts a test with no shared session and no wait before the
+// next login, and closes it and restores the RCON target after the test.
 func resetShared(t *testing.T) {
 	oldAddr, oldPass := currentTarget()
+	sharedConnection.Lock()
+	if sharedConnection.connection != nil {
+		sharedConnection.connection.close()
+	}
+	sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
+	sharedConnection.Unlock()
 	t.Cleanup(func() {
 		setTarget(oldAddr, oldPass)
 		sharedConnection.Lock()
@@ -1121,17 +1137,13 @@ func TestForEachKicksOnlyMatchingPlayers(t *testing.T) {
 	oldSend := sendCommand
 	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
 	t.Cleanup(func() { sendCommand = oldSend })
-	latest.Lock()
-	oldPlayers := latest.players
-	latest.players = []Player{
-		{ID: 4, GUID: testGUID, Name: "Laggy", Ping: 820},
-		{ID: 1, GUID: testGUID2, Name: "Fine", Ping: 40},
-		{ID: 7, GUID: "", Name: "Loading (Lobby)", Ping: 999}, // not verified yet: skipped
-		{ID: 2, GUID: "0000000000000000000000000000beef", Name: "Edge", Ping: 500},
-		{ID: 9, GUID: "0000000000000000000000000000cafe", Name: "Awful", Ping: 1500},
-	}
-	latest.Unlock()
-	t.Cleanup(func() { latest.Lock(); latest.players = oldPlayers; latest.Unlock() })
+	setOnline(
+		Player{ID: 4, GUID: testGUID, Name: "Laggy", Ping: 820},
+		Player{ID: 1, GUID: testGUID2, Name: "Fine", Ping: 40},
+		Player{ID: 7, GUID: "", Name: "Loading (Lobby)", Ping: 999}, // not verified yet: skipped
+		Player{ID: 2, GUID: "0000000000000000000000000000beef", Name: "Edge", Ping: 500},
+		Player{ID: 9, GUID: "0000000000000000000000000000cafe", Name: "Awful", Ping: 1500},
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1174,11 +1186,6 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 	line("Player #3 Survivor - BE GUID: "+testGUID, t0)
 	line("Player #5 Calm (5.6.7.8:2304) connected", t0)
 	line("Player #5 Calm - BE GUID: "+testGUID2, t0)
-	latest.Lock()
-	oldPlayers := latest.players
-	latest.players = []Player{{ID: 3, GUID: testGUID, Name: "Survivor", Ping: 40}, {ID: 5, GUID: testGUID2, Name: "Calm", Ping: 60}}
-	latest.Unlock()
-	t.Cleanup(func() { latest.Lock(); latest.players = oldPlayers; latest.Unlock() })
 	// chat sends a line through the event hub, as the server does, so it
 	// gets a real Seq, then to the tracker.
 	chat := func(text string) {
@@ -1318,10 +1325,17 @@ func TestHeartbeat(t *testing.T) {
 	if p, b := polls(); p != 1 || b != 1 || loginPollDue.Load() {
 		t.Fatalf("after the first beat: %d players, %d bans polls (due=%v); want 1 and 1", p, b, loginPollDue.Load())
 	}
+	playersPageSeen.Store(0)
 	h.beat()
-	if _, b := polls(); b != 1 {
-		t.Fatalf("the ban list was read again %d time(s) without a login", b-1)
+	if p, b := polls(); p != 1 || b != 1 {
+		t.Fatalf("a beat with nobody loading and no page open polled players %d and bans %d more time(s)", p-1, b-1)
 	}
+	playersPageSeen.Store(time.Now().UnixMilli()) // a Players page is open: pings
+	h.beat()
+	if p, _ := polls(); p != 2 {
+		t.Fatalf("players polled %d time(s) with a page open, want 2", p)
+	}
+	playersPageSeen.Store(0)
 
 	f.set(true)
 	logins, _ := f.counts()
@@ -1333,5 +1347,69 @@ func TestHeartbeat(t *testing.T) {
 	}
 	if l, _ := f.counts(); l != logins+1 {
 		t.Fatalf("%d login(s) on the 3rd miss, want 1", l-logins)
+	}
+}
+
+// TestRestartKeepsReturningPlayersSession checks the restart grace: a player
+// back within restartGrace of the next login keeps one session with the
+// downtime not counted; one who isn't is left closed when the server went down.
+func TestRestartKeepsReturningPlayersSession(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	line("Player #0 Back (1.1.1.1:2304) connected", t0)
+	line("Player #0 Back - BE GUID: "+testGUID, t0)
+	line("Player #1 Gone (2.2.2.2:2304) connected", t0)
+	line("Player #1 Gone - BE GUID: "+testGUID2, t0)
+
+	down := t0.Add(10 * time.Minute)
+	serverLost(down)
+	if countRows(t, db, "active_sessions") != 0 {
+		t.Fatal("sessions still open while the server is down")
+	}
+	login := down.Add(5 * time.Minute)
+	serverLoggedIn(login)
+	back := login.Add(30 * time.Second)
+	line("Player #4 Back (1.1.1.1:2304) connected", back)
+	line("Player #4 Back - BE GUID: "+testGUID, back)
+	if h := history(t, db, testGUID); len(h) != 0 || countRows(t, db, "active_sessions") != 1 {
+		t.Fatalf("not resumed: history %+v", h)
+	}
+	forgetAwayPlayers(login.Add(restartGrace + time.Second))
+	line("Player #5 Gone (2.2.2.2:2304) connected", login.Add(2*time.Minute))
+	line("Player #5 Gone - BE GUID: "+testGUID2, login.Add(2*time.Minute))
+	if h := history(t, db, testGUID2); len(h) != 1 || !h[0].at.Equal(down) || h[0].duration != 600 {
+		t.Fatalf("late player's old session = %+v, want closed at the outage", h)
+	}
+
+	line("Player #4 Back disconnected", back.Add(20*time.Minute))
+	h := history(t, db, testGUID)
+	// 10 minutes before the outage and 20 after: the 5.5 minutes down aren't counted.
+	if len(h) != 1 || h[0].duration != 30*60 || !h[0].connected.Equal(t0) {
+		t.Fatalf("resumed session = %+v, want one 30 minute session from t0", h)
+	}
+	var playtime int
+	db.QueryRow("SELECT total_playtime_seconds FROM players WHERE guid = ?", testGUID).Scan(&playtime)
+	if playtime != 30*60 {
+		t.Fatalf("playtime = %d, want 1800", playtime)
+	}
+}
+
+func TestPlayersPollWanted(t *testing.T) {
+	testDB(t)
+	playersPageSeen.Store(0)
+	now := time.Now()
+	if playersPollWanted(now) {
+		t.Fatal("poll wanted with nobody online")
+	}
+	line("Player #2 New (3.3.3.3:2304) connected", now)
+	if !playersPollWanted(now) {
+		t.Fatal("no poll while a player is loading")
+	}
+	playersPolledTracker([]Player{{ID: 2, IP: "3.3.3.3", Name: "New"}}, now.Add(time.Second))
+	if playersPollWanted(now) {
+		t.Fatal("still polling after (Lobby) left the name")
+	}
+	if p, known := onlinePlayers(); !known || len(p) != 1 || p[0].Name != "New" {
+		t.Fatalf("onlinePlayers = %+v %v", p, known)
 	}
 }

@@ -308,7 +308,7 @@ var condSubjects = map[string]condSubject{
 	"player_ip":   {"text", needPlayer},
 	"player_guid": {"ident", needPlayer},
 	"player_role": {"role", needPlayer},
-	// How many players are online, from the 5-second player check. Works on
+	// How many players are online (the tracker, players.go). Works on
 	// every trigger: "If {players_online} > 0, Kick everyone, else Shut down".
 	"players_online": {"num", needNothing},
 }
@@ -722,10 +722,7 @@ func (x *job) currentID() (int, bool) {
 // value is what a placeholder or If subject stands for in this run.
 func (x *job) value(name string) (string, bool) {
 	if name == "players_online" {
-		latest.Lock()
-		n := len(latest.players)
-		latest.Unlock()
-		return strconv.Itoa(n), true
+		return strconv.Itoa(len(onlineNow())), true
 	}
 	if x.p == nil {
 		return "", false
@@ -804,12 +801,11 @@ func recordSent(guid, cmd string) {
 
 // onlineNames is the latest player list as "Online (N): a, b, c".
 func onlineNames() string {
-	latest.Lock()
-	names := make([]string, 0, len(latest.players))
-	for _, p := range latest.players {
+	online := onlineNow()
+	names := make([]string, 0, len(online))
+	for _, p := range online {
 		names = append(names, bareName(p.Name))
 	}
-	latest.Unlock()
 	if len(names) == 0 {
 		return "Online (0): nobody"
 	}
@@ -954,6 +950,7 @@ func (x *job) forEach(of string, steps []Step) bool {
 	}
 	var items []item
 	from, to := x.run.chatWindowOf()
+	x.run.polled.Do(func() { pollPlayersNow() })
 	if of == forEachMessage {
 		senders := map[string]bool{}
 		for _, l := range chatsAfter(from) {
@@ -969,9 +966,7 @@ func (x *job) forEach(of string, steps []Step) bool {
 		}
 		x.run.logf("For each message: %d new from %d player(s)", len(items), len(senders))
 	} else {
-		players := onlineNow()
-		sort.Slice(players, func(a, b int) bool { return players[a].ID < players[b].ID })
-		for _, p := range players {
+		for _, p := range onlineNow() { // by player number
 			if p.GUID == "" {
 				continue
 			}
@@ -1680,6 +1675,9 @@ type flowRun struct {
 		set      bool
 		from, to int64
 	}
+	// polled makes the run's first For each poll `players` once, for fresh
+	// pings and anyone the console log missed (pollPlayersNow, rcon.go).
+	polled   sync.Once
 	stopOnce sync.Once
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -1984,14 +1982,6 @@ func runScheduleTick(now time.Time) {
 // Player-join trigger, and the latest player list
 // ---------------------------------------------------------------------------
 
-// latest is the poller's most recent player list. Flows and chat commands
-// read it, so they don't send their own `players` command.
-var latest struct {
-	sync.Mutex
-	players []Player
-	ok      bool // false until the first successful poll
-}
-
 // lobbySuffix is what BattlEye appends to a name while the player is still on
 // the loading screen.
 const lobbySuffix = "(Lobby)"
@@ -2002,21 +1992,23 @@ func inLobby(p Player) bool {
 }
 
 // joinWatch remembers who was online at the last successful poll, by GUID
-// (player numbers get reused). Only the poller goroutine (db.go) touches it.
+// (player numbers get reused). Only the heartbeat goroutine (rcon.go) and
+// For each runs (after their poll) touch it, under its lock.
 var joinWatch = struct {
+	sync.Mutex
 	seen   map[string]bool
 	primed bool // false until the first successful poll after startup
 }{seen: map[string]bool{}}
 
-// playersPolled is called by the poller with every successful `players`
-// result. It keeps the latest list and starts the join flows for new
+// playersPolled is called after every successful `players` poll with who
+// is online (pollPlayersNow, rcon.go). It starts the join flows for new
 // arrivals. The first call after startup only records who is online, so a
-// restart doesn't greet everybody.
+// restart of ReCON doesn't greet everybody.
 func playersPolled(players []Player) {
-	latest.Lock()
-	latest.players, latest.ok = append([]Player(nil), players...), true
-	latest.Unlock()
-	if joined := newArrivals(players); len(joined) > 0 {
+	joinWatch.Lock()
+	joined := newArrivals(players)
+	joinWatch.Unlock()
+	if len(joined) > 0 {
 		startJoinFlows(joined)
 	}
 }
@@ -2043,10 +2035,9 @@ func newArrivals(players []Player) []Player {
 // playersLost is called when the game server stops answering. Everyone is
 // forgotten, so players are greeted again when they reconnect.
 func playersLost() {
+	joinWatch.Lock()
 	joinWatch.seen = map[string]bool{}
-	latest.Lock()
-	latest.players = nil
-	latest.Unlock()
+	joinWatch.Unlock()
 }
 
 // playerRole reads a player's role (Player when unknown).
@@ -2375,9 +2366,8 @@ var codeRe = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
 
 // onlineNow is a copy of the latest player list.
 func onlineNow() []Player {
-	latest.Lock()
-	defer latest.Unlock()
-	return append([]Player(nil), latest.players...)
+	players, _ := onlinePlayers()
+	return players
 }
 
 // onlineStaff is every mod and admin online.

@@ -26,7 +26,8 @@ import (
 //
 //	rcon.go   talking to the game server (BattlEye protocol, sessions, parsing)
 //	web.go    HTTP routes, JSON API and the HTML pages
-//	db.go     SQLite storage and the poller that mirrors the server into it
+//	db.go     SQLite storage and the ban sync and chat recorder that feed it
+//	players.go who is online and their sessions, from the console log
 //	flows.go  flows (steps, triggers, the runner and the scheduler) and the
 //	          built-in chat commands
 // ============================================================================

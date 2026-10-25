@@ -339,27 +339,25 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// onlinePlayersForPage is the online list for the Players page: the 5-second
-// poller's latest list, so the page never waits on RCON. Before the poller's
-// first result it reads `players` once. connected is false while the game
-// server isn't answering (the poller has missed 3 checks, or that one read
-// failed); the online list is then empty, and the page still shows everyone
-// from the database.
+// onlinePlayersForPage is the online list for the Players page: the
+// tracker's (players.go), so the page never waits on RCON, and asking marks
+// the page open so the heartbeat polls pings while it is. Before the first
+// poll since the server last answered, it polls once itself. ok is false
+// while the server isn't answering.
 func onlinePlayersForPage() ([]Player, bool) {
-	latest.Lock()
-	players, ok := append([]Player{}, latest.players...), latest.ok
-	latest.Unlock()
+	playersPageSeen.Store(time.Now().UnixMilli())
 	if rconStatus() == "unavailable" {
 		return []Player{}, false
 	}
-	if ok {
+	players, known := onlinePlayers()
+	if known {
 		return players, true
 	}
-	out, acked, err := runShared("players", 3*time.Second, false, "")
-	if err != nil || !acked {
+	if !pollPlayersNow() {
 		return []Player{}, false
 	}
-	return parsePlayers(out), true
+	players, _ = onlinePlayers()
+	return players, true
 }
 
 // handleAllPlayersJSON serves GET /api/players/all: every player ever seen,
@@ -830,7 +828,7 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The server just answered the login: show it as connected now rather
-	// than after the poller's next check.
+	// than after the heartbeat's next check.
 	rconPolled.Store(true)
 	rconFails.Store(0)
 	b, _ := json.Marshal(req)

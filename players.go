@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,11 +29,20 @@ import (
 // who simply stays online; offline players are history and aren't touched.
 // Playtime counts from the connect line, so loading time is included.
 //
-// The 5-second `players` poll (db.go) fills in what the messages can't tell:
-// when "(Lobby)" leaves a name, and anything missed while RCON wasn't
-// listening (ReCON starting with players already on, a lost line). A tracked
-// player missing from two polls in a row with no disconnect line is closed at
-// the last time they were seen.
+// The tracker is ReCON's list of who is online: flows, chat commands and the
+// Players page all read it (onlinePlayers). A `players` poll (pollPlayersNow,
+// rcon.go) fills in what the messages can't tell, and is only sent when
+// needed (playersPollWanted): after every RCON login, every 5 seconds while
+// someone is still loading (until "(Lobby)" leaves their name), while a
+// Players page is open (for pings), and right before a For each runs. A
+// poll also catches anything missed while RCON wasn't listening: a player
+// it doesn't list is closed, one it lists that the tracker doesn't know is
+// opened.
+//
+// Server restarts: when the server stops answering, every session is closed
+// at the time it last answered (serverLost) but remembered. A player who
+// comes back within restartGrace of ReCON's next login keeps the same
+// session, with the time the server was down not counted (ResumeSession).
 // ============================================================================
 
 // trackedPlayer is one player on the server, by their player number.
@@ -40,14 +50,16 @@ type trackedPlayer struct {
 	id          int
 	name        string // without "(Lobby)"
 	ip          string
+	port        string
+	ping        int    // from the last poll that listed them
 	guid        string // lower case; "" until BattlEye sends it
 	connectedAt time.Time
 	lastSeen    time.Time  // the connect line, or the last poll that listed them
 	lobby       bool       // still loading
 	opened      bool       // the session is in the database
 	kickedAt    time.Time  // set by a kick line; the session ends as kicked (or banned)
-	misses      int        // polls in a row that didn't list them
 	chats       []lastChat // what they wrote in chat this session, oldest first (up to maxSessionChats)
+	historyID   int64      // after serverLost: the session's history row, for ResumeSession
 }
 
 // maxSessionChats is how many chat lines are kept per player online.
@@ -68,17 +80,25 @@ type lastChat struct {
 
 // tracker is every player the server has told us about. ended remembers when
 // each GUID's last session closed, so a poll sent before a disconnect line
-// arrived can't open the session again. One mutex covers the map and the
+// arrived can't open the session again. One mutex covers the maps and the
 // database writes, so the event and poll paths never interleave.
 var tracker = struct {
 	sync.Mutex
 	byID  map[int]*trackedPlayer
 	ended map[string]time.Time
-}{byID: map[int]*trackedPlayer{}, ended: map[string]time.Time{}}
+	known bool // a poll has listed who is online since the server last answered
 
-// trackerMissesToClose is how many polls in a row may miss a player (with no
-// disconnect line) before their session is closed anyway.
-const trackerMissesToClose = 2
+	// Server restarts (serverLost): who was online when it stopped
+	// answering, by GUID, when that was, and until when they may come back
+	// to the same session (restartGrace after the next login).
+	away       map[string]*trackedPlayer
+	downAt     time.Time
+	graceUntil time.Time
+}{byID: map[int]*trackedPlayer{}, ended: map[string]time.Time{}, away: map[string]*trackedPlayer{}}
+
+// restartGrace is how long after ReCON logs in again following an outage
+// a player may reconnect and keep the session they had before it.
+var restartGrace = 60 * time.Second
 
 // startPlayerTracker feeds every server message to the tracker for as long
 // as ReCON runs.
@@ -126,7 +146,7 @@ func trackEvent(ev ServerEvent) {
 		if t != nil { // the number was taken by someone we never saw leave
 			closeTracked(t, t.lastSeen)
 		}
-		tracker.byID[ev.PlayerID] = &trackedPlayer{id: ev.PlayerID, name: bareName(ev.Name), ip: ev.IP,
+		tracker.byID[ev.PlayerID] = &trackedPlayer{id: ev.PlayerID, name: bareName(ev.Name), ip: ev.IP, port: ev.Port,
 			connectedAt: ev.Time, lastSeen: ev.Time, lobby: true}
 
 	case eventGUID:
@@ -136,7 +156,7 @@ func trackEvent(ev ServerEvent) {
 		}
 		if t.guid == "" {
 			t.guid = ev.GUID
-			openTracked(t)
+			openTracked(t, ev.Time)
 		}
 
 	case eventKick:
@@ -156,10 +176,22 @@ func trackEvent(ev ServerEvent) {
 	}
 }
 
-// openTracked writes a player's new session once their GUID is known.
-func openTracked(t *trackedPlayer) {
+// openTracked writes a player's new session once their GUID is known, or,
+// for a player back within restartGrace after an outage, opens the session
+// they had again (seen at `at`). Caller holds the tracker lock.
+func openTracked(t *trackedPlayer, at time.Time) {
 	if t.opened || t.guid == "" {
 		return
+	}
+	if old := tracker.away[t.guid]; old != nil && !at.After(tracker.graceUntil) {
+		delete(tracker.away, t.guid)
+		if err := globalDatabase.ResumeSession(t.guid, old.historyID, t.id, at); err != nil {
+			log.Printf("players: resuming the session of %s: %v", t.guid, err)
+		} else {
+			log.Printf("players: %s is back after the restart, same session", t.guid)
+			t.opened, t.chats = true, old.chats
+			return
+		}
 	}
 	if err := globalDatabase.OpenSession(t.guid, t.name, t.ip, t.id, t.connectedAt); err != nil {
 		log.Printf("players: opening the session of %s: %v", t.guid, err)
@@ -175,6 +207,7 @@ func closeTracked(t *trackedPlayer, at time.Time) {
 	if !t.opened {
 		return
 	}
+	t.historyID = 0
 	ended := endDisconnected
 	if !t.kickedAt.IsZero() {
 		ended = endKicked
@@ -182,17 +215,21 @@ func closeTracked(t *trackedPlayer, at time.Time) {
 			ended = endBanned
 		}
 	}
-	if err := globalDatabase.CloseSession(t.guid, at, ended); err != nil {
+	id, err := globalDatabase.CloseSession(t.guid, at, ended)
+	if err != nil {
 		log.Printf("players: closing the session of %s: %v", t.guid, err)
 	}
+	t.historyID = id
 	tracker.ended[t.guid] = at
 }
 
 // playersPolledTracker reconciles the tracker with a `players` poll that
-// was sent at sentAt.
+// was sent at sentAt. A tracked player it doesn't list (and no disconnect
+// line came for) is closed at sentAt.
 func playersPolledTracker(players []Player, sentAt time.Time) {
 	tracker.Lock()
 	defer tracker.Unlock()
+	tracker.known = true
 	listed := map[int]bool{}
 	for _, p := range players {
 		listed[p.ID] = true
@@ -211,7 +248,7 @@ func playersPolledTracker(players []Player, sentAt time.Time) {
 			}
 			// Online, but no lines seen for them (ReCON just started, or RCON
 			// wasn't listening when they connected): count from now.
-			t = &trackedPlayer{id: p.ID, name: bareName(p.Name), ip: p.IP, guid: guid,
+			t = &trackedPlayer{id: p.ID, name: bareName(p.Name), ip: p.IP, port: p.Port, guid: guid,
 				connectedAt: sentAt, lastSeen: sentAt, lobby: inLobby(p)}
 			tracker.byID[p.ID] = t
 		}
@@ -219,10 +256,10 @@ func playersPolledTracker(players []Player, sentAt time.Time) {
 			t.guid = guid // the GUID line was missed
 		}
 		if t.ip == "" {
-			t.ip = p.IP
+			t.ip, t.port = p.IP, p.Port
 		}
-		openTracked(t)
-		t.lastSeen, t.misses = sentAt, 0
+		openTracked(t, sentAt)
+		t.lastSeen, t.ping = sentAt, p.Ping
 		if t.lobby && !inLobby(p) {
 			t.lobby = false
 			if t.opened {
@@ -236,9 +273,7 @@ func playersPolledTracker(players []Player, sentAt time.Time) {
 		if listed[id] || !t.connectedAt.Before(sentAt) {
 			continue // listed, or connected after this poll was sent
 		}
-		if t.misses++; t.misses >= trackerMissesToClose {
-			closeTracked(t, t.lastSeen)
-		}
+		closeTracked(t, sentAt)
 	}
 	for g, at := range tracker.ended {
 		if sentAt.Sub(at) > time.Minute {
@@ -307,11 +342,81 @@ func chatsAfter(after int64) []sessionChat {
 }
 
 // serverLost closes every open session when the game server stops answering
-// (the poller's 3rd miss in a row), each at the last time the player was seen.
-func serverLost() {
+// (the heartbeat's 3rd miss in a row), at `at`, when it last answered. The
+// players are remembered in tracker.away so those who come back soon after
+// it does keep the same session (openTracked).
+func serverLost(at time.Time) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	tracker.away = map[string]*trackedPlayer{}
+	tracker.downAt, tracker.graceUntil, tracker.known = at, time.Time{}, false
+	for _, t := range tracker.byID {
+		opened := t.opened
+		closeTracked(t, at)
+		if opened && t.historyID != 0 {
+			tracker.away[t.guid] = t
+		}
+	}
+}
+
+// serverLoggedIn is called on every login of the shared session (rcon.go).
+// After an outage, it starts the restartGrace in which players who come
+// back keep their session.
+func serverLoggedIn(at time.Time) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	if len(tracker.away) > 0 && tracker.graceUntil.IsZero() {
+		tracker.graceUntil = at.Add(restartGrace)
+	}
+}
+
+// forgetAwayPlayers drops the players who didn't come back within
+// restartGrace; their sessions stay closed at the time the server went down.
+// The heartbeat calls it on every beat.
+func forgetAwayPlayers(now time.Time) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	if len(tracker.away) > 0 && !tracker.graceUntil.IsZero() && now.After(tracker.graceUntil) {
+		tracker.away = map[string]*trackedPlayer{}
+	}
+}
+
+// onlinePlayers is who is online, by player number, as the console log and
+// the last poll tell it: the Name has " (Lobby)" while they load and Ping is
+// from the last poll. known is false until a poll has listed who is on since
+// the server last answered.
+func onlinePlayers() (players []Player, known bool) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	players = make([]Player, 0, len(tracker.byID))
+	for _, t := range tracker.byID {
+		name := t.name
+		if t.lobby {
+			name += " " + lobbySuffix
+		}
+		players = append(players, Player{ID: t.id, IP: t.ip, Port: t.port, Ping: t.ping, GUID: t.guid, Name: name})
+	}
+	sort.Slice(players, func(a, b int) bool { return players[a].ID < players[b].ID })
+	return players, tracker.known
+}
+
+// playersPageSeen is when a Players page last asked for the online list
+// (Unix milliseconds); pings are polled while one is open.
+var playersPageSeen atomic.Int64
+
+// playersPollWanted reports whether the heartbeat should poll `players`
+// now: someone is still loading, or a Players page asked within the last
+// two heartbeats.
+func playersPollWanted(now time.Time) bool {
+	if now.Sub(time.UnixMilli(playersPageSeen.Load())) < 2*heartbeatEvery {
+		return true
+	}
 	tracker.Lock()
 	defer tracker.Unlock()
 	for _, t := range tracker.byID {
-		closeTracked(t, t.lastSeen)
+		if t.lobby {
+			return true
+		}
 	}
+	return false
 }

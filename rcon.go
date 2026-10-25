@@ -647,6 +647,7 @@ func unlockAfterLogin(s *persistentConnection) {
 	out, acked, err := s.runRaw("#unlock", 2*time.Second)
 	logSentCommand(sharedSource, loginSource, "#unlock", acked, err)
 	logCommandResult(loginSource, out, acked, err)
+	serverLoggedIn(time.Now()) // players.go
 	loginPollDue.Store(true)
 }
 
@@ -691,8 +692,10 @@ var loginPollDue atomic.Bool
 //     players.go) so playtime stops while it's offline. From then on, each
 //     round logs in again on the same RCON socket (reloginShared, paced).
 //     This is the only place that decides the server isn't answering.
-//   - Answered: reset the count, then poll players and read the ban list
-//     after a login, and the ban list every banSyncEvery.
+//   - Answered: reset the count. Poll players after a login, and while
+//     playersPollWanted (players.go); read the ban list after a login and
+//     every banSyncEvery. Players who didn't come back after a restart in
+//     time are let go (forgetAwayPlayers).
 func startServerHeartbeat() {
 	pollInterval = heartbeatEvery
 	rconNextPoll.Store(time.Now().Add(heartbeatEvery).UnixMilli())
@@ -709,32 +712,39 @@ func startServerHeartbeat() {
 
 // heartbeat is what the heartbeat goroutine remembers between beats.
 type heartbeat struct {
-	fails       int       // unanswered beats in a row
-	lastBanSync time.Time // when the ban list was last read
+	fails        int       // unanswered beats in a row
+	lastAnswered time.Time // when the server last answered one
+	lastBanSync  time.Time // when the ban list was last read
 }
 
 // beat is one heartbeat (see startServerHeartbeat).
 func (h *heartbeat) beat() {
-	expireDueBans(time.Now()) // db.go
+	now := time.Now()
+	expireDueBans(now)     // db.go
+	forgetAwayPlayers(now) // players.go
 	_, acked, err := runShared("", heartbeatWait, false, "")
 	rconPolled.Store(true)
 	if err != nil || !acked {
 		h.fails++
 		rconFails.Store(int32(h.fails))
 		if h.fails == heartbeatMisses {
-			serverLost()  // players.go
-			playersLost() // greet everyone again when they reconnect (flows.go)
+			down := h.lastAnswered
+			if down.IsZero() {
+				down = now
+			}
+			serverLost(down) // players.go
+			playersLost()    // greet everyone again when they reconnect (flows.go)
 		}
 		if h.fails >= heartbeatMisses {
 			reloginShared()
 		}
 		return
 	}
-	h.fails = 0
+	h.fails, h.lastAnswered = 0, now
 	rconFails.Store(0)
 	resetReloginPace()
 	afterLogin := loginPollDue.Swap(false)
-	if !pollPlayersNow() && afterLogin {
+	if (afterLogin || playersPollWanted(now)) && !pollPlayersNow() && afterLogin {
 		loginPollDue.Store(true) // the server isn't answering `players` yet: next beat
 	}
 	if afterLogin || time.Since(h.lastBanSync) >= banSyncEvery {
@@ -747,17 +757,17 @@ func (h *heartbeat) beat() {
 }
 
 // pollPlayersNow reads `players` (not logged) and hands the list to the
-// tracker (sessions, players.go), the SteamID search (auto mode, steam.go)
-// and flows (the list for flows and chat commands, join flows, flows.go).
-// It reports whether the server answered.
+// tracker (who is online, sessions, players.go), the SteamID search (auto
+// mode, steam.go) and flows (join flows, flows.go). It reports whether the
+// server answered.
 func pollPlayersNow() bool {
 	sentAt := time.Now()
 	out, acked, err := runShared("players", 3*time.Second, false, "")
 	if err != nil || !acked {
 		return false
 	}
-	players := parsePlayers(out)
-	playersPolledTracker(players, sentAt)
+	playersPolledTracker(parsePlayers(out), sentAt)
+	players, _ := onlinePlayers()
 	steamPlayersSeen(players)
 	playersPolled(players)
 	return true
@@ -1174,8 +1184,8 @@ func bareName(name string) string {
 	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(name), lobbySuffix))
 }
 
-// onlineByName, onlineByID and onlineByGUID look a player up in the poller's
-// latest `players` list (flows.go), so they never send a command of their own.
+// onlineByName, onlineByID and onlineByGUID look a player up in the online
+// list (onlinePlayers, players.go), so they never send a command of their own.
 func onlineByName(name string) (Player, bool) {
 	return onlineWhere(func(p Player) bool { return bareName(p.Name) == name })
 }
@@ -1184,11 +1194,10 @@ func onlineByName(name string) (Player, bool) {
 // Player message flows: the one online player with exactly that name. ok is
 // false when nobody, or more than one player, has it.
 func onlineByUniqueName(name string) (Player, bool) {
-	latest.Lock()
-	defer latest.Unlock()
+	players, _ := onlinePlayers()
 	var found Player
 	n := 0
-	for _, p := range latest.players {
+	for _, p := range players {
 		if bareName(p.Name) == name {
 			found, n = p, n+1
 		}
@@ -1205,9 +1214,8 @@ func onlineByGUID(guid string) (Player, bool) {
 }
 
 func onlineWhere(match func(Player) bool) (Player, bool) {
-	latest.Lock()
-	defer latest.Unlock()
-	for _, p := range latest.players {
+	players, _ := onlinePlayers()
+	for _, p := range players {
 		if match(p) {
 			return p, true
 		}
