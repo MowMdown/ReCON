@@ -388,10 +388,10 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<p>An If compares one thing, such as <code>{player_ping}</code>, and runs its steps when the comparison is true. <b>+ Else if</b> adds more comparisons of the same thing, checked top to bottom: the first one that is true runs, and the rest are skipped. <b>+ Else</b> runs when none are true. Each If has its own End if, so they can't come apart, and Ifs can go inside other Ifs.</p>
 			<p>Reorder Else ifs with their arrows; moving one above the first makes it the If. Removing an Else if or the Else keeps its steps: they move below the End if.</p>
 			<h3>For each</h3>
-			<p><b>For each</b> runs the steps inside it (down to its End for each) once per item, with that item's player as the Player, so Kick, Ban, a Message to the Player, the player placeholders and If comparisons work inside it in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies; it acts only when the flow runs. Pick what it goes through:</p>
+			<p><b>For each</b> runs the steps inside it (down to its End for each) once per item, with that item's player as the Player, so Kick, Ban, a Message to the Player, the player placeholders and If comparisons work inside it in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies; it acts only when the flow runs, on what happened since the flow's last run. Pick what it goes through:</p>
 			<ul>
-				<li><b>player</b>: every player online (the latest 5-second player check's), one after another. <code>{message}</code> is that player's latest chat line this session (empty if they haven't chatted).</li>
-				<li><b>message</b>: every chat line players online sent this session that this flow hasn't handled yet, oldest first, as the player who sent it. <code>{message}</code> is the line. A flow every minute sees each line once.</li>
+				<li><b>player</b>: every player online (the latest 5-second player check's), one after another. <code>{message}</code> is that player's latest chat line since this flow last ran (empty if they haven't chatted since).</li>
+				<li><b>message</b>: every chat line players online sent since this flow last ran, oldest first, as the player who sent it. <code>{message}</code> is the line. A flow every minute sees each line once.</li>
 			</ul>
 			<p>Players BattlEye hasn't verified yet are left out. Stop flow inside it ends the whole run. A For each can't go inside another one. The run log lists each player a condition matched, not every one checked.</p>
 			<p>Examples for a Schedule flow every minute (<code>* * * * *</code>): <b>For each</b> player, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. Or <b>For each</b> message, <b>If</b> <code>{message}</code> contains <code>noob</code>, <b>Message</b> the Player <i>Please keep chat friendly</i>. In a flow without a player of its own, Add step puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so three clicks build either one.</p>
@@ -1148,7 +1148,7 @@ function sendsText(s) {
 function forEachText(s) {
 	return s.of === 'message'
 		? 'once for each chat line a player online sent since this flow last ran, as the Player who sent it, with {message} the line'
-		: 'once for each player online, as the Player, with {message} their latest chat line this session';
+		: 'once for each player online, as the Player, with {message} their latest chat line since this flow last ran';
 }
 
 function describeIf(s) {

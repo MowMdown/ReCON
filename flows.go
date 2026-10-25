@@ -916,13 +916,30 @@ func (x *job) exec(list []Step) bool {
 	return true
 }
 
-// forEachMarks is, per flow, the Seq of the newest chat line a For each
-// message has handled, so each line is handled once per flow. In memory: a
-// restart starts again from the lines of the sessions in progress.
+// forEachMarks is, per flow, the Seq of the last server event its previous
+// run's For each steps looked at, so a run only considers chat sent since
+// the flow's last run. In memory: a restart starts again from the lines of
+// the sessions in progress.
 var forEachMarks = struct {
 	sync.Mutex
 	byFlow map[int64]int64
 }{byFlow: map[int64]int64{}}
+
+// chatWindowOf returns the chat lines (by server event Seq, (from, to])
+// that this run's For each steps consider: everything since the flow's last
+// run. The first call in a run fixes the window and moves the flow's mark,
+// so every For each in the run sees the same lines.
+func (r *flowRun) chatWindowOf() (from, to int64) {
+	forEachMarks.Lock()
+	defer forEachMarks.Unlock()
+	if !r.chatWindow.set {
+		r.chatWindow.from = forEachMarks.byFlow[r.flowID]
+		r.chatWindow.to = serverEvents.lastSeq()
+		r.chatWindow.set = true
+		forEachMarks.byFlow[r.flowID] = r.chatWindow.to
+	}
+	return r.chatWindow.from, r.chatWindow.to
+}
 
 // forEach runs a For each's steps, in order: once for every player online
 // (of "player", by player number), or once for every chat line players
@@ -936,24 +953,20 @@ func (x *job) forEach(of string, steps []Step) bool {
 		msg string
 	}
 	var items []item
+	from, to := x.run.chatWindowOf()
 	if of == forEachMessage {
-		forEachMarks.Lock()
-		after := forEachMarks.byFlow[x.run.flowID]
-		forEachMarks.Unlock()
-		lines := chatsAfter(after)
 		senders := map[string]bool{}
-		for _, l := range lines {
+		for _, l := range chatsAfter(from) {
+			if l.chat.Seq > to {
+				continue // sent after this run started looking
+			}
 			p, ok := onlineByGUID(l.guid)
 			if !ok {
 				continue // left since the line was sent
 			}
 			items = append(items, item{p, l.chat.Text})
 			senders[l.guid] = true
-			after = max(after, l.chat.Seq)
 		}
-		forEachMarks.Lock()
-		forEachMarks.byFlow[x.run.flowID] = after
-		forEachMarks.Unlock()
 		x.run.logf("For each message: %d new from %d player(s)", len(items), len(senders))
 	} else {
 		players := onlineNow()
@@ -962,8 +975,8 @@ func (x *job) forEach(of string, steps []Step) bool {
 			if p.GUID == "" {
 				continue
 			}
-			msg := ""
-			if c, ok := latestChatOf(p.GUID); ok {
+			msg := "" // only what they wrote since the flow's last run
+			if c, ok := latestChatOf(p.GUID); ok && c.Seq > from && c.Seq <= to {
 				msg = c.Text
 			}
 			items = append(items, item{p, msg})
@@ -1655,17 +1668,23 @@ func previewFlow(f Flow) map[string]any {
 // progress, all sharing this run's log, context and Stop button. Mutable
 // fields are guarded by flowRuns' mutex.
 type flowRun struct {
-	flowID   int64
-	name     string
-	status   string // running | done | stopped | error
-	active   bool
-	failed   bool      // a command failed; the run ends as "error"
-	stopped  bool      // the Stop button was pressed
-	anchor   time.Time // when step 1 starts (after the delay)
-	lastRun  time.Time // when the flow was last started
-	jobs     int       // jobs still working through the steps
-	log      []string
-	onStop   []Step // sent once if Stop is pressed
+	flowID  int64
+	name    string
+	status  string // running | done | stopped | error
+	active  bool
+	failed  bool      // a command failed; the run ends as "error"
+	stopped bool      // the Stop button was pressed
+	anchor  time.Time // when step 1 starts (after the delay)
+	lastRun time.Time // when the flow was last started
+	jobs    int       // jobs still working through the steps
+	log     []string
+	onStop  []Step // sent once if Stop is pressed
+	// chatWindow is the chat lines this run's For each steps look at:
+	// Seq in (from, to]. Set by the first For each of the run (chatWindowOf).
+	chatWindow struct {
+		set      bool
+		from, to int64
+	}
 	stopOnce sync.Once
 	ctx      context.Context
 	cancel   context.CancelFunc

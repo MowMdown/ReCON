@@ -272,10 +272,10 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 
 ### For each
 
-**For each** runs the steps inside it (down to its *End for each*) once per item, with that item's player as the Player. Kick, Ban, a Message to the Player, the `{player_...}` placeholders, `{message}` and If comparisons all work inside it, in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies, and it acts only when the flow runs. Pick what it goes through:
+**For each** runs the steps inside it (down to its *End for each*) once per item, with that item's player as the Player. Kick, Ban, a Message to the Player, the `{player_...}` placeholders, `{message}` and If comparisons all work inside it, in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies, and it acts only when the flow runs, on what happened since the flow's last run (the first run looks at the current sessions so far). Pick what it goes through:
 
-- **player**: every player online (the latest 5-second player check's), one after another. `{message}` is that player's latest chat line this session (empty if they haven't chatted).
-- **message**: every chat line that players online sent this session and this flow hasn't handled yet, oldest first, with the sender as the Player and the line as `{message}`. A flow every minute sees each line once.
+- **player**: every player online (the latest 5-second player check's), one after another. `{message}` is that player's latest chat line since this flow last ran (empty if they haven't chatted since).
+- **message**: every chat line that players online sent since this flow last ran, oldest first, with the sender as the Player and the line as `{message}`. A flow every minute sees each line once.
 
 Other rules:
 

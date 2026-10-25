@@ -1154,7 +1154,7 @@ func TestForEachKicksOnlyMatchingPlayers(t *testing.T) {
 	}
 }
 
-func TestForEachMessageHandlesEachLineOnce(t *testing.T) {
+func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 	testDB(t)
 	var sent []string
 	oldSend := sendCommand
@@ -1170,50 +1170,64 @@ func TestForEachMessageHandlesEachLineOnce(t *testing.T) {
 	latest.players = []Player{{ID: 3, GUID: testGUID, Name: "Survivor", Ping: 40}, {ID: 5, GUID: testGUID2, Name: "Calm", Ping: 60}}
 	latest.Unlock()
 	t.Cleanup(func() { latest.Lock(); latest.players = oldPlayers; latest.Unlock() })
-	chat := func(seq int64, text string) {
+	// chat sends a line through the event hub, as the server does, so it
+	// gets a real Seq, then to the tracker.
+	chat := func(text string) {
 		ev := parseServerMessage(text, t0)
-		ev.Seq = seq
+		serverEvents.publish(ev)
+		ev.Seq = serverEvents.lastSeq()
 		trackEvent(ev)
 	}
-	chat(10, "(Global) Survivor: hello all")
-	chat(11, "(Side) Calm: anyone noob here?")
-	chat(12, "(Global) Survivor: you noob")
-
+	const flowID = 42
+	t.Cleanup(func() { forEachMarks.Lock(); delete(forEachMarks.byFlow, flowID); forEachMarks.Unlock() })
+	// runFlow is one run of the flow: a fresh flowRun, as each launch makes.
+	runFlow := func(steps []Step) {
+		t.Helper()
+		sent = nil
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		x := &job{run: &flowRun{flowID: flowID, name: "chat", ctx: ctx, cancel: cancel}, ctx: ctx}
+		if !x.exec(steps) {
+			t.Fatal("the run ended early")
+		}
+	}
 	warn := []Step{{Type: "forEach", Of: "message", Steps: []Step{{Type: "if", Branches: []Branch{{
 		Subject: "message", Op: "has", Value: "noob",
 		Steps: []Step{{Type: "message", To: "player", Text: "No insults: {message}"}}}}}}}}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	run := &flowRun{flowID: 42, name: "language", ctx: ctx, cancel: cancel}
-	t.Cleanup(func() { forEachMarks.Lock(); delete(forEachMarks.byFlow, 42); forEachMarks.Unlock() })
-	x := &job{run: run, ctx: ctx}
+	lastSaid := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "all", Text: "{player_name} said: {message}"}}}}
 
-	if !x.exec(warn) {
-		t.Fatal("the run ended early")
-	}
-	want := []string{"say 5 No insults: anyone noob here?", "say 3 No insults: you noob"}
-	if fmt.Sprint(sent) != fmt.Sprint(want) {
+	chat("(Global) Survivor: hello all")
+	chat("(Side) Calm: anyone noob here?")
+	chat("(Global) Survivor: you noob")
+	runFlow(warn)
+	if want := []string{"say 5 No insults: anyone noob here?", "say 3 No insults: you noob"}; fmt.Sprint(sent) != fmt.Sprint(want) {
 		t.Fatalf("first run sent %q, want %q", sent, want)
 	}
-	// The next run only sees lines sent since.
-	sent = nil
-	if !x.exec(warn) || len(sent) != 0 {
-		t.Fatalf("second run with no new lines sent %q", sent)
+	runFlow(warn)
+	if len(sent) != 0 {
+		t.Fatalf("a run with no new lines sent %q", sent)
 	}
-	chat(13, "(Global) Calm: noob")
-	if !x.exec(warn) || fmt.Sprint(sent) != fmt.Sprint([]string{"say 5 No insults: noob"}) {
-		t.Fatalf("third run sent %q", sent)
+	chat("(Global) Calm: noob")
+	runFlow(warn)
+	if want := []string{"say 5 No insults: noob"}; fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Fatalf("third run sent %q, want %q", sent, want)
 	}
 
-	// For each player sees each player's latest line as {message}.
-	sent = nil
-	latestLine := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "all", Text: "{player_name} last said: {message}"}}}}
-	if !x.exec(latestLine) {
-		t.Fatal("the run ended early")
-	}
-	if want := []string{"say -1 Survivor last said: you noob", "say -1 Calm last said: noob"}; fmt.Sprint(sent) != fmt.Sprint(want) {
+	// For each player: {message} is their latest line since the last run,
+	// empty for a player who hasn't chatted since.
+	chat("(Global) Survivor: brb")
+	runFlow(lastSaid)
+	if want := []string{"say -1 Survivor said: brb", "say -1 Calm said:"}; fmt.Sprint(sent) != fmt.Sprint(want) {
 		t.Fatalf("For each player sent %q, want %q", sent, want)
 	}
+
+	// Two For each in one run look at the same lines.
+	chat("(Global) Calm: noob again")
+	runFlow(append(append([]Step{}, lastSaid...), warn...))
+	if want := []string{"say -1 Survivor said:", "say -1 Calm said: noob again", "say 5 No insults: noob again"}; fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Fatalf("two loops in one run sent %q, want %q", sent, want)
+	}
+
 	// A player's lines go when they leave.
 	line("Player #3 Survivor disconnected", t0.Add(time.Hour))
 	if _, ok := latestChatOf(testGUID); ok {
