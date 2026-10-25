@@ -42,21 +42,23 @@ import (
 // until the GUID matches, working up from the oldest accounts and down from
 // the newest at once (see steamSearchSplit). Old and new accounts turn up
 // soonest; a full pass takes several minutes. It runs in the background, one
-// pass at a time, and only for players with no SteamID yet. Each SteamID is
+// pass at a time, and a pass looks for every GUID in players and bans that
+// has no SteamID yet, since many GUIDs cost the same as one. Each SteamID is
 // written to players and bans the moment it is found. A search asked for
 // while a pass is running waits for the next pass. STEAM_SEARCH_CORES and
 // STEAM_SEARCH_PRIORITY set how much CPU it uses (see steamSearchConfig;
 // default 1 core, medium).
 //
-// STEAM_SEARCH_MODE:
+// When a player with no SteamID joins (steamPlayerJoined), the steam2guid
+// table, if there is one, is read for them at once, in either mode.
+// STEAM_SEARCH_MODE only decides when hashing starts for the rest:
 //
-//	manual  (the default) the button searches for that one player.
-//	auto    when a player with no SteamID joins (steamPlayerJoined), the
-//	        table is read for them at once. If it can't answer, they wait for
-//	        a batch search: it starts 60 seconds after the first such join,
-//	        each further join adds 30 seconds, and it starts at once when 3
-//	        minutes have passed or 15 players are waiting, so a busy restart
-//	        costs one pass, not one per player (steamAutoBatch).
+//	manual  (the default) when the button is pressed.
+//	auto    by itself, as a batch: 60 seconds after the first join the
+//	        table couldn't answer, each further join adds 30 seconds, and
+//	        it starts at once when 3 minutes have passed or 15 players are
+//	        waiting, so a busy restart costs one pass, not one per player
+//	        (steamAutoBatch).
 //
 // steam2guid tables (STEAM_TABLE_DIR, default the folder players.db is in,
 // so /data): if a table built
@@ -526,7 +528,7 @@ func parseSteamSearchMode(s string) bool {
 	return false
 }
 
-// steamAutoSeen is every GUID auto mode has already looked at since ReCON
+// steamAutoSeen is every GUID steamPlayerJoined has already looked at since ReCON
 // started, so a player who rejoins, or whom no search could match, isn't
 // looked up again and again.
 var steamAutoSeen = struct {
@@ -553,13 +555,10 @@ var steamAutoBatch = struct {
 }{guids: map[string]bool{}}
 
 // steamPlayerJoined is called by the tracker (players.go) when a player's
-// session opens. In auto mode, a player with no SteamID is looked up in the
-// steam2guid table straight away; one the table can't answer joins the
+// session opens. A player with no SteamID is looked up in the steam2guid
+// table straight away; in auto mode, one the table can't answer joins the
 // batch for the next search.
 func steamPlayerJoined(guid, name string) {
-	if !steamSearchAuto {
-		return
-	}
 	g := strings.ToLower(guid)
 	if !guidPattern.MatchString(g) {
 		return
@@ -586,6 +585,9 @@ func steamPlayerJoined(guid, name string) {
 		if id, ok := lookupSteamTable(g); ok {
 			saveSteamID(g, id)
 			return
+		}
+		if !steamSearchAuto {
+			return // manual: hashing waits for the button
 		}
 		log.Printf("steam: %s (%s) has no SteamID; searching soon (STEAM_SEARCH_MODE=auto)", name, g)
 		addToSteamBatch(g, time.Now())
@@ -748,8 +750,8 @@ var steamSearch = struct {
 }{queued: map[string]bool{}, notFound: map[string]time.Time{}}
 
 // startSteamSearch asks for these GUIDs' SteamIDs. If no pass is running it
-// starts one for them; if one is running, those it isn't looking for wait
-// for the next pass.
+// starts one for them and every other GUID missing a SteamID; if one is
+// running, those it isn't looking for wait for the next pass.
 func startSteamSearch(guids ...string) error {
 	steamSearch.Lock()
 	defer steamSearch.Unlock()
@@ -769,11 +771,16 @@ func startSteamSearch(guids ...string) error {
 	return beginSteamSearchLocked(list)
 }
 
-// beginSteamSearchLocked starts a pass for the GUIDs in list. Caller holds
-// steamSearch's lock.
+// beginSteamSearchLocked starts a pass for the GUIDs in list plus every
+// other GUID in players and bans still missing a SteamID: a pass costs the
+// same for many GUIDs as for one. Caller holds steamSearch's lock.
 func beginSteamSearchLocked(list []string) error {
+	pending, err := globalDatabase.ListPendingSteamGUIDs()
+	if err != nil {
+		return err
+	}
 	wanted := map[string]bool{}
-	for _, g := range list {
+	for _, g := range append(pending, list...) {
 		wanted[strings.ToLower(g)] = true
 	}
 	list = make([]string, 0, len(wanted))

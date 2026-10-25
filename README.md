@@ -112,7 +112,7 @@ Everything is set with environment variables.
 | `DB_PATH`               | `/data/players.db` | The SQLite database: players, sessions, IPs, chat, notes, roles, permanent bans, flows and settings (timed bans and RCON Settings are kept in memory only) |
 | `TZ`                    | `UTC`              | Time zone for flow schedules and the times shown, e.g. `America/New_York` |
 | `STEAM_API_KEY`         | none               | Turns on the full Steam Profile tab. Free at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
-| `STEAM_SEARCH_MODE`     | `manual`           | `manual`: look up a player's SteamID only when you press **Search Steam ID** (that player only). `auto`: also look up every player who joins without one: straight away in the steam2guid table, else in one search for everyone waiting, starting 60s after the first join (+30s per join, at most 3 minutes or 15 players) |
+| `STEAM_SEARCH_MODE`     | `manual`           | How SteamIDs the steam2guid table can't answer are searched for (the table, if you have one, is always read first, as soon as a player joins). `manual`: when you press **Search Steam ID**. `auto`: by itself, in one search for everyone waiting, starting 60s after the first join (+30s per join, at most 3 minutes or 15 players). Either way a search covers every player still missing a SteamID |
 | `STEAM_SEARCH_CORES`    | `1`                | CPU cores a SteamID lookup may use (capped at the cores available) |
 | `STEAM_SEARCH_PRIORITY` | `medium`           | How much of each core it uses: `low` 33%, `medium` 66%, `high` 99% |
 
@@ -383,7 +383,7 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 
 BattlEye only reports a GUID, which is a one-way hash of the player's SteamID. ReCON finds the SteamID by checking Steam account IDs until one matches the GUID. Older accounts are found in seconds; newer ones take longer. Once found, the SteamID is saved with the player, so the lookup only happens once.
 
-- In the default `manual` mode, a player with no SteamID gets a **Search Steam ID** button on their Steam Profile tab, which looks up that player and shows the lookup's progress. In `auto` mode, ReCON also looks up each player who joins without one: straight away in a steam2guid table if you have one, otherwise in one search for everyone waiting, starting a minute after the first of them joins (30 seconds more for each further join, at most 3 minutes or 15 players).
+- When a player without a SteamID joins, ReCON looks them up in a steam2guid table straight away, if you have one. Anyone it can't answer needs a search, which covers every player still missing a SteamID at once. In the default `manual` mode it starts from the **Search Steam ID** button on a player's Steam Profile tab, which shows its progress. In `auto` mode it starts by itself, a minute after the first such player joins (30 seconds more for each further join, at most 3 minutes or 15 players).
 - `STEAM_SEARCH_CORES` and `STEAM_SEARCH_PRIORITY` set how much CPU a lookup may use.
 
 Without `STEAM_API_KEY`, the tab shows only the SteamID and a link to the profile. With a key it also shows:

@@ -24,7 +24,7 @@ import (
 //   - players / sessions / IP history (OpenPlayerSession, ClosePlayerSession, ListOfflinePlayers, ...)
 //   - player details and admin notes (GetPlayerDetails, SavePlayerNote)
 //   - chat history (AddChatMessage, GetChatHistory)
-//   - SteamIDs (SteamIDByGUID, PlayersBySteamIDs, SetSteamID)
+//   - SteamIDs (SteamIDByGUID, PlayersBySteamIDs, ListPendingSteamGUIDs, SetSteamID)
 //   - player roles for the chat commands (GetPlayerRole, SetPlayerRole, ...)
 //   - settings, such as the chat commands' (Setting, SaveStoredSetting)
 //   - bans (RecordPlayerBan, SyncBansFromServer, ExpireTimedBans, ListAllBans, AllBanStates, DeletePlayerBan)
@@ -510,6 +510,31 @@ func (db *Database) SteamIDByGUID(guid string) (steamID string, known bool, err 
 		return "", false, err
 	}
 	return strings.TrimSpace(s.String), true, nil
+}
+
+// ListPendingSteamGUIDs returns every GUID (lower case) in players and bans that
+// has no SteamID yet: what a SteamID search looks for. Malformed GUIDs are
+// left out.
+func (db *Database) ListPendingSteamGUIDs() ([]string, error) {
+	rows, err := db.Query(`
+		SELECT lower(guid) FROM players WHERE steam_id IS NULL OR steam_id = ''
+		UNION
+		SELECT lower(guid) FROM bans WHERE steam_id IS NULL OR steam_id = ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var g string
+		if err := rows.Scan(&g); err != nil {
+			return nil, err
+		}
+		if guidPattern.MatchString(g) {
+			out = append(out, g)
+		}
+	}
+	return out, rows.Err()
 }
 
 // SetSteamID stores the SteamID found for a GUID in players and bans, in one
