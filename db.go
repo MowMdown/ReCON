@@ -20,15 +20,15 @@ import (
 // ----------------------------------------------------------------------------
 // Every SQL statement in the program lives in this file:
 //
-//   - schema setup (OpenDatabase) and the flows table (EnsureFlowsTable)
-//   - players / sessions / IP history (OpenSession, CloseSession, OfflinePlayers, ...)
-//   - player details and admin notes (PlayerDetails, SaveNote)
-//   - chat history (AddChatMessage, ChatHistory)
+//   - schema setup (OpenPlayerDatabase) and the flows table (EnsureFlowsTable)
+//   - players / sessions / IP history (OpenPlayerSession, ClosePlayerSession, ListOfflinePlayers, ...)
+//   - player details and admin notes (GetPlayerDetails, SavePlayerNote)
+//   - chat history (AddChatMessage, GetChatHistory)
 //   - SteamIDs (SteamIDByGUID, PlayersBySteamIDs, SetSteamID)
-//   - player roles for the chat commands (PlayerRole, SetPlayerRole, ...)
-//   - settings, such as the chat commands' (Setting, SaveSetting)
-//   - bans (BanUser, SyncBans, ExpireBans, BanList, BanStates, DeleteBan)
-//   - flows storage (ListFlows, GetFlow, SaveFlow, ...): steps are kept as JSON
+//   - player roles for the chat commands (GetPlayerRole, SetPlayerRole, ...)
+//   - settings, such as the chat commands' (Setting, SaveStoredSetting)
+//   - bans (RecordPlayerBan, SyncBansFromServer, ExpireTimedBans, ListAllBans, AllBanStates, DeletePlayerBan)
+//   - flows storage (ListStoredFlows, GetStoredFlow, SaveStoredFlow, ...): steps are kept as JSON
 //
 // The bottom section keeps the database in step with the game server: the
 // BattlEye <-> DB ban sync (run by the heartbeat, rcon.go) and the chat
@@ -49,7 +49,7 @@ type Database struct {
 // waits its turn instead of failing with "database is locked".
 const sqliteParams = "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
 
-func OpenDatabase(filepath string) (*Database, error) {
+func OpenPlayerDatabase(filepath string) (*Database, error) {
 	db, err := sql.Open("sqlite", filepath+sqliteParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -283,11 +283,11 @@ const (
 	endBanned       = "banned"
 )
 
-// OpenSession records a player coming online (players.go calls it once per
+// OpenPlayerSession records a player coming online (players.go calls it once per
 // session, when their GUID is known): their name and IP, the IP in their IP
 // history, and an open session starting at connectedAt. A session already
 // open for the GUID is left as it is.
-func (db *Database) OpenSession(guid, name, ip string, playerID int, connectedAt time.Time) error {
+func (db *Database) OpenPlayerSession(guid, name, ip string, playerID int, connectedAt time.Time) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -322,17 +322,17 @@ func (db *Database) OpenSession(guid, name, ip string, playerID int, connectedAt
 	return tx.Commit()
 }
 
-// MarkLoaded records when a player finished loading ("(Lobby)" left their name).
-func (db *Database) MarkLoaded(guid string, at time.Time) error {
+// MarkSessionLoaded records when a player finished loading ("(Lobby)" left their name).
+func (db *Database) MarkSessionLoaded(guid string, at time.Time) error {
 	_, err := db.Exec("UPDATE active_sessions SET loaded_at = ? WHERE guid = ? AND loaded_at IS NULL", at.UTC(), guid)
 	return err
 }
 
-// CloseSession ends a player's open session at `at`: it goes into
+// ClosePlayerSession ends a player's open session at `at`: it goes into
 // session_history with how it ended, its length (less any paused time) is
 // added to their playtime, and last_seen becomes `at`. It returns the
 // history row's id, or 0 if no session was open.
-func (db *Database) CloseSession(guid string, at time.Time, ended string) (int64, error) {
+func (db *Database) ClosePlayerSession(guid string, at time.Time, ended string) (int64, error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return 0, err
@@ -379,13 +379,13 @@ func (db *Database) CloseSession(guid string, at time.Time, ended string) (int64
 	return id, tx.Commit()
 }
 
-// ResumeSession opens again a session CloseSession ended (history row
+// ResumePlayerSession opens again a session ClosePlayerSession ended (history row
 // historyID) when the server went down, for a player back at `at` after the
 // restart: the history row goes, its length comes off their playtime, and
 // the session is open again as player number playerID, with the time from
 // the old end to `at` paused (not counted). It does nothing if the row is
 // gone or the player already has a session open.
-func (db *Database) ResumeSession(guid string, historyID int64, playerID int, at time.Time) error {
+func (db *Database) ResumePlayerSession(guid string, historyID int64, playerID int, at time.Time) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -432,8 +432,8 @@ func (db *Database) ResumeSession(guid string, historyID int64, playerID int, at
 	return tx.Commit()
 }
 
-// OfflinePlayers returns all players from the database who are not currently connected.
-func (db *Database) OfflinePlayers() ([]Player, error) {
+// ListOfflinePlayers returns all players from the database who are not currently connected.
+func (db *Database) ListOfflinePlayers() ([]Player, error) {
 	rows, err := db.Query(`
 		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen, p.role
 		FROM players p
@@ -461,9 +461,9 @@ func (db *Database) OfflinePlayers() ([]Player, error) {
 	return players, rows.Err()
 }
 
-// KnownPlayers returns every player ever seen, sorted by name. Offline is
+// ListKnownPlayers returns every player ever seen, sorted by name. Offline is
 // false for players with an open session (online as of the last poll).
-func (db *Database) KnownPlayers() ([]Player, error) {
+func (db *Database) ListKnownPlayers() ([]Player, error) {
 	rows, err := db.Query(`
 		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen,
 			EXISTS (SELECT 1 FROM active_sessions a WHERE a.guid = p.guid)
@@ -577,9 +577,9 @@ func (db *Database) GUIDByName(name string) (string, error) {
 // Roles (the chat commands' permissions, set on the Players page)
 // ---------------------------------------------------------------------------
 
-// PlayerRole returns a player's role (0 Player, 1 Mod, 2 Admin) by GUID,
+// GetPlayerRole returns a player's role (0 Player, 1 Mod, 2 Admin) by GUID,
 // case-insensitive. Unknown players, and errors, are Player.
-func (db *Database) PlayerRole(guid string) int {
+func (db *Database) GetPlayerRole(guid string) int {
 	var role int
 	if err := db.QueryRow("SELECT role FROM players WHERE lower(guid) = lower(?)", guid).Scan(&role); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -600,8 +600,8 @@ func (db *Database) SetPlayerRole(guid string, role int) (found bool, err error)
 	return n > 0, err
 }
 
-// Roles returns lower-case GUID -> role for every Mod and Admin.
-func (db *Database) Roles() (map[string]int, error) {
+// AllPlayerRoles returns lower-case GUID -> role for every Mod and Admin.
+func (db *Database) AllPlayerRoles() (map[string]int, error) {
 	rows, err := db.Query("SELECT guid, role FROM players WHERE role > 0")
 	if err != nil {
 		return nil, err
@@ -643,8 +643,8 @@ func (db *Database) PlayersByCode(code string) ([]Player, error) {
 // Settings
 // ---------------------------------------------------------------------------
 
-// Setting returns a stored setting; ok is false when it was never saved.
-func (db *Database) Setting(key string) (value string, ok bool, err error) {
+// GetStoredSetting returns a stored setting; ok is false when it was never saved.
+func (db *Database) GetStoredSetting(key string) (value string, ok bool, err error) {
 	err = db.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
@@ -652,8 +652,8 @@ func (db *Database) Setting(key string) (value string, ok bool, err error) {
 	return value, err == nil, err
 }
 
-// SaveSetting stores a setting.
-func (db *Database) SaveSetting(key, value string) error {
+// SaveStoredSetting stores a setting.
+func (db *Database) SaveStoredSetting(key, value string) error {
 	_, err := db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
 	return err
@@ -663,7 +663,7 @@ func (db *Database) SaveSetting(key, value string) error {
 // Player details and admin notes (the Players page's Details dialog)
 // ---------------------------------------------------------------------------
 
-// recentSessionsKept is how many past sessions PlayerDetails returns, newest first.
+// recentSessionsKept is how many past sessions GetPlayerDetails returns, newest first.
 const recentSessionsKept = 100
 
 type detailsPlayer struct {
@@ -764,9 +764,9 @@ func asString(v any) string {
 	return ""
 }
 
-// PlayerDetails gathers everything stored about one player (GUID matched
+// GetPlayerDetails gathers everything stored about one player (GUID matched
 // case-insensitively), or sql.ErrNoRows if the GUID was never seen.
-func (db *Database) PlayerDetails(guid string) (*playerDetails, error) {
+func (db *Database) GetPlayerDetails(guid string) (*playerDetails, error) {
 	d := &playerDetails{}
 	var first, last any
 	err := db.QueryRow(`SELECT guid, username, last_ip, first_seen, last_seen, total_playtime_seconds, role
@@ -876,15 +876,15 @@ func (db *Database) PlayerDetails(guid string) (*playerDetails, error) {
 	return d, nil
 }
 
-// PlayerKnown reports whether a GUID (case-insensitive) has ever been seen.
-func (db *Database) PlayerKnown(guid string) (bool, error) {
+// IsPlayerKnown reports whether a GUID (case-insensitive) has ever been seen.
+func (db *Database) IsPlayerKnown(guid string) (bool, error) {
 	var n int
 	err := db.QueryRow("SELECT COUNT(*) FROM players WHERE lower(guid) = lower(?)", guid).Scan(&n)
 	return n > 0, err
 }
 
-// SaveNote stores a player's admin note; an empty note deletes it.
-func (db *Database) SaveNote(guid, note string) error {
+// SavePlayerNote stores a player's admin note; an empty note deletes it.
+func (db *Database) SavePlayerNote(guid, note string) error {
 	guid = strings.ToLower(guid)
 	if strings.TrimSpace(note) == "" {
 		_, err := db.Exec("DELETE FROM player_notes WHERE guid = ?", guid)
@@ -922,8 +922,8 @@ func (db *Database) AddChatMessage(at time.Time, guid, direction, line string) e
 	return err
 }
 
-// ChatHistory returns a player's newest `limit` lines, oldest first.
-func (db *Database) ChatHistory(guid string, limit int) ([]chatLine, error) {
+// GetChatHistory returns a player's newest `limit` lines, oldest first.
+func (db *Database) GetChatHistory(guid string, limit int) ([]chatLine, error) {
 	rows, err := db.Query(`
 		SELECT at, direction, line FROM (
 			SELECT id, at, direction, line FROM chat_messages
@@ -969,10 +969,10 @@ type timedBan struct {
 	index        int // its position in BattlEye's list, -1 until read
 }
 
-// BanUser records a ban ReCON just placed: a permanent one in the bans table
+// RecordPlayerBan records a ban ReCON just placed: a permanent one in the bans table
 // (with the player's SteamID when known), a timed one in memory, ending at
 // expires.
-func (db *Database) BanUser(guid, playerName, ip, reason string, perm bool, expires time.Time) error {
+func (db *Database) RecordPlayerBan(guid, playerName, ip, reason string, perm bool, expires time.Time) error {
 	g := strings.ToLower(guid)
 	db.timed.Lock()
 	delete(db.timed.m, g)
@@ -995,13 +995,13 @@ func (db *Database) BanUser(guid, playerName, ip, reason string, perm bool, expi
 	return err
 }
 
-// storedBan is a permanent ban that SyncBans wants put back on the server.
+// storedBan is a permanent ban that SyncBansFromServer wants put back on the server.
 type storedBan struct {
 	GUID   string
 	Reason string
 }
 
-// SyncBans brings the bans in line with BattlEye's GUID ban list, read at
+// SyncBansFromServer brings the bans in line with BattlEye's GUID ban list, read at
 // readAt:
 //   - a permanent ban BattlEye lists is added to the bans table if missing
 //     (name, IP and SteamID looked up from players), or has its reason and
@@ -1014,7 +1014,7 @@ type storedBan struct {
 //     back with addBan.
 //
 // Callers must pass a list parsed from a complete, recognised `bans` reply.
-func (db *Database) SyncBans(bans []Ban, readAt time.Time) ([]storedBan, error) {
+func (db *Database) SyncBansFromServer(bans []Ban, readAt time.Time) ([]storedBan, error) {
 	live := make(map[string]Ban, len(bans))
 	for _, b := range bans {
 		g := strings.ToLower(b.GUID)
@@ -1104,9 +1104,9 @@ func (db *Database) SyncBans(bans []Ban, readAt time.Time) ([]storedBan, error) 
 	return readd, nil
 }
 
-// ExpireBans forgets the timed bans whose time ran out by `now`, and
+// ExpireTimedBans forgets the timed bans whose time ran out by `now`, and
 // returns how many.
-func (db *Database) ExpireBans(now time.Time) (int64, error) {
+func (db *Database) ExpireTimedBans(now time.Time) (int64, error) {
 	db.timed.Lock()
 	defer db.timed.Unlock()
 	var n int64
@@ -1133,14 +1133,14 @@ func (db *Database) NextBanExpiry() (int64, error) {
 	return next, nil
 }
 
-// IsBanned reports whether a GUID (case-insensitive) is banned.
-func (db *Database) IsBanned(guid string) (bool, error) {
-	st, err := db.BanState(guid)
+// IsPlayerBanned reports whether a GUID (case-insensitive) is banned.
+func (db *Database) IsPlayerBanned(guid string) (bool, error) {
+	st, err := db.GetBanState(guid)
 	return st.Banned, err
 }
 
-// DeleteBan removes a ban by GUID (case-insensitive), permanent or timed.
-func (db *Database) DeleteBan(guid string) error {
+// DeletePlayerBan removes a ban by GUID (case-insensitive), permanent or timed.
+func (db *Database) DeletePlayerBan(guid string) error {
 	db.timed.Lock()
 	delete(db.timed.m, strings.ToLower(guid))
 	db.timed.Unlock()
@@ -1148,9 +1148,9 @@ func (db *Database) DeleteBan(guid string) error {
 	return err
 }
 
-// permBans reads the permanent bans, in BattlEye's list order (ones not in
+// listPermanentBans reads the permanent bans, in BattlEye's list order (ones not in
 // BattlEye's list go last), with an optional WHERE condition.
-func (db *Database) permBans(where string, args ...any) ([]Ban, error) {
+func (db *Database) listPermanentBans(where string, args ...any) ([]Ban, error) {
 	rows, err := db.Query("SELECT lower(guid), player_name, reason, be_index FROM bans "+where+
 		" ORDER BY be_index < 0, be_index, player_name COLLATE NOCASE", args...)
 	if err != nil {
@@ -1193,10 +1193,10 @@ func stateOf(b Ban) banState {
 	return st
 }
 
-// BanList returns every ban for the Bans page, in BattlEye's list order
+// ListAllBans returns every ban for the Bans page, in BattlEye's list order
 // (bans not placed in BattlEye's list yet go last).
-func (db *Database) BanList() ([]Ban, error) {
-	out, err := db.permBans("")
+func (db *Database) ListAllBans() ([]Ban, error) {
+	out, err := db.listPermanentBans("")
 	if err != nil {
 		return nil, err
 	}
@@ -1214,9 +1214,9 @@ func (db *Database) BanList() ([]Ban, error) {
 	return out, nil
 }
 
-// BanStates returns every banned GUID's status, by lower-case GUID.
-func (db *Database) BanStates() (map[string]banState, error) {
-	list, err := db.BanList()
+// AllBanStates returns every banned GUID's status, by lower-case GUID.
+func (db *Database) AllBanStates() (map[string]banState, error) {
+	list, err := db.ListAllBans()
 	if err != nil {
 		return nil, err
 	}
@@ -1227,8 +1227,8 @@ func (db *Database) BanStates() (map[string]banState, error) {
 	return out, nil
 }
 
-// BanState is one GUID's ban status (Banned false when not banned).
-func (db *Database) BanState(guid string) (banState, error) {
+// GetBanState is one GUID's ban status (Banned false when not banned).
+func (db *Database) GetBanState(guid string) (banState, error) {
 	g := strings.ToLower(guid)
 	db.timed.Lock()
 	tb, ok := db.timed.m[g]
@@ -1236,7 +1236,7 @@ func (db *Database) BanState(guid string) (banState, error) {
 	if ok {
 		return banState{Banned: true, MinutesLeft: minutesLeft(tb, time.Now()), Reason: tb.reason}, nil
 	}
-	list, err := db.permBans("WHERE lower(guid) = ?", g)
+	list, err := db.listPermanentBans("WHERE lower(guid) = ?", g)
 	if err != nil || len(list) == 0 {
 		return banState{MinutesLeft: -1}, err
 	}
@@ -1248,12 +1248,12 @@ func (db *Database) BanState(guid string) (banState, error) {
 // ---------------------------------------------------------------------------
 
 // flowsTableSQL creates the flows table. The id is a plain INTEGER PRIMARY
-// KEY, not AUTOINCREMENT: SaveFlow gives a new flow the lowest free number
+// KEY, not AUTOINCREMENT: SaveStoredFlow gives a new flow the lowest free number
 // (from 0), so deleting flows frees their numbers for the next ones.
 //
 // Columns: script holds the steps as JSON, cancel the When stopped steps,
 // timer the delay before step 1, and schedule the trigger: "manual",
-// "on-join", "on-chat" or a cron expression (see triggerOf in flows.go).
+// "on-join", "on-chat" or a cron expression (see triggerFromSchedule in flows.go).
 const flowsTableSQL = `CREATE TABLE %s (
 	id INTEGER PRIMARY KEY,
 	name TEXT NOT NULL UNIQUE,
@@ -1302,8 +1302,8 @@ func (db *Database) EnsureFlowsTable() error {
 	return tx.Commit()
 }
 
-// ListFlows returns every flow in display order, read with flowFromRow.
-func (db *Database) ListFlows() ([]Flow, error) {
+// ListStoredFlows returns every flow in display order, read with flowFromRow.
+func (db *Database) ListStoredFlows() ([]Flow, error) {
 	rows, err := db.Query("SELECT id, name, script, cancel, timer, schedule, schedule_enabled FROM flows ORDER BY position, id")
 	if err != nil {
 		return nil, err
@@ -1324,8 +1324,8 @@ func (db *Database) ListFlows() ([]Flow, error) {
 	return flows, rows.Err()
 }
 
-// GetFlow returns one flow, or sql.ErrNoRows.
-func (db *Database) GetFlow(id int64) (Flow, error) {
+// GetStoredFlow returns one flow, or sql.ErrNoRows.
+func (db *Database) GetStoredFlow(id int64) (Flow, error) {
 	var f Flow
 	var script, cancel string
 	var en int
@@ -1339,11 +1339,11 @@ func (db *Database) GetFlow(id int64) (Flow, error) {
 	return f, nil
 }
 
-// SaveFlow inserts a new flow (isNew; placed last, with the lowest free
+// SaveStoredFlow inserts a new flow (isNew; placed last, with the lowest free
 // number from 0) or updates flow f.ID. f.Schedule must already be in stored
 // form ("manual", "on-join", "on-chat" or cron); script and cancel are the
 // steps as JSON. Updating a missing ID returns sql.ErrNoRows.
-func (db *Database) SaveFlow(f Flow, isNew bool, script, cancel string) (int64, error) {
+func (db *Database) SaveStoredFlow(f Flow, isNew bool, script, cancel string) (int64, error) {
 	en := 0
 	if f.ScheduleEnabled {
 		en = 1
@@ -1387,8 +1387,8 @@ func (db *Database) SetFlowScheduleEnabled(id int64, on bool) error {
 	return err
 }
 
-// ReorderFlows stores the display order: ids[0] becomes position 1, and so on.
-func (db *Database) ReorderFlows(ids []int64) error {
+// ReorderStoredFlows stores the display order: ids[0] becomes position 1, and so on.
+func (db *Database) ReorderStoredFlows(ids []int64) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -1402,8 +1402,8 @@ func (db *Database) ReorderFlows(ids []int64) error {
 	return tx.Commit()
 }
 
-// DeleteFlow removes a flow row.
-func (db *Database) DeleteFlow(id int64) error {
+// DeleteStoredFlow removes a flow row.
+func (db *Database) DeleteStoredFlow(id int64) error {
 	_, err := db.Exec("DELETE FROM flows WHERE id = ?", id)
 	return err
 }
@@ -1422,7 +1422,7 @@ var banListLock sync.Mutex
 const banSyncEvery = 5 * time.Minute
 
 // syncBanList reads BattlEye's ban list and brings the bans table in line
-// with it (SyncBans), then puts back any permanent ban the server has lost
+// with it (SyncBansFromServer), then puts back any permanent ban the server has lost
 // (`addBan <guid> 0 <reason>`) and saves the list with writeBans. Holds
 // banListLock so it can't interleave with a ban or unban.
 func syncBanList() error {
@@ -1433,7 +1433,7 @@ func syncBanList() error {
 	if err != nil {
 		return err
 	}
-	readd, err := globalDatabase.SyncBans(bans, readAt)
+	readd, err := globalDatabase.SyncBansFromServer(bans, readAt)
 	refreshBanExpiry()
 	if err != nil {
 		return err
@@ -1441,7 +1441,7 @@ func syncBanList() error {
 	added := 0
 	for _, b := range readd {
 		cmd := strings.TrimSpace(fmt.Sprintf("addBan %s 0 %s", b.GUID, cleanReason(b.Reason)))
-		_, acked, err := runShared(cmd, 1500*time.Millisecond, false, "bans")
+		_, acked, err := runSharedCommand(cmd, 1500*time.Millisecond, false, "bans")
 		if err != nil || !acked {
 			log.Printf("bans: re-adding permanent ban %s failed (acked=%v err=%v)", b.GUID, acked, err)
 			continue
@@ -1450,7 +1450,7 @@ func syncBanList() error {
 		added++
 	}
 	if added > 0 {
-		runShared("writeBans", 1500*time.Millisecond, false, "bans") // persist bans.txt, best effort
+		runSharedCommand("writeBans", 1500*time.Millisecond, false, "bans") // persist bans.txt, best effort
 	}
 	return nil
 }
@@ -1474,9 +1474,9 @@ func longerBan(a, b Ban) bool {
 	return am > bm
 }
 
-// banStatuses returns every banned GUID's status, from the bans table.
-func banStatuses() map[string]banState {
-	out, err := globalDatabase.BanStates()
+// allBanStatuses returns every banned GUID's status, from the bans table.
+func allBanStatuses() map[string]banState {
+	out, err := globalDatabase.AllBanStates()
 	if err != nil {
 		log.Printf("bans: reading the bans table: %v", err)
 		return map[string]banState{}
@@ -1486,7 +1486,7 @@ func banStatuses() map[string]banState {
 
 // banStatusOf is one player's ban status (Banned false when not banned).
 func banStatusOf(guid string) banState {
-	st, err := globalDatabase.BanState(guid)
+	st, err := globalDatabase.GetBanState(guid)
 	if err != nil {
 		log.Printf("bans: reading %s: %v", guid, err)
 		return banState{MinutesLeft: -1}
@@ -1516,7 +1516,7 @@ func expireDueBans(now time.Time) {
 	}
 	banListLock.Lock()
 	defer banListLock.Unlock()
-	n, err := globalDatabase.ExpireBans(now)
+	n, err := globalDatabase.ExpireTimedBans(now)
 	if err != nil {
 		log.Printf("bans: deleting expired bans: %v", err)
 		return

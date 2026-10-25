@@ -19,6 +19,6 @@ package main
 // startJoinFlows runs the join flows for each player who just joined.
 func startJoinFlows(joined []Player) {
 	for _, p := range joined {
-		startPlayerFlows(triggerJoin, sourceJoin, &flowPlayer{Player: p, role: playerRole(p.GUID)})
+		startPlayerFlows(triggerJoin, sourceJoin, &flowPlayer{Player: p, role: lookupPlayerRole(p.GUID)})
 	}
 }

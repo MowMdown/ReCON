@@ -12,11 +12,11 @@ import (
 // starts a scheduled flow now, and Stop ends any flow's active run.
 // ============================================================================
 
-// startFlow starts a run now (the Run button). minutes > 0 replaces the
+// startFlowNow starts a run now (the Run button). minutes > 0 replaces the
 // flow's delay for this run. Join and chat flows run for a player, so Run
 // can't start them.
-func startFlow(f Flow, minutes int) error {
-	if err := checkFlow(f); err != nil {
+func startFlowNow(f Flow, minutes int) error {
+	if err := checkFlowDefinition(f); err != nil {
 		return err
 	}
 	switch f.Trigger {
@@ -25,16 +25,16 @@ func startFlow(f Flow, minutes int) error {
 	case triggerChat:
 		return errors.New("this flow runs for each player message, so Run can't start it")
 	}
-	delay, _ := delayOf(f)
+	delay, _ := flowDelaySeconds(f)
 	if minutes > 0 {
 		delay = minutes * 60
 	}
-	return launch(f, time.Now().Add(time.Duration(delay)*time.Second), sourceManual, nil)
+	return launchFlowRun(f, time.Now().Add(time.Duration(delay)*time.Second), sourceManual, nil)
 }
 
-// stopFlow cancels the active run of a flow (the Stop button). The run sends
+// stopFlowRun cancels the active run of a flow (the Stop button). The run sends
 // the When stopped steps as it stops.
-func stopFlow(id int64) error {
+func stopFlowRun(id int64) error {
 	flowRuns.Lock()
 	run := flowRuns.byFlow[id]
 	active := run != nil && run.active

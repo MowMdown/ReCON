@@ -32,7 +32,7 @@ func handleChatLine(name, message string) {
 	if !ok || p.GUID == "" {
 		return
 	}
-	role := playerRole(p.GUID)
+	role := lookupPlayerRole(p.GUID)
 	handleChatCommand(p, role, message)
 	startPlayerFlows(triggerChat, sourceChat, &flowPlayer{Player: p, role: role, message: strings.TrimSpace(message)})
 }

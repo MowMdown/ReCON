@@ -33,7 +33,7 @@ import (
 func runWebServer(addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           logRequests(routes()),
+		Handler:           logWebRequests(buildWebRoutes()),
 		ReadHeaderTimeout: 5 * time.Second, // guards against slowloris-style header stalls
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      120 * time.Second, // generous: kickall can take a while
@@ -41,9 +41,9 @@ func runWebServer(addr string) error {
 	return srv.ListenAndServe()
 }
 
-// routes registers every route. Patterns use Go 1.22 method and {wildcard}
+// buildWebRoutes registers every route. Patterns use Go 1.22 method and {wildcard}
 // routing.
-func routes() *http.ServeMux {
+func buildWebRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 	// The bare address opens the Players page. {$} matches "/" only, so a
 	// mistyped path still gets a 404. 302, not 301: browsers keep a 301, and
@@ -58,7 +58,7 @@ func routes() *http.ServeMux {
 	// "unavailable"}, and while not connected "retryInMs": time until the next
 	// check of the game server.
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
-		st := map[string]any{"ok": true, "rcon": rconStatus()}
+		st := map[string]any{"ok": true, "rcon": currentRconStatus()}
 		if st["rcon"] != "connected" {
 			st["retryInMs"] = max(time.Until(rconNextCheck()).Milliseconds(), 0)
 		}
@@ -66,11 +66,11 @@ func routes() *http.ServeMux {
 	})
 
 	// Raw RCON, for schedulers and scripts.
-	mux.HandleFunc("/rcon", handleRcon)            // GET ?cmd=... or POST (raw text or {"command": ...})
+	mux.HandleFunc("/rcon", handleRconCommand)     // GET ?cmd=... or POST (raw text or {"command": ...})
 	mux.HandleFunc("POST /kickall", handleKickAll) // optional {"reason": ...}
 
 	// Players.
-	mux.HandleFunc("GET /players", pageHandler(playersPage))
+	mux.HandleFunc("GET /players", servePageHandler(playersPage))
 	mux.HandleFunc("GET /api/players", handlePlayersJSON)                      // online + offline players
 	mux.HandleFunc("GET /api/players/all", handleAllPlayersJSON)               // every player ever seen (no RCON needed)
 	mux.HandleFunc("POST /api/players/{id}/{action}", handlePlayerAction)      // message | kick | ban
@@ -91,13 +91,13 @@ func routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/console", handleConsoleCommand) // {"command": ...}, run exactly as typed
 
 	// Bans.
-	mux.HandleFunc("GET /bans", pageHandler(bansPage))
-	mux.HandleFunc("GET /api/bans", handleBansJSON)            // list GUID bans (from the DB, kept in step with BattlEye)
-	mux.HandleFunc("POST /api/bans/{guid}/ban", handleBanGUID) // ban a known player, online or not
-	mux.HandleFunc("POST /api/bans/{guid}/unban", handleUnban) // remove every entry for a GUID
+	mux.HandleFunc("GET /bans", servePageHandler(bansPage))
+	mux.HandleFunc("GET /api/bans", handleBansJSON)                  // list GUID bans (from the DB, kept in step with BattlEye)
+	mux.HandleFunc("POST /api/bans/{guid}/ban", handleBanGUID)       // ban a known player, online or not
+	mux.HandleFunc("POST /api/bans/{guid}/unban", handlePlayerUnban) // remove every entry for a GUID
 
 	// Flows.
-	mux.HandleFunc("GET /flows", pageHandler(flowsPage))
+	mux.HandleFunc("GET /flows", servePageHandler(flowsPage))
 	mux.HandleFunc("GET /api/flows", handleFlowsList)                   // flows + current/last run of each
 	mux.HandleFunc("POST /api/flows", handleFlowSave)                   // update {id, name, trigger, schedule, delay, steps, onStop}; no id creates
 	mux.HandleFunc("POST /api/flows/{id}/run", withFlow(handleFlowRun)) // optional {"minutes": N}
@@ -141,9 +141,9 @@ func isQuiet(r *http.Request) bool {
 		(strings.HasSuffix(p, "/chat") || strings.HasSuffix(p, "/details") || strings.HasSuffix(p, "/steam")))
 }
 
-// logRequests logs each request (method, path+query, remote address,
+// logWebRequests logs each request (method, path+query, remote address,
 // X-Forwarded-For, user agent), except routine polls (isQuiet).
-func logRequests(next http.Handler) http.Handler {
+func logWebRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isQuiet(r) {
 			from := r.RemoteAddr
@@ -165,11 +165,11 @@ func fail(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"ok": false, "error": msg})
 }
 
-// rconStatus is the game server connection as the heartbeat (rcon.go) last
+// currentRconStatus is the game server connection as the heartbeat (rcon.go) last
 // saw it: connected, retrying (one or two failed checks, or none done yet),
 // or unavailable (3 or more failed checks in a row, the point where the
 // heartbeat treats the server as down).
-func rconStatus() string {
+func currentRconStatus() string {
 	switch f := rconFails.Load(); {
 	case !rconPolled.Load():
 		return "retrying"
@@ -182,7 +182,7 @@ func rconStatus() string {
 }
 
 // rconNextCheck is when ReCON next tries the game server: the heartbeat's next
-// check, or, while it waits between logins (connectShared), the first check
+// check, or, while it waits between logins (connectSharedSession), the first check
 // after that wait.
 func rconNextCheck() time.Time {
 	next := time.UnixMilli(rconNextPoll.Load())
@@ -193,8 +193,8 @@ func rconNextCheck() time.Time {
 	return next
 }
 
-// rconUnavailable is the 503 the pages read as "retrying...".
-func rconUnavailable(w http.ResponseWriter, msg string) {
+// isRconUnavailable is the 503 the pages read as "retrying...".
+func isRconUnavailable(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "connected": false, "retrying": true, "error": msg})
 }
 
@@ -219,7 +219,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 // Raw RCON endpoints
 // ---------------------------------------------------------------------------
 
-// handleRcon runs any RCON command, given as
+// handleRconCommand runs any RCON command, given as
 //
 //	GET  /rcon?cmd=players
 //	POST /rcon                  body = raw command text
@@ -227,7 +227,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 //
 // JSON is used when the Content-Type contains "json". Bodies are capped at 4 KiB.
 // RCON failure -> 502; otherwise 200 with {ok, command, acked, output}.
-func handleRcon(w http.ResponseWriter, r *http.Request) {
+func handleRconCommand(w http.ResponseWriter, r *http.Request) {
 	var cmd string
 	switch r.Method {
 	case http.MethodGet:
@@ -258,7 +258,7 @@ func handleRcon(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "no command")
 		return
 	}
-	out, acked, err := runShared(cmd, 2*time.Second, false, "web")
+	out, acked, err := runSharedCommand(cmd, 2*time.Second, false, "web")
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
@@ -292,15 +292,15 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 // Player API
 // ---------------------------------------------------------------------------
 
-// livePlayers reads the connected players (retrying read). ok is false when
+// readLivePlayers reads the connected players (retrying read). ok is false when
 // RCON can't be reached; the 503 has already been written in that case.
-func livePlayers(w http.ResponseWriter) ([]Player, bool) {
-	out, acked, err := runShared("players", 3*time.Second, true, "")
+func readLivePlayers(w http.ResponseWriter) ([]Player, bool) {
+	out, acked, err := runSharedCommand("players", 3*time.Second, true, "")
 	if err != nil || !acked {
-		rconUnavailable(w, "RCON unavailable")
+		isRconUnavailable(w, "RCON unavailable")
 		return nil, false
 	}
-	return parsePlayers(out), true
+	return parsePlayersReply(out), true
 }
 
 // handlePlayersJSON serves GET /api/players: online players (each with their
@@ -311,19 +311,19 @@ func livePlayers(w http.ResponseWriter) ([]Player, bool) {
 // players), so the offline list always shows.
 func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	players, connected := onlinePlayersForPage()
-	offlinePlayers, err := globalDatabase.OfflinePlayers()
+	offlinePlayers, err := globalDatabase.ListOfflinePlayers()
 	if err != nil {
 		log.Printf("error reading offline players from DB: %v", err)
 		offlinePlayers = []Player{}
 	}
-	if roles, err := globalDatabase.Roles(); err == nil {
+	if roles, err := globalDatabase.AllPlayerRoles(); err == nil {
 		for i := range players {
 			players[i].Role = roles[strings.ToLower(players[i].GUID)]
 		}
 	}
 	// The Last Message column: the newest line each online player wrote
 	// this session, kept in memory by the player tracker (players.go).
-	last := lastChats()
+	last := lastChatPerPlayer()
 	for i := range players {
 		if c, ok := last[players[i].ID]; ok && strings.EqualFold(c.guid, players[i].GUID) {
 			players[i].LastMessage, players[i].LastMessageChannel, players[i].LastMessageUnix = c.chat.Text, c.chat.Channel, c.chat.At.Unix()
@@ -335,7 +335,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		"players":        players,
 		"count":          len(players),
 		"offlinePlayers": offlinePlayers,
-		"bans":           banStatuses(),
+		"bans":           allBanStatuses(),
 	})
 }
 
@@ -346,24 +346,24 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 // while the server isn't answering.
 func onlinePlayersForPage() ([]Player, bool) {
 	playersPageSeen.Store(time.Now().UnixMilli())
-	if rconStatus() == "unavailable" {
+	if currentRconStatus() == "unavailable" {
 		return []Player{}, false
 	}
-	players, known := onlinePlayers()
+	players, known := listOnlinePlayers()
 	if known {
 		return players, true
 	}
 	if !pollPlayersNow() {
 		return []Player{}, false
 	}
-	players, _ = onlinePlayers()
+	players, _ = listOnlinePlayers()
 	return players, true
 }
 
 // handleAllPlayersJSON serves GET /api/players/all: every player ever seen,
 // from the database only, so it works while RCON is down.
 func handleAllPlayersJSON(w http.ResponseWriter, r *http.Request) {
-	players, err := globalDatabase.KnownPlayers()
+	players, err := globalDatabase.ListKnownPlayers()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -405,7 +405,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "message is required")
 			return
 		}
-		_, acked, err := runShared(fmt.Sprintf("say %d %s", id, msg), 2*time.Second, false, "web")
+		_, acked, err := runSharedCommand(fmt.Sprintf("say %d %s", id, msg), 2*time.Second, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -414,7 +414,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	players, ok := livePlayers(w)
+	players, ok := readLivePlayers(w)
 	if !ok {
 		return
 	}
@@ -436,7 +436,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if action == "kick" {
-		_, acked, err := runShared(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
+		_, acked, err := runSharedCommand(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -449,7 +449,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "minutes must be 0 or greater")
 		return
 	}
-	banPlayer(w, p, true, req)
+	banOnlinePlayer(w, p, true, req)
 }
 
 // banResult is what banByGUID did, as the API reports it.
@@ -478,7 +478,7 @@ func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResu
 	defer banListLock.Unlock()
 	res := banResult{Online: online, Perm: minutes == 0, code: http.StatusOK}
 	placed := time.Now()
-	_, guidAck, guidErr := runShared(fmt.Sprintf("addBan %s %d %s", p.GUID, minutes, reason), 1500*time.Millisecond, false, logAs)
+	_, guidAck, guidErr := runSharedCommand(fmt.Sprintf("addBan %s %d %s", p.GUID, minutes, reason), 1500*time.Millisecond, false, logAs)
 	if guidErr != nil {
 		res.Error, res.code = guidErr.Error(), http.StatusBadGateway
 		return res
@@ -488,10 +488,10 @@ func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResu
 		return res
 	}
 	res.GUIDBan = true
-	dbErr := globalDatabase.BanUser(p.GUID, bareName(p.Name), p.IP, reason, res.Perm, placed.Add(time.Duration(minutes)*time.Minute))
+	dbErr := globalDatabase.RecordPlayerBan(p.GUID, bareName(p.Name), p.IP, reason, res.Perm, placed.Add(time.Duration(minutes)*time.Minute))
 	refreshBanExpiry()
 	if online {
-		_, kickAck, kickErr := runShared(fmt.Sprintf("kick %d %s", p.ID, reason), 1500*time.Millisecond, false, logAs)
+		_, kickAck, kickErr := runSharedCommand(fmt.Sprintf("kick %d %s", p.ID, reason), 1500*time.Millisecond, false, logAs)
 		res.Kicked = kickErr == nil && kickAck
 		if !res.Kicked {
 			log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
@@ -506,8 +506,8 @@ func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResu
 	return res
 }
 
-// banPlayer bans player p from the pages and writes the JSON response.
-func banPlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) {
+// banOnlinePlayer bans player p from the pages and writes the JSON response.
+func banOnlinePlayer(w http.ResponseWriter, p Player, online bool, req actionRequest) {
 	res := banByGUID(p, online, req.Minutes, req.Reason, "web")
 	writeJSON(w, res.code, res)
 }
@@ -535,7 +535,7 @@ func playerGUID(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 // handlePlayerDetails serves GET /api/players/{guid}/details: everything
-// logged about one player (db.go PlayerDetails), plus whether they are
+// logged about one player (db.go GetPlayerDetails), plus whether they are
 // online right now and their ban status. Works for offline players and
 // while RCON is down.
 func handlePlayerDetails(w http.ResponseWriter, r *http.Request) {
@@ -543,7 +543,7 @@ func handlePlayerDetails(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	d, err := globalDatabase.PlayerDetails(guid)
+	d, err := globalDatabase.GetPlayerDetails(guid)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
 		return
@@ -579,7 +579,7 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, fmt.Sprintf("note is %d characters; the limit is %d", n, maxNoteLen))
 		return
 	}
-	known, err := globalDatabase.PlayerKnown(guid)
+	known, err := globalDatabase.IsPlayerKnown(guid)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -588,7 +588,7 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
 		return
 	}
-	if err := globalDatabase.SaveNote(guid, note); err != nil {
+	if err := globalDatabase.SavePlayerNote(guid, note); err != nil {
 		log.Printf("note %s: %v", guid, err)
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -636,7 +636,7 @@ func handleChatHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	lines, err := globalDatabase.ChatHistory(guid, chatHistoryLimit)
+	lines, err := globalDatabase.GetChatHistory(guid, chatHistoryLimit)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -665,7 +665,7 @@ func handleChatSend(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "message is required")
 		return
 	}
-	players, ok := livePlayers(w)
+	players, ok := readLivePlayers(w)
 	if !ok {
 		return
 	}
@@ -682,7 +682,7 @@ func handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd := fmt.Sprintf("say %d %s", p.ID, msg)
-	_, acked, err := runShared(cmd, 2*time.Second, false, "web")
+	_, acked, err := runSharedCommand(cmd, 2*time.Second, false, "web")
 	if err != nil {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
@@ -725,7 +725,7 @@ func handleConsoleEvents(w http.ResponseWriter, r *http.Request) {
 var consoleSayRe = regexp.MustCompile(`(?i)^say\s+(\d+)\s+(.+)$`)
 
 // handleConsoleCommand serves POST /api/console {"command": "..."}: runs one
-// command exactly as typed; runShared puts it and its outcome in the
+// command exactly as typed; runSharedCommand puts it and its outcome in the
 // console log (as consoleSource). kickall is
 // ReCON's own command, as in the CLI console; everything else goes to
 // BattlEye.
@@ -753,7 +753,7 @@ func handleConsoleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, acked, err := runShared(cmd, 3*time.Second, false, consoleSource)
+	out, acked, err := runSharedCommand(cmd, 3*time.Second, false, consoleSource)
 	if err != nil {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
@@ -790,14 +790,14 @@ func recordConsoleSay(cmd string) {
 // docker-compose.yaml ("defaults", password included: ReCON runs on the game
 // host behind its firewall) and the endpoint ReCON uses now ("address").
 func handleRconSettingsGet(w http.ResponseWriter, r *http.Request) {
-	d := rconDefaults()
-	address, _ := currentTarget()
+	d := rconDefaultSettings()
+	address, _ := currentRconTarget()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"settings": currentRconOverrides(),
 		"defaults": map[string]any{"host": d.Host, "port": d.Port, "password": d.Password},
 		"address":  address,
-		"rcon":     rconStatus(),
+		"rcon":     currentRconStatus(),
 	})
 }
 
@@ -819,7 +819,7 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	address, password := req.effective()
-	if err := reconnectShared(address, password); err != nil {
+	if err := reconnectSharedSession(address, password); err != nil {
 		log.Printf("rcon: RCON Settings: connecting to %s failed: %v", address, err)
 		why := err.Error()
 		if errors.Is(err, syscall.ECONNREFUSED) {
@@ -846,12 +846,12 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 // straight away, so the page never waits on RCON.
 // "connected" is false while the game server isn't answering.
 func handleBansJSON(w http.ResponseWriter, r *http.Request) {
-	list, err := globalDatabase.BanList()
+	list, err := globalDatabase.ListAllBans()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": rconStatus() == "connected", "bans": list, "count": len(list)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": currentRconStatus() == "connected", "bans": list, "count": len(list)})
 }
 
 // guidParam returns the {guid} path value, lower-cased. ok is false (and a
@@ -888,13 +888,13 @@ func handleBanGUID(w http.ResponseWriter, r *http.Request) {
 		req.Reason = "No reason specified"
 	}
 
-	players, ok := livePlayers(w)
+	players, ok := readLivePlayers(w)
 	if !ok {
 		return
 	}
 	for _, p := range players {
 		if strings.EqualFold(p.GUID, guid) {
-			banPlayer(w, p, true, req)
+			banOnlinePlayer(w, p, true, req)
 			return
 		}
 	}
@@ -906,10 +906,10 @@ func handleBanGUID(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	banPlayer(w, p, false, req)
+	banOnlinePlayer(w, p, false, req)
 }
 
-// handleUnban serves POST /api/bans/{guid}/unban.
+// handlePlayerUnban serves POST /api/bans/{guid}/unban.
 //
 // BattlEye removes bans by list index, indexes shift after every removal, and
 // one GUID can be listed more than once. So it loops: re-read the list, find
@@ -918,7 +918,7 @@ func handleBanGUID(w http.ResponseWriter, r *http.Request) {
 // the DB row is deleted, which is the only way a permanent ban leaves the
 // database (syncBanList puts back any permanent ban BattlEye loses). Partial
 // states are reported via be_removed/db_removed.
-func handleUnban(w http.ResponseWriter, r *http.Request) {
+func handlePlayerUnban(w http.ResponseWriter, r *http.Request) {
 	guid, ok := guidParam(w, r)
 	if !ok {
 		return
@@ -943,7 +943,7 @@ func handleUnban(w http.ResponseWriter, r *http.Request) {
 		if idx < 0 {
 			break // GUID no longer listed: done
 		}
-		_, acked, err := runShared(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false, "web")
+		_, acked, err := runSharedCommand(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false, "web")
 		if err == nil && !acked {
 			err = errors.New("removeBan was not acknowledged")
 		}
@@ -957,9 +957,9 @@ func handleUnban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, saved, _ := runShared("writeBans", 1500*time.Millisecond, false, "web") // persist bans.txt, best effort
+	_, saved, _ := runSharedCommand("writeBans", 1500*time.Millisecond, false, "web") // persist bans.txt, best effort
 
-	err := globalDatabase.DeleteBan(guid)
+	err := globalDatabase.DeletePlayerBan(guid)
 	refreshBanExpiry()
 	if err != nil {
 		log.Printf("error deleting ban from DB: %v", err)
@@ -979,7 +979,7 @@ func handleFlowsList(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "flows": flows, "runs": snapshotRuns()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "flows": flows, "runs": snapshotFlowRuns()})
 }
 
 // handleFlowSave serves POST /api/flows: with "id" it updates that flow;
@@ -1019,7 +1019,7 @@ func withFlow(h func(http.ResponseWriter, *http.Request, Flow)) http.HandlerFunc
 			fail(w, http.StatusNotFound, "invalid flow id")
 			return
 		}
-		f, err := globalDatabase.GetFlow(id)
+		f, err := globalDatabase.GetStoredFlow(id)
 		if errors.Is(err, sql.ErrNoRows) {
 			fail(w, http.StatusNotFound, "flow not found")
 			return
@@ -1045,7 +1045,7 @@ func handleFlowRun(w http.ResponseWriter, r *http.Request, f Flow) {
 		fail(w, http.StatusBadRequest, "minutes must be 0-10080")
 		return
 	}
-	if err := startFlow(f, body.Minutes); err != nil {
+	if err := startFlowNow(f, body.Minutes); err != nil {
 		code := http.StatusBadRequest
 		if errors.Is(err, errFlowRunning) {
 			code = http.StatusConflict
@@ -1057,7 +1057,7 @@ func handleFlowRun(w http.ResponseWriter, r *http.Request, f Flow) {
 }
 
 func handleFlowStop(w http.ResponseWriter, r *http.Request, f Flow) {
-	if err := stopFlow(f.ID); err != nil {
+	if err := stopFlowRun(f.ID); err != nil {
 		fail(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -1081,12 +1081,12 @@ func setFlowEnabled(w http.ResponseWriter, id int64, on bool) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	rescheduleFlows() // flows_schedule.go
+	wakeFlowScheduler() // flows_schedule.go
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func handleFlowDelete(w http.ResponseWriter, r *http.Request, f Flow) {
-	if err := deleteFlow(f.ID); err != nil {
+	if err := deleteFlowAndRuns(f.ID); err != nil {
 		code := http.StatusInternalServerError
 		if errors.Is(err, errFlowBusy) {
 			code = http.StatusConflict
@@ -1114,7 +1114,7 @@ type flowFile struct {
 // handleFlowExport serves every flow, in list order, as a downloadable
 // flows.json. Enabled/disabled state is not exported.
 func handleFlowExport(w http.ResponseWriter, r *http.Request) {
-	flows, err := globalDatabase.ListFlows()
+	flows, err := globalDatabase.ListStoredFlows()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1146,7 +1146,7 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "no flows in file")
 		return
 	}
-	existing, err := globalDatabase.ListFlows()
+	existing, err := globalDatabase.ListStoredFlows()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1186,7 +1186,7 @@ func handleFlowPreview(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad JSON")
 		return
 	}
-	writeJSON(w, http.StatusOK, previewFlow(f))
+	writeJSON(w, http.StatusOK, previewFlowSteps(f))
 }
 
 // handleFlowReorder saves the order of the flows list: {"ids": [...]}.
@@ -1198,7 +1198,7 @@ func handleFlowReorder(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad JSON")
 		return
 	}
-	if err := globalDatabase.ReorderFlows(req.IDs); err != nil {
+	if err := globalDatabase.ReorderStoredFlows(req.IDs); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1217,7 +1217,7 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	switch name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(req.Command), "#")); name {
 	case "lock", "unlock":
-		_, acked, err := runShared("#"+name, 2*time.Second, true, "web")
+		_, acked, err := runSharedCommand("#"+name, 2*time.Second, true, "web")
 		if err == nil && !acked {
 			err = errors.New("#" + name + " was not acknowledged")
 		}
@@ -1228,7 +1228,7 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "#" + name + " sent"})
 	case "shutdown":
 		// The server may die before it acknowledges, so only a transport error is a failure.
-		_, acked, err := runShared("#shutdown", 2*time.Second, false, "web")
+		_, acked, err := runSharedCommand("#shutdown", 2*time.Second, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -1290,20 +1290,20 @@ func handleChatCommandsSave(w http.ResponseWriter, r *http.Request) {
 //go:embed templates/*.html
 var templateFiles embed.FS
 
-// loadPage parses one page together with base.html.
-func loadPage(name string) *template.Template {
+// loadPageTemplate parses one page together with base.html.
+func loadPageTemplate(name string) *template.Template {
 	return template.Must(template.New(name).ParseFS(templateFiles, "templates/base.html", "templates/"+name))
 }
 
 var (
-	playersPage = loadPage("players.html")
-	bansPage    = loadPage("bans.html")
-	flowsPage   = loadPage("flows.html")
+	playersPage = loadPageTemplate("players.html")
+	bansPage    = loadPageTemplate("bans.html")
+	flowsPage   = loadPageTemplate("flows.html")
 )
 
-// pageHandler serves an HTML page. Its layout values (widths, paddings, font
+// servePageHandler serves an HTML page. Its layout values (widths, paddings, font
 // sizes) and polling intervals are written in the page's own HTML.
-func pageHandler(page *template.Template) http.HandlerFunc {
+func servePageHandler(page *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := page.Execute(w, nil); err != nil {

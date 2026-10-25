@@ -126,14 +126,14 @@ Mount `/data` as a volume, or everything ReCON has recorded is lost when the con
 
 Every page shows two status lines at the top:
 
-- **RCON Status:** whether ReCON can reach the game server (checked every 5 seconds): *Connected*, or *Unavailable - Retrying...* with a small grey countdown to ReCON's next try. ReCON keeps retrying in the background on its own; after a few failed logins it waits longer between tries (up to 30 seconds).
+- **RCON Status:** whether ReCON can reach the game server (a heartbeat every 5 seconds; three missed in a row means unavailable): *Connected*, or *Unavailable - Retrying...* with a small grey countdown to ReCON's next try. ReCON keeps retrying in the background on its own; after a few failed logins it waits longer between tries (up to 30 seconds).
 - **WebGUI Status:** whether your browser can reach ReCON. While it can, the page's count follows *Connected*: players online, bans or flows.
 
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
 
 ### Players: `/players`
 
-The top table lists the players online now (refreshed every 5 seconds). Mods and Admins have a badge after their name. **Last Message** shows the newest thing each player has written in chat since they connected (hover for the channel, time and full text). It's empty until they chat; messages sent to them aren't shown there, only in their chat history.
+The top table lists the players online now (refreshed every 5 seconds). ReCON follows who connects and disconnects from the server's own messages; while this page is open it also asks the server for the player list every 5 seconds, for up-to-date pings. Mods and Admins have a badge after their name. **Last Message** shows the newest thing each player has written in chat since they connected (hover for the channel, time and full text). It's empty until they chat; messages sent to them aren't shown there, only in their chat history.
 
 | Button  | What it does |
 | ------- | ------------ |
@@ -144,9 +144,9 @@ The top table lists the players online now (refreshed every 5 seconds). Mods and
 
 **Offline Players** lists everyone who has played before: last IP, total time on the server, when they were last seen, and their ban status and reason. If the game server stops answering, this list still shows from the database.
 
-**Settings** (top right, above Console) changes where ReCON connects: Server IP, Port and RCON password. The line under the title shows the server in use: *Connected to IP:PORT* in green, or *Can't reach IP:PORT* in red. A field left empty uses the default from `docker-compose.yaml`, shown greyed out; clear the fields and Connect to go back to those defaults. **Connect** tries one login with those settings on a new connection each time it's pressed, even if nothing changed. Only if the server accepts the login does ReCON switch to it and save the settings, so a typo can't cut ReCON off; otherwise nothing changes and the dialog says why. Saved settings survive restarts and are used by the command-line tool too.
+**Settings** (top right, above Console) changes where ReCON connects: Server IP, Port and RCON password. The line under the title shows the server in use: *Connected to IP:PORT* in green, or *Can't reach IP:PORT* in red. A field left empty uses the default from `docker-compose.yaml`, shown greyed out; clear the fields and Connect to go back to those defaults. **Connect** tries one login with those settings on a new connection each time it's pressed, even if nothing changed. Only if the server accepts the login does ReCON switch to it and keep the settings, so a typo can't cut ReCON off; otherwise nothing changes and the dialog says why. The settings are kept in memory only: restarting ReCON goes back to the `docker-compose.yaml` values, which the command-line tool always uses.
 
-**Console** (top right) opens a live RCON console. It shows everything the server reports (connects, disconnects, GUIDs, chat, kicks, admin logins) as it happens, and runs any command you type exactly as typed. Up and Down recall earlier commands. Commands sent by flows and buttons aren't shown here; the Flows page and the container log record those.
+**Console** (top right) opens ReCON's console log: everything the server reports (connects, disconnects, GUIDs, chat, kicks, admin logins) and every command ReCON sends for the pages, flows and chat commands, with the server's reply, as it happens. Commands not typed in the console say who sent them. It runs any command you type exactly as typed; Up and Down recall earlier commands. ReCON keeps the last 50,000 lines until it restarts and shows the newest 1,000. The routine checks (heartbeats, player and ban list reads) aren't logged. The container log has the same lines, marked `[web]`; the command-line tool's are marked `[cli]` and aren't in the console.
 
 ![RCON console](docs/screenshots/players-console.png)
 
@@ -157,7 +157,7 @@ Details works for online and offline players. It has these tabs:
 | Tab           | Shows |
 | ------------- | ----- |
 | Overview      | First and last seen, total time, sessions, average session, last IP, ban status, and a warning when the player shares an IP with anyone else |
-| Sessions      | Each visit: connected, disconnected (noted when they were kicked or banned), duration and IP |
+| Sessions      | Each visit: connected, disconnected (noted when they were kicked or banned), duration and IP. A player back within 60 seconds of ReCON logging in again after a server restart keeps the same session; the time the server was down doesn't count |
 | IPs           | Every IP they used, and anyone else seen on the same IP. Names are links to that player's details |
 | Steam Profile | Their Steam account (see [Steam profiles](#6-steam-profiles)) |
 | Chat          | Their chat history. While they're online you can message them from here |
@@ -174,7 +174,7 @@ The **Ban** / **Unban** button at the bottom works whether the player is online 
 
 Lists the server's GUID bans with the player's name, time left and reason, refreshed every 10 seconds. A GUID ReCON has never seen shows as *Unknown*. **Unban** removes every entry for that GUID and saves the ban file.
 
-The list comes from ReCON's database, which follows the server's ban list: ReCON reads the list when it logs in to RCON (so after every server restart) and every 5 minutes. A ban added on the server some other way shows up at the next read. A timed ban leaves the list when its time runs out, as it does on the server. A **permanent** ban only leaves through **Unban** here: if it goes missing from the server's list, ReCON adds it back.
+The list follows the server's ban list: ReCON reads it when it logs in to RCON (so after every server restart) and every 5 minutes. A ban added on the server some other way shows up at the next read. **Permanent** bans are stored in ReCON's database and only leave through **Unban** here: if one goes missing from the server's list, ReCON adds it back. **Timed** bans are kept in memory only, since the server already has them; a timed ban leaves the list when its time runs out, as it does on the server, and after ReCON restarts they come back with the first read.
 
 **Ban Player** (top right) bans anyone who has ever played on the server, online or not. Pick them by name (online players are marked, and the start of the GUID tells apart players with the same name), enter a reason (the player sees it), and leave the duration at **0 for permanent** or enter minutes. An online player is kicked straight away.
 
@@ -210,14 +210,15 @@ Drag rows to reorder the list. Each flow's latest run log is shown under the tab
 | Trigger            | Runs | Needs Enable |
 | ------------------ | ---- | ------------ |
 | **Schedule**       | On a cron schedule | Yes |
-| **On join**        | Once for each player who finishes loading in | Yes |
-| **Player message** | Once for every chat message a player sends | Yes |
+| **On join**        | Once for each player who connects, as soon as they finish loading in | Yes |
+| **Player message** | Once for every chat message a player sends, as soon as it arrives | Yes |
 | **Manual**         | When you press Run, or call `POST /api/flows/<id>/run` | No |
 
 - Every trigger can have a **delay** before step 1.
 - A flow's trigger can't change after it's saved, so a restart flow can never start firing on every join by accident. To change it, make a new flow, or Export, edit `trigger` in the file and Import.
 - On join and Player message flows run for one player (who joined, or who typed), so Run can't start them. Several players can be in progress at once; they share one run log and one Stop button.
-- Players already online when ReCON starts aren't greeted. After a server restart, everyone who reconnects is.
+- Schedules start right on time (plus the delay): ReCON watches the clock rather than checking every few seconds.
+- On join flows start for players ReCON sees connecting: ReCON asks the server for the player list every 5 seconds while someone is loading, and the flow starts when *(Lobby)* leaves their name. Players already online when ReCON starts aren't greeted. After a server restart, everyone who reconnects is.
 
 ### Times
 
@@ -382,7 +383,7 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 
 BattlEye only reports a GUID, which is a one-way hash of the player's SteamID. ReCON finds the SteamID by checking Steam account IDs until one matches the GUID. Older accounts are found in seconds; newer ones take longer. Once found, the SteamID is saved with the player, so the lookup only happens once.
 
-- In the default `manual` mode, a player with no SteamID gets a **Search Steam ID** button on their Steam Profile tab, which shows the lookup's progress. In `auto` mode, ReCON starts a lookup for each new player who joins without one.
+- In the default `manual` mode, a player with no SteamID gets a **Search Steam ID** button on their Steam Profile tab, which looks up that player and shows the lookup's progress. In `auto` mode, ReCON also looks up each player who joins without one: straight away in a steam2guid table if you have one, otherwise in one search for everyone waiting, starting a minute after the first of them joins (30 seconds more for each further join, at most 3 minutes or 15 players).
 - `STEAM_SEARCH_CORES` and `STEAM_SEARCH_PRIORITY` set how much CPU a lookup may use.
 
 Without `STEAM_API_KEY`, the tab shows only the SteamID and a link to the profile. With a key it also shows:
@@ -492,7 +493,7 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 
 | Method | Path | Body | Description |
 | ------ | ---- | ---- | ----------- |
-| GET  | `/api/rcon-settings` | | The saved RCON overrides, the `docker-compose.yaml` defaults and the address in use |
+| GET  | `/api/rcon-settings` | | The RCON overrides in use (memory only), the `docker-compose.yaml` defaults and the address in use |
 | POST | `/api/rcon-settings` | `{"host": "...", "port": "...", "password": "..."}` | One login with these (empty = default); if accepted, switch to it and save them |
 | GET  | `/api/console?after=N` | | Server messages and console commands newer than `N`, plus `last` to pass next time |
 | POST | `/api/console` | `{"command": "..."}` | Run a command exactly as typed and add it to the console log |
@@ -540,11 +541,12 @@ ReCON is a single Go program with no dependencies besides the SQLite driver.
 | File | Contents |
 | ---- | -------- |
 | `main.go` | Startup, configuration and the command-line tool |
-| `rcon.go` | The BattlEye RCON protocol, the shared session and server messages |
+| `rcon.go` | The BattlEye RCON protocol, the shared session, the heartbeat and polls, and the console log |
 | `web.go` | HTTP routes, the JSON API and page rendering |
-| `db.go` | SQLite storage and the poller that keeps it in step with the server |
-| `players.go` | Player sessions, from the server's connect, GUID, kick and disconnect messages |
-| `flows.go` | Flows (steps, triggers, runner, scheduler) and the chat commands |
+| `db.go` | SQLite storage, the ban list sync and the chat recorder |
+| `players.go` | Who is online and their sessions, from the console log; keeps a session across a server restart for players back within 60 seconds |
+| `flows.go` | Flows (steps, conditions, runner) and the chat commands |
+| `flows_schedule.go`, `flows_join.go`, `flows_message.go`, `flows_manual.go` | One file per flow trigger |
 | `steam.go` | SteamID lookups and Steam profiles |
 | `templates/` | The HTML pages, embedded into the binary at build time |
 | `examples/flows.json` | Example flows to import |

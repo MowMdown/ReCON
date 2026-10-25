@@ -24,7 +24,7 @@ const (
 // resets the player tracker.
 func testDB(t *testing.T) *Database {
 	t.Helper()
-	db, err := OpenDatabase(filepath.Join(t.TempDir(), "players.db"))
+	db, err := OpenPlayerDatabase(filepath.Join(t.TempDir(), "players.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestEvalCond(t *testing.T) {
 	}
 	for _, c := range cases {
 		b := Branch{Subject: c.subject, Op: c.op, Value: c.value}
-		if got := evalCond(b, c.v); got != c.want {
+		if got := evaluateIfCondition(b, c.v); got != c.want {
 			t.Errorf("{%s} %s %q against %q = %v, want %v", c.subject, c.op, c.value, c.v, got, c.want)
 		}
 	}
@@ -83,15 +83,15 @@ func TestEvalCond(t *testing.T) {
 
 func TestRoleConditionUsesNumber(t *testing.T) {
 	x := &job{p: &flowPlayer{role: roleMod}}
-	v, _ := x.condValue("player_role")
-	if !evalCond(Branch{Subject: "player_role", Op: "ge", Value: "1"}, v) {
+	v, _ := x.ifSubjectValue("player_role")
+	if !evaluateIfCondition(Branch{Subject: "player_role", Op: "ge", Value: "1"}, v) {
 		t.Fatalf("a Mod should be at least Mod (value %q)", v)
 	}
-	if name, _ := x.value("player_role"); name != "Mod" {
+	if name, _ := x.placeholderValue("player_role"); name != "Mod" {
 		t.Fatalf("{player_role} placeholder = %q, want Mod", name)
 	}
-	if got := describeCond(Branch{Subject: "player_role", Op: "ge", Value: "1"}); got != "{player_role} is at least Mod" {
-		t.Fatalf("describeCond = %q", got)
+	if got := describeIfCondition(Branch{Subject: "player_role", Op: "ge", Value: "1"}); got != "{player_role} is at least Mod" {
+		t.Fatalf("describeIfCondition = %q", got)
 	}
 }
 
@@ -99,19 +99,19 @@ func TestCheckIfOperators(t *testing.T) {
 	ifStep := func(subject, op, value string) []Step {
 		return []Step{{Type: "if", Branches: []Branch{{Subject: subject, Op: op, Value: value, Steps: []Step{{Type: "stop"}}}}}}
 	}
-	if err := checkSteps(triggerJoin, ifStep("player_id", "gt", "3"), nil); err == nil {
+	if err := checkFlowSteps(triggerJoin, ifStep("player_id", "gt", "3"), nil); err == nil {
 		t.Error("{player_id} > 3 should be rejected")
 	}
-	if err := checkSteps(triggerJoin, ifStep("player_guid", "eq", "nope"), nil); err == nil {
+	if err := checkFlowSteps(triggerJoin, ifStep("player_guid", "eq", "nope"), nil); err == nil {
 		t.Error("a malformed GUID value should be rejected")
 	}
-	if err := checkSteps(triggerJoin, ifStep("player_role", "ge", "5"), nil); err == nil {
+	if err := checkFlowSteps(triggerJoin, ifStep("player_role", "ge", "5"), nil); err == nil {
 		t.Error("role 5 should be rejected")
 	}
-	if err := checkSteps(triggerJoin, ifStep("player_role", "le", "1"), nil); err != nil {
+	if err := checkFlowSteps(triggerJoin, ifStep("player_role", "le", "1"), nil); err != nil {
 		t.Errorf("role at most Mod: %v", err)
 	}
-	if err := checkSteps(triggerChat, ifStep("message", "exact", "!rules"), nil); err != nil {
+	if err := checkFlowSteps(triggerChat, ifStep("message", "exact", "!rules"), nil); err != nil {
 		t.Errorf("message is exactly: %v", err)
 	}
 }
@@ -123,7 +123,7 @@ func TestParsePlayersUnverifiedGUID(t *testing.T) {
 		"0   1.2.3.4:2304   47   " + testGUID + "(OK)   Some Name\n" +
 		"1   5.6.7.8:2304   0    -   New Guy (Lobby)\n" +
 		"(2 players in total)\n"
-	ps := parsePlayers(out)
+	ps := parsePlayersReply(out)
 	if len(ps) != 2 {
 		t.Fatalf("parsed %d players, want 2", len(ps))
 	}
@@ -238,14 +238,14 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 	}
 	old.Close()
 
-	db, err := OpenDatabase(path)
+	db, err := OpenPlayerDatabase(path)
 	if err != nil {
 		t.Fatalf("opening the old database: %v", err)
 	}
 	defer db.Close()
 	globalDatabase = db
 	tracker.byID, tracker.ended = map[int]*trackedPlayer{}, map[string]time.Time{}
-	if err := initFlows(); err != nil {
+	if err := initStoredFlows(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -258,7 +258,7 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 		}
 	}
 	// Real players keep their history.
-	d, err := db.PlayerDetails(testGUID)
+	d, err := db.GetPlayerDetails(testGUID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 		t.Fatalf("details after upgrade = %+v", d)
 	}
 	// An old open session (no player number, no loaded_at) closes normally.
-	if _, err := db.CloseSession(testGUID, t0.Add(30*time.Minute), endDisconnected); err != nil {
+	if _, err := db.ClosePlayerSession(testGUID, t0.Add(30*time.Minute), endDisconnected); err != nil {
 		t.Fatal(err)
 	}
 	if h := history(t, db, testGUID); len(h) != 2 || h[1].duration != 1800 || h[1].loaded || h[1].ended != endDisconnected {
@@ -274,7 +274,7 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 	}
 	// Old bans: the permanent one stays; the timed one is dropped from the
 	// table (timed bans are kept in memory, from BattlEye's list).
-	states, err := db.BanStates()
+	states, err := db.AllBanStates()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 		t.Errorf("%d rows in bans, want 1", n)
 	}
 	// Opening it again (the next restart) changes nothing and doesn't fail.
-	db2, err := OpenDatabase(path)
+	db2, err := OpenPlayerDatabase(path)
 	if err != nil {
 		t.Fatalf("second open: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 func TestSyncBans(t *testing.T) {
 	db := testDB(t)
 	read := time.Unix(1_700_000_000, 0)
-	readd, err := db.SyncBans([]Ban{
+	readd, err := db.SyncBansFromServer([]Ban{
 		{Index: 0, GUID: testGUID, Minutes: "perm", Perm: true, Reason: "cheating"},
 		{Index: 1, GUID: testGUID2, Minutes: "60", Reason: "toxic"},
 		{Index: 2, GUID: testGUID2, Minutes: "30", Reason: "toxic"}, // listed twice: the longer one counts
@@ -315,7 +315,7 @@ func TestSyncBans(t *testing.T) {
 	}
 
 	// Read again 10s later: the expiry doesn't jitter.
-	if _, err := db.SyncBans([]Ban{
+	if _, err := db.SyncBansFromServer([]Ban{
 		{Index: 0, GUID: testGUID, Minutes: "perm", Perm: true, Reason: "cheating"},
 		{Index: 1, GUID: testGUID2, Minutes: "59", Reason: "toxic"},
 	}, read.Add(10*time.Second)); err != nil {
@@ -326,37 +326,37 @@ func TestSyncBans(t *testing.T) {
 	}
 
 	// Nothing has run out yet; then the timed ban has.
-	if n, _ := db.ExpireBans(read.Add(59 * time.Minute)); n != 0 {
+	if n, _ := db.ExpireTimedBans(read.Add(59 * time.Minute)); n != 0 {
 		t.Fatalf("expired %d bans early", n)
 	}
-	if n, _ := db.ExpireBans(read.Add(time.Hour)); n != 1 {
+	if n, _ := db.ExpireTimedBans(read.Add(time.Hour)); n != 1 {
 		t.Fatalf("expired %d bans at the hour, want 1", n)
 	}
-	if st, _ := db.BanState(testGUID2); st.Banned {
+	if st, _ := db.GetBanState(testGUID2); st.Banned {
 		t.Fatal("expired ban still shows as banned")
 	}
 
 	// A timed ban BattlEye stops listing is deleted; a permanent one is kept
 	// and handed back to be re-added.
-	if err := db.BanUser(testGUID2, "Someone", "1.2.3.4", "spam", false, read.Add(2*time.Hour)); err != nil {
+	if err := db.RecordPlayerBan(testGUID2, "Someone", "1.2.3.4", "spam", false, read.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	readd, err = db.SyncBans(nil, read.Add(time.Hour))
+	readd, err = db.SyncBansFromServer(nil, read.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(readd) != 1 || readd[0].GUID != testGUID || readd[0].Reason != "cheating" {
 		t.Fatalf("readd = %+v, want the permanent ban", readd)
 	}
-	if st, _ := db.BanState(testGUID); !st.Banned || !st.Perm {
+	if st, _ := db.GetBanState(testGUID); !st.Banned || !st.Perm {
 		t.Fatalf("permanent ban state = %+v", st)
 	}
-	if st, _ := db.BanState(testGUID2); st.Banned {
+	if st, _ := db.GetBanState(testGUID2); st.Banned {
 		t.Fatal("timed ban missing from BattlEye was kept")
 	}
-	list, err := db.BanList()
+	list, err := db.ListAllBans()
 	if err != nil || len(list) != 1 || list[0].Minutes != "perm" {
-		t.Fatalf("BanList = %+v, %v", list, err)
+		t.Fatalf("ListAllBans = %+v, %v", list, err)
 	}
 }
 
@@ -387,7 +387,7 @@ func TestEventHubKeepsNewest(t *testing.T) {
 }
 
 // line feeds one server message to the tracker as if it arrived at `at`.
-func line(text string, at time.Time) { trackEvent(parseServerMessage(text, at)) }
+func line(text string, at time.Time) { trackServerEvent(parseServerMessage(text, at)) }
 
 type sessionRow struct {
 	ended         string
@@ -489,7 +489,7 @@ func TestTrackerKickAndBan(t *testing.T) {
 
 	line("Player #2 B (2.2.2.2:2304) connected", t0)
 	line("Player #2 B - BE GUID: "+testGUID2, t0)
-	if err := db.BanUser(testGUID2, "B", "2.2.2.2", "cheating", true, time.Time{}); err != nil {
+	if err := db.RecordPlayerBan(testGUID2, "B", "2.2.2.2", "cheating", true, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	line("Player #2 B ("+testGUID2+") has been kicked by BattlEye: Admin Ban (cheating)", t0.Add(time.Minute))
@@ -517,10 +517,10 @@ func TestTrackerMissedLines(t *testing.T) {
 
 	// Server stops answering: every open session closes when it last answered.
 	playersPolledTracker(on, t0.Add(time.Minute))
-	serverLost(t0.Add(time.Minute + 5*time.Second))
+	serverWentDown(t0.Add(time.Minute + 5*time.Second))
 	h = history(t, db, testGUID)
 	if countRows(t, db, "active_sessions") != 0 || len(h) != 2 || !h[1].at.Equal(t0.Add(time.Minute+5*time.Second)) {
-		t.Fatalf("serverLost didn't close the session: %+v", h)
+		t.Fatalf("serverWentDown didn't close the session: %+v", h)
 	}
 }
 
@@ -550,7 +550,7 @@ func newFakeBE(t *testing.T) *fakeBE {
 			if err != nil {
 				return
 			}
-			typ, p, ok := parsePacket(buf[:n])
+			typ, p, ok := parseRconPacket(buf[:n])
 			if !ok {
 				continue
 			}
@@ -574,9 +574,9 @@ func newFakeBE(t *testing.T) *fakeBE {
 				if accept {
 					ok = 1
 				}
-				c.WriteTo(buildPacket(0, []byte{ok}), from)
+				c.WriteTo(buildRconPacket(0, []byte{ok}), from)
 			case 1:
-				c.WriteTo(buildPacket(1, p[:1]), from) // ack with the same seq
+				c.WriteTo(buildRconPacket(1, p[:1]), from) // ack with the same seq
 			}
 		}
 	}()
@@ -604,10 +604,10 @@ func (f *fakeBE) counts() (logins, unlocks int) {
 // login is followed by exactly one #unlock.
 func TestReloginIsPaced(t *testing.T) {
 	f := newFakeBE(t)
-	oldAddr, oldPass := currentTarget()
+	oldAddr, oldPass := currentRconTarget()
 	oldWait, oldFirst, oldMax, oldSettle := reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle
 	t.Cleanup(func() {
-		setTarget(oldAddr, oldPass)
+		setRconTarget(oldAddr, oldPass)
 		reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = oldWait, oldFirst, oldMax, oldSettle
 		sharedConnection.Lock()
 		if sharedConnection.connection != nil {
@@ -617,22 +617,22 @@ func TestReloginIsPaced(t *testing.T) {
 		sharedConnection.Unlock()
 		resetReloginPace()
 	})
-	setTarget(f.conn.LocalAddr().String(), "pw")
+	setRconTarget(f.conn.LocalAddr().String(), "pw")
 	reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = 20*time.Millisecond, 200*time.Millisecond, 400*time.Millisecond, time.Second
 	resetReloginPace()
 
-	if _, err := connectShared(); err != nil {
+	if _, err := connectSharedSession(); err != nil {
 		t.Fatal(err)
 	}
 	if l, u := f.counts(); l != 1 || u != 1 {
 		t.Fatalf("first login: %d login(s), %d #unlock(s); want 1 and 1", l, u)
 	}
 
-	// The server stops answering. The poller calls reloginShared on every
+	// The server stops answering. The poller calls reloginSharedSession on every
 	// round; here it's called every 10ms for 1s (100 calls).
 	f.set(true)
 	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		reloginShared()
+		reloginSharedSession()
 	}
 	l, _ := f.counts()
 	// Allowed: one now, then 200ms and 400ms (capped) waits: about 4 in 1s.
@@ -646,7 +646,7 @@ func TestReloginIsPaced(t *testing.T) {
 	time.Sleep(reloginMaxWait)
 	before, unlocksBefore := f.counts()
 	for end := time.Now().Add(500 * time.Millisecond); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		reloginShared()
+		reloginSharedSession()
 	}
 	after, unlocks := f.counts()
 	if after-before != 1 || unlocks-unlocksBefore != 1 {
@@ -659,19 +659,19 @@ func TestReloginIsPaced(t *testing.T) {
 func TestConnectSharedPacesNewSockets(t *testing.T) {
 	f := newFakeBE(t)
 	f.set(true)
-	oldAddr, oldPass := currentTarget()
+	oldAddr, oldPass := currentRconTarget()
 	oldWait, oldFirst := reloginReplyWait, reloginFirstWait
 	t.Cleanup(func() {
-		setTarget(oldAddr, oldPass)
+		setRconTarget(oldAddr, oldPass)
 		reloginReplyWait, reloginFirstWait = oldWait, oldFirst
 		sharedConnection.Lock()
 		sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
 		sharedConnection.Unlock()
 	})
-	setTarget(f.conn.LocalAddr().String(), "pw")
+	setRconTarget(f.conn.LocalAddr().String(), "pw")
 	reloginReplyWait, reloginFirstWait = 20*time.Millisecond, time.Hour
 	for i := 0; i < 20; i++ {
-		if _, err := connectShared(); err == nil {
+		if _, err := connectSharedSession(); err == nil {
 			t.Fatal("connected to a server that doesn't answer")
 		}
 	}
@@ -695,7 +695,7 @@ func TestLastChatFromServerMessages(t *testing.T) {
 	if err := db.AddChatMessage(t0.Add(3*time.Minute), testGUID, chatOut, "> say 0 hello from the admins"); err != nil {
 		t.Fatal(err)
 	}
-	last := lastChats()
+	last := lastChatPerPlayer()
 	if c := last[0]; c.guid != testGUID || c.chat.Text != "anyone at NWAF?" || c.chat.Channel != "Side" || !c.chat.At.Equal(t0.Add(2*time.Minute)) {
 		t.Fatalf("Survivor's last chat = %+v", c)
 	}
@@ -706,7 +706,7 @@ func TestLastChatFromServerMessages(t *testing.T) {
 	// Two players with the same name: the line can't be placed, so neither gets it.
 	line("Player #2 Quiet (9.9.9.9:2304) connected", t0)
 	line("(Global) Quiet: who said that?", t0.Add(4*time.Minute))
-	if _, ok := lastChats()[1]; ok {
+	if _, ok := lastChatPerPlayer()[1]; ok {
 		t.Fatal("an ambiguous chat line was given to a player")
 	}
 
@@ -714,13 +714,13 @@ func TestLastChatFromServerMessages(t *testing.T) {
 	line("Player #0 Survivor disconnected", t0.Add(5*time.Minute))
 	line("Player #0 Survivor (1.2.3.4:2304) connected", t0.Add(6*time.Minute))
 	line("Player #0 Survivor - BE GUID: "+testGUID, t0.Add(6*time.Minute))
-	if _, ok := lastChats()[0]; ok {
+	if _, ok := lastChatPerPlayer()[0]; ok {
 		t.Fatal("the last session's message is still shown")
 	}
 }
 
 func TestRootRedirectsToPlayers(t *testing.T) {
-	mux := routes()
+	mux := buildWebRoutes()
 	for path, want := range map[string]int{"/": http.StatusFound, "/plyers": http.StatusNotFound} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -736,7 +736,7 @@ func TestRootRedirectsToPlayers(t *testing.T) {
 // resetShared starts a test with no shared session and no wait before the
 // next login, and closes it and restores the RCON target after the test.
 func resetShared(t *testing.T) {
-	oldAddr, oldPass := currentTarget()
+	oldAddr, oldPass := currentRconTarget()
 	sharedConnection.Lock()
 	if sharedConnection.connection != nil {
 		sharedConnection.connection.close()
@@ -744,7 +744,7 @@ func resetShared(t *testing.T) {
 	sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
 	sharedConnection.Unlock()
 	t.Cleanup(func() {
-		setTarget(oldAddr, oldPass)
+		setRconTarget(oldAddr, oldPass)
 		sharedConnection.Lock()
 		if sharedConnection.connection != nil {
 			sharedConnection.connection.close()
@@ -760,31 +760,31 @@ func TestReconnectSharedOnlySwitchesOnSuccess(t *testing.T) {
 	a.setPassword("apw")
 	b.setPassword("bpw")
 	addrA, addrB := a.conn.LocalAddr().String(), b.conn.LocalAddr().String()
-	setTarget(addrA, "apw")
-	old, err := connectShared()
+	setRconTarget(addrA, "apw")
+	old, err := connectSharedSession()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Wrong password for B: nothing changes.
-	if err := reconnectShared(addrB, "nope"); err == nil {
+	if err := reconnectSharedSession(addrB, "nope"); err == nil {
 		t.Fatal("a rejected login was accepted")
 	}
-	if addr, _ := currentTarget(); addr != addrA {
+	if addr, _ := currentRconTarget(); addr != addrA {
 		t.Fatalf("target moved to %s after a failed connect", addr)
 	}
-	if c, _ := connectShared(); c != old || old.isClosed() {
+	if c, _ := connectSharedSession(); c != old || old.isClosed() {
 		t.Fatal("the working session was replaced or closed after a failed connect")
 	}
 
 	// Right password: B becomes the session and the target; A's session closes.
-	if err := reconnectShared(addrB, "bpw"); err != nil {
+	if err := reconnectSharedSession(addrB, "bpw"); err != nil {
 		t.Fatal(err)
 	}
-	if addr, pass := currentTarget(); addr != addrB || pass != "bpw" {
+	if addr, pass := currentRconTarget(); addr != addrB || pass != "bpw" {
 		t.Fatalf("target = %s %q", addr, pass)
 	}
-	if c, _ := connectShared(); c == old {
+	if c, _ := connectSharedSession(); c == old {
 		t.Fatal("still on the old session")
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -797,7 +797,7 @@ func TestReconnectSharedOnlySwitchesOnSuccess(t *testing.T) {
 
 	// Connecting again to the same place does a fresh handshake.
 	before, _ := b.counts()
-	if err := reconnectShared(addrB, "bpw"); err != nil {
+	if err := reconnectSharedSession(addrB, "bpw"); err != nil {
 		t.Fatal(err)
 	}
 	if after, _ := b.counts(); after != before+1 {
@@ -814,7 +814,7 @@ func TestRconSettingsPage(t *testing.T) {
 	t.Setenv("RCON_HOST", "10.9.9.9")
 	t.Setenv("RCON_PORT", "2306")
 	t.Setenv("RCON_PASSWORD", "compose-password")
-	mux := routes()
+	mux := buildWebRoutes()
 	call := func(method, body string) (int, map[string]any) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(method, "/api/rcon-settings", strings.NewReader(body))
@@ -849,10 +849,10 @@ func TestRconSettingsPage(t *testing.T) {
 	if s := currentRconOverrides(); s.Host != host || s.Port != port || s.Password != "secret" {
 		t.Fatalf("kept = %+v", s)
 	}
-	if addr, pass := currentTarget(); addr != net.JoinHostPort(host, port) || pass != "secret" {
+	if addr, pass := currentRconTarget(); addr != net.JoinHostPort(host, port) || pass != "secret" {
 		t.Fatalf("target = %s %q", addr, pass)
 	}
-	if _, ok, _ := globalDatabase.Setting("rcon"); ok {
+	if _, ok, _ := globalDatabase.GetStoredSetting("rcon"); ok {
 		t.Fatal("RCON Settings were written to the database")
 	}
 
@@ -863,7 +863,7 @@ func TestRconSettingsPage(t *testing.T) {
 }
 
 func TestNoPasswordDoesNotDial(t *testing.T) {
-	if _, err := dialTo("127.0.0.1:1", "", sharedSource, false); err != errNoPassword {
+	if _, err := dialRconAddress("127.0.0.1:1", "", sharedSource, false); err != errNoPassword {
 		t.Fatalf("err = %v, want errNoPassword", err)
 	}
 }
@@ -896,7 +896,7 @@ func TestStatusReportsNextRetry(t *testing.T) {
 
 	status := func() map[string]any {
 		rec := httptest.NewRecorder()
-		routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+		buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
 		var out map[string]any
 		json.Unmarshal(rec.Body.Bytes(), &out)
 		return out
@@ -918,7 +918,7 @@ func testFlow(name string) Flow {
 
 func flowIDs(t *testing.T) []int64 {
 	t.Helper()
-	flows, err := globalDatabase.ListFlows()
+	flows, err := globalDatabase.ListStoredFlows()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -948,7 +948,7 @@ func TestFlowNumbersReuseFreedOnes(t *testing.T) {
 		}
 	}
 	for _, id := range flowIDs(t) {
-		if err := deleteFlow(id); err != nil {
+		if err := deleteFlowAndRuns(id); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -960,7 +960,7 @@ func TestFlowNumbersReuseFreedOnes(t *testing.T) {
 	}
 	// Deleting one in the middle leaves the others as they are; its number
 	// goes to the next new flow, then numbering carries on after the last.
-	if err := deleteFlow(1); err != nil {
+	if err := deleteFlowAndRuns(1); err != nil {
 		t.Fatal(err)
 	}
 	if got := fmt.Sprint(flowIDs(t)); got != "[0 2 3]" {
@@ -973,7 +973,7 @@ func TestFlowNumbersReuseFreedOnes(t *testing.T) {
 		t.Fatalf("next flow got #%d, want #4", id)
 	}
 	// Flow 0 is an ordinary flow: it can be edited.
-	f, err := db.GetFlow(0)
+	f, err := db.GetStoredFlow(0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -981,7 +981,7 @@ func TestFlowNumbersReuseFreedOnes(t *testing.T) {
 	if id, err := validateAndSaveFlow(f, false); err != nil || id != 0 {
 		t.Fatalf("editing #0: id %d, %v", id, err)
 	}
-	if f, _ := db.GetFlow(0); f.Name != "renamed" {
+	if f, _ := db.GetStoredFlow(0); f.Name != "renamed" {
 		t.Fatalf("flow #0 = %q", f.Name)
 	}
 }
@@ -1013,7 +1013,7 @@ func TestFlowsTableLosesAutoincrement(t *testing.T) {
 	if got := fmt.Sprint(flowIDs(t)); got != "[5 7]" {
 		t.Fatalf("flows after the move: %s", got)
 	}
-	if f, err := db.GetFlow(5); err != nil || f.Name != "MOTD" || !f.ScheduleEnabled || f.Trigger != triggerSchedule || len(f.Steps) != 1 {
+	if f, err := db.GetStoredFlow(5); err != nil || f.Name != "MOTD" || !f.ScheduleEnabled || f.Trigger != triggerSchedule || len(f.Steps) != 1 {
 		t.Fatalf("flow #5 = %+v, %v", f, err)
 	}
 	// New flows take the free numbers from 0.
@@ -1030,7 +1030,7 @@ func TestFlowAPIUsesMissingIDForNew(t *testing.T) {
 	if err := db.EnsureFlowsTable(); err != nil {
 		t.Fatal(err)
 	}
-	mux := routes()
+	mux := buildWebRoutes()
 	post := func(path, body string) (int, map[string]any) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
@@ -1052,7 +1052,7 @@ func TestFlowAPIUsesMissingIDForNew(t *testing.T) {
 	if got := fmt.Sprint(flowIDs(t)); got != "[0 1]" {
 		t.Fatalf("flows: %s", got)
 	}
-	if f, _ := db.GetFlow(0); f.Name != "First (renamed)" {
+	if f, _ := db.GetStoredFlow(0); f.Name != "First (renamed)" {
 		t.Fatalf("flow #0 = %q", f.Name)
 	}
 	// Flow 0 is reachable through the per-flow routes.
@@ -1073,9 +1073,9 @@ func TestConnectTriesOnce(t *testing.T) {
 	reloginReplyWait = 50 * time.Millisecond
 	f := newFakeBE(t)
 	f.set(true)
-	setTarget("127.0.0.1:1", "pw")
+	setRconTarget("127.0.0.1:1", "pw")
 	for press := 1; press <= 3; press++ {
-		if err := reconnectShared(f.conn.LocalAddr().String(), "pw"); err == nil {
+		if err := reconnectSharedSession(f.conn.LocalAddr().String(), "pw"); err == nil {
 			t.Fatal("connected to a server that doesn't answer")
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -1083,7 +1083,7 @@ func TestConnectTriesOnce(t *testing.T) {
 			t.Fatalf("after %d press(es): %d login packets, want %d", press, logins, press)
 		}
 	}
-	if addr, _ := currentTarget(); addr != "127.0.0.1:1" {
+	if addr, _ := currentRconTarget(); addr != "127.0.0.1:1" {
 		t.Fatalf("target changed to %s", addr)
 	}
 }
@@ -1098,42 +1098,42 @@ func pingKickFlow() []Step {
 
 func TestForEachValidation(t *testing.T) {
 	kick := []Step{{Type: "kick", Who: "player", Reason: "x"}}
-	if err := checkSteps(triggerSchedule, kick, nil); err == nil {
+	if err := checkFlowSteps(triggerSchedule, kick, nil); err == nil {
 		t.Error("Kick outside a For each player was accepted in a Schedule flow")
 	}
-	if err := checkSteps(triggerSchedule, pingKickFlow(), nil); err != nil {
+	if err := checkFlowSteps(triggerSchedule, pingKickFlow(), nil); err != nil {
 		t.Errorf("the ping-kick example: %v", err)
 	}
-	if err := checkSteps(triggerManual, []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "player", Text: "hi {player_name}"}}}}, nil); err != nil {
+	if err := checkFlowSteps(triggerManual, []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "player", Text: "hi {player_name}"}}}}, nil); err != nil {
 		t.Errorf("a message to each player: %v", err)
 	}
 	nested := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "forEach", Of: "message", Steps: kick}}}}
-	if err := checkSteps(triggerSchedule, nested, nil); err == nil || !strings.Contains(err.Error(), "inside another") {
+	if err := checkFlowSteps(triggerSchedule, nested, nil); err == nil || !strings.Contains(err.Error(), "inside another") {
 		t.Errorf("a loop inside a loop: %v", err)
 	}
 	// {message} is the looped player's line, in any trigger.
 	for _, of := range []string{"player", "message"} {
 		words := []Step{{Type: "forEach", Of: of, Steps: []Step{{Type: "if", Branches: []Branch{{
 			Subject: "message", Op: "has", Value: "noob", Steps: []Step{{Type: "message", To: "player", Text: "You said: {message}"}}}}}}}}
-		if err := checkSteps(triggerSchedule, words, nil); err != nil {
+		if err := checkFlowSteps(triggerSchedule, words, nil); err != nil {
 			t.Errorf("For each %s with {message}: %v", of, err)
 		}
 	}
-	if err := checkSteps(triggerSchedule, []Step{{Type: "forEach", Of: "everything", Steps: kick}}, nil); err == nil {
+	if err := checkFlowSteps(triggerSchedule, []Step{{Type: "forEach", Of: "everything", Steps: kick}}, nil); err == nil {
 		t.Error("For each of an unknown kind was accepted")
 	}
-	if got := fixSteps([]Step{{Type: "forEach"}}); got[0].Of != "player" {
+	if got := normalizeFlowSteps([]Step{{Type: "forEach"}}); got[0].Of != "player" {
 		t.Errorf("a For each without a kind reads as %q, want player", got[0].Of)
 	}
 	afterLoop := append(pingKickFlow(), kick...)
-	if err := checkSteps(triggerSchedule, afterLoop, nil); err == nil {
+	if err := checkFlowSteps(triggerSchedule, afterLoop, nil); err == nil {
 		t.Error("a Kick after the loop was accepted")
 	}
-	if err := checkSteps(triggerSchedule, []Step{{Type: "lock"}}, []Step{{Type: "forEach"}}); err == nil {
+	if err := checkFlowSteps(triggerSchedule, []Step{{Type: "lock"}}, []Step{{Type: "forEach"}}); err == nil {
 		t.Error("For each player was accepted in When stopped")
 	}
-	if n := countSteps(pingKickFlow()); n != 3 {
-		t.Errorf("countSteps = %d, want 3", n)
+	if n := countAllSteps(pingKickFlow()); n != 3 {
+		t.Errorf("countAllSteps = %d, want 3", n)
 	}
 }
 
@@ -1155,7 +1155,7 @@ func TestForEachKicksOnlyMatchingPlayers(t *testing.T) {
 	defer cancel()
 	run := &flowRun{name: "ping check", ctx: ctx, cancel: cancel}
 	x := &job{run: run, ctx: ctx}
-	if !x.exec(pingKickFlow()) {
+	if !x.execFlowSteps(pingKickFlow()) {
 		t.Fatal("the run ended early")
 	}
 	want := []string{"kick 4 Ping too high (820)", "kick 9 Ping too high (1500)"}
@@ -1173,7 +1173,7 @@ func TestForEachKicksOnlyMatchingPlayers(t *testing.T) {
 	// Stop flow inside the loop ends the whole run.
 	sent = nil
 	stopFirst := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "player", Text: "hi"}, {Type: "stop"}}}}
-	if x.exec(stopFirst) {
+	if x.execFlowSteps(stopFirst) {
 		t.Fatal("Stop flow inside the loop didn't end the run")
 	}
 	if len(sent) != 1 || sent[0] != "say 1 hi" {
@@ -1198,7 +1198,7 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 		ev := parseServerMessage(text, t0)
 		serverEvents.publish(ev)
 		ev.Seq = serverEvents.lastSeq()
-		trackEvent(ev)
+		trackServerEvent(ev)
 	}
 	const flowID = 42
 	t.Cleanup(func() { forEachMarks.Lock(); delete(forEachMarks.byFlow, flowID); forEachMarks.Unlock() })
@@ -1209,7 +1209,7 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		x := &job{run: &flowRun{flowID: flowID, name: "chat", ctx: ctx, cancel: cancel}, ctx: ctx}
-		if !x.exec(steps) {
+		if !x.execFlowSteps(steps) {
 			t.Fatal("the run ended early")
 		}
 	}
@@ -1264,21 +1264,21 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 func TestSentCommandsGoInConsoleLog(t *testing.T) {
 	resetShared(t)
 	f := newFakeBE(t)
-	setTarget(f.conn.LocalAddr().String(), "pw")
+	setRconTarget(f.conn.LocalAddr().String(), "pw")
 	loginPollDue.Store(false)
 	t.Cleanup(func() { loginPollDue.Store(false) })
 
 	start := serverEvents.lastSeq()
-	if _, _, err := runShared("", time.Second, false, ""); err != nil {
+	if _, _, err := runSharedCommand("", time.Second, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !loginPollDue.Load() {
 		t.Fatal("a new login didn't ask for a poll")
 	}
-	runShared("players", time.Second, false, "")
-	runShared("say -1 hello", time.Second, false, flowSource("Greeter"))
+	runSharedCommand("players", time.Second, false, "")
+	runSharedCommand("say -1 hello", time.Second, false, flowSource("Greeter"))
 	f.set(true)
-	runShared("kick 3 bye", 300*time.Millisecond, false, "web")
+	runSharedCommand("kick 3 bye", 300*time.Millisecond, false, "web")
 
 	var got []string
 	for _, ev := range serverEvents.after(start) {
@@ -1302,7 +1302,7 @@ func TestHeartbeat(t *testing.T) {
 	testDB(t)
 	resetShared(t)
 	f := newFakeBE(t)
-	setTarget(f.conn.LocalAddr().String(), "pw")
+	setRconTarget(f.conn.LocalAddr().String(), "pw")
 	oldWait, oldReply := heartbeatWait, reloginReplyWait
 	t.Cleanup(func() {
 		heartbeatWait, reloginReplyWait = oldWait, oldReply
@@ -1327,17 +1327,17 @@ func TestHeartbeat(t *testing.T) {
 		return
 	}
 	var h heartbeat
-	h.beat() // logs in, then polls players and bans
+	h.checkServerAlive() // logs in, then polls players and bans
 	if p, b := polls(); p != 1 || b != 1 || loginPollDue.Load() {
 		t.Fatalf("after the first beat: %d players, %d bans polls (due=%v); want 1 and 1", p, b, loginPollDue.Load())
 	}
 	playersPageSeen.Store(0)
-	h.beat()
+	h.checkServerAlive()
 	if p, b := polls(); p != 1 || b != 1 {
 		t.Fatalf("a beat with nobody loading and no page open polled players %d and bans %d more time(s)", p-1, b-1)
 	}
 	playersPageSeen.Store(time.Now().UnixMilli()) // a Players page is open: pings
-	h.beat()
+	h.checkServerAlive()
 	if p, _ := polls(); p != 2 {
 		t.Fatalf("players polled %d time(s) with a page open, want 2", p)
 	}
@@ -1346,10 +1346,10 @@ func TestHeartbeat(t *testing.T) {
 	f.set(true)
 	logins, _ := f.counts()
 	for i := 0; i < heartbeatMisses; i++ {
-		h.beat()
+		h.checkServerAlive()
 	}
-	if rconFails.Load() != heartbeatMisses || rconStatus() != "unavailable" {
-		t.Fatalf("fails = %d, status %s", rconFails.Load(), rconStatus())
+	if rconFails.Load() != heartbeatMisses || currentRconStatus() != "unavailable" {
+		t.Fatalf("fails = %d, status %s", rconFails.Load(), currentRconStatus())
 	}
 	if l, _ := f.counts(); l != logins+1 {
 		t.Fatalf("%d login(s) on the 3rd miss, want 1", l-logins)
@@ -1368,7 +1368,7 @@ func TestRestartKeepsReturningPlayersSession(t *testing.T) {
 	line("Player #1 Gone - BE GUID: "+testGUID2, t0)
 
 	down := t0.Add(10 * time.Minute)
-	serverLost(down)
+	serverWentDown(down)
 	if countRows(t, db, "active_sessions") != 0 {
 		t.Fatal("sessions still open while the server is down")
 	}
@@ -1415,8 +1415,8 @@ func TestPlayersPollWanted(t *testing.T) {
 	if playersPollWanted(now) {
 		t.Fatal("still polling after (Lobby) left the name")
 	}
-	if p, known := onlinePlayers(); !known || len(p) != 1 || p[0].Name != "New" {
-		t.Fatalf("onlinePlayers = %+v %v", p, known)
+	if p, known := listOnlinePlayers(); !known || len(p) != 1 || p[0].Name != "New" {
+		t.Fatalf("listOnlinePlayers = %+v %v", p, known)
 	}
 }
 
@@ -1456,7 +1456,7 @@ func TestSchedulerWakesForNextRun(t *testing.T) {
 	if !started {
 		t.Fatal("the due run wasn't started")
 	}
-	stopFlow(id)
+	stopFlowRun(id)
 	if _, again := lastFired[id]; !again {
 		t.Fatal("the cron time wasn't recorded")
 	}

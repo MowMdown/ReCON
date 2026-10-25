@@ -67,8 +67,8 @@ var rconOverrides struct {
 	settings rconSettings
 }
 
-// rconDefaults are the settings from the environment.
-func rconDefaults() rconSettings {
+// rconDefaultSettings are the settings from the environment.
+func rconDefaultSettings() rconSettings {
 	return rconSettings{
 		Host:     environmentOrDefault("RCON_HOST", "127.0.0.1"),
 		Port:     environmentOrDefault("RCON_PORT", "2306"),
@@ -94,7 +94,7 @@ func (s rconSettings) clean() (rconSettings, error) {
 // effective fills the empty fields from the defaults and returns the RCON
 // endpoint ("host:port") and password to use.
 func (s rconSettings) effective() (address, password string) {
-	d := rconDefaults()
+	d := rconDefaultSettings()
 	if s.Host == "" {
 		s.Host = d.Host
 	}
@@ -133,12 +133,12 @@ func keepRconOverrides(s rconSettings) {
 func main() {
 	dbPath := environmentOrDefault("DB_PATH", "/data/players.db")
 	var err error
-	globalDatabase, err = OpenDatabase(dbPath)
+	globalDatabase, err = OpenPlayerDatabase(dbPath)
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 	address, password := rconSettings{}.effective()
-	setTarget(address, password)
+	setRconTarget(address, password)
 
 	// CLI mode: `prog kickall ...`, `prog -i`, `prog players`, etc.
 	if len(os.Args) > 1 {
@@ -158,12 +158,12 @@ func main() {
 	if err := globalDatabase.ClearActiveSessions(); err != nil {
 		log.Printf("failed to clear stale sessions: %v", err)
 	}
-	if err := initFlows(); err != nil {
+	if err := initStoredFlows(); err != nil {
 		log.Fatalf("failed to initialize flows: %v", err)
 	}
 
-	startScheduler()   // runs enabled flows on their cron schedule (flows_schedule.go)
-	startChatWatcher() // chat commands and Player message flows (flows_message.go)
+	startFlowScheduler() // runs enabled flows on their cron schedule (flows_schedule.go)
+	startChatWatcher()   // chat commands and Player message flows (flows_message.go)
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	startDatabaseSync()    // sessions and chat history from the console log (db.go)
@@ -185,21 +185,21 @@ func main() {
 // Exits with status 1 on failure.
 func runCommandLine(args []string) {
 	if args[0] == "-i" {
-		runConsole()
+		runInteractiveConsole()
 		return
 	}
-	l, err := dialPersistent("cli", false)
+	l, err := dialPersistentConnection("cli", false)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 	var ok bool
 	if args[0] == "kickall" {
-		rep, err := kickAll(l, strings.Join(args[1:], " "))
+		rep, err := kickAllPlayers(l, strings.Join(args[1:], " "))
 		ok = printKickReport(rep, err)
 	} else {
 		out, acked, err := l.run(strings.Join(args, " "), 2*time.Second)
-		ok = printResult(out, acked, err)
+		ok = printCommandResult(out, acked, err)
 	}
 	l.close()
 	if !ok {
@@ -207,7 +207,7 @@ func runCommandLine(args []string) {
 	}
 }
 
-// runConsole is the interactive REPL. It logs in once and keeps the session
+// runInteractiveConsole is the interactive REPL. It logs in once and keeps the session
 // alive with the keepalive goroutine, so repeated commands don't pay the
 // login round trip. Features:
 //   - "exit" / "quit" leaves; blank lines are ignored
@@ -215,7 +215,7 @@ func runCommandLine(args []string) {
 //   - automatic reconnect: if the session is dead before a command, or a
 //     command fails/gets no ack and the session no longer answers a probe,
 //     it logs in again
-func runConsole() {
+func runInteractiveConsole() {
 	fmt.Println("Interactive RCON console (logs in once and stays logged in). Type 'exit' to quit.")
 	var l *persistentConnection
 	defer func() {
@@ -231,7 +231,7 @@ func runConsole() {
 			l.close()
 			l = nil
 		}
-		nl, err := dialPersistent("cli", true)
+		nl, err := dialPersistentConnection("cli", true)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return false
@@ -259,13 +259,13 @@ func runConsole() {
 		var err error
 		if line == "kickall" || strings.HasPrefix(line, "kickall ") {
 			var rep *kickReport
-			rep, err = kickAll(l, strings.TrimPrefix(line, "kickall"))
+			rep, err = kickAllPlayers(l, strings.TrimPrefix(line, "kickall"))
 			printKickReport(rep, err)
 			acked = err == nil
 		} else {
 			var out string
 			out, acked, err = l.run(line, 2*time.Second)
-			printResult(out, acked, err)
+			printCommandResult(out, acked, err)
 		}
 		// A failed or unacknowledged command may mean the session silently
 		// died (UDP has no disconnect signal). Probe it and re-login if needed.
@@ -296,14 +296,14 @@ func printKickReport(rep *kickReport, err error) bool {
 	return true
 }
 
-// printResult prints the outcome of a single command. It distinguishes three
+// printCommandResult prints the outcome of a single command. It distinguishes three
 // non-error cases so you can tell them apart in the terminal:
 //   - output text            -> printed as-is
 //   - acked but empty output -> "(ok, no output)"
 //   - nothing at all         -> "(no acknowledgement from server)"
 //
 // Returns false on error so the caller can exit non-zero.
-func printResult(out string, acked bool, err error) bool {
+func printCommandResult(out string, acked bool, err error) bool {
 	switch {
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "error:", err)

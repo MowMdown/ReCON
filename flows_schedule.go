@@ -82,7 +82,7 @@ func parseCronField(field string, lo, hi int, names map[string]int, label string
 	return set, star, nil
 }
 
-func parseCron(expr string) (*cronExpr, error) {
+func parseCronExpression(expr string) (*cronExpr, error) {
 	expr = strings.ToLower(strings.TrimSpace(expr))
 	f := strings.Fields(expr)
 	if len(f) != 5 {
@@ -315,19 +315,19 @@ var lastFired = map[int64]time.Time{}
 // disabled or deleted), so it can work out its next wake-up again.
 var scheduleChanged = make(chan struct{}, 1)
 
-// rescheduleFlows tells the scheduler that flows changed.
-func rescheduleFlows() {
+// wakeFlowScheduler tells the scheduler that flows changed.
+func wakeFlowScheduler() {
 	select {
 	case scheduleChanged <- struct{}{}:
 	default: // already told
 	}
 }
 
-// startScheduler runs the scheduled flows. There is no tick: it sleeps until
+// startFlowScheduler runs the scheduled flows. There is no tick: it sleeps until
 // the next run's first step is due (cron time plus the flow's delay), starts
 // it right on time, and works out the next one; a change to the flows wakes
 // it early.
-func startScheduler() {
+func startFlowScheduler() {
 	go func() {
 		timer := time.NewTimer(0)
 		for {
@@ -354,7 +354,7 @@ func startScheduler() {
 // come.
 func runDueSchedules(now time.Time) time.Time {
 	wake := now.Add(scheduleIdleWait)
-	flows, err := globalDatabase.ListFlows()
+	flows, err := globalDatabase.ListStoredFlows()
 	if err != nil {
 		log.Printf("scheduler: %v", err)
 		return now.Add(time.Minute)
@@ -371,14 +371,14 @@ func runDueSchedules(now time.Time) time.Time {
 		}
 	}
 	for _, f := range flows {
-		if !f.ScheduleEnabled || f.Trigger != triggerSchedule || checkFlow(f) != nil {
+		if !f.ScheduleEnabled || f.Trigger != triggerSchedule || checkFlowDefinition(f) != nil {
 			continue
 		}
-		c, err := parseCron(f.Schedule)
+		c, err := parseCronExpression(f.Schedule)
 		if err != nil {
 			continue
 		}
-		delay, _ := delayOf(f)
+		delay, _ := flowDelaySeconds(f)
 		d := time.Duration(delay) * time.Second
 		from := now.Add(-scheduleGrace - d)
 		if lf, ok := lastFired[f.ID]; ok && lf.After(from) {
@@ -392,7 +392,7 @@ func runDueSchedules(now time.Time) time.Time {
 			wake = minTime(wake, start) // not due yet
 			continue
 		}
-		if err := launch(f, t.Add(d), sourceSchedule, nil); errors.Is(err, errFlowRunning) {
+		if err := launchFlowRun(f, t.Add(d), sourceSchedule, nil); errors.Is(err, errFlowRunning) {
 			wake = minTime(wake, now.Add(scheduleBusyRetry)) // busy: try again shortly
 			continue
 		} else if err != nil {

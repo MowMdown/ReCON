@@ -192,10 +192,10 @@ func (e *steamHTTPError) Error() string {
 	return fmt.Sprintf("steam %s: HTTP %d", e.method, e.code)
 }
 
-// steamGet calls one Web API method and decodes the JSON reply into out. The
+// callSteamAPI calls one Web API method and decodes the JSON reply into out. The
 // key travels in the query string, so it is kept out of every error (net/http
 // puts the whole URL into its errors).
-func steamGet(ctx context.Context, method string, q url.Values, out any) error {
+func callSteamAPI(ctx context.Context, method string, q url.Values, out any) error {
 	q.Set("key", steamAPIKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, steamAPIBase+method+"?"+q.Encode(), nil)
 	if err != nil {
@@ -282,19 +282,19 @@ func fetchSteamProfile(ctx context.Context, steamID string) (*steamProfile, erro
 		wg.Add(1)
 		go func() { defer wg.Done(); f() }()
 	}
-	call(func() { sumErr = steamGet(ctx, "/ISteamUser/GetPlayerSummaries/v2/", ids, &sums) })
+	call(func() { sumErr = callSteamAPI(ctx, "/ISteamUser/GetPlayerSummaries/v2/", ids, &sums) })
 	call(func() {
-		banErr = steamGet(ctx, "/ISteamUser/GetPlayerBans/v1/", url.Values{"steamids": {steamID}}, &bans)
+		banErr = callSteamAPI(ctx, "/ISteamUser/GetPlayerBans/v1/", url.Values{"steamids": {steamID}}, &bans)
 	})
 	call(func() {
-		levelErr = steamGet(ctx, "/IPlayerService/GetSteamLevel/v1/", url.Values{"steamid": {steamID}}, &level)
+		levelErr = callSteamAPI(ctx, "/IPlayerService/GetSteamLevel/v1/", url.Values{"steamid": {steamID}}, &level)
 	})
 	call(func() {
-		gamesErr = steamGet(ctx, "/IPlayerService/GetOwnedGames/v1/",
+		gamesErr = callSteamAPI(ctx, "/IPlayerService/GetOwnedGames/v1/",
 			url.Values{"steamid": {steamID}, "include_played_free_games": {"1"}}, &games)
 	})
 	call(func() {
-		friendsErr = steamGet(ctx, "/ISteamUser/GetFriendList/v1/",
+		friendsErr = callSteamAPI(ctx, "/ISteamUser/GetFriendList/v1/",
 			url.Values{"steamid": {steamID}, "relationship": {"friend"}}, &friends)
 	})
 	wg.Wait()
