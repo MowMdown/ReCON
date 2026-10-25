@@ -785,8 +785,8 @@ func recordConsoleSay(cmd string) {
 // RCON Settings (the Players page's RCON Settings dialog)
 // ---------------------------------------------------------------------------
 
-// handleRconSettingsGet serves GET /api/rcon-settings: the saved overrides
-// ("settings", empty fields use the defaults), the defaults from
+// handleRconSettingsGet serves GET /api/rcon-settings: the overrides in use
+// ("settings", empty fields use the defaults; memory only), the defaults from
 // docker-compose.yaml ("defaults", password included: ReCON runs on the game
 // host behind its firewall) and the endpoint ReCON uses now ("address").
 func handleRconSettingsGet(w http.ResponseWriter, r *http.Request) {
@@ -794,7 +794,7 @@ func handleRconSettingsGet(w http.ResponseWriter, r *http.Request) {
 	address, _ := currentTarget()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
-		"settings": savedRconSettings(),
+		"settings": currentRconOverrides(),
 		"defaults": map[string]any{"host": d.Host, "port": d.Port, "password": d.Password},
 		"address":  address,
 		"rcon":     rconStatus(),
@@ -805,7 +805,8 @@ func handleRconSettingsGet(w http.ResponseWriter, r *http.Request) {
 // password}: empty fields use the defaults. It logs in with those settings
 // on a new connection first (a new handshake, even when nothing changed);
 // only if the server accepts does that become ReCON's RCON session and are
-// the settings saved. A wrong address or password changes nothing.
+// the settings kept, in memory until ReCON restarts. A wrong address or
+// password changes nothing.
 func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 	var req rconSettings
 	if err := decodeBody(w, r, &req); err != nil {
@@ -831,12 +832,7 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 	// than after the heartbeat's next check.
 	rconPolled.Store(true)
 	rconFails.Store(0)
-	b, _ := json.Marshal(req)
-	if err := globalDatabase.SaveSetting(rconSettingsKey, string(b)); err != nil {
-		log.Printf("rcon: saving RCON settings: %v", err)
-		fail(w, http.StatusInternalServerError, "Connected to "+address+", but the settings could not be saved, so a restart goes back to the old ones: "+err.Error())
-		return
-	}
+	keepRconOverrides(req)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "address": address})
 }
 
@@ -844,9 +840,10 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 // Ban API
 // ---------------------------------------------------------------------------
 
-// handleBansJSON serves GET /api/bans: every ban, from the bans table. The
-// poller keeps that table in step with BattlEye (syncBanList, db.go), and
-// ban and unban update it straight away, so the page never waits on RCON.
+// handleBansJSON serves GET /api/bans: every ban, the permanent ones from
+// the bans table and the timed ones from memory. The heartbeat keeps both in
+// step with BattlEye (syncBanList, db.go), and ban and unban update them
+// straight away, so the page never waits on RCON.
 // "connected" is false while the game server isn't answering.
 func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 	list, err := globalDatabase.BanList()

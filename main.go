@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,17 +50,21 @@ func environmentOrDefault(key, def string) string {
 // rconSettings is where ReCON finds the game server's RCON. The defaults
 // come from the environment (docker-compose.yaml): RCON_HOST (default
 // 127.0.0.1), RCON_PORT (default 2306) and RCON_PASSWORD. RCON Settings on
-// the Players page can override any of them; what it saves is kept in the
-// settings table under rconSettingsKey, and a field left empty uses the
-// default. The CLI reads the same saved settings.
+// the Players page can override any of them until ReCON restarts: the
+// overrides are kept in memory only (rconOverrides), and a field left empty
+// uses the default. The CLI uses the environment only.
 type rconSettings struct {
 	Host     string `json:"host"`
 	Port     string `json:"port"`
 	Password string `json:"password"`
 }
 
-// rconSettingsKey is where the overrides are stored in the settings table.
-const rconSettingsKey = "rcon"
+// rconOverrides is what RCON Settings last connected with (all empty until
+// then).
+var rconOverrides struct {
+	sync.Mutex
+	settings rconSettings
+}
 
 // rconDefaults are the settings from the environment.
 func rconDefaults() rconSettings {
@@ -102,27 +106,25 @@ func (s rconSettings) effective() (address, password string) {
 	return net.JoinHostPort(s.Host, s.Port), s.Password
 }
 
-// savedRconSettings reads the overrides saved in RCON Settings (all empty
-// when nothing was saved).
-func savedRconSettings() rconSettings {
-	var s rconSettings
-	raw, ok, err := globalDatabase.Setting(rconSettingsKey)
-	if err != nil {
-		log.Printf("rcon: reading saved RCON settings: %v", err)
-	} else if ok {
-		if err := json.Unmarshal([]byte(raw), &s); err != nil {
-			log.Printf("rcon: saved RCON settings unreadable, using the defaults: %v", err)
-			return rconSettings{}
-		}
-	}
-	return s
+// currentRconOverrides is what RCON Settings last connected with.
+func currentRconOverrides() rconSettings {
+	rconOverrides.Lock()
+	defer rconOverrides.Unlock()
+	return rconOverrides.settings
+}
+
+// keepRconOverrides remembers the settings RCON Settings connected with,
+// until ReCON restarts.
+func keepRconOverrides(s rconSettings) {
+	rconOverrides.Lock()
+	rconOverrides.settings = s
+	rconOverrides.Unlock()
 }
 
 // main wires everything together:
 //  1. Opens the player database (DB_PATH, default /data/players.db).
 //  2. Works out where the game server's RCON is: the environment's
-//     RCON_HOST, RCON_PORT and RCON_PASSWORD, overridden by anything saved
-//     in RCON Settings (rconSettings).
+//     RCON_HOST, RCON_PORT and RCON_PASSWORD (rconSettings).
 //  3. If command-line args were given, runs CLI mode and returns.
 //  4. Otherwise runs as a server: clears stale sessions, prepares the flows
 //     table, starts the background player sync and the flow scheduler, and
@@ -134,7 +136,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
-	address, password := savedRconSettings().effective()
+	address, password := rconSettings{}.effective()
 	setTarget(address, password)
 
 	// CLI mode: `prog kickall ...`, `prog -i`, `prog players`, etc.

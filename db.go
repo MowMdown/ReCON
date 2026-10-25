@@ -38,6 +38,7 @@ import (
 
 type Database struct {
 	*sql.DB
+	timed timedBans // timed bans live here only, never in the bans table
 }
 
 // sqliteParams are applied by the driver to every connection it opens.
@@ -221,9 +222,7 @@ func OpenDatabase(filepath string) (*Database, error) {
 		// player came back from): not counted in its length or playtime.
 		{"active_sessions", "paused_seconds", "INTEGER NOT NULL DEFAULT 0"},
 		{"session_history", "paused_seconds", "INTEGER NOT NULL DEFAULT 0"},
-		// Unix seconds when a timed ban runs out (NULL for permanent bans, or
-		// until the first ban list read), and its position in BattlEye's list.
-		{"bans", "expires_unix", "INTEGER"},
+		// A permanent ban's position in BattlEye's list.
 		{"bans", "be_index", "INTEGER NOT NULL DEFAULT -1"},
 	} {
 		if err := addColumnIfMissing(db, c.table, c.column, c.decl); err != nil {
@@ -239,13 +238,18 @@ func OpenDatabase(filepath string) (*Database, error) {
 		"DELETE FROM players WHERE guid IN ('-', '')",
 		"DELETE FROM chat_messages WHERE guid IN ('-', '')",
 		"DELETE FROM player_notes WHERE guid IN ('-', '')",
+		// Timed bans are kept in memory only now (timedBans): BattlEye's
+		// list has them, and the first read after startup fills them in.
+		"DELETE FROM bans WHERE perm = 0",
+		// RCON Settings used to be saved here; they are memory only now.
+		"DELETE FROM settings WHERE key = 'rcon'",
 	} {
 		if _, err := db.Exec(q); err != nil {
 			db.Close()
-			return nil, fmt.Errorf("failed to remove unverified-player rows: %w", err)
+			return nil, fmt.Errorf("failed to clean up old rows: %w", err)
 		}
 	}
-	return &Database{db}, nil
+	return &Database{DB: db, timed: timedBans{m: map[string]timedBan{}}}, nil
 }
 
 // addColumnIfMissing adds a column to an existing table unless it is there.
@@ -971,61 +975,71 @@ func (db *Database) ChatHistory(guid string, limit int) ([]chatLine, error) {
 // Bans
 // ---------------------------------------------------------------------------
 
-// BanUser records a ban ReCON just placed. expires is when a timed ban runs
-// out (ignored for a permanent one). steam_id is copied from players when the
-// player's SteamID is known.
+// Permanent bans are stored in the bans table; only Unban on the web pages
+// removes one, and one BattlEye loses is put back (syncBanList). Timed bans
+// are kept in memory only (timedBans), filled from BattlEye's list after
+// every login and every banSyncEvery, and gone when ReCON restarts until the
+// next read.
+
+// timedBans is every timed ban, by lower-case GUID.
+type timedBans struct {
+	sync.Mutex
+	m map[string]timedBan
+}
+
+// timedBan is one timed ban and when it runs out.
+type timedBan struct {
+	name, reason string
+	expires      time.Time
+	index        int // its position in BattlEye's list, -1 until read
+}
+
+// BanUser records a ban ReCON just placed: a permanent one in the bans table
+// (with the player's SteamID when known), a timed one in memory, ending at
+// expires.
 func (db *Database) BanUser(guid, playerName, ip, reason string, perm bool, expires time.Time) error {
-	var exp any // NULL for a permanent ban
+	g := strings.ToLower(guid)
+	db.timed.Lock()
+	delete(db.timed.m, g)
 	if !perm {
-		exp = expires.Unix()
+		db.timed.m[g] = timedBan{name: playerName, reason: reason, expires: expires, index: -1}
+		db.timed.Unlock()
+		_, err := db.Exec("DELETE FROM bans WHERE lower(guid) = ?", g) // now timed, not permanent
+		return err
 	}
+	db.timed.Unlock()
 	_, err := db.Exec(`
-		INSERT INTO bans (guid, player_name, ip, reason, perm, expires_unix, steam_id)
-		VALUES (?, ?, ?, ?, ?, ?, (SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = lower(?)))
+		INSERT INTO bans (guid, player_name, ip, reason, perm, steam_id)
+		VALUES (?, ?, ?, ?, 1, (SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = lower(?)))
 		ON CONFLICT(guid) DO UPDATE SET
 			player_name = excluded.player_name,
 			ip = excluded.ip,
 			reason = excluded.reason,
-			perm = excluded.perm,
-			expires_unix = excluded.expires_unix,
 			steam_id = COALESCE(NULLIF(bans.steam_id, ''), excluded.steam_id)`,
-		strings.ToLower(guid), playerName, ip, reason, boolInt(perm), exp, guid)
+		g, playerName, ip, reason, guid)
 	return err
 }
 
-func boolInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// storedBan is a bans row that SyncBans wants put back on the server.
+// storedBan is a permanent ban that SyncBans wants put back on the server.
 type storedBan struct {
 	GUID   string
 	Reason string
 }
 
-// SyncBans brings the bans table in line with BattlEye's GUID ban list, read
-// at readAt:
-//   - a ban BattlEye lists is added if missing (name, IP and SteamID looked up
-//     from players), or has its reason, type and list position refreshed. A
-//     timed ban's expiry is readAt plus the minutes left, re-set only when it
-//     moves by more than a minute (the minutes are rounded).
-//   - a timed ban BattlEye no longer lists (it ran out, or was removed some
-//     other way) is deleted.
+// SyncBans brings the bans in line with BattlEye's GUID ban list, read at
+// readAt:
+//   - a permanent ban BattlEye lists is added to the bans table if missing
+//     (name, IP and SteamID looked up from players), or has its reason and
+//     list position refreshed.
+//   - the timed bans in memory become the timed ones BattlEye lists, each
+//     ending readAt plus its minutes left. A ban already known keeps its end
+//     unless that moves by more than a minute (the minutes are rounded).
 //   - a permanent ban BattlEye no longer lists is kept and returned: only
 //     Unban on the web pages removes a permanent ban, so the caller puts it
 //     back with addBan.
 //
 // Callers must pass a list parsed from a complete, recognised `bans` reply.
 func (db *Database) SyncBans(bans []Ban, readAt time.Time) ([]storedBan, error) {
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	live := make(map[string]Ban, len(bans))
 	for _, b := range bans {
 		g := strings.ToLower(b.GUID)
@@ -1034,58 +1048,56 @@ func (db *Database) SyncBans(bans []Ban, readAt time.Time) ([]storedBan, error) 
 		}
 		live[g] = b
 	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	timed := map[string]timedBan{}
 	for g, b := range live {
-		var exp any // NULL for a permanent ban
 		if !b.Perm {
 			m, _ := strconv.Atoi(b.Minutes)
-			exp = readAt.Add(time.Duration(m) * time.Minute).Unix()
+			tb := timedBan{reason: b.Reason, expires: readAt.Add(time.Duration(m) * time.Minute), index: b.Index}
+			if err := tx.QueryRow("SELECT username FROM players WHERE lower(guid) = ?", g).Scan(&tb.name); err != nil {
+				tb.name = "Unknown"
+			}
+			timed[g] = tb
+			continue
 		}
 		_, err := tx.Exec(`
-			INSERT INTO bans (guid, player_name, ip, reason, perm, expires_unix, be_index, steam_id)
+			INSERT INTO bans (guid, player_name, ip, reason, perm, be_index, steam_id)
 			VALUES (
 				?,
 				COALESCE((SELECT username FROM players WHERE lower(guid) = ?), 'Unknown'),
 				COALESCE((SELECT last_ip FROM players WHERE lower(guid) = ?), ''),
-				?, ?, ?, ?,
+				?, 1, ?,
 				(SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = ?)
 			)
 			ON CONFLICT(guid) DO UPDATE SET
 				reason = excluded.reason,
-				perm = excluded.perm,
 				be_index = excluded.be_index,
-				expires_unix = CASE
-					WHEN excluded.perm = 1 THEN NULL
-					WHEN bans.expires_unix IS NULL OR abs(bans.expires_unix - excluded.expires_unix) > 60 THEN excluded.expires_unix
-					ELSE bans.expires_unix
-				END,
 				steam_id = COALESCE(NULLIF(bans.steam_id, ''), excluded.steam_id)`,
-			g, g, g, b.Reason, boolInt(b.Perm), exp, b.Index, g,
+			g, g, g, b.Reason, b.Index, g,
 		)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	rows, err := tx.Query("SELECT guid, perm, reason FROM bans")
+	rows, err := tx.Query("SELECT lower(guid), reason FROM bans")
 	if err != nil {
 		return nil, err
 	}
-	var gone []string
 	var readd []storedBan
 	for rows.Next() {
 		var g, reason string
-		var perm int
-		if err := rows.Scan(&g, &perm, &reason); err != nil {
+		if err := rows.Scan(&g, &reason); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		if _, ok := live[strings.ToLower(g)]; ok {
-			continue
-		}
-		if perm == 1 {
-			readd = append(readd, storedBan{GUID: strings.ToLower(g), Reason: reason})
-		} else {
-			gone = append(gone, g)
+		if b, ok := live[g]; !ok || !b.Perm {
+			readd = append(readd, storedBan{GUID: g, Reason: reason})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -1093,88 +1105,87 @@ func (db *Database) SyncBans(bans []Ban, readAt time.Time) ([]storedBan, error) 
 		return nil, err
 	}
 	rows.Close()
-
-	for _, g := range gone {
-		if _, err := tx.Exec("DELETE FROM bans WHERE guid = ?", g); err != nil {
-			return nil, err
-		}
-	}
 	for _, b := range readd {
-		if _, err := tx.Exec("UPDATE bans SET be_index = -1 WHERE guid = ?", b.GUID); err != nil {
+		if _, err := tx.Exec("UPDATE bans SET be_index = -1 WHERE lower(guid) = ?", b.GUID); err != nil {
 			return nil, err
 		}
 	}
-	return readd, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	db.timed.Lock()
+	for g, tb := range timed {
+		if old, ok := db.timed.m[g]; ok && old.expires.Sub(tb.expires).Abs() <= time.Minute {
+			tb.expires = old.expires
+		}
+		if old, ok := db.timed.m[g]; ok && tb.name == "Unknown" {
+			tb.name = old.name
+		}
+		timed[g] = tb
+	}
+	db.timed.m = timed
+	db.timed.Unlock()
+	return readd, nil
 }
 
-// ExpireBans deletes the timed bans whose time ran out by `now`.
+// ExpireBans forgets the timed bans whose time ran out by `now`, and
+// returns how many.
 func (db *Database) ExpireBans(now time.Time) (int64, error) {
-	res, err := db.Exec("DELETE FROM bans WHERE perm = 0 AND expires_unix IS NOT NULL AND expires_unix <= ?", now.Unix())
-	if err != nil {
-		return 0, err
+	db.timed.Lock()
+	defer db.timed.Unlock()
+	var n int64
+	for g, tb := range db.timed.m {
+		if !tb.expires.After(now) {
+			delete(db.timed.m, g)
+			n++
+		}
 	}
-	return res.RowsAffected()
+	return n, nil
 }
 
 // NextBanExpiry is when the next timed ban runs out (Unix seconds), or 0 when
-// no timed ban has a known end.
+// there is none.
 func (db *Database) NextBanExpiry() (int64, error) {
-	var next sql.NullInt64
-	err := db.QueryRow("SELECT MIN(expires_unix) FROM bans WHERE perm = 0 AND expires_unix IS NOT NULL").Scan(&next)
-	return next.Int64, err
+	db.timed.Lock()
+	defer db.timed.Unlock()
+	var next int64
+	for _, tb := range db.timed.m {
+		if u := tb.expires.Unix(); next == 0 || u < next {
+			next = u
+		}
+	}
+	return next, nil
 }
 
-// IsBanned reports whether a GUID (case-insensitive) is in the bans table.
+// IsBanned reports whether a GUID (case-insensitive) is banned.
 func (db *Database) IsBanned(guid string) (bool, error) {
-	var n int
-	err := db.QueryRow("SELECT COUNT(*) FROM bans WHERE lower(guid) = lower(?)", guid).Scan(&n)
-	return n > 0, err
+	st, err := db.BanState(guid)
+	return st.Banned, err
 }
 
-// DeleteBan removes a ban row by GUID (case-insensitive).
+// DeleteBan removes a ban by GUID (case-insensitive), permanent or timed.
 func (db *Database) DeleteBan(guid string) error {
+	db.timed.Lock()
+	delete(db.timed.m, strings.ToLower(guid))
+	db.timed.Unlock()
 	_, err := db.Exec("DELETE FROM bans WHERE lower(guid) = lower(?)", guid)
 	return err
 }
 
-// banColumns and scanBan read one bans row for the pages.
-const banColumns = "lower(guid), player_name, reason, perm, expires_unix, be_index"
-
-func scanBan(sc interface{ Scan(...any) error }, now time.Time) (Ban, banState, error) {
-	var b Ban
-	var perm int
-	var exp sql.NullInt64
-	if err := sc.Scan(&b.GUID, &b.Name, &b.Reason, &perm, &exp, &b.Index); err != nil {
-		return b, banState{}, err
-	}
-	b.Perm = perm == 1
-	st := banState{Banned: true, Perm: b.Perm, MinutesLeft: -1, Reason: b.Reason}
-	switch {
-	case b.Perm:
-		b.Minutes = "perm"
-	case exp.Valid:
-		left := int((exp.Int64 - now.Unix() + 59) / 60) // round up: 30 seconds left shows as 1 minute
-		st.MinutesLeft = max(left, 0)
-		b.Minutes = strconv.Itoa(st.MinutesLeft)
-	default:
-		b.Minutes = "?" // timed, but not read from BattlEye yet
-	}
-	return b, st, nil
-}
-
-// BanList returns every ban for the Bans page, in BattlEye's list order
-// (bans not placed in BattlEye's list yet go last).
-func (db *Database) BanList() ([]Ban, error) {
-	rows, err := db.Query("SELECT " + banColumns + " FROM bans ORDER BY be_index < 0, be_index, player_name COLLATE NOCASE")
+// permBans reads the permanent bans, in BattlEye's list order (ones not in
+// BattlEye's list go last), with an optional WHERE condition.
+func (db *Database) permBans(where string, args ...any) ([]Ban, error) {
+	rows, err := db.Query("SELECT lower(guid), player_name, reason, be_index FROM bans "+where+
+		" ORDER BY be_index < 0, be_index, player_name COLLATE NOCASE", args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	now := time.Now()
 	out := []Ban{}
 	for rows.Next() {
-		b, _, err := scanBan(rows, now)
-		if err != nil {
+		b := Ban{Perm: true, Minutes: "perm"}
+		if err := rows.Scan(&b.GUID, &b.Name, &b.Reason, &b.Index); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -1182,32 +1193,79 @@ func (db *Database) BanList() ([]Ban, error) {
 	return out, rows.Err()
 }
 
-// BanStates returns every banned GUID's status, by lower-case GUID.
-func (db *Database) BanStates() (map[string]banState, error) {
-	rows, err := db.Query("SELECT " + banColumns + " FROM bans")
+// timedBanList is the timed bans as the pages show them, at `now`.
+func (db *Database) timedBanList(now time.Time) []Ban {
+	db.timed.Lock()
+	defer db.timed.Unlock()
+	out := make([]Ban, 0, len(db.timed.m))
+	for g, tb := range db.timed.m {
+		out = append(out, Ban{GUID: g, Name: tb.name, Reason: tb.reason, Index: tb.index, Minutes: strconv.Itoa(minutesLeft(tb, now))})
+	}
+	return out
+}
+
+// minutesLeft rounds up: 30 seconds left shows as 1 minute.
+func minutesLeft(tb timedBan, now time.Time) int {
+	return max(int((tb.expires.Unix()-now.Unix()+59)/60), 0)
+}
+
+// stateOf is a ban as banState.
+func stateOf(b Ban) banState {
+	st := banState{Banned: true, Perm: b.Perm, MinutesLeft: -1, Reason: b.Reason}
+	if !b.Perm {
+		st.MinutesLeft, _ = strconv.Atoi(b.Minutes)
+	}
+	return st
+}
+
+// BanList returns every ban for the Bans page, in BattlEye's list order
+// (bans not placed in BattlEye's list yet go last).
+func (db *Database) BanList() ([]Ban, error) {
+	out, err := db.permBans("")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	now := time.Now()
-	out := map[string]banState{}
-	for rows.Next() {
-		b, st, err := scanBan(rows, now)
-		if err != nil {
-			return nil, err
+	out = append(out, db.timedBanList(time.Now())...)
+	sort.SliceStable(out, func(a, b int) bool {
+		ia, ib := out[a].Index, out[b].Index
+		if (ia < 0) != (ib < 0) {
+			return ib < 0
 		}
-		out[b.GUID] = st
+		if ia != ib {
+			return ia < ib
+		}
+		return strings.ToLower(out[a].Name) < strings.ToLower(out[b].Name)
+	})
+	return out, nil
+}
+
+// BanStates returns every banned GUID's status, by lower-case GUID.
+func (db *Database) BanStates() (map[string]banState, error) {
+	list, err := db.BanList()
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	out := make(map[string]banState, len(list))
+	for _, b := range list {
+		out[b.GUID] = stateOf(b)
+	}
+	return out, nil
 }
 
 // BanState is one GUID's ban status (Banned false when not banned).
 func (db *Database) BanState(guid string) (banState, error) {
-	_, st, err := scanBan(db.QueryRow("SELECT "+banColumns+" FROM bans WHERE lower(guid) = lower(?)", guid), time.Now())
-	if errors.Is(err, sql.ErrNoRows) {
-		return banState{MinutesLeft: -1}, nil
+	g := strings.ToLower(guid)
+	db.timed.Lock()
+	tb, ok := db.timed.m[g]
+	db.timed.Unlock()
+	if ok {
+		return banState{Banned: true, MinutesLeft: minutesLeft(tb, time.Now()), Reason: tb.reason}, nil
 	}
-	return st, err
+	list, err := db.permBans("WHERE lower(guid) = ?", g)
+	if err != nil || len(list) == 0 {
+		return banState{MinutesLeft: -1}, err
+	}
+	return stateOf(list[0]), nil
 }
 
 // ---------------------------------------------------------------------------

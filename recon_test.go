@@ -272,8 +272,8 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 	if h := history(t, db, testGUID); len(h) != 2 || h[1].duration != 1800 || h[1].loaded || h[1].ended != endDisconnected {
 		t.Fatalf("history after upgrade = %+v", h)
 	}
-	// Old bans: the permanent one is permanent; the timed one has no end
-	// until BattlEye's list is read, and is never expired before that.
+	// Old bans: the permanent one stays; the timed one is dropped from the
+	// table (timed bans are kept in memory, from BattlEye's list).
 	states, err := db.BanStates()
 	if err != nil {
 		t.Fatal(err)
@@ -281,11 +281,11 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 	if st := states[testGUID2]; !st.Banned || !st.Perm {
 		t.Errorf("permanent ban = %+v", st)
 	}
-	if st := states["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]; !st.Banned || st.Perm || st.MinutesLeft != -1 {
-		t.Errorf("timed ban = %+v", st)
+	if st := states["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]; st.Banned {
+		t.Errorf("timed ban still stored: %+v", st)
 	}
-	if n, _ := db.ExpireBans(time.Now().Add(1000 * time.Hour)); n != 0 {
-		t.Errorf("expired %d old timed ban(s) with no known end", n)
+	if n := countRows(t, db, "bans"); n != 1 {
+		t.Errorf("%d rows in bans, want 1", n)
 	}
 	// Opening it again (the next restart) changes nothing and doesn't fail.
 	db2, err := OpenDatabase(path)
@@ -305,6 +305,9 @@ func TestSyncBans(t *testing.T) {
 	}, read)
 	if err != nil || len(readd) != 0 {
 		t.Fatalf("first sync: readd=%v err=%v", readd, err)
+	}
+	if n := countRows(t, db, "bans"); n != 1 {
+		t.Fatalf("%d rows in bans, want only the permanent ban", n)
 	}
 	next, _ := db.NextBanExpiry()
 	if want := read.Add(time.Hour).Unix(); next != want {
@@ -835,19 +838,22 @@ func TestRconSettingsPage(t *testing.T) {
 	if code, _ := call(http.MethodPost, `{"host": "`+host+`", "port": "`+port+`", "password": "wrong"}`); code != http.StatusBadGateway {
 		t.Fatalf("wrong password: %d", code)
 	}
-	if s := savedRconSettings(); s != (rconSettings{}) {
-		t.Fatalf("saved after a failed connect: %+v", s)
+	if s := currentRconOverrides(); s != (rconSettings{}) {
+		t.Fatalf("kept after a failed connect: %+v", s)
 	}
 
-	// The right settings connect, are saved, and become the target.
+	// The right settings connect, are kept (in memory only), and become the target.
 	if code, got := call(http.MethodPost, `{"host": " `+host+` ", "port": "`+port+`", "password": "secret"}`); code != 200 || got["ok"] != true {
 		t.Fatalf("connect = %d %v", code, got)
 	}
-	if s := savedRconSettings(); s.Host != host || s.Port != port || s.Password != "secret" {
-		t.Fatalf("saved = %+v", s)
+	if s := currentRconOverrides(); s.Host != host || s.Port != port || s.Password != "secret" {
+		t.Fatalf("kept = %+v", s)
 	}
-	if addr, pass := savedRconSettings().effective(); addr != net.JoinHostPort(host, port) || pass != "secret" {
-		t.Fatalf("effective = %s %q", addr, pass)
+	if addr, pass := currentTarget(); addr != net.JoinHostPort(host, port) || pass != "secret" {
+		t.Fatalf("target = %s %q", addr, pass)
+	}
+	if _, ok, _ := globalDatabase.Setting("rcon"); ok {
+		t.Fatal("RCON Settings were written to the database")
 	}
 
 	// Empty fields use the defaults.

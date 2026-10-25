@@ -109,7 +109,7 @@ Everything is set with environment variables.
 | `RCON_HOST`             | `127.0.0.1`        | IP or hostname of the DayZ server |
 | `RCON_PORT`             | `2306`             | BattlEye RCON UDP port (`RConPort` in `BEServer_x64.cfg`) |
 | `LISTEN_ADDR`           | `:8080`            | Address the web server listens on inside the container |
-| `DB_PATH`               | `/data/players.db` | The SQLite database: players, sessions, IPs, chat, notes, roles, bans, flows and settings |
+| `DB_PATH`               | `/data/players.db` | The SQLite database: players, sessions, IPs, chat, notes, roles, permanent bans, flows and settings (timed bans and RCON Settings are kept in memory only) |
 | `TZ`                    | `UTC`              | Time zone for flow schedules and the times shown, e.g. `America/New_York` |
 | `STEAM_API_KEY`         | none               | Turns on the full Steam Profile tab. Free at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
 | `STEAM_SEARCH_MODE`     | `manual`           | `manual`: look up a player's SteamID only when you press **Search Steam ID**. `auto`: also start a lookup for every new player who joins without one |
