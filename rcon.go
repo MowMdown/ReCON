@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,14 +23,20 @@ import (
 //
 //   - the BattlEye packet format and login
 //   - persistentConnection: a logged-in session with a background reader and
-//     an optional keepalive. The CLI and console dial their own; everything in
-//     server mode (web, poller, flows) goes through one shared session
-//     (runShared). It opens a new socket only when the old one has died;
-//     when the server stops answering, the poller logs in again on the same
-//     socket (reloginShared), so BattlEye keeps the same admin slot.
-//   - server messages: the lines BattlEye pushes to a logged-in session on
-//     its own (chat, connects, GUIDs, kicks). The reader ACKs them, parses
-//     them into ServerEvents, logs them and publishes them on serverEvents.
+//     an optional keepalive. The CLI and its console (-i) dial their own,
+//     logged to the container as [cli]; everything in server mode (pages,
+//     flows, polls) goes through one shared session (runShared), logged as
+//     [web]. It opens a new socket only when the old one has died; when the
+//     server stops answering, the heartbeat logs in again on the same socket
+//     (reloginShared), so BattlEye keeps the same admin slot.
+//   - the heartbeat: an empty command every 5 seconds keeps the shared
+//     session alive and notices when the server is down; it polls players
+//     and bans after every login.
+//   - the master console log (serverEvents): the lines BattlEye pushes to a
+//     logged-in session on its own (chat, connects, GUIDs, kicks), which the
+//     reader ACKs and parses into ServerEvents, and every command ReCON
+//     sends with its reply. Polls and heartbeats aren't in it. The player
+//     tracker, chat history and flows all work from it.
 //   - parsing what the server sends back (`players`, `bans`)
 //   - kickall, built from those pieces
 //
@@ -409,16 +416,33 @@ func (l *persistentConnection) isResponsive() bool {
 	return err == nil && acked
 }
 
-// run executes a command and logs it with its source and ack status (empty
-// probes aren't logged). The CLI and console use it; the shared session logs
-// in runShared instead, only when asked to. It satisfies the commandRunner
+// run executes a command and logs it to the container log as [cli] (empty
+// probes aren't logged). The CLI and its console (-i) use it; the shared
+// session logs in runShared instead. It satisfies the commandRunner
 // interface.
 func (l *persistentConnection) run(command string, wait time.Duration) (string, bool, error) {
 	out, acked, err := l.runRaw(command, wait)
 	if command != "" {
-		log.Printf("rcon[%s] > %q (acked=%v err=%v)", l.src, command, acked, err)
+		logSentCommand(l.src, "", command, acked, err)
 	}
 	return out, acked, err
+}
+
+// logSentCommand writes one sent command to the container log, e.g.
+//
+//	[web] > kick 3 Bye (flow "Ping kicker", acked=true)
+//	[cli] > players (acked=true)
+//
+// origin is the session (sharedSource or "cli"), by who asked for it.
+func logSentCommand(origin, by, command string, acked bool, err error) {
+	detail := fmt.Sprintf("acked=%v", acked)
+	if err != nil {
+		detail += fmt.Sprintf(" err=%v", err)
+	}
+	if by != "" {
+		detail = by + ", " + detail
+	}
+	log.Printf("[%s] > %s (%s)", origin, command, detail)
 }
 
 // runRaw sends one command and waits for its (possibly multi-part) reply.
@@ -464,12 +488,12 @@ func (l *persistentConnection) runRaw(command string, wait time.Duration) (strin
 }
 
 // ---------------------------------------------------------------------------
-// Shared session (server mode: web layer, poller, flows)
+// Shared session (server mode: web layer, heartbeat, flows)
 // ---------------------------------------------------------------------------
 
 // sharedConnection holds the one long-lived session. The Mutex protects the
 // pointer; persistentConnection serialises the commands themselves.
-// Keepalive is off because the 5s poller already keeps the session busy.
+// Keepalive is off because the heartbeat already keeps the session busy.
 // Being permanently logged in is also what lets it receive server messages.
 var sharedConnection = struct {
 	sync.Mutex
@@ -513,7 +537,7 @@ func connectShared() (*persistentConnection, error) {
 		c.close()
 		sharedConnection.connection = nil
 	}
-	// Every call would otherwise dial (the poller, every page refresh), and
+	// Every call would otherwise dial (the heartbeat, every page refresh), and
 	// each new socket leaves a login queued at a server that isn't answering:
 	// after a failed login, wait as reloginShared does before dialing again.
 	if time.Now().Before(sharedConnection.nextDial) {
@@ -527,9 +551,8 @@ func connectShared() (*persistentConnection, error) {
 		return nil, err
 	}
 	sharedConnection.nextDial, sharedConnection.dialWait = time.Time{}, 0
-	_, acked, uerr := s.runRaw("#unlock", 2*time.Second)
-	log.Printf("rcon: logged in, sent #unlock (acked=%v err=%v)", acked, uerr)
-	bansStale.Store(true) // the server may have restarted: re-read its ban list (db.go)
+	log.Printf("rcon: logged in")
+	unlockAfterLogin(s)
 	sharedConnection.connection = s
 	return s, nil
 }
@@ -552,9 +575,8 @@ func reconnectShared(address, password string) error {
 	}
 	sharedConnection.connection = s
 	sharedConnection.nextDial, sharedConnection.dialWait = time.Time{}, 0
-	_, acked, uerr := s.runRaw("#unlock", 2*time.Second)
-	log.Printf("rcon: connected to %s from RCON Settings, sent #unlock (acked=%v err=%v)", address, acked, uerr)
-	bansStale.Store(true)
+	log.Printf("rcon: connected to %s from RCON Settings", address)
+	unlockAfterLogin(s)
 	return nil
 }
 
@@ -572,19 +594,19 @@ var (
 )
 
 // reloginPace is when reloginShared may next send a login, and the wait to
-// use after the next unanswered one. Only the poller goroutine touches it.
+// use after the next unanswered one. Only the heartbeat goroutine touches it.
 var reloginPace struct {
 	next time.Time
 	wait time.Duration
 }
 
-// resetReloginPace is called by the poller when the server answers again, so
+// resetReloginPace is called by the heartbeat when the server answers again, so
 // the next outage starts with an immediate login and the shortest wait.
 func resetReloginPace() {
 	reloginPace.next, reloginPace.wait = time.Time{}, 0
 }
 
-// reloginShared is called by the poller when the server has missed 3 checks
+// reloginShared is called by the heartbeat when the server has missed 3 checks
 // in a row (it may have restarted and forgotten us). It logs in again on the
 // same socket, so the server keeps our admin slot, then sends #unlock as a
 // new login does. Calls are paced (see reloginFirstWait): one between
@@ -608,9 +630,137 @@ func reloginShared() {
 		return
 	}
 	reloginPace.next, reloginPace.wait = time.Now().Add(reloginSettle), 0
-	_, acked, uerr := c.runRaw("#unlock", 2*time.Second)
-	log.Printf("rcon: no reply from the server; logged in again on the same connection, sent #unlock (acked=%v err=%v)", acked, uerr)
-	bansStale.Store(true)
+	log.Printf("rcon: no reply from the server; logged in again on the same connection")
+	unlockAfterLogin(c)
+}
+
+// loginSource is the logAs label for what ReCON sends by itself after a login.
+const loginSource = "login"
+
+// unlockAfterLogin sends #unlock on a session that has just logged in (see
+// connectShared), logs it like any other sent command, and asks the
+// heartbeat to poll players and bans next: the server may have restarted,
+// so the players and bans ReCON knew may be out of date. It uses runRaw
+// because the callers already hold the session.
+func unlockAfterLogin(s *persistentConnection) {
+	serverEvents.publish(ServerEvent{Time: time.Now(), Kind: eventSent, Text: "> #unlock", Source: loginSource, PlayerID: -1})
+	out, acked, err := s.runRaw("#unlock", 2*time.Second)
+	logSentCommand(sharedSource, loginSource, "#unlock", acked, err)
+	logCommandResult(loginSource, out, acked, err)
+	loginPollDue.Store(true)
+}
+
+// ---------------------------------------------------------------------------
+// Heartbeat and polls (shared session)
+// ---------------------------------------------------------------------------
+
+// heartbeatEvery is how often the heartbeat checks the shared session with
+// an empty command. It keeps the session from going idle (BattlEye drops a
+// client it hasn't heard from in about 45 seconds) and is how ReCON notices
+// the server has stopped answering.
+var heartbeatEvery = 5 * time.Second
+
+// heartbeatWait is how long a heartbeat waits for its answer.
+var heartbeatWait = 2 * time.Second
+
+// heartbeatMisses is how many heartbeats in a row may go unanswered before
+// the server is taken to be down.
+const heartbeatMisses = 3
+
+// What the heartbeat saw, for the status bar (rconStatus, web.go).
+var (
+	rconPolled atomic.Bool  // it has checked the server at least once
+	rconFails  atomic.Int32 // unanswered heartbeats in a row
+	// rconNextPoll is when the heartbeat checks the game server next (Unix
+	// milliseconds), for the status bar's retry countdown (rconNextCheck, web.go).
+	rconNextPoll atomic.Int64
+	// pollInterval is the heartbeat's interval (set by startServerHeartbeat).
+	pollInterval time.Duration
+)
+
+// loginPollDue is set by every login of the shared session; the next
+// answered heartbeat then polls players and bans.
+var loginPollDue atomic.Bool
+
+// startServerHeartbeat checks the shared session every heartbeatEvery:
+//
+//   - Delete timed bans that have run out, if one is due (db.go).
+//   - Send an empty command (heartbeatWait). Nothing is logged for it.
+//   - Unanswered: count it. At exactly heartbeatMisses in a row the server
+//     is taken to be down: open sessions are closed once (serverLost,
+//     players.go) so playtime stops while it's offline. From then on, each
+//     round logs in again on the same RCON socket (reloginShared, paced).
+//     This is the only place that decides the server isn't answering.
+//   - Answered: reset the count, then poll players and read the ban list
+//     after a login, and the ban list every banSyncEvery.
+func startServerHeartbeat() {
+	pollInterval = heartbeatEvery
+	rconNextPoll.Store(time.Now().Add(heartbeatEvery).UnixMilli())
+	go func() {
+		t := time.NewTicker(heartbeatEvery)
+		defer t.Stop()
+		var h heartbeat
+		for tick := range t.C {
+			rconNextPoll.Store(tick.Add(heartbeatEvery).UnixMilli())
+			h.beat()
+		}
+	}()
+}
+
+// heartbeat is what the heartbeat goroutine remembers between beats.
+type heartbeat struct {
+	fails       int       // unanswered beats in a row
+	lastBanSync time.Time // when the ban list was last read
+}
+
+// beat is one heartbeat (see startServerHeartbeat).
+func (h *heartbeat) beat() {
+	expireDueBans(time.Now()) // db.go
+	_, acked, err := runShared("", heartbeatWait, false, "")
+	rconPolled.Store(true)
+	if err != nil || !acked {
+		h.fails++
+		rconFails.Store(int32(h.fails))
+		if h.fails == heartbeatMisses {
+			serverLost()  // players.go
+			playersLost() // greet everyone again when they reconnect (flows.go)
+		}
+		if h.fails >= heartbeatMisses {
+			reloginShared()
+		}
+		return
+	}
+	h.fails = 0
+	rconFails.Store(0)
+	resetReloginPace()
+	afterLogin := loginPollDue.Swap(false)
+	if !pollPlayersNow() && afterLogin {
+		loginPollDue.Store(true) // the server isn't answering `players` yet: next beat
+	}
+	if afterLogin || time.Since(h.lastBanSync) >= banSyncEvery {
+		h.lastBanSync = time.Now()
+		if err := syncBanList(); err != nil { // db.go
+			log.Printf("heartbeat: bans: %v", err)
+			h.lastBanSync = time.Now().Add(time.Minute - banSyncEvery) // try again in a minute
+		}
+	}
+}
+
+// pollPlayersNow reads `players` (not logged) and hands the list to the
+// tracker (sessions, players.go), the SteamID search (auto mode, steam.go)
+// and flows (the list for flows and chat commands, join flows, flows.go).
+// It reports whether the server answered.
+func pollPlayersNow() bool {
+	sentAt := time.Now()
+	out, acked, err := runShared("players", 3*time.Second, false, "")
+	if err != nil || !acked {
+		return false
+	}
+	players := parsePlayers(out)
+	playersPolledTracker(players, sentAt)
+	steamPlayersSeen(players)
+	playersPolled(players)
+	return true
 }
 
 // runShared runs a command on the shared session.
@@ -619,29 +769,60 @@ func reloginShared() {
 //     ban, say, ...) so a slow-but-successful command is never repeated.
 //   - allowRetry=true: up to 3 attempts with 1s pauses, for read-only
 //     commands (players, bans) where repeating is harmless.
-//   - logAs: the label for the "rcon[<logAs>] > ..." log line written for
-//     each attempt: "web" for POST actions from the pages and API, the flow's
-//     name for flow steps, or "" for no line at all (page refreshes, the
-//     poller and other routine reads).
+//   - logAs: who asked: "web" for actions from the pages and API, "console"
+//     for the console page, flowSource(name) for flow steps. The command,
+//     and then its reply or error, go into the master console log
+//     (serverEvents) once per call, and each attempt to the container log as
+//     "[web] > command (logAs, acked=...)". "" logs nothing: heartbeats,
+//     polls and page refreshes.
 //
 // err is only set for a connection/transport failure. A command the server
 // simply didn't acknowledge returns acked=false with err=nil, so callers can
 // tell "server never got it" from "server didn't answer" (e.g. #shutdown).
 //
 // A missed reply never drops the session here: retries reuse it, and only
-// the poller decides the server has stopped answering (see reloginShared).
+// the heartbeat decides the server has stopped answering (see reloginShared).
 // A socket that has died is replaced by connectShared on the next call.
 func runShared(command string, wait time.Duration, allowRetry bool, logAs string) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
 		maxAttempts = 3
 	}
-	// Commands typed in the console page also go to its log, once per call
-	// however many attempts it takes. Commands from flows and the other
-	// pages don't: the Flows page and the container log already show them.
-	if logAs == consoleSource {
+	if logAs != "" {
 		serverEvents.publish(ServerEvent{Time: time.Now(), Kind: eventSent, Text: "> " + command, Source: logAs, PlayerID: -1})
 	}
+	out, acked, err := runSharedAttempts(command, wait, maxAttempts, logAs)
+	if logAs != "" {
+		logCommandResult(logAs, out, acked, err)
+	}
+	return out, acked, err
+}
+
+// logCommandResult adds what came back for a sent command to the master
+// console log: its output, the error, or that the server never answered.
+// An acknowledged command with no output adds nothing.
+func logCommandResult(logAs, out string, acked bool, err error) {
+	note := func(kind, text string) {
+		serverEvents.publish(ServerEvent{Time: time.Now(), Kind: kind, Text: text, Source: logAs, PlayerID: -1})
+	}
+	switch {
+	case err != nil:
+		note(eventError, "error: "+err.Error())
+	case !acked:
+		note(eventError, "(no acknowledgement from server)")
+	case strings.TrimSpace(out) != "":
+		note(eventReply, strings.TrimRight(out, "\r\n "))
+	}
+}
+
+// flowSource is the runShared logAs label for a flow's commands.
+func flowSource(name string) string {
+	return "flow " + strconv.Quote(name)
+}
+
+// runSharedAttempts is runShared's send loop: up to maxAttempts tries with
+// 1s pauses between them.
+func runSharedAttempts(command string, wait time.Duration, maxAttempts int, logAs string) (string, bool, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		more := attempt+1 < maxAttempts // only pause when another attempt follows
@@ -655,7 +836,7 @@ func runShared(command string, wait time.Duration, allowRetry bool, logAs string
 		}
 		out, acked, err := s.runRaw(command, wait)
 		if logAs != "" {
-			log.Printf("rcon[%s] > %q (acked=%v err=%v)", logAs, command, acked, err)
+			logSentCommand(sharedSource, logAs, command, acked, err)
 		}
 		if err == nil && acked {
 			return out, true, nil
@@ -669,12 +850,33 @@ func runShared(command string, wait time.Duration, allowRetry bool, logAs string
 }
 
 // sharedRunner adapts runShared to the commandRunner interface (single
-// attempt per command) for kickAll. It doesn't log the individual `players`
-// reads and kicks; the caller logs one kickReport.summary line instead.
-type sharedRunner struct{}
+// attempt per command) for kickAll. The kicks are logged as logAs; the
+// `players` reads around them are polls and aren't.
+type sharedRunner struct{ logAs string }
 
-func (sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
-	return runShared(command, wait, false, "")
+func (r sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
+	if command == "players" {
+		return runShared(command, wait, false, "")
+	}
+	return runShared(command, wait, false, r.logAs)
+}
+
+// kickAllShared runs ReCON's own kickall command on the shared session for
+// logAs (see runShared): "> kickall <reason>" and then its summary go into
+// the master console log and the container log, with each kick between.
+func kickAllShared(reason, logAs string) (*kickReport, error) {
+	if reason = cleanReason(reason); reason == "" {
+		reason = "Server restarting"
+	}
+	serverEvents.publish(ServerEvent{Time: time.Now(), Kind: eventSent, Text: "> kickall " + reason, Source: logAs, PlayerID: -1})
+	rep, err := kickAll(sharedRunner{logAs}, reason)
+	if err != nil {
+		logCommandResult(logAs, "", false, fmt.Errorf("kickall failed: %w", err))
+		return nil, err
+	}
+	log.Printf("[%s] > %s (%s)", sharedSource, rep.summary(reason), logAs)
+	logCommandResult(logAs, rep.summary(reason), true, nil)
+	return rep, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -686,7 +888,7 @@ func (sharedRunner) run(command string, wait time.Duration) (string, bool, error
 // other RCon admins logging in. reader() ACKs each one and drops resends,
 // then handleServerMessage turns it into a ServerEvent, logs it as
 //
-//	rcon[web] < (Global) SomeName: hello
+//	[web] < (Global) SomeName: hello
 //
 // and publishes it on serverEvents. Anything can subscribe (an HTTP feed,
 // flows reacting to chat, ...). Publishing never blocks the reader: a
@@ -777,16 +979,19 @@ func handleServerMessage(src, text string) {
 	if text == "" {
 		return
 	}
-	log.Printf("rcon[%s] < %s", src, text)
+	log.Printf("[%s] < %s", src, text)
 	serverEvents.publish(parseServerMessage(text, time.Now()))
 }
 
-// recentEventsKept is how many events serverEvents keeps for late joiners
-// (e.g. a page that opens and wants the last few chat lines).
-const recentEventsKept = 200
+// consoleLogLimit is how many lines the master console log (serverEvents)
+// keeps: every server message and every command ReCON sent with its reply,
+// since ReCON started. It is a safety limit; a busy server reaches it after
+// days. Older lines are dropped first.
+const consoleLogLimit = 50000
 
-// eventHub fans server events out to subscribers and keeps the most recent
-// ones. Safe for concurrent use.
+// eventHub is the master console log: it numbers every event, keeps the most
+// recent consoleLogLimit of them and fans each one out to subscribers (the
+// player tracker, the chat recorder, flows). Safe for concurrent use.
 type eventHub struct {
 	mu     sync.Mutex
 	seq    int64 // Seq of the last published event
@@ -806,10 +1011,10 @@ func (h *eventHub) publish(ev ServerEvent) {
 	h.seq++
 	ev.Seq = h.seq
 	h.recent = append(h.recent, ev)
-	// Trim only once twice the limit has built up, so the copy happens once
-	// per recentEventsKept events instead of on every one.
-	if len(h.recent) >= 2*recentEventsKept {
-		h.recent = append([]ServerEvent(nil), h.recent[len(h.recent)-recentEventsKept:]...)
+	// Trim only once a tenth over the limit, so the copy happens once per
+	// consoleLogLimit/10 events instead of on every one.
+	if len(h.recent) >= consoleLogLimit+consoleLogLimit/10 {
+		h.recent = append([]ServerEvent(nil), h.recent[len(h.recent)-consoleLogLimit:]...)
 	}
 	for ch := range h.subs {
 		select {
@@ -849,32 +1054,33 @@ func (h *eventHub) recentEvents() []ServerEvent {
 	return h.after(0)
 }
 
-// after returns the kept events with Seq greater than seq, oldest first, and
-// the Seq of the newest event (to pass next time). A page polls with the last
-// value it got; 0 means "everything kept". A seq from before a ReCON restart
-// is larger than anything now, so the page gets the whole buffer again.
+// after returns the kept events with Seq greater than seq, oldest first. A
+// page polls with the last value it got; 0 means "everything kept". A seq
+// from before a ReCON restart is larger than anything now, so the page gets
+// the whole log again.
 func (h *eventHub) after(seq int64) []ServerEvent {
-	events, _ := h.afterWithLast(seq)
+	events, _ := h.afterWithLast(seq, 0)
 	return events
 }
 
-func (h *eventHub) afterWithLast(seq int64) ([]ServerEvent, int64) {
+// afterWithLast is after, plus the Seq of the newest event (to pass next
+// time). A limit above 0 returns only the newest limit events.
+func (h *eventHub) afterWithLast(seq int64, limit int) ([]ServerEvent, int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if seq > h.seq {
 		seq = 0 // ReCON restarted since the caller last asked
 	}
-	out := []ServerEvent{}
 	kept := h.recent
-	if len(kept) > recentEventsKept {
-		kept = kept[len(kept)-recentEventsKept:]
+	if len(kept) > consoleLogLimit {
+		kept = kept[len(kept)-consoleLogLimit:]
 	}
-	for _, ev := range kept {
-		if ev.Seq > seq {
-			out = append(out, ev)
-		}
+	// Seq only grows, so the first newer event can be found by bisection.
+	kept = kept[sort.Search(len(kept), func(i int) bool { return kept[i].Seq > seq }):]
+	if limit > 0 && len(kept) > limit {
+		kept = kept[len(kept)-limit:]
 	}
-	return out, h.seq
+	return append([]ServerEvent{}, kept...), h.seq
 }
 
 // ---------------------------------------------------------------------------

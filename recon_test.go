@@ -346,18 +346,27 @@ func TestSyncBans(t *testing.T) {
 
 func TestEventHubKeepsNewest(t *testing.T) {
 	h := &eventHub{subs: map[chan ServerEvent]struct{}{}}
-	for i := 0; i < 3*recentEventsKept+7; i++ {
+	total := 3*consoleLogLimit + 7
+	for i := 0; i < total; i++ {
 		h.publish(ServerEvent{Kind: eventOther})
 	}
 	ev := h.recentEvents()
-	if len(ev) != recentEventsKept {
-		t.Fatalf("kept %d events, want %d", len(ev), recentEventsKept)
+	if len(ev) != consoleLogLimit {
+		t.Fatalf("kept %d events, want %d", len(ev), consoleLogLimit)
 	}
-	if last := ev[len(ev)-1].Seq; last != int64(3*recentEventsKept+7) {
+	if last := ev[len(ev)-1].Seq; last != int64(total) {
 		t.Fatalf("newest Seq = %d", last)
 	}
-	if first := ev[0].Seq; first != int64(2*recentEventsKept+8) {
+	if first := ev[0].Seq; first != int64(total-consoleLogLimit+1) {
 		t.Fatalf("oldest Seq = %d", first)
+	}
+	// after() finds its place by bisection; a limit keeps the newest.
+	if got := h.after(int64(total - 3)); len(got) != 3 || got[0].Seq != int64(total-2) {
+		t.Fatalf("after(total-3) = %d events starting at %d", len(got), got[0].Seq)
+	}
+	got, last := h.afterWithLast(0, 10)
+	if len(got) != 10 || got[9].Seq != int64(total) || last != int64(total) {
+		t.Fatalf("afterWithLast(0, 10) = %d events, last %d", len(got), last)
 	}
 }
 
@@ -1232,5 +1241,97 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 	line("Player #3 Survivor disconnected", t0.Add(time.Hour))
 	if _, ok := latestChatOf(testGUID); ok {
 		t.Fatal("a player who left still has session lines")
+	}
+}
+
+// TestSentCommandsGoInConsoleLog checks the master console log: a command
+// sent for someone goes in once with who sent it, followed by an error when
+// the server doesn't answer; polls and heartbeats don't go in at all; a new
+// login logs its #unlock and asks for a players and bans poll.
+func TestSentCommandsGoInConsoleLog(t *testing.T) {
+	resetShared(t)
+	f := newFakeBE(t)
+	setTarget(f.conn.LocalAddr().String(), "pw")
+	loginPollDue.Store(false)
+	t.Cleanup(func() { loginPollDue.Store(false) })
+
+	start := serverEvents.lastSeq()
+	if _, _, err := runShared("", time.Second, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !loginPollDue.Load() {
+		t.Fatal("a new login didn't ask for a poll")
+	}
+	runShared("players", time.Second, false, "")
+	runShared("say -1 hello", time.Second, false, flowSource("Greeter"))
+	f.set(true)
+	runShared("kick 3 bye", 300*time.Millisecond, false, "web")
+
+	var got []string
+	for _, ev := range serverEvents.after(start) {
+		got = append(got, ev.Kind+"|"+ev.Text+"|"+ev.Source)
+	}
+	want := []string{
+		"sent|> #unlock|login",
+		`sent|> say -1 hello|flow "Greeter"`,
+		"sent|> kick 3 bye|web",
+		"error|(no acknowledgement from server)|web",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("console log:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestHeartbeat checks that an answered heartbeat after a login polls
+// players and bans once, and that three unanswered ones in a row mark the
+// server down and log in again on the same socket.
+func TestHeartbeat(t *testing.T) {
+	testDB(t)
+	resetShared(t)
+	f := newFakeBE(t)
+	setTarget(f.conn.LocalAddr().String(), "pw")
+	oldWait, oldReply := heartbeatWait, reloginReplyWait
+	t.Cleanup(func() {
+		heartbeatWait, reloginReplyWait = oldWait, oldReply
+		rconFails.Store(0)
+		loginPollDue.Store(false)
+		resetReloginPace()
+	})
+	heartbeatWait, reloginReplyWait = 100*time.Millisecond, 50*time.Millisecond
+	resetReloginPace()
+
+	polls := func() (players, bans int) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, c := range f.commands {
+			switch c {
+			case "players":
+				players++
+			case "bans":
+				bans++
+			}
+		}
+		return
+	}
+	var h heartbeat
+	h.beat() // logs in, then polls players and bans
+	if p, b := polls(); p != 1 || b != 1 || loginPollDue.Load() {
+		t.Fatalf("after the first beat: %d players, %d bans polls (due=%v); want 1 and 1", p, b, loginPollDue.Load())
+	}
+	h.beat()
+	if _, b := polls(); b != 1 {
+		t.Fatalf("the ban list was read again %d time(s) without a login", b-1)
+	}
+
+	f.set(true)
+	logins, _ := f.counts()
+	for i := 0; i < heartbeatMisses; i++ {
+		h.beat()
+	}
+	if rconFails.Load() != heartbeatMisses || rconStatus() != "unavailable" {
+		t.Fatalf("fails = %d, status %s", rconFails.Load(), rconStatus())
+	}
+	if l, _ := f.counts(); l != logins+1 {
+		t.Fatalf("%d login(s) on the 3rd miss, want 1", l-logins)
 	}
 }

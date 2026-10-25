@@ -1020,23 +1020,18 @@ func runFlowCommand(run *flowRun, cmd string) {
 	// lists the players and kicks each (kickAll).
 	if bare := strings.TrimPrefix(lower, "#"); bare == "kickall" || strings.HasPrefix(bare, "kickall ") {
 		reason := strings.TrimSpace(strings.TrimPrefix(cmd, "#")[len("kickall"):])
-		if reason == "" {
-			reason = "Server restarting"
-		}
-		rep, err := kickAll(sharedRunner{}, reason)
+		rep, err := kickAllShared(reason, flowSource(run.name))
 		if err != nil {
 			run.logf("kickall failed: %v", err)
 			run.markFailed()
 			return
 		}
-		msg := rep.summary(reason)
-		log.Printf("rcon[%s] > %s", run.name, msg)
-		run.addToRunLog(msg)
+		run.addToRunLog(rep.summary(reason))
 		return
 	}
 
 	retry := lower == "#lock" || lower == "#unlock"
-	_, acked, err := runShared(cmd, 2*time.Second, retry, run.name) // logs rcon[<flow name>]
+	_, acked, err := runShared(cmd, 2*time.Second, retry, flowSource(run.name))
 	run.addToRunLog(fmt.Sprintf("sent %q (acked=%v err=%v)", cmd, acked, err))
 	if err != nil || (!acked && lower != "#shutdown") {
 		run.markFailed()
@@ -1723,7 +1718,7 @@ func (r *flowRun) logf(format string, a ...any) {
 }
 
 // addToRunLog adds a line to the Flows page's run log only. Used for sent
-// commands, which runShared already logs to the container as rcon[name].
+// commands, which runShared already logs to the container.
 func (r *flowRun) addToRunLog(msg string) {
 	flowRuns.Lock()
 	r.log = append(r.log, time.Now().Format("15:04:05")+"  "+msg)

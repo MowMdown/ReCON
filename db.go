@@ -1321,13 +1321,9 @@ func (db *Database) DeleteFlow(id int64) error {
 // list and delete a ban that was just added.
 var banListLock sync.Mutex
 
-// banSyncEvery is how often the poller reads BattlEye's ban list. It also
-// reads it after every RCON login (bansStale), so after a server restart.
+// banSyncEvery is how often the heartbeat (rcon.go) reads BattlEye's ban
+// list. It also reads it after every RCON login, so after a server restart.
 const banSyncEvery = 5 * time.Minute
-
-// bansStale is set after each RCON login (connectShared, reloginShared in
-// rcon.go); the poller then reads the ban list at its next good poll.
-var bansStale atomic.Bool
 
 // syncBanList reads BattlEye's ban list and brings the bans table in line
 // with it (SyncBans), then puts back any permanent ban the server has lost
@@ -1472,82 +1468,12 @@ func startChatRecorder() {
 	}()
 }
 
-// rconPolled and rconFails let the status bar show what the poller saw:
-// whether it has checked the game server yet, and how many checks in a row
-// have failed (see rconStatus in web.go).
-var (
-	rconPolled atomic.Bool
-	rconFails  atomic.Int32
-	// rconNextPoll is when the poller checks the game server next (Unix
-	// milliseconds), for the status bar's retry countdown (rconNextCheck, web.go).
-	rconNextPoll atomic.Int64
-	// pollInterval is the poller's interval (set by startBackgroundSync).
-	pollInterval time.Duration
-)
-
-// startBackgroundSync keeps the database in step with the game server
-// without any web page open: it starts the chat recorder and the player
-// tracker (players.go), then polls in the background.
-//
-// Every `interval`:
-//   - Delete timed bans that have run out, if one is due.
-//   - Poll `players` (single attempt, 3s wait).
-//   - On failure, count consecutive failures. At exactly 3 in a row the server
-//     is assumed down: every open session is closed once (serverLost), so
-//     playtime stops accruing while it's offline. From the 3rd miss on, each
-//     round logs in again on the same RCON socket (reloginShared, rcon.go).
-//   - On success, reset the failure counter and hand the list to the tracker
-//     (playersPolledTracker), the SteamID search (auto mode) and the flows
-//     (playersPolled, which starts player-join flows).
-//   - Read the ban list after an RCON login and every banSyncEvery.
-func startBackgroundSync(interval time.Duration) {
+// startDatabaseSync keeps the database in step with the game server without
+// any web page open: it starts the chat recorder and the player tracker
+// (players.go), which both read the master console log, and loads when the
+// next timed ban runs out. The heartbeat (rcon.go) does the polling.
+func startDatabaseSync() {
 	startChatRecorder()
 	startPlayerTracker()
 	refreshBanExpiry()
-	pollInterval = interval
-	rconNextPoll.Store(time.Now().Add(interval).UnixMilli())
-	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		fails := 0
-		var lastBanSync time.Time
-		for tick := range t.C {
-			rconNextPoll.Store(tick.Add(interval).UnixMilli())
-			expireDueBans(time.Now())
-			sentAt := time.Now()
-			out, acked, err := runShared("players", 3*time.Second, false, "")
-			rconPolled.Store(true)
-			if err != nil || !acked {
-				fails++
-				rconFails.Store(int32(fails))
-				// Server probably down: close open sessions once so
-				// playtime doesn't keep accruing while it's offline.
-				if fails == 3 {
-					serverLost()  // players.go
-					playersLost() // greet everyone again when they reconnect (flows.go)
-				}
-				// From the 3rd miss on, log in again on the same socket each
-				// round: the server may have restarted and forgotten us. This
-				// is the only place that decides the server isn't answering.
-				if fails >= 3 {
-					reloginShared()
-				}
-				continue
-			}
-			fails = 0
-			rconFails.Store(0)
-			resetReloginPace() // rcon.go
-			players := parsePlayers(out)
-			playersPolledTracker(players, sentAt) // sessions (players.go)
-			steamPlayersSeen(players)             // STEAM_SEARCH_MODE=auto: find new players' SteamIDs (steam.go)
-			playersPolled(players)                // keeps the list for flows and chat commands, starts join flows (flows.go)
-			if bansStale.Swap(false) || time.Since(lastBanSync) >= banSyncEvery {
-				lastBanSync = time.Now()
-				if err := syncBanList(); err != nil {
-					log.Printf("poller: bans: %v", err)
-					lastBanSync = time.Now().Add(time.Minute - banSyncEvery) // try again in a minute
-				}
-			}
-		}
-	}()
 }

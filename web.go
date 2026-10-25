@@ -165,10 +165,10 @@ func fail(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"ok": false, "error": msg})
 }
 
-// rconStatus is the game server connection as the 5-second poller last saw
-// it: connected, retrying (one or two failed checks, or none done yet), or
-// unavailable (3 or more failed checks in a row, the point where the poller
-// treats the server as down).
+// rconStatus is the game server connection as the heartbeat (rcon.go) last
+// saw it: connected, retrying (one or two failed checks, or none done yet),
+// or unavailable (3 or more failed checks in a row, the point where the
+// heartbeat treats the server as down).
 func rconStatus() string {
 	switch f := rconFails.Load(); {
 	case !rconPolled.Load():
@@ -181,7 +181,7 @@ func rconStatus() string {
 	return "retrying"
 }
 
-// rconNextCheck is when ReCON next tries the game server: the poller's next
+// rconNextCheck is when ReCON next tries the game server: the heartbeat's next
 // check, or, while it waits between logins (connectShared), the first check
 // after that wait.
 func rconNextCheck() time.Time {
@@ -280,12 +280,11 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	if body.Reason == "" {
 		body.Reason = "Server restarting"
 	}
-	rep, err := kickAll(sharedRunner{}, body.Reason)
+	rep, err := kickAllShared(body.Reason, "web")
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
 	}
-	log.Printf("rcon[web] > %s", rep.summary(body.Reason))
 	writeJSON(w, 200, map[string]any{"ok": true, "result": rep})
 }
 
@@ -704,18 +703,22 @@ func handleChatSend(w http.ResponseWriter, r *http.Request) {
 // RCON console (the Players page's Console dialog)
 // ---------------------------------------------------------------------------
 //
-// GET /api/console?after=N returns the server messages since N (serverEvents,
-// rcon.go), plus the commands typed in the console and their replies. POST
-// /api/console runs any RCON command and puts it and its reply in the same
-// log. Commands sent by flows and the other pages are left out (the Flows
-// page and the container log show those).
+// GET /api/console?after=N returns the master console log since N
+// (serverEvents, rcon.go): every server message, and every command ReCON
+// sent for the pages, the console, flows and chat commands, with its reply.
+// Polls and heartbeats aren't in it, nor commands from the CLI (its own
+// session). POST /api/console runs any RCON command.
 
-// handleConsoleEvents serves GET /api/console?after=N: every kept event
-// newer than N, plus "last" to send as after= next time. The page polls it
-// while the console is open; after=0 (or none) returns the whole buffer.
+// consoleShownLines is the most lines the console page keeps, so it is
+// also the most one request returns (the newest ones).
+const consoleShownLines = 1000
+
+// handleConsoleEvents serves GET /api/console?after=N: the events newer than
+// N (at most consoleShownLines, the newest), plus "last" to send as after=
+// next time. The page polls it while the console is open.
 func handleConsoleEvents(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-	events, last := serverEvents.afterWithLast(after)
+	events, last := serverEvents.afterWithLast(after, consoleShownLines)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "events": events, "last": last})
 }
 
@@ -724,8 +727,8 @@ func handleConsoleEvents(w http.ResponseWriter, r *http.Request) {
 var consoleSayRe = regexp.MustCompile(`(?i)^say\s+(\d+)\s+(.+)$`)
 
 // handleConsoleCommand serves POST /api/console {"command": "..."}: runs one
-// command exactly as typed and writes the outcome into the console log.
-// runShared already logged the command itself (as consoleSource). kickall is
+// command exactly as typed; runShared puts it and its outcome in the
+// console log (as consoleSource). kickall is
 // ReCON's own command, as in the CLI console; everything else goes to
 // BattlEye.
 func handleConsoleCommand(w http.ResponseWriter, r *http.Request) {
@@ -741,38 +744,21 @@ func handleConsoleCommand(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "no command")
 		return
 	}
-	note := func(kind, text string) {
-		serverEvents.publish(ServerEvent{Time: time.Now(), Kind: kind, Text: text, PlayerID: -1})
-	}
-
 	if low := strings.ToLower(cmd); low == "kickall" || strings.HasPrefix(low, "kickall ") {
 		reason := strings.TrimSpace(cmd[len("kickall"):])
-		if reason == "" {
-			reason = "Server restarting"
-		}
-		note(eventSent, "> "+cmd)
-		rep, err := kickAll(sharedRunner{}, reason)
+		rep, err := kickAllShared(reason, consoleSource)
 		if err != nil {
-			note(eventError, "kickall failed: "+err.Error())
 			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		log.Printf("rcon[%s] > %s", consoleSource, rep.summary(reason))
-		note(eventReply, rep.summary(reason))
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": true, "output": rep.summary(reason)})
 		return
 	}
 
 	out, acked, err := runShared(cmd, 3*time.Second, false, consoleSource)
-	switch {
-	case err != nil:
-		note(eventError, "error: "+err.Error())
+	if err != nil {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
-	case !acked:
-		note(eventError, "(no acknowledgement from server)")
-	case strings.TrimSpace(out) != "":
-		note(eventReply, strings.TrimRight(out, "\r\n "))
 	}
 	if acked {
 		recordConsoleSay(cmd)
@@ -1253,12 +1239,11 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": acked, "message": "#shutdown sent"})
 	case "kickall":
-		rep, err := kickAll(sharedRunner{}, "Server restarting")
+		rep, err := kickAllShared("Server restarting", "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		log.Printf("rcon[web] > %s", rep.summary("Server restarting"))
 		msg := fmt.Sprintf("Kicked %d player(s)", len(rep.Order))
 		if len(rep.Remaining) > 0 {
 			msg += fmt.Sprintf(", %d still connected", len(rep.Remaining))

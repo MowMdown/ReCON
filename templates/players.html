@@ -608,7 +608,9 @@ async function pollConsole() {
 				let empty = log.querySelector('.empty');
 				if (empty) empty.remove();
 				for (let ev of d.events) {
-					log.appendChild(logLine(ev.time, ev.kind, ev.text));
+					// Commands not typed here say who sent them: web, a flow, chat, bans.
+					let text = ev.kind === 'sent' && ev.source && ev.source !== 'console' ? ev.text + '   (' + ev.source + ')' : ev.text;
+					log.appendChild(logLine(ev.time, ev.kind, text));
 				}
 				while (log.childElementCount > 1000) log.firstElementChild.remove();
 			} else if (!log.childElementCount) {
