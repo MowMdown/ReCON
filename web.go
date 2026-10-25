@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -802,15 +803,15 @@ func recordConsoleSay(cmd string) {
 
 // handleRconSettingsGet serves GET /api/rcon-settings: the saved overrides
 // ("settings", empty fields use the defaults), the defaults from
-// docker-compose.yaml ("defaults"; the password itself is never sent, only
-// whether one is set) and the endpoint ReCON uses now ("address").
+// docker-compose.yaml ("defaults", password included: ReCON runs on the game
+// host behind its firewall) and the endpoint ReCON uses now ("address").
 func handleRconSettingsGet(w http.ResponseWriter, r *http.Request) {
 	d := rconDefaults()
 	address, _ := currentTarget()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"settings": savedRconSettings(),
-		"defaults": map[string]any{"host": d.Host, "port": d.Port, "passwordSet": d.Password != ""},
+		"defaults": map[string]any{"host": d.Host, "port": d.Port, "password": d.Password},
 		"address":  address,
 		"rcon":     rconStatus(),
 	})
@@ -835,9 +836,17 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 	address, password := req.effective()
 	if err := reconnectShared(address, password); err != nil {
 		log.Printf("rcon: RCON Settings: connecting to %s failed: %v", address, err)
-		fail(w, http.StatusBadGateway, "Could not log in to "+address+": "+err.Error()+". Nothing was changed.")
+		why := err.Error()
+		if errors.Is(err, syscall.ECONNREFUSED) {
+			why = "nothing is listening on that port (is the server running, and is the port right?)"
+		}
+		fail(w, http.StatusBadGateway, "Could not log in to "+address+": "+why+". Nothing was changed.")
 		return
 	}
+	// The server just answered the login: show it as connected now rather
+	// than after the poller's next check.
+	rconPolled.Store(true)
+	rconFails.Store(0)
 	b, _ := json.Marshal(req)
 	if err := globalDatabase.SaveSetting(rconSettingsKey, string(b)); err != nil {
 		log.Printf("rcon: saving RCON settings: %v", err)

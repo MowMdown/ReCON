@@ -796,14 +796,11 @@ func TestRconSettingsPage(t *testing.T) {
 		return rec.Code, out
 	}
 
-	// GET shows the defaults, but never the default password.
+	// GET shows the defaults, the password included (shown as placeholder text).
 	code, got := call(http.MethodGet, "")
 	d, _ := got["defaults"].(map[string]any)
-	if code != 200 || d["host"] != "10.9.9.9" || d["port"] != "2306" || d["passwordSet"] != true {
+	if code != 200 || d["host"] != "10.9.9.9" || d["port"] != "2306" || d["password"] != "compose-password" {
 		t.Fatalf("GET = %d %v", code, got)
-	}
-	if strings.Contains(fmt.Sprint(got), "compose-password") {
-		t.Fatal("GET sent the default password to the page")
 	}
 
 	// Bad input and a wrong password change nothing.
@@ -1033,5 +1030,29 @@ func TestFlowAPIUsesMissingIDForNew(t *testing.T) {
 	}
 	if code, _ := post("/api/flows", `{"id": -1, "name": "x", `+steps+`}`); code != http.StatusBadRequest {
 		t.Fatalf("negative id: %d", code)
+	}
+}
+
+// TestConnectTriesOnce checks that RCON Settings' Connect sends one login per
+// press, even to a server that doesn't answer, and changes nothing.
+func TestConnectTriesOnce(t *testing.T) {
+	resetShared(t)
+	oldWait := reloginReplyWait
+	t.Cleanup(func() { reloginReplyWait = oldWait })
+	reloginReplyWait = 50 * time.Millisecond
+	f := newFakeBE(t)
+	f.set(true)
+	setTarget("127.0.0.1:1", "pw")
+	for press := 1; press <= 3; press++ {
+		if err := reconnectShared(f.conn.LocalAddr().String(), "pw"); err == nil {
+			t.Fatal("connected to a server that doesn't answer")
+		}
+		time.Sleep(20 * time.Millisecond)
+		if logins, _ := f.counts(); logins != press {
+			t.Fatalf("after %d press(es): %d login packets, want %d", press, logins, press)
+		}
+	}
+	if addr, _ := currentTarget(); addr != "127.0.0.1:1" {
+		t.Fatalf("target changed to %s", addr)
 	}
 }
