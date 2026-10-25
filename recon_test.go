@@ -1056,3 +1056,90 @@ func TestConnectTriesOnce(t *testing.T) {
 		t.Fatalf("target changed to %s", addr)
 	}
 }
+
+// pingKickFlow is the example: for each player, if ping is over 500, kick them.
+func pingKickFlow() []Step {
+	return []Step{{Type: "forEach", Steps: []Step{{Type: "if", Branches: []Branch{{
+		Subject: "player_ping", Op: "gt", Value: "500",
+		Steps: []Step{{Type: "kick", Who: "player", Reason: "Ping too high ({player_ping})"}},
+	}}}}}}
+}
+
+func TestForEachValidation(t *testing.T) {
+	kick := []Step{{Type: "kick", Who: "player", Reason: "x"}}
+	if err := checkSteps(triggerSchedule, kick, nil); err == nil {
+		t.Error("Kick outside a For each player was accepted in a Schedule flow")
+	}
+	if err := checkSteps(triggerSchedule, pingKickFlow(), nil); err != nil {
+		t.Errorf("the ping-kick example: %v", err)
+	}
+	if err := checkSteps(triggerManual, []Step{{Type: "forEach", Steps: []Step{{Type: "message", To: "player", Text: "hi {player_name}"}}}}, nil); err != nil {
+		t.Errorf("a message to each player: %v", err)
+	}
+	nested := []Step{{Type: "forEach", Steps: []Step{{Type: "forEach", Steps: kick}}}}
+	if err := checkSteps(triggerSchedule, nested, nil); err == nil || !strings.Contains(err.Error(), "inside another") {
+		t.Errorf("a loop inside a loop: %v", err)
+	}
+	chat := []Step{{Type: "forEach", Steps: []Step{{Type: "message", To: "all", Text: "{message}"}}}}
+	if err := checkSteps(triggerChat, chat, nil); err == nil {
+		t.Error("{message} inside a For each player was accepted (it isn't the looped player's)")
+	}
+	afterLoop := append(pingKickFlow(), kick...)
+	if err := checkSteps(triggerSchedule, afterLoop, nil); err == nil {
+		t.Error("a Kick after the loop was accepted")
+	}
+	if err := checkSteps(triggerSchedule, []Step{{Type: "lock"}}, []Step{{Type: "forEach"}}); err == nil {
+		t.Error("For each player was accepted in When stopped")
+	}
+	if n := countSteps(pingKickFlow()); n != 3 {
+		t.Errorf("countSteps = %d, want 3", n)
+	}
+}
+
+func TestForEachKicksOnlyMatchingPlayers(t *testing.T) {
+	testDB(t)
+	var sent []string
+	oldSend := sendCommand
+	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
+	t.Cleanup(func() { sendCommand = oldSend })
+	latest.Lock()
+	oldPlayers := latest.players
+	latest.players = []Player{
+		{ID: 4, GUID: testGUID, Name: "Laggy", Ping: 820},
+		{ID: 1, GUID: testGUID2, Name: "Fine", Ping: 40},
+		{ID: 7, GUID: "", Name: "Loading (Lobby)", Ping: 999}, // not verified yet: skipped
+		{ID: 2, GUID: "0000000000000000000000000000beef", Name: "Edge", Ping: 500},
+		{ID: 9, GUID: "0000000000000000000000000000cafe", Name: "Awful", Ping: 1500},
+	}
+	latest.Unlock()
+	t.Cleanup(func() { latest.Lock(); latest.players = oldPlayers; latest.Unlock() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &flowRun{name: "ping check", ctx: ctx, cancel: cancel}
+	x := &job{run: run, ctx: ctx}
+	if !x.exec(pingKickFlow()) {
+		t.Fatal("the run ended early")
+	}
+	want := []string{"kick 4 Ping too high (820)", "kick 9 Ping too high (1500)"}
+	if fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Fatalf("sent %q, want %q", sent, want)
+	}
+	logText := strings.Join(run.log, "\n")
+	if !strings.Contains(logText, "For each player: 4 online") || !strings.Contains(logText, "Laggy (#4): If {player_ping} > 500") {
+		t.Fatalf("run log:\n%s", logText)
+	}
+	if strings.Contains(logText, "Fine") {
+		t.Fatalf("a player who didn't match was logged:\n%s", logText)
+	}
+
+	// Stop flow inside the loop ends the whole run.
+	sent = nil
+	stopFirst := []Step{{Type: "forEach", Steps: []Step{{Type: "message", To: "player", Text: "hi"}, {Type: "stop"}}}}
+	if x.exec(stopFirst) {
+		t.Fatal("Stop flow inside the loop didn't end the run")
+	}
+	if len(sent) != 1 || sent[0] != "say 1 hi" {
+		t.Fatalf("sent %q; the loop should stop after the first player (#1)", sent)
+	}
+}

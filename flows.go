@@ -123,6 +123,8 @@ func fmtDur(secs int) string {
 //	command     Cmd: any RCON command
 //	stop        ends the run
 //	if          Branches (the If, then any Else ifs) and Else
+//	forEach     Steps, run once for every player online, with that player
+//	            as "the player" (so Kick, Ban and {player_...} work inside it)
 type Step struct {
 	Type     string   `json:"type"`
 	To       string   `json:"to,omitempty"`
@@ -133,7 +135,8 @@ type Step struct {
 	Reason   string   `json:"reason,omitempty"`
 	Cmd      string   `json:"cmd,omitempty"`
 	Branches []Branch `json:"branches,omitempty"`
-	Else     *[]Step  `json:"else,omitempty"` // nil: no Else
+	Else     *[]Step  `json:"else,omitempty"`  // nil: no Else
+	Steps    []Step   `json:"steps,omitempty"` // forEach: the steps run for each player
 }
 
 // Branch is the If or one Else if: a condition and the steps it runs. Every
@@ -145,8 +148,15 @@ type Branch struct {
 	Steps   []Step `json:"steps"`
 }
 
-// branchLists is an If's step lists in order: each branch, then the Else.
+// isBlock reports whether a step holds other steps (If, For each player).
+func isBlock(s *Step) bool { return s.Type == "if" || s.Type == "forEach" }
+
+// branchLists is a block's step lists in order: an If's branches, then its
+// Else; a For each player's one list.
 func branchLists(s *Step) [][]Step {
+	if s.Type == "forEach" {
+		return [][]Step{s.Steps}
+	}
 	out := make([][]Step, 0, len(s.Branches)+1)
 	for _, b := range s.Branches {
 		out = append(out, b.Steps)
@@ -178,16 +188,19 @@ func fixSteps(list []Step) []Step {
 			e := fixSteps(*s.Else)
 			s.Else = &e
 		}
+		if s.Type == "forEach" {
+			s.Steps = fixSteps(s.Steps)
+		}
 	}
 	return list
 }
 
-// countSteps counts every step, inside Ifs too.
+// countSteps counts every step, inside Ifs and For each player too.
 func countSteps(list []Step) int {
 	n := 0
 	for i := range list {
 		n++
-		if list[i].Type == "if" {
+		if isBlock(&list[i]) {
 			for _, l := range branchLists(&list[i]) {
 				n += countSteps(l)
 			}
@@ -196,7 +209,8 @@ func countSteps(list []Step) int {
 	return n
 }
 
-// runLength is how long the waits take, counting the longest branch of each If.
+// runLength is how long the waits take, counting the longest branch of each
+// If, and a For each player's waits once (they repeat for every player).
 func runLength(list []Step) int {
 	total := 0
 	for i := range list {
@@ -213,6 +227,8 @@ func runLength(list []Step) int {
 				}
 			}
 			total += longest
+		case "forEach":
+			total += runLength(s.Steps)
 		}
 	}
 	return total
@@ -456,7 +472,7 @@ const (
 
 var stepTypes = map[string]bool{"message": true, "playerList": true, "wait": true, "lock": true,
 	"unlock": true, "shutdown": true, "kick": true, "ban": true, "kickAll": true, "command": true,
-	"stop": true, "if": true}
+	"stop": true, "if": true, "forEach": true}
 
 // stopTypes are the steps allowed in "When stopped": they go out once, with no player.
 var stopTypes = map[string]bool{"message": true, "lock": true, "unlock": true, "kickAll": true, "command": true}
@@ -474,6 +490,7 @@ type stepChecker struct {
 	has    map[string]bool
 	n      int    // step number, counted as the page numbers them
 	onStop bool   // checking "When stopped"
+	inLoop bool   // inside a For each player
 	where  string // "Step" or "When stopped, step"
 }
 
@@ -547,6 +564,11 @@ func (c *stepChecker) check(list []Step, depth int) error {
 				return err
 			}
 			continue // the branches checked their own steps
+		case "forEach":
+			if err := c.checkForEach(s, depth); err != nil {
+				return err
+			}
+			continue
 		}
 		for _, t := range []string{s.Text, s.Reason, s.Cmd} {
 			if err := c.tokensOK(t); err != nil {
@@ -555,6 +577,20 @@ func (c *stepChecker) check(list []Step, depth int) error {
 		}
 	}
 	return nil
+}
+
+// checkForEach checks a For each player's steps with a player available
+// (each player online in turn) and no chat message (it isn't theirs).
+func (c *stepChecker) checkForEach(s *Step, depth int) error {
+	if c.inLoop {
+		return c.fail("a For each player can't go inside another one")
+	}
+	outer := c.has
+	c.has = map[string]bool{needNothing: true, needPlayer: true, needChat: false}
+	c.inLoop = true
+	err := c.check(s.Steps, depth+1)
+	c.has, c.inLoop = outer, false
+	return err
 }
 
 func (c *stepChecker) checkIf(s *Step, depth int) error {
@@ -645,7 +681,11 @@ type flowPlayer struct {
 type job struct {
 	run *flowRun
 	ctx context.Context
-	p   *flowPlayer // nil for schedule and manual runs
+	p   *flowPlayer // nil for schedule and manual runs; each player in turn inside a For each player
+	// inLoop: running a For each player's steps. Conditions are then only
+	// logged when they match (with the player's name), so a check of 60
+	// players doesn't fill the run log with "no".
+	inLoop bool
 }
 
 // sendCommand sends one flow command. Tests replace it.
@@ -818,6 +858,10 @@ func (x *job) exec(list []Step) bool {
 		case "stop":
 			x.run.logf("Stop flow step: the run ends here")
 			return false
+		case "forEach":
+			if !x.forEach(s.Steps) {
+				return false
+			}
 		case "if":
 			ran := false
 			for k, b := range s.Branches {
@@ -827,7 +871,11 @@ func (x *job) exec(list []Step) bool {
 				if k > 0 {
 					word = "Else if "
 				}
-				x.run.logf("%s%s: %s", word, describeCond(b), map[bool]string{true: "yes", false: "no"}[ok])
+				if !x.inLoop {
+					x.run.logf("%s%s: %s", word, describeCond(b), map[bool]string{true: "yes", false: "no"}[ok])
+				} else if ok {
+					x.run.logf("%s (#%d): %s%s", bareName(x.p.Name), x.p.ID, word, describeCond(b))
+				}
 				if ok {
 					if !x.exec(b.Steps) {
 						return false
@@ -837,11 +885,45 @@ func (x *job) exec(list []Step) bool {
 				}
 			}
 			if !ran && s.Else != nil {
-				x.run.logf("Else")
+				if x.inLoop {
+					x.run.logf("%s (#%d): Else", bareName(x.p.Name), x.p.ID)
+				} else {
+					x.run.logf("Else")
+				}
 				if !x.exec(*s.Else) {
 					return false
 				}
 			}
+		}
+	}
+	return true
+}
+
+// forEach runs a For each player's steps once for every player online,
+// in player-number order, with that player as "the player". The list is
+// the 5-second player check's latest, taken when the step starts; players
+// BattlEye hasn't verified yet (no GUID) are skipped. It returns false when
+// the run must end (Stop pressed, or a Stop flow step ran).
+func (x *job) forEach(steps []Step) bool {
+	players := onlineNow()
+	sort.Slice(players, func(a, b int) bool { return players[a].ID < players[b].ID })
+	n := 0
+	for _, p := range players {
+		if p.GUID != "" {
+			n++
+		}
+	}
+	x.run.logf("For each player: %d online", n)
+	for _, p := range players {
+		if p.GUID == "" {
+			continue
+		}
+		if x.ctx.Err() != nil {
+			return false
+		}
+		each := &job{run: x.run, ctx: x.ctx, p: &flowPlayer{Player: p, role: playerRole(p.GUID)}, inLoop: true}
+		if !each.exec(steps) {
+			return false
 		}
 	}
 	return true
