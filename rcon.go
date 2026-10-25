@@ -837,6 +837,13 @@ func (h *eventHub) subscribe(buffer int) (<-chan ServerEvent, func()) {
 	}
 }
 
+// lastSeq is the Seq of the newest published event (0 before any).
+func (h *eventHub) lastSeq() int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.seq
+}
+
 // recentEvents returns a copy of the kept events, oldest first.
 func (h *eventHub) recentEvents() []ServerEvent {
 	return h.after(0)

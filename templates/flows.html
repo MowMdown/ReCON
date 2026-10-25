@@ -362,6 +362,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td>Kick / Ban</td><td>Kicks or bans (by GUID) the Player</td></tr>
 					<tr><td>Kick everyone</td><td>Kicks every player online</td></tr>
 					<tr><td>If</td><td>Runs its steps only when its condition is true (see <i>If / Else</i>)</td></tr>
+					<tr><td>For each</td><td>Runs the steps inside it once per player online, or per new chat message, with that player as the Player (see <i>For each</i>)</td></tr>
 					<tr><td>Stop flow</td><td>Ends the run there</td></tr>
 					<tr><td>RCON command</td><td>Any command, as typed</td></tr>
 				</tbody>
@@ -386,6 +387,14 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<h3>If, Else if, Else</h3>
 			<p>An If compares one thing, such as <code>{player_ping}</code>, and runs its steps when the comparison is true. <b>+ Else if</b> adds more comparisons of the same thing, checked top to bottom: the first one that is true runs, and the rest are skipped. <b>+ Else</b> runs when none are true. Each If has its own End if, so they can't come apart, and Ifs can go inside other Ifs.</p>
 			<p>Reorder Else ifs with their arrows; moving one above the first makes it the If. Removing an Else if or the Else keeps its steps: they move below the End if.</p>
+			<h3>For each</h3>
+			<p><b>For each</b> runs the steps inside it (down to its End for each) once per item, with that item's player as the Player, so Kick, Ban, a Message to the Player, the player placeholders and If comparisons work inside it in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies; it acts only when the flow runs, on what happened since the flow's last run. Pick what it goes through:</p>
+			<ul>
+				<li><b>player</b>: every player online (the latest 5-second player check's), one after another. <code>{message}</code> is that player's latest chat line since this flow last ran (empty if they haven't chatted since).</li>
+				<li><b>message</b>: every chat line players online sent since this flow last ran, oldest first, as the player who sent it. <code>{message}</code> is the line. A flow every minute sees each line once.</li>
+			</ul>
+			<p>Players BattlEye hasn't verified yet are left out. Stop flow inside it ends the whole run. A For each can't go inside another one. The run log lists each player a condition matched, not every one checked.</p>
+			<p>Examples for a Schedule flow every minute (<code>* * * * *</code>): <b>For each</b> player, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. Or <b>For each</b> message, <b>If</b> <code>{message}</code> contains <code>noob</code>, <b>Message</b> the Player <i>Please keep chat friendly</i>. In a flow without a player of its own, Add step puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so three clicks build either one.</p>
 			<h3>What you can compare</h3>
 			<table>
 				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
@@ -740,6 +749,7 @@ function importStepCount(list) {
 			(s.branches || []).forEach(function(b) { n += importStepCount(b && b.steps); });
 			n += importStepCount(s.else);
 		}
+		if (s && s.type === 'forEach') n += importStepCount(s.steps);
 	});
 	return n;
 }
@@ -910,7 +920,7 @@ const TOKENS = [
 	{ tok: '{players_online}', need: '', title: 'How many players are online (works in every flow)' }
 ];
 const NEED_TEXT = {
-	player: 'needs a player: use the On join or Player message trigger',
+	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
 	chat: 'needs the Player message trigger'
 };
 // Kinds: word = the chat message, matched by words; text = exact, wildcard
@@ -990,6 +1000,8 @@ const STEPS = {
 		parts: ['reason', { k: 'reason', kind: 'text', ph: 'Server restart' }], def: { reason: 'Server restart' } },
 	if:         { label: 'If', cat: 'logic', group: 'Logic', desc: 'Run steps only when… (comes with its End if)',
 		parts: [{ k: 'subject', kind: 'select', opts: 'subjects' }, { k: 'op', kind: 'select', opts: 'ops' }, { k: 'value', kind: 'val' }], def: { subject: 'player_ping', op: 'ge', value: '500' } },
+	forEach:    { label: 'For each', cat: 'logic', group: 'Logic', desc: 'Run steps once per player online, or per new chat message (comes with its End for each)',
+		parts: [{ k: 'of', kind: 'select', opts: [['player', 'player'], ['message', 'message']] }], def: { of: 'player' } },
 	stop:       { label: 'Stop flow', cat: 'logic', group: 'Logic', desc: 'End the run here', parts: ['end the run here'], def: {} },
 	command:    { label: 'RCON command', cat: 'adv', group: 'Advanced', desc: 'Any command, placeholders allowed',
 		parts: [{ k: 'cmd', kind: 'text', ph: 'kick {player_id} Example', mono: true }], def: { cmd: '' } }
@@ -1011,17 +1023,27 @@ function el(tag, attrs, ...kids) {
 	for (const c of kids.flat(Infinity)) if (c != null) n.append(c);
 	return n;
 }
-function ctx(f) {
+// ctx is what the trigger provides. Inside a For each there is always a
+// player (each one in turn) and a {message}: the chat line (For each
+// message) or that player's latest one this session (For each player).
+function ctx(f, inLoop) {
 	const t = f.trigger.type;
+	if (inLoop) return { '': true, player: true, chat: true };
 	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat' };
 }
 const secsOf = (v) => parseDur(v) || 0;
 // An If: { type: 'if', branches: [{ subject, op, value, steps }, ...], else: [steps] | null }.
 // branches[0] is the If, the rest are Else ifs (checked in order), then the Else.
-const lists = (s) => s.branches.map((b) => b.steps).concat(s.else ? [s.else] : []);
+// A For each: { type: 'forEach', of: 'player' | 'message', steps: [...] }, run once
+// per player online, or per chat line players online sent that the flow hasn't
+// handled yet.
+// Both are blocks: steps that hold other steps.
+const isBlock = (s) => s.type === 'if' || s.type === 'forEach';
+const lists = (s) => s.type === 'forEach' ? [s.steps] : s.branches.map((b) => b.steps).concat(s.else ? [s.else] : []);
+const hasLoop = (list) => list.some((s) => s.type === 'forEach' || (isBlock(s) && lists(s).some(hasLoop)));
 function countSteps(list) {
 	let n = 0;
-	for (const s of list) { n++; if (s.type === 'if') for (const l of lists(s)) n += countSteps(l); }
+	for (const s of list) { n++; if (isBlock(s)) for (const l of lists(s)) n += countSteps(l); }
 	return n;
 }
 function fmtSecs(secs) {
@@ -1039,6 +1061,7 @@ function runLength(list) {
 	for (const s of list) {
 		if (s.type === 'wait') len += secsOf(s.time);
 		else if (s.type === 'if') len += Math.max(0, ...lists(s).map(runLength));
+		else if (s.type === 'forEach') len += runLength(s.steps); // once; it repeats per player or message
 	}
 	return len;
 }
@@ -1075,20 +1098,23 @@ function stepErr(c, s) {
 	if (s.type === 'if' && subjectOf(s)[2] === 'num' && !/^\d+$/.test(String(s.value).trim())) return 'Enter a whole number';
 	return '';
 }
-// Step numbers in the order the rows are shown (Else and End if rows have none).
-function numbering(list, map = new Map()) {
+// Step numbers in the order the rows are shown (Else and End rows have none),
+// and which steps are inside a For each.
+function numbering(list, map = new Map(), loop = new Set(), inLoop = false) {
 	for (const s of list) {
 		map.set(s, map.size + 1);
-		if (s.type === 'if') for (const l of lists(s)) numbering(l, map);
+		if (inLoop) loop.add(s);
+		if (isBlock(s)) for (const l of lists(s)) numbering(l, map, loop, inLoop || s.type === 'forEach');
 	}
 	return map;
 }
 function validate(f, list) {
-	const c = ctx(f);
-	const nums = numbering(list);
+	const loop = new Set();
+	const nums = numbering(list, new Map(), loop);
 	const errs = new Map();
 	let first = null;
 	for (const [s, n] of nums) {
+		const c = ctx(f, loop.has(s));
 		if (s.type === 'if') {
 			for (const b of s.branches) {
 				const e = condErr(c, b);
@@ -1096,10 +1122,10 @@ function validate(f, list) {
 			}
 			continue;
 		}
-		const e = stepErr(c, s);
+		const e = s.type === 'forEach' && loop.has(s) ? 'A For each can\'t go inside another one' : stepErr(c, s);
 		if (e) { errs.set(s, e); if (first == null) first = n; }
 	}
-	return { errs, first, nums };
+	return { errs, first, nums, loop };
 }
 
 function sendsText(s) {
@@ -1118,6 +1144,12 @@ function sendsText(s) {
 	}
 	return '';
 }
+// forEachText explains a For each under its row.
+function forEachText(s) {
+	return s.of === 'message'
+		? 'once for each chat line a player online sent since this flow last ran, as the Player who sent it, with {message} the line'
+		: 'once for each player online, as the Player, with {message} their latest chat line since this flow last ran';
+}
 
 function describeIf(s) {
 	const sub = subjectOf(s);
@@ -1134,7 +1166,7 @@ let rowRefs = { steps: [], onStop: [] };
 let flatRows = { steps: [], onStop: [] };
 let jointRefs = { steps: [], onStop: [] };
 // Else and End if rows repeat their If's condition, e.g. end if {players_online} > 0
-const jointText = (s, isElse) => isElse ? '' : describeIf(s.branches[0]);
+const jointText = (s, isElse) => isElse || s.type === 'forEach' ? '' : describeIf(s.branches[0]);
 function jointLabel(key, s, isElse) {
 	const span = el('span', { class: 'w', style: 'font-family:var(--mono);font-size:12.5px', text: jointText(s, isElse) });
 	jointRefs[key].push({ span, s, isElse });
@@ -1146,17 +1178,20 @@ const ifId = (s) => { if (!ifIds.has(s)) ifIds.set(s, ++ifSeq); return ifIds.get
 
 // One row per step, plus an Else row and an End if row drawn for each If.
 // Every row knows the list and index of the step it belongs to.
-function flatten(list, depth = 0, out = []) {
+function flatten(list, depth = 0, out = [], inLoop = false) {
 	list.forEach((s, i) => {
 		const start = out.length;
-		out.push({ kind: 'step', s, list, i, depth });
+		out.push({ kind: 'step', s, list, i, depth, inLoop });
 		if (s.type === 'if') {
 			s.branches.forEach((b, k) => {
-				if (k) out.push({ kind: 'elif', s, b, k, list, i, depth });
-				flatten(b.steps, depth + 1, out);
+				if (k) out.push({ kind: 'elif', s, b, k, list, i, depth, inLoop });
+				flatten(b.steps, depth + 1, out, inLoop);
 			});
-			if (s.else) { out.push({ kind: 'else', s, list, i, depth }); flatten(s.else, depth + 1, out); }
-			out.push({ kind: 'end', s, list, i, depth });
+			if (s.else) { out.push({ kind: 'else', s, list, i, depth, inLoop }); flatten(s.else, depth + 1, out, inLoop); }
+			out.push({ kind: 'end', s, list, i, depth, inLoop });
+		} else if (s.type === 'forEach') {
+			flatten(s.steps, depth + 1, out, true);
+			out.push({ kind: 'end', s, list, i, depth, inLoop });
 		}
 		out[start].last = out.length - 1; // last row of this step's block
 	});
@@ -1165,7 +1200,7 @@ function flatten(list, depth = 0, out = []) {
 function findParent(root, target) {
 	for (let i = 0; i < root.length; i++) {
 		const s = root[i];
-		if (s.type !== 'if') continue;
+		if (!isBlock(s)) continue;
 		const ls = lists(s);
 		const idx = ls.indexOf(target);
 		if (idx >= 0) return { node: s, idx, ls, list: root, i };
@@ -1196,14 +1231,15 @@ function renderSteps(key) {
 			const def = STEPS[s.type];
 			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
 			const obj = s.type === 'if' ? s.branches[0] : s;
-			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key));
+			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
 			const atTop = r.list === list && r.i === 0;
 			const atBottom = r.list === list && r.i === list.length - 1;
-			const what = s.type === 'if' ? 'If block on step ' + n : 'step ' + n;
-			row = el('div', { class: 'step', 'data-r': ri, 'data-if': s.type === 'if' ? ifId(s) : null, style },
-				el('span', { class: 'grip', title: s.type === 'if' ? 'Drag to move the whole If block' : 'Drag to move', 'aria-hidden': 'true', text: '⋮⋮' }),
+			const blockName = s.type === 'if' ? 'If' : 'For each';
+			const what = isBlock(s) ? blockName + ' block on step ' + n : 'step ' + n;
+			row = el('div', { class: 'step', 'data-r': ri, 'data-if': isBlock(s) ? ifId(s) : null, style },
+				el('span', { class: 'grip', title: isBlock(s) ? 'Drag to move the whole ' + blockName + ' block' : 'Drag to move', 'aria-hidden': 'true', text: '⋮⋮' }),
 				el('span', { class: 'num', text: String(n) }),
 				el('div', { class: 'body' }, sentence, sends, err),
 				el('div', { class: 'tools' },
@@ -1211,8 +1247,8 @@ function renderSteps(key) {
 					s.type === 'if' && !s.else ? el('button', { type: 'button', class: 'addelse', title: 'Add an Else to this If', 'aria-label': 'Add Else to step ' + n, onclick: () => { s.else = []; changed(true); }, text: '+ Else' }) : null,
 					el('button', { type: 'button', title: 'Move up', 'aria-label': 'Move ' + what + ' up', disabled: atTop, onclick: () => moveStep(key, r.list, r.i, -1), text: '▲' }),
 					el('button', { type: 'button', title: 'Move down', 'aria-label': 'Move ' + what + ' down', disabled: atBottom, onclick: () => moveStep(key, r.list, r.i, 1), text: '▼' }),
-					el('button', { type: 'button', title: s.type === 'if' ? 'Duplicate the whole If block' : 'Duplicate', 'aria-label': 'Duplicate ' + what, onclick: () => { r.list.splice(r.i + 1, 0, clone(s)); changed(true); }, text: '⧉' }),
-					el('button', { type: 'button', title: s.type === 'if' ? 'Delete the If and every step inside it' : 'Delete', 'aria-label': 'Delete ' + what, onclick: () => { r.list.splice(r.i, 1); changed(true); }, text: '✕' })
+					el('button', { type: 'button', title: isBlock(s) ? 'Duplicate the whole ' + blockName + ' block' : 'Duplicate', 'aria-label': 'Duplicate ' + what, onclick: () => { r.list.splice(r.i + 1, 0, clone(s)); changed(true); }, text: '⧉' }),
+					el('button', { type: 'button', title: isBlock(s) ? 'Delete the ' + blockName + ' and every step inside it' : 'Delete', 'aria-label': 'Delete ' + what, onclick: () => { r.list.splice(r.i, 1); changed(true); }, text: '✕' })
 				)
 			);
 			rowRefs[key].push({ row, sends, err, s, ek: obj });
@@ -1222,7 +1258,7 @@ function renderSteps(key) {
 			// An Else if always compares the same thing as its If; only the operator and value change.
 			for (const p of STEPS.if.parts) sentence.append(p.k === 'subject'
 				? el('span', { class: 'w', title: 'Set by the If: change it there', style: 'color:var(--fg);font-family:var(--mono);font-size:12.5px;padding:0 4px', text: subjectOf(b)[1] })
-				: field(b, p, key));
+				: field(b, p, key, r.inLoop));
 			const err = el('div', { class: 'err' });
 			const what = 'Else if ' + k + ' of step ' + n;
 			row = el('div', { class: 'step joint branch', 'data-r': ri, 'data-if': ifId(s), style },
@@ -1243,7 +1279,7 @@ function renderSteps(key) {
 				el('span', { class: 'grip', 'aria-hidden': 'true' }),
 				el('span', { class: 'num' }),
 				el('div', { class: 'body' }, el('div', { class: 'sentence' },
-					el('span', { class: 'pill logic', text: isElse ? 'Else' : 'End if' }),
+					el('span', { class: 'pill logic', text: isElse ? 'Else' : s.type === 'forEach' ? 'End for each' : 'End if' }),
 					jointLabel(key, s, isElse))),
 				el('div', { class: 'tools' }, isElse ? el('button', {
 					type: 'button', title: 'Remove the Else (its steps move below the End if)', 'aria-label': 'Remove Else of step ' + n,
@@ -1256,12 +1292,14 @@ function renderSteps(key) {
 	updateDerivedRows(key, errs);
 }
 
-function field(s, p, key) {
+// field draws one input of a step. inLoop: the step is inside a For each
+// player, so "the player" (each one in turn) is available.
+function field(s, p, key, inLoop) {
 	if (p.kind === 'select') {
 		let opts = p.opts;
-		if (opts === 'subjects') { const c = ctx(ed); opts = SUBJECTS.filter((x) => c[x[3]] || x[0] === s.subject).map(([v, l]) => [v, l]); }
+		if (opts === 'subjects') { const c = ctx(ed, inLoop); opts = SUBJECTS.filter((x) => c[x[3]] || x[0] === s.subject).map(([v, l]) => [v, l]); }
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
-		if (opts === 'to') opts = toOpts(ed.trigger.type);
+		if (opts === 'to') opts = toOpts(inLoop ? 'join' : ed.trigger.type);
 		if (opts === 'who') opts = whoOpts();
 		if (key === 'onStop' && p.k === 'to') opts = [['all', 'Everyone']];
 		if (!opts.some(([v]) => v === String(s[p.k]))) s[p.k] = opts[0][0];
@@ -1304,7 +1342,8 @@ function updateDerivedRows(key, errs) {
 	for (const j of jointRefs[key]) j.span.textContent = jointText(j.s, j.isElse);
 	for (const r of rowRefs[key]) {
 		let t = r.s.type ? sendsText(r.s) : '';
-		if (r.s.type === 'wait') {
+		if (r.s.type === 'forEach') t = 'runs the steps inside ' + forEachText(r.s);
+		else if (r.s.type === 'wait') {
 			const secs = secsOf(r.s.time);
 			t = secs > 0 ? 'waits ' + secs + ' second' + (secs === 1 ? '' : 's') : '';
 		} else if (t) t = 'sends: ' + t;
@@ -1324,7 +1363,7 @@ function stepUp(root, list, i) {
 	if (i > 0) {
 		const prev = list[i - 1];
 		list.splice(i, 1);
-		if (prev.type === 'if') { const ls = lists(prev); ls[ls.length - 1].push(s); }
+		if (isBlock(prev)) { const ls = lists(prev); ls[ls.length - 1].push(s); }
 		else list.splice(i - 1, 0, s);
 		return true;
 	}
@@ -1340,7 +1379,7 @@ function stepDown(root, list, i) {
 	if (i < list.length - 1) {
 		const next = list[i + 1];
 		list.splice(i, 1);
-		if (next.type === 'if') next.branches[0].steps.unshift(s);
+		if (isBlock(next)) lists(next)[0].unshift(s);
 		else list.splice(i + 1, 0, s);
 		return true;
 	}
@@ -1377,12 +1416,14 @@ function moveBranch(key, s, k, dir) {
 function dropPos(r, above) {
 	if (r.kind === 'step') {
 		if (above) return { list: r.list, i: r.i };
-		return r.s.type === 'if' ? { list: r.s.branches[0].steps, i: 0 } : { list: r.list, i: r.i + 1 };
+		return isBlock(r.s) ? { list: lists(r.s)[0], i: 0 } : { list: r.list, i: r.i + 1 };
 	}
 	const ls = lists(r.s);
 	if (r.kind === 'elif') return above ? { list: ls[r.k - 1], i: ls[r.k - 1].length } : { list: r.b.steps, i: 0 };
-	const lastBranch = r.s.branches[r.s.branches.length - 1].steps;
-	if (r.kind === 'else') return above ? { list: lastBranch, i: lastBranch.length } : { list: r.s.else, i: 0 };
+	if (r.kind === 'else') {
+		const lastBranch = r.s.branches[r.s.branches.length - 1].steps;
+		return above ? { list: lastBranch, i: lastBranch.length } : { list: r.s.else, i: 0 };
+	}
 	const last = ls[ls.length - 1];
 	return above ? { list: last, i: last.length } : { list: r.list, i: r.i + 1 };
 }
@@ -1458,7 +1499,7 @@ function setupDrag(box) {
 // ---------------------------------------------------------------------------
 function whyDisabled(type, key) {
 	if (key === 'onStop') return STOP_TYPES.includes(type) ? '' : 'not for Stop';
-	if ((type === 'kick' || type === 'ban') && !ctx(ed).player) return 'needs On join or Player message';
+	if ((type === 'kick' || type === 'ban') && !ctx(ed).player && !hasLoop(ed.steps)) return 'needs a For each, or On join or Player message';
 	return '';
 }
 function openMenu(key) {
@@ -1496,6 +1537,7 @@ function sameSubject(first) {
 // Keep every Else if on its If's subject (after the If's subject changes).
 function syncIfs(list) {
 	for (const s of list) {
+		if (s.type === 'forEach') { syncIfs(s.steps); continue; }
 		if (s.type !== 'if') continue;
 		const first = s.branches[0];
 		s.branches.forEach((b, k) => {
@@ -1504,7 +1546,10 @@ function syncIfs(list) {
 		for (const l of lists(s)) syncIfs(l);
 	}
 }
-function newCond() {
+// newCond is a new If's first condition: on what the place it goes has
+// (loopOf: inside a For each of 'player' or 'message').
+function newCond(loopOf) {
+	if (loopOf) return Object.assign(defaultCond(loopOf === 'message' ? 'message' : 'player_ping'), { steps: [] });
 	const c = ctx(ed);
 	return Object.assign(defaultCond(c.chat ? 'message' : c.player ? 'player_ping' : 'players_online'), { steps: [] });
 }
@@ -1513,8 +1558,25 @@ function addStep(key, type) {
 	if ((type === 'message' || type === 'playerList') && key === 'steps') s.to = ctx(ed).player ? 'player' : 'all';
 	if (type === 'playerList' && ed.trigger.type === 'chat') s.to = 'player';
 
-	if (type === 'if') { delete s.subject; delete s.op; delete s.value; s.branches = [newCond()]; s.else = null; }
-	ed[key].push(s);
+	// In a flow without a player of its own, steps that work on "the player"
+	// go into the For each that ends the list: an If at the loop's
+	// level, a Kick, Ban or Message into the innermost block there (so For
+	// each player, If, Kick builds "kick each player the If matches").
+	const last = ed[key][ed[key].length - 1];
+	const intoLoop = key === 'steps' && !ctx(ed).player && last && last.type === 'forEach' &&
+		['kick', 'ban', 'if', 'message'].includes(type);
+	if (type === 'if') { delete s.subject; delete s.op; delete s.value; s.branches = [newCond(intoLoop ? last.of : null)]; s.else = null; }
+	if (type === 'forEach') s.steps = [];
+	if (intoLoop && type === 'message') s.to = 'player';
+	let into = ed[key];
+	if (intoLoop) {
+		into = last.steps;
+		while (type !== 'if' && into.length && isBlock(into[into.length - 1])) {
+			const ls = lists(into[into.length - 1]);
+			into = ls[ls.length - 1];
+		}
+	}
+	into.push(s);
 	closeMenus();
 	changed(true);
 	const target = rowRefs[key].find((r) => r.s === s);
@@ -1528,7 +1590,8 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.addrow')) cl
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 
 function renderChips() {
-	const c = ctx(ed);
+	// A For each makes the player placeholders and {message} usable (inside it).
+	const c = hasLoop(ed.steps) ? ctx(ed, true) : ctx(ed);
 	const box = $('chips');
 	box.textContent = '';
 	box.append('Insert:');
@@ -1687,7 +1750,7 @@ async function updateTrigHint() {
 // ---------------------------------------------------------------------------
 function changed(structural) {
 	syncIfs(ed.steps);
-	if (structural) { renderSteps('steps'); renderSteps('onStop'); }
+	if (structural) { renderSteps('steps'); renderSteps('onStop'); renderChips(); } // a For each adds the player placeholders
 	else { updateDerivedRows('steps'); updateDerivedRows('onStop'); }
 	if (ed.trigger.type !== 'schedule') updateTrigHint();
 }

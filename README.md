@@ -236,6 +236,7 @@ Every time box (Wait, the delay, chat command cooldowns) takes seconds, or hours
 | Kick / Ban                       | Kicks or bans (by GUID) the Player |
 | Kick everyone                    | Kicks every player online |
 | If                               | Runs its steps only when its condition is true |
+| For each                         | Runs the steps inside it once per player online, or per new chat message, with that player as the Player (see below) |
 | Stop flow                        | Ends the run there |
 | RCON command                     | Any command, as typed |
 
@@ -268,6 +269,40 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 | `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Mod or Admin (Player < Mod < Admin) |
 
 ![If / Else in the editor](docs/screenshots/flows-edit-if.png)
+
+### For each
+
+**For each** runs the steps inside it (down to its *End for each*) once per item, with that item's player as the Player. Kick, Ban, a Message to the Player, the `{player_...}` placeholders, `{message}` and If comparisons all work inside it, in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies, and it acts only when the flow runs, on what happened since the flow's last run (the first run looks at the current sessions so far). Pick what it goes through:
+
+- **player**: every player online (the latest 5-second player check's), one after another. `{message}` is that player's latest chat line since this flow last ran (empty if they haven't chatted since).
+- **message**: every chat line that players online sent since this flow last ran, oldest first, with the sender as the Player and the line as `{message}`. A flow every minute sees each line once.
+
+Other rules:
+
+- **Unverified players:** players BattlEye hasn't verified yet are left out.
+- **Stop flow** inside it ends the whole run.
+- **No nesting:** a For each can't go inside another one.
+- **Run log:** lists each player a condition matched, not every one checked.
+
+Chat lines are kept in memory with each online player for their current session (up to 100 each), so they go when the player leaves or ReCON restarts.
+
+For example, Schedule flows every minute (`* * * * *`):
+
+```
+For each player
+    If {player_ping} > 500
+        Kick  the Player, reason "Ping too high ({player_ping})"
+    End if
+End for each
+
+For each message
+    If {message} contains noob
+        Message  the Player "Please keep chat friendly"
+    End if
+End for each
+```
+
+In a flow without a player of its own, **Add step** puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so New flow → Schedule → Add step *For each*, *If*, *Kick* builds the first one.
 
 Some examples:
 

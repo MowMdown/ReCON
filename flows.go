@@ -123,6 +123,12 @@ func fmtDur(secs int) string {
 //	command     Cmd: any RCON command
 //	stop        ends the run
 //	if          Branches (the If, then any Else ifs) and Else
+//	forEach     Of (player | message) and Steps. player: the steps run once
+//	            for every player online, as "the player", with {message} their
+//	            latest chat line this session. message: once for every chat
+//	            line players online sent this session that this flow hasn't
+//	            handled yet, as the player who sent it, with {message} the
+//	            line. Ifs inside decide who or what qualifies.
 type Step struct {
 	Type     string   `json:"type"`
 	To       string   `json:"to,omitempty"`
@@ -133,7 +139,9 @@ type Step struct {
 	Reason   string   `json:"reason,omitempty"`
 	Cmd      string   `json:"cmd,omitempty"`
 	Branches []Branch `json:"branches,omitempty"`
-	Else     *[]Step  `json:"else,omitempty"` // nil: no Else
+	Else     *[]Step  `json:"else,omitempty"`  // nil: no Else
+	Steps    []Step   `json:"steps,omitempty"` // forEach: the steps run for each player or message
+	Of       string   `json:"of,omitempty"`    // forEach: "player" or "message"
 }
 
 // Branch is the If or one Else if: a condition and the steps it runs. Every
@@ -145,8 +153,21 @@ type Branch struct {
 	Steps   []Step `json:"steps"`
 }
 
-// branchLists is an If's step lists in order: each branch, then the Else.
+// What a For each goes through.
+const (
+	forEachPlayer  = "player"
+	forEachMessage = "message"
+)
+
+// isBlock reports whether a step holds other steps (If, For each).
+func isBlock(s *Step) bool { return s.Type == "if" || s.Type == "forEach" }
+
+// branchLists is a block's step lists in order: an If's branches, then its
+// Else; a For each player's one list.
 func branchLists(s *Step) [][]Step {
+	if s.Type == "forEach" {
+		return [][]Step{s.Steps}
+	}
 	out := make([][]Step, 0, len(s.Branches)+1)
 	for _, b := range s.Branches {
 		out = append(out, b.Steps)
@@ -178,16 +199,22 @@ func fixSteps(list []Step) []Step {
 			e := fixSteps(*s.Else)
 			s.Else = &e
 		}
+		if s.Type == "forEach" {
+			s.Steps = fixSteps(s.Steps)
+			if s.Of = strings.TrimSpace(s.Of); s.Of == "" {
+				s.Of = forEachPlayer
+			}
+		}
 	}
 	return list
 }
 
-// countSteps counts every step, inside Ifs too.
+// countSteps counts every step, inside Ifs and For each player too.
 func countSteps(list []Step) int {
 	n := 0
 	for i := range list {
 		n++
-		if list[i].Type == "if" {
+		if isBlock(&list[i]) {
 			for _, l := range branchLists(&list[i]) {
 				n += countSteps(l)
 			}
@@ -196,7 +223,8 @@ func countSteps(list []Step) int {
 	return n
 }
 
-// runLength is how long the waits take, counting the longest branch of each If.
+// runLength is how long the waits take, counting the longest branch of each
+// If, and a For each player's waits once (they repeat for every player).
 func runLength(list []Step) int {
 	total := 0
 	for i := range list {
@@ -213,6 +241,8 @@ func runLength(list []Step) int {
 				}
 			}
 			total += longest
+		case "forEach":
+			total += runLength(s.Steps)
 		}
 	}
 	return total
@@ -456,7 +486,7 @@ const (
 
 var stepTypes = map[string]bool{"message": true, "playerList": true, "wait": true, "lock": true,
 	"unlock": true, "shutdown": true, "kick": true, "ban": true, "kickAll": true, "command": true,
-	"stop": true, "if": true}
+	"stop": true, "if": true, "forEach": true}
 
 // stopTypes are the steps allowed in "When stopped": they go out once, with no player.
 var stopTypes = map[string]bool{"message": true, "lock": true, "unlock": true, "kickAll": true, "command": true}
@@ -474,6 +504,7 @@ type stepChecker struct {
 	has    map[string]bool
 	n      int    // step number, counted as the page numbers them
 	onStop bool   // checking "When stopped"
+	inLoop bool   // inside a For each player
 	where  string // "Step" or "When stopped, step"
 }
 
@@ -547,6 +578,11 @@ func (c *stepChecker) check(list []Step, depth int) error {
 				return err
 			}
 			continue // the branches checked their own steps
+		case "forEach":
+			if err := c.checkForEach(s, depth); err != nil {
+				return err
+			}
+			continue
 		}
 		for _, t := range []string{s.Text, s.Reason, s.Cmd} {
 			if err := c.tokensOK(t); err != nil {
@@ -555,6 +591,23 @@ func (c *stepChecker) check(list []Step, depth int) error {
 		}
 	}
 	return nil
+}
+
+// checkForEach checks a For each's steps with a player (each one in turn)
+// and a {message} (that player's line) available.
+func (c *stepChecker) checkForEach(s *Step, depth int) error {
+	if c.inLoop {
+		return c.fail("a For each can't go inside another one")
+	}
+	if s.Of != forEachPlayer && s.Of != forEachMessage {
+		return c.fail("pick what For each goes through: player or message")
+	}
+	outer := c.has
+	c.has = map[string]bool{needNothing: true, needPlayer: true, needChat: true}
+	c.inLoop = true
+	err := c.check(s.Steps, depth+1)
+	c.has, c.inLoop = outer, false
+	return err
 }
 
 func (c *stepChecker) checkIf(s *Step, depth int) error {
@@ -645,7 +698,11 @@ type flowPlayer struct {
 type job struct {
 	run *flowRun
 	ctx context.Context
-	p   *flowPlayer // nil for schedule and manual runs
+	p   *flowPlayer // nil for schedule and manual runs; each player in turn inside a For each player
+	// inLoop: running a For each player's steps. Conditions are then only
+	// logged when they match (with the player's name), so a check of 60
+	// players doesn't fill the run log with "no".
+	inLoop bool
 }
 
 // sendCommand sends one flow command. Tests replace it.
@@ -818,6 +875,10 @@ func (x *job) exec(list []Step) bool {
 		case "stop":
 			x.run.logf("Stop flow step: the run ends here")
 			return false
+		case "forEach":
+			if !x.forEach(s.Of, s.Steps) {
+				return false
+			}
 		case "if":
 			ran := false
 			for k, b := range s.Branches {
@@ -827,7 +888,11 @@ func (x *job) exec(list []Step) bool {
 				if k > 0 {
 					word = "Else if "
 				}
-				x.run.logf("%s%s: %s", word, describeCond(b), map[bool]string{true: "yes", false: "no"}[ok])
+				if !x.inLoop {
+					x.run.logf("%s%s: %s", word, describeCond(b), map[bool]string{true: "yes", false: "no"}[ok])
+				} else if ok {
+					x.run.logf("%s (#%d): %s%s", bareName(x.p.Name), x.p.ID, word, describeCond(b))
+				}
 				if ok {
 					if !x.exec(b.Steps) {
 						return false
@@ -837,11 +902,95 @@ func (x *job) exec(list []Step) bool {
 				}
 			}
 			if !ran && s.Else != nil {
-				x.run.logf("Else")
+				if x.inLoop {
+					x.run.logf("%s (#%d): Else", bareName(x.p.Name), x.p.ID)
+				} else {
+					x.run.logf("Else")
+				}
 				if !x.exec(*s.Else) {
 					return false
 				}
 			}
+		}
+	}
+	return true
+}
+
+// forEachMarks is, per flow, the Seq of the last server event its previous
+// run's For each steps looked at, so a run only considers chat sent since
+// the flow's last run. In memory: a restart starts again from the lines of
+// the sessions in progress.
+var forEachMarks = struct {
+	sync.Mutex
+	byFlow map[int64]int64
+}{byFlow: map[int64]int64{}}
+
+// chatWindowOf returns the chat lines (by server event Seq, (from, to])
+// that this run's For each steps consider: everything since the flow's last
+// run. The first call in a run fixes the window and moves the flow's mark,
+// so every For each in the run sees the same lines.
+func (r *flowRun) chatWindowOf() (from, to int64) {
+	forEachMarks.Lock()
+	defer forEachMarks.Unlock()
+	if !r.chatWindow.set {
+		r.chatWindow.from = forEachMarks.byFlow[r.flowID]
+		r.chatWindow.to = serverEvents.lastSeq()
+		r.chatWindow.set = true
+		forEachMarks.byFlow[r.flowID] = r.chatWindow.to
+	}
+	return r.chatWindow.from, r.chatWindow.to
+}
+
+// forEach runs a For each's steps, in order: once for every player online
+// (of "player", by player number), or once for every chat line players
+// online sent this session that this flow hasn't handled yet (of "message",
+// oldest first). Each run has that player as "the player"; players BattlEye
+// hasn't verified (no GUID) are left out. It returns false when the run must
+// end (Stop pressed, or a Stop flow step ran).
+func (x *job) forEach(of string, steps []Step) bool {
+	type item struct {
+		p   Player
+		msg string
+	}
+	var items []item
+	from, to := x.run.chatWindowOf()
+	if of == forEachMessage {
+		senders := map[string]bool{}
+		for _, l := range chatsAfter(from) {
+			if l.chat.Seq > to {
+				continue // sent after this run started looking
+			}
+			p, ok := onlineByGUID(l.guid)
+			if !ok {
+				continue // left since the line was sent
+			}
+			items = append(items, item{p, l.chat.Text})
+			senders[l.guid] = true
+		}
+		x.run.logf("For each message: %d new from %d player(s)", len(items), len(senders))
+	} else {
+		players := onlineNow()
+		sort.Slice(players, func(a, b int) bool { return players[a].ID < players[b].ID })
+		for _, p := range players {
+			if p.GUID == "" {
+				continue
+			}
+			msg := "" // only what they wrote since the flow's last run
+			if c, ok := latestChatOf(p.GUID); ok && c.Seq > from && c.Seq <= to {
+				msg = c.Text
+			}
+			items = append(items, item{p, msg})
+		}
+		x.run.logf("For each player: %d online", len(items))
+	}
+	for _, it := range items {
+		if x.ctx.Err() != nil {
+			return false
+		}
+		each := &job{run: x.run, ctx: x.ctx, inLoop: true,
+			p: &flowPlayer{Player: it.p, role: playerRole(it.p.GUID), message: it.msg}}
+		if !each.exec(steps) {
+			return false
 		}
 	}
 	return true
@@ -1519,17 +1668,23 @@ func previewFlow(f Flow) map[string]any {
 // progress, all sharing this run's log, context and Stop button. Mutable
 // fields are guarded by flowRuns' mutex.
 type flowRun struct {
-	flowID   int64
-	name     string
-	status   string // running | done | stopped | error
-	active   bool
-	failed   bool      // a command failed; the run ends as "error"
-	stopped  bool      // the Stop button was pressed
-	anchor   time.Time // when step 1 starts (after the delay)
-	lastRun  time.Time // when the flow was last started
-	jobs     int       // jobs still working through the steps
-	log      []string
-	onStop   []Step // sent once if Stop is pressed
+	flowID  int64
+	name    string
+	status  string // running | done | stopped | error
+	active  bool
+	failed  bool      // a command failed; the run ends as "error"
+	stopped bool      // the Stop button was pressed
+	anchor  time.Time // when step 1 starts (after the delay)
+	lastRun time.Time // when the flow was last started
+	jobs    int       // jobs still working through the steps
+	log     []string
+	onStop  []Step // sent once if Stop is pressed
+	// chatWindow is the chat lines this run's For each steps look at:
+	// Seq in (from, to]. Set by the first For each of the run (chatWindowOf).
+	chatWindow struct {
+		set      bool
+		from, to int64
+	}
 	stopOnce sync.Once
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -1682,6 +1837,9 @@ func deleteFlow(id int64) error {
 	}
 	delete(flowRuns.byFlow, id)
 	flowRuns.Unlock()
+	forEachMarks.Lock()
+	delete(forEachMarks.byFlow, id) // a new flow reusing the number starts afresh
+	forEachMarks.Unlock()
 	return globalDatabase.DeleteFlow(id)
 }
 

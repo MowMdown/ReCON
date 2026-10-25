@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,8 +19,10 @@ import (
 //	`players` poll without "(Lobby)" in the name   -> finished loading
 //	Player #3 Name (<guid>) has been kicked by ... -> the session will end as kicked
 //	Player #3 Name disconnected                    -> the session closes
-//	(Global) Name: text                            -> their last message, for the
-//	                                                  Players page (memory only)
+//	(Global) Name: text                            -> kept with the player for
+//	                                                  this session (memory only):
+//	                                                  the Players page's Last
+//	                                                  Message and For each flows
 //
 // The database is only written when one of those happens, never for a player
 // who simply stays online; offline players are history and aren't touched.
@@ -39,16 +42,20 @@ type trackedPlayer struct {
 	ip          string
 	guid        string // lower case; "" until BattlEye sends it
 	connectedAt time.Time
-	lastSeen    time.Time // the connect line, or the last poll that listed them
-	lobby       bool      // still loading
-	opened      bool      // the session is in the database
-	kickedAt    time.Time // set by a kick line; the session ends as kicked (or banned)
-	misses      int       // polls in a row that didn't list them
-	lastChat    lastChat  // the newest line they wrote in chat this session
+	lastSeen    time.Time  // the connect line, or the last poll that listed them
+	lobby       bool       // still loading
+	opened      bool       // the session is in the database
+	kickedAt    time.Time  // set by a kick line; the session ends as kicked (or banned)
+	misses      int        // polls in a row that didn't list them
+	chats       []lastChat // what they wrote in chat this session, oldest first (up to maxSessionChats)
 }
 
+// maxSessionChats is how many chat lines are kept per player online.
+const maxSessionChats = 100
+
 // lastChat is a line a player wrote in chat. It is kept only in memory, on
-// the player's tracker entry, so it goes when they disconnect. Messages sent
+// the player's tracker entry (their session's lines), so it goes when they
+// disconnect. Messages sent
 // to a player are commands ReCON sends, not chat lines from the server, so
 // they never end up here. The chat history in the database is separate
 // (startChatRecorder, db.go).
@@ -56,6 +63,7 @@ type lastChat struct {
 	Text    string    // what they typed, without the "(Global) Name: " prefix
 	Channel string    // Global, Side, Direct, Vehicle, ...
 	At      time.Time // when it was sent
+	Seq     int64     // the server event's number (serverEvents), increasing
 }
 
 // tracker is every player the server has told us about. ended remembers when
@@ -105,7 +113,10 @@ func trackEvent(ev ServerEvent) {
 			}
 		}
 		if sender != nil {
-			sender.lastChat = lastChat{Text: ev.Message, Channel: ev.Channel, At: ev.Time}
+			sender.chats = append(sender.chats, lastChat{Text: ev.Message, Channel: ev.Channel, At: ev.Time, Seq: ev.Seq})
+			if len(sender.chats) > maxSessionChats {
+				sender.chats = append([]lastChat(nil), sender.chats[len(sender.chats)-maxSessionChats:]...)
+			}
 		}
 		return
 	}
@@ -250,10 +261,48 @@ func lastChats() map[int]onlineChat {
 	defer tracker.Unlock()
 	out := map[int]onlineChat{}
 	for id, t := range tracker.byID {
-		if t.lastChat.Text != "" {
-			out[id] = onlineChat{t.guid, t.lastChat}
+		if n := len(t.chats); n > 0 {
+			out[id] = onlineChat{t.guid, t.chats[n-1]}
 		}
 	}
+	return out
+}
+
+// latestChatOf is the newest line a player online (by GUID) wrote this session.
+func latestChatOf(guid string) (lastChat, bool) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	for _, t := range tracker.byID {
+		if t.guid != "" && strings.EqualFold(t.guid, guid) && len(t.chats) > 0 {
+			return t.chats[len(t.chats)-1], true
+		}
+	}
+	return lastChat{}, false
+}
+
+// sessionChat is one chat line and who (by GUID) wrote it.
+type sessionChat struct {
+	guid string
+	chat lastChat
+}
+
+// chatsAfter returns every chat line players online wrote this session with
+// a Seq greater than after, oldest first.
+func chatsAfter(after int64) []sessionChat {
+	tracker.Lock()
+	defer tracker.Unlock()
+	var out []sessionChat
+	for _, t := range tracker.byID {
+		if t.guid == "" {
+			continue
+		}
+		for _, c := range t.chats {
+			if c.Seq > after {
+				out = append(out, sessionChat{t.guid, c})
+			}
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].chat.Seq < out[b].chat.Seq })
 	return out
 }
 
