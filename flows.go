@@ -27,22 +27,24 @@ import (
 //
 // Every flow has one trigger:
 //
-//	schedule  a cron schedule, while Enabled
-//	join      once for each player who finishes loading in, while Enabled
-//	chat      once for each chat message a player sends, while Enabled
-//	manual    only when Run is pressed
+//	schedule  a cron schedule, while Enabled             flows_schedule.go
+//	join      once for each player who finishes loading   flows_join.go
+//	          in, while Enabled
+//	chat      once for each chat message a player sends,  flows_message.go
+//	          while Enabled
+//	manual    only when Run is pressed                    flows_manual.go
 //
 // and an optional delay before step 1. "The player" is whoever triggered a
 // join or chat run; {player_name}, {player_id}, {player_ping}, {player_ip},
 // {player_guid}, {player_role} and {message} are filled in from them.
 // Schedule and Manual flows have no player, so they message everyone only.
 //
-// The same file runs the built-in chat commands (!help, !shout, !whisper,
-// !players, !vote, !code, !kick, !ban), since they also react to chat.
+// This file has what every trigger shares, and the built-in chat commands
+// (!help, !shout, !whisper, !players, !vote, !code, !kick, !ban).
 //
-// Sections: times, steps and conditions, validation, the runner, cron, flow
-// definitions, run bookkeeping, the scheduler, the join and chat triggers,
-// and the chat commands.
+// Sections: times, steps and conditions, validation, the runner (including
+// For each), flow definitions, runs, starting player flows, and the chat
+// commands.
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -178,9 +180,9 @@ func branchLists(s *Step) [][]Step {
 	return out
 }
 
-// fixSteps gives every branch and Else a non-nil list, so the page always
+// normalizeFlowSteps gives every branch and Else a non-nil list, so the page always
 // gets [] rather than null, and trims the text fields.
-func fixSteps(list []Step) []Step {
+func normalizeFlowSteps(list []Step) []Step {
 	if list == nil {
 		return []Step{}
 	}
@@ -193,14 +195,14 @@ func fixSteps(list []Step) []Step {
 		for j := range s.Branches {
 			b := &s.Branches[j]
 			b.Subject, b.Op, b.Value = strings.TrimSpace(b.Subject), strings.TrimSpace(b.Op), cleanReason(b.Value)
-			b.Steps = fixSteps(b.Steps)
+			b.Steps = normalizeFlowSteps(b.Steps)
 		}
 		if s.Else != nil {
-			e := fixSteps(*s.Else)
+			e := normalizeFlowSteps(*s.Else)
 			s.Else = &e
 		}
 		if s.Type == "forEach" {
-			s.Steps = fixSteps(s.Steps)
+			s.Steps = normalizeFlowSteps(s.Steps)
 			if s.Of = strings.TrimSpace(s.Of); s.Of == "" {
 				s.Of = forEachPlayer
 			}
@@ -209,23 +211,23 @@ func fixSteps(list []Step) []Step {
 	return list
 }
 
-// countSteps counts every step, inside Ifs and For each player too.
-func countSteps(list []Step) int {
+// countAllSteps counts every step, inside Ifs and For each player too.
+func countAllSteps(list []Step) int {
 	n := 0
 	for i := range list {
 		n++
 		if isBlock(&list[i]) {
 			for _, l := range branchLists(&list[i]) {
-				n += countSteps(l)
+				n += countAllSteps(l)
 			}
 		}
 	}
 	return n
 }
 
-// runLength is how long the waits take, counting the longest branch of each
+// flowRunLength is how long the waits take, counting the longest branch of each
 // If, and a For each player's waits once (they repeat for every player).
-func runLength(list []Step) int {
+func flowRunLength(list []Step) int {
 	total := 0
 	for i := range list {
 		s := &list[i]
@@ -236,13 +238,13 @@ func runLength(list []Step) int {
 		case "if":
 			longest := 0
 			for _, l := range branchLists(s) {
-				if n := runLength(l); n > longest {
+				if n := flowRunLength(l); n > longest {
 					longest = n
 				}
 			}
 			total += longest
 		case "forEach":
-			total += runLength(s.Steps)
+			total += flowRunLength(s.Steps)
 		}
 	}
 	return total
@@ -308,7 +310,7 @@ var condSubjects = map[string]condSubject{
 	"player_ip":   {"text", needPlayer},
 	"player_guid": {"ident", needPlayer},
 	"player_role": {"role", needPlayer},
-	// How many players are online, from the 5-second player check. Works on
+	// How many players are online (the tracker, players.go). Works on
 	// every trigger: "If {players_online} > 0, Kick everyone, else Shut down".
 	"players_online": {"num", needNothing},
 }
@@ -330,9 +332,9 @@ var opText = map[string]map[string]string{
 	"role":  {"eq": "is", "ne": "is not", "ge": "is at least", "le": "is at most"},
 }
 
-// describeCond writes a condition the way the page shows it, for the run log:
+// describeIfCondition writes a condition the way the page shows it, for the run log:
 // {player_ping} >= 500, {player_name} is "Survivor", {player_role} is at least Mod.
-func describeCond(b Branch) string {
+func describeIfCondition(b Branch) string {
 	sub := condSubjects[b.Subject]
 	val := b.Value
 	switch {
@@ -424,8 +426,8 @@ func wildMatch(pattern, s string) bool {
 	return err == nil && re.MatchString(s)
 }
 
-// evalCond checks one branch's condition against the subject's value.
-func evalCond(b Branch, v string) bool {
+// evaluateIfCondition checks one branch's condition against the subject's value.
+func evaluateIfCondition(b Branch, v string) bool {
 	sub := condSubjects[b.Subject]
 	v = strings.TrimSpace(v)
 	switch sub.kind {
@@ -523,7 +525,7 @@ func (c *stepChecker) tokensOK(text string) error {
 	return nil
 }
 
-func (c *stepChecker) check(list []Step, depth int) error {
+func (c *stepChecker) checkStepList(list []Step, depth int) error {
 	if depth > maxDepth {
 		return c.fail(fmt.Sprintf("Ifs can go %d deep at most", maxDepth))
 	}
@@ -574,7 +576,7 @@ func (c *stepChecker) check(list []Step, depth int) error {
 				return c.fail("Type the command to send")
 			}
 		case "if":
-			if err := c.checkIf(s, depth); err != nil {
+			if err := c.checkIfStep(s, depth); err != nil {
 				return err
 			}
 			continue // the branches checked their own steps
@@ -605,12 +607,12 @@ func (c *stepChecker) checkForEach(s *Step, depth int) error {
 	outer := c.has
 	c.has = map[string]bool{needNothing: true, needPlayer: true, needChat: true}
 	c.inLoop = true
-	err := c.check(s.Steps, depth+1)
+	err := c.checkStepList(s.Steps, depth+1)
 	c.has, c.inLoop = outer, false
 	return err
 }
 
-func (c *stepChecker) checkIf(s *Step, depth int) error {
+func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 	if len(s.Branches) == 0 {
 		return c.fail("this If has no condition")
 	}
@@ -654,31 +656,31 @@ func (c *stepChecker) checkIf(s *Step, depth int) error {
 		}
 	}
 	for _, l := range branchLists(s) {
-		if err := c.check(l, depth+1); err != nil {
+		if err := c.checkStepList(l, depth+1); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// checkSteps validates a flow's steps and its When stopped steps for its
+// checkFlowSteps validates a flow's steps and its When stopped steps for its
 // trigger. Errors name the step as the page numbers them.
-func checkSteps(trigger string, steps, onStop []Step) error {
+func checkFlowSteps(trigger string, steps, onStop []Step) error {
 	if len(steps) == 0 {
 		return errors.New("add at least one step")
 	}
-	if countSteps(steps)+countSteps(onStop) > maxSteps {
+	if countAllSteps(steps)+countAllSteps(onStop) > maxSteps {
 		return fmt.Errorf("a flow can have %d steps at most", maxSteps)
 	}
 	c := &stepChecker{has: triggerHas(trigger), where: "Step"}
-	if err := c.check(steps, 0); err != nil {
+	if err := c.checkStepList(steps, 0); err != nil {
 		return err
 	}
 	if len(onStop) > 0 && trigger != triggerSchedule && trigger != triggerManual {
 		return errors.New("only Schedule and Manual flows have When stopped steps")
 	}
 	s := &stepChecker{has: map[string]bool{}, onStop: true, where: "When stopped, step"}
-	return s.check(onStop, 0)
+	return s.checkStepList(onStop, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -719,13 +721,10 @@ func (x *job) currentID() (int, bool) {
 	return 0, false
 }
 
-// value is what a placeholder or If subject stands for in this run.
-func (x *job) value(name string) (string, bool) {
+// placeholderValue is what a placeholder or If subject stands for in this run.
+func (x *job) placeholderValue(name string) (string, bool) {
 	if name == "players_online" {
-		latest.Lock()
-		n := len(latest.players)
-		latest.Unlock()
-		return strconv.Itoa(n), true
+		return strconv.Itoa(len(onlineNow())), true
 	}
 	if x.p == nil {
 		return "", false
@@ -752,29 +751,29 @@ func (x *job) value(name string) (string, bool) {
 	return "", false
 }
 
-// condValue is what an If compares: the same as value, except that a role
+// ifSubjectValue is what an If compares: the same as value, except that a role
 // is its number (0 Player, 1 Mod, 2 Admin) so "is at least Mod" can work.
-func (x *job) condValue(name string) (string, bool) {
+func (x *job) ifSubjectValue(name string) (string, bool) {
 	if name == "player_role" && x.p != nil {
 		return strconv.Itoa(x.p.role), true
 	}
-	return x.value(name)
+	return x.placeholderValue(name)
 }
 
-// fill replaces the placeholders in a step's text. Unknown {words} are left
+// fillPlaceholders replaces the placeholders in a step's text. Unknown {words} are left
 // as typed, and what is filled in is not expanded again.
-func (x *job) fill(text string) string {
+func (x *job) fillPlaceholders(text string) string {
 	return cleanReason(tokenRe.ReplaceAllStringFunc(text, func(m string) string {
-		if v, ok := x.value(m[1 : len(m)-1]); ok {
+		if v, ok := x.placeholderValue(m[1 : len(m)-1]); ok {
 			return v
 		}
 		return m
 	}))
 }
 
-// say sends a message to everyone, or to the player. A private message is
+// sendChatMessage sends a message to everyone, or to the player. A private message is
 // added to the player's chat history, as the Message dialog does.
-func (x *job) say(to, text string) {
+func (x *job) sendChatMessage(to, text string) {
 	if text == "" {
 		return
 	}
@@ -789,11 +788,11 @@ func (x *job) say(to, text string) {
 	}
 	cmd := fmt.Sprintf("say %d %s", id, text)
 	sendCommand(x.run, cmd)
-	recordSent(x.p.GUID, cmd)
+	recordSentMessage(x.p.GUID, cmd)
 }
 
-// recordSent adds a private message ReCON sent to a player's chat history.
-func recordSent(guid, cmd string) {
+// recordSentMessage adds a private message ReCON sent to a player's chat history.
+func recordSentMessage(guid, cmd string) {
 	if globalDatabase == nil || guid == "" {
 		return
 	}
@@ -802,14 +801,13 @@ func recordSent(guid, cmd string) {
 	}
 }
 
-// onlineNames is the latest player list as "Online (N): a, b, c".
-func onlineNames() string {
-	latest.Lock()
-	names := make([]string, 0, len(latest.players))
-	for _, p := range latest.players {
+// listOnlineNames is the latest player list as "Online (N): a, b, c".
+func listOnlineNames() string {
+	online := onlineNow()
+	names := make([]string, 0, len(online))
+	for _, p := range online {
 		names = append(names, bareName(p.Name))
 	}
-	latest.Unlock()
 	if len(names) == 0 {
 		return "Online (0): nobody"
 	}
@@ -821,9 +819,9 @@ var banStep = func(p Player, online bool, minutes int, reason, logAs string) ban
 	return banByGUID(p, online, minutes, reason, logAs)
 }
 
-// exec runs a list of steps. It returns false when the run must end: Stop
+// execFlowSteps runs a list of steps. It returns false when the run must end: Stop
 // was pressed during a wait, or a Stop flow step ran.
-func (x *job) exec(list []Step) bool {
+func (x *job) execFlowSteps(list []Step) bool {
 	for i := range list {
 		s := &list[i]
 		if x.ctx.Err() != nil {
@@ -831,9 +829,9 @@ func (x *job) exec(list []Step) bool {
 		}
 		switch s.Type {
 		case "message":
-			x.say(s.To, x.fill(s.Text))
+			x.sendChatMessage(s.To, x.fillPlaceholders(s.Text))
 		case "playerList":
-			x.say(s.To, onlineNames())
+			x.sendChatMessage(s.To, listOnlineNames())
 		case "wait":
 			secs, _ := parseDur(s.Time)
 			if !sleepUntil(x.ctx, time.Now().Add(time.Duration(secs)*time.Second)) {
@@ -842,23 +840,23 @@ func (x *job) exec(list []Step) bool {
 		case "lock", "unlock", "shutdown":
 			sendCommand(x.run, "#"+s.Type)
 		case "kickAll":
-			sendCommand(x.run, strings.TrimSpace("kickall "+x.fill(s.Reason)))
+			sendCommand(x.run, strings.TrimSpace("kickall "+x.fillPlaceholders(s.Reason)))
 		case "command":
-			sendCommand(x.run, x.fill(s.Cmd))
+			sendCommand(x.run, x.fillPlaceholders(s.Cmd))
 		case "kick":
 			id, ok := x.currentID()
 			if !ok {
 				x.run.logf("%s has left; kick skipped", bareName(x.p.Name))
 				continue
 			}
-			reason := x.fill(s.Reason)
+			reason := x.fillPlaceholders(s.Reason)
 			if reason == "" {
 				reason = "No reason specified"
 			}
 			sendCommand(x.run, fmt.Sprintf("kick %d %s", id, reason))
 		case "ban":
 			minutes, _ := strconv.Atoi(s.Len)
-			reason := x.fill(s.Reason)
+			reason := x.fillPlaceholders(s.Reason)
 			if reason == "" {
 				reason = "No reason specified"
 			}
@@ -868,7 +866,7 @@ func (x *job) exec(list []Step) bool {
 			res := banStep(p, online, minutes, reason, x.run.name)
 			if !res.OK {
 				x.run.logf("ban of %s failed: %s", bareName(p.Name), res.Error)
-				x.run.markFailed()
+				x.run.markRunFailed()
 			} else {
 				x.run.logf("banned %s (%s)", bareName(p.Name), banLength(minutes))
 			}
@@ -876,25 +874,25 @@ func (x *job) exec(list []Step) bool {
 			x.run.logf("Stop flow step: the run ends here")
 			return false
 		case "forEach":
-			if !x.forEach(s.Of, s.Steps) {
+			if !x.runForEachStep(s.Of, s.Steps) {
 				return false
 			}
 		case "if":
 			ran := false
 			for k, b := range s.Branches {
-				v, _ := x.condValue(b.Subject)
-				ok := evalCond(b, v)
+				v, _ := x.ifSubjectValue(b.Subject)
+				ok := evaluateIfCondition(b, v)
 				word := "If "
 				if k > 0 {
 					word = "Else if "
 				}
 				if !x.inLoop {
-					x.run.logf("%s%s: %s", word, describeCond(b), map[bool]string{true: "yes", false: "no"}[ok])
+					x.run.logf("%s%s: %s", word, describeIfCondition(b), map[bool]string{true: "yes", false: "no"}[ok])
 				} else if ok {
-					x.run.logf("%s (#%d): %s%s", bareName(x.p.Name), x.p.ID, word, describeCond(b))
+					x.run.logf("%s (#%d): %s%s", bareName(x.p.Name), x.p.ID, word, describeIfCondition(b))
 				}
 				if ok {
-					if !x.exec(b.Steps) {
+					if !x.execFlowSteps(b.Steps) {
 						return false
 					}
 					ran = true
@@ -907,7 +905,7 @@ func (x *job) exec(list []Step) bool {
 				} else {
 					x.run.logf("Else")
 				}
-				if !x.exec(*s.Else) {
+				if !x.execFlowSteps(*s.Else) {
 					return false
 				}
 			}
@@ -941,22 +939,23 @@ func (r *flowRun) chatWindowOf() (from, to int64) {
 	return r.chatWindow.from, r.chatWindow.to
 }
 
-// forEach runs a For each's steps, in order: once for every player online
+// runForEachStep runs a For each's steps, in order: once for every player online
 // (of "player", by player number), or once for every chat line players
 // online sent this session that this flow hasn't handled yet (of "message",
 // oldest first). Each run has that player as "the player"; players BattlEye
 // hasn't verified (no GUID) are left out. It returns false when the run must
 // end (Stop pressed, or a Stop flow step ran).
-func (x *job) forEach(of string, steps []Step) bool {
+func (x *job) runForEachStep(of string, steps []Step) bool {
 	type item struct {
 		p   Player
 		msg string
 	}
 	var items []item
 	from, to := x.run.chatWindowOf()
+	x.run.polled.Do(func() { pollPlayersNow() })
 	if of == forEachMessage {
 		senders := map[string]bool{}
-		for _, l := range chatsAfter(from) {
+		for _, l := range sessionChatsAfter(from) {
 			if l.chat.Seq > to {
 				continue // sent after this run started looking
 			}
@@ -969,9 +968,7 @@ func (x *job) forEach(of string, steps []Step) bool {
 		}
 		x.run.logf("For each message: %d new from %d player(s)", len(items), len(senders))
 	} else {
-		players := onlineNow()
-		sort.Slice(players, func(a, b int) bool { return players[a].ID < players[b].ID })
-		for _, p := range players {
+		for _, p := range onlineNow() { // by player number
 			if p.GUID == "" {
 				continue
 			}
@@ -988,8 +985,8 @@ func (x *job) forEach(of string, steps []Step) bool {
 			return false
 		}
 		each := &job{run: x.run, ctx: x.ctx, inLoop: true,
-			p: &flowPlayer{Player: it.p, role: playerRole(it.p.GUID), message: it.msg}}
-		if !each.exec(steps) {
+			p: &flowPlayer{Player: it.p, role: lookupPlayerRole(it.p.GUID), message: it.msg}}
+		if !each.execFlowSteps(steps) {
 			return false
 		}
 	}
@@ -1017,29 +1014,24 @@ func runFlowCommand(run *flowRun, cmd string) {
 	lower := strings.ToLower(cmd)
 
 	// kickall [reason] is this program's own command, not a BattlEye one: it
-	// lists the players and kicks each (kickAll).
+	// lists the players and kicks each (kickAllPlayers).
 	if bare := strings.TrimPrefix(lower, "#"); bare == "kickall" || strings.HasPrefix(bare, "kickall ") {
 		reason := strings.TrimSpace(strings.TrimPrefix(cmd, "#")[len("kickall"):])
-		if reason == "" {
-			reason = "Server restarting"
-		}
-		rep, err := kickAll(sharedRunner{}, reason)
+		rep, err := kickAllShared(reason, flowSource(run.name))
 		if err != nil {
 			run.logf("kickall failed: %v", err)
-			run.markFailed()
+			run.markRunFailed()
 			return
 		}
-		msg := rep.summary(reason)
-		log.Printf("rcon[%s] > %s", run.name, msg)
-		run.addToRunLog(msg)
+		run.addToRunLog(rep.summary(reason))
 		return
 	}
 
 	retry := lower == "#lock" || lower == "#unlock"
-	_, acked, err := runShared(cmd, 2*time.Second, retry, run.name) // logs rcon[<flow name>]
+	_, acked, err := runSharedCommand(cmd, 2*time.Second, retry, flowSource(run.name))
 	run.addToRunLog(fmt.Sprintf("sent %q (acked=%v err=%v)", cmd, acked, err))
 	if err != nil || (!acked && lower != "#shutdown") {
-		run.markFailed()
+		run.markRunFailed()
 	}
 }
 
@@ -1058,278 +1050,6 @@ func sleepUntil(ctx context.Context, t time.Time) bool {
 		return true
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Cron
-// ---------------------------------------------------------------------------
-
-type cronExpr struct {
-	min, hour, dom, mon, dow []bool // allowed values, indexed by value
-	domStar, dowStar         bool   // field started with "*" (affects day matching)
-}
-
-var (
-	monthNames = map[string]int{"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-		"jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
-	dowNames = map[string]int{"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
-)
-
-func cronNum(tok string, names map[string]int) (int, error) {
-	if v, ok := names[tok]; ok {
-		return v, nil
-	}
-	return strconv.Atoi(tok)
-}
-
-func parseCronField(field string, lo, hi int, names map[string]int, label string) ([]bool, bool, error) {
-	set := make([]bool, hi+1)
-	star := strings.HasPrefix(field, "*")
-	for _, part := range strings.Split(field, ",") {
-		rng, stepStr, hasStep := strings.Cut(part, "/")
-		step := 1
-		if hasStep {
-			n, err := strconv.Atoi(stepStr)
-			if err != nil || n < 1 {
-				return nil, false, fmt.Errorf("%s: bad step %q", label, stepStr)
-			}
-			step = n
-		}
-		var a, b int
-		if rng == "*" {
-			a, b = lo, hi
-		} else {
-			from, to, isRange := strings.Cut(rng, "-")
-			x, err := cronNum(from, names)
-			if err != nil {
-				return nil, false, fmt.Errorf("%s: bad value %q", label, from)
-			}
-			a, b = x, x
-			if isRange {
-				y, err := cronNum(to, names)
-				if err != nil {
-					return nil, false, fmt.Errorf("%s: bad value %q", label, to)
-				}
-				b = y
-			} else if hasStep {
-				b = hi
-			}
-		}
-		if a < lo || b > hi || a > b {
-			return nil, false, fmt.Errorf("%s: %q is out of range (%d-%d)", label, part, lo, hi)
-		}
-		for v := a; v <= b; v += step {
-			set[v] = true
-		}
-	}
-	return set, star, nil
-}
-
-func parseCron(expr string) (*cronExpr, error) {
-	expr = strings.ToLower(strings.TrimSpace(expr))
-	f := strings.Fields(expr)
-	if len(f) != 5 {
-		return nil, errors.New("expected 5 fields: minute hour day-of-month month day-of-week (e.g. 0 6 * * *)")
-	}
-	c := &cronExpr{}
-	var err error
-	if c.min, _, err = parseCronField(f[0], 0, 59, nil, "minute"); err != nil {
-		return nil, err
-	}
-	if c.hour, _, err = parseCronField(f[1], 0, 23, nil, "hour"); err != nil {
-		return nil, err
-	}
-	if c.dom, c.domStar, err = parseCronField(f[2], 1, 31, nil, "day-of-month"); err != nil {
-		return nil, err
-	}
-	if c.mon, _, err = parseCronField(f[3], 1, 12, monthNames, "month"); err != nil {
-		return nil, err
-	}
-	if c.dow, c.dowStar, err = parseCronField(f[4], 0, 7, dowNames, "day-of-week"); err != nil {
-		return nil, err
-	}
-	if c.dow[7] { // 7 is also Sunday
-		c.dow[0] = true
-	}
-	return c, nil
-}
-
-// dayMatches follows standard cron: if both day-of-month and day-of-week are
-// restricted a day matches when EITHER does; otherwise both must match.
-func (c *cronExpr) dayMatches(t time.Time) bool {
-	if !c.mon[int(t.Month())] {
-		return false
-	}
-	domOK, dowOK := c.dom[t.Day()], c.dow[int(t.Weekday())]
-	if c.domStar || c.dowStar {
-		return domOK && dowOK
-	}
-	return domOK || dowOK
-}
-
-// next returns the first run time strictly after `after` (server local time).
-func (c *cronExpr) next(after time.Time) (time.Time, bool) {
-	loc := after.Location()
-	for d := 0; d <= 366*8; d++ {
-		day := time.Date(after.Year(), after.Month(), after.Day()+d, 0, 0, 0, 0, loc)
-		if !c.dayMatches(day) {
-			continue
-		}
-		for h := 0; h < 24; h++ {
-			if !c.hour[h] {
-				continue
-			}
-			for m := 0; m < 60; m++ {
-				if !c.min[m] {
-					continue
-				}
-				cand := time.Date(day.Year(), day.Month(), day.Day(), h, m, 0, 0, loc)
-				if cand.After(after) {
-					return cand, true
-				}
-			}
-		}
-	}
-	return time.Time{}, false
-}
-
-func cronValues(set []bool, lo, hi int) []int {
-	out := []int{}
-	for v := lo; v <= hi && v < len(set); v++ {
-		if set[v] {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-func joinAnd(items []string) string {
-	switch len(items) {
-	case 0:
-		return ""
-	case 1:
-		return items[0]
-	}
-	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
-}
-
-func intStrings(v []int) []string {
-	out := make([]string, len(v))
-	for i, n := range v {
-		out[i] = strconv.Itoa(n)
-	}
-	return out
-}
-
-func describeMinutes(mins []int) string {
-	if len(mins) == 1 {
-		if mins[0] == 0 {
-			return "Every hour, on the hour"
-		}
-		return fmt.Sprintf("At %d minutes past every hour", mins[0])
-	}
-	if mins[0] == 0 && mins[1] > 0 && 60%mins[1] == 0 && len(mins) == 60/mins[1] {
-		even := true
-		for i, m := range mins {
-			if m != i*mins[1] {
-				even = false
-			}
-		}
-		if even {
-			return fmt.Sprintf("Every %d minutes", mins[1])
-		}
-	}
-	return "At minutes " + joinAnd(intStrings(mins)) + " past every hour"
-}
-
-var (
-	longDays   = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
-	longMonths = []string{"", "January", "February", "March", "April", "May", "June", "July",
-		"August", "September", "October", "November", "December"}
-)
-
-// describe returns a plain-English sentence for the schedule.
-func (c *cronExpr) describe() string {
-	mins := cronValues(c.min, 0, 59)
-	hrs := cronValues(c.hour, 0, 23)
-	var when string
-	switch {
-	case len(mins) == 60 && len(hrs) == 24:
-		when = "Every minute"
-	case len(hrs) == 24:
-		when = describeMinutes(mins)
-	case len(mins) == 60:
-		hs := make([]string, len(hrs))
-		for i, h := range hrs {
-			hs[i] = fmt.Sprintf("%02d:00", h)
-		}
-		when = "Every minute during the " + joinAnd(hs) + " hour"
-		if len(hs) > 1 {
-			when += "s"
-		}
-	case len(hrs)*len(mins) <= 8:
-		ts := []string{}
-		for _, h := range hrs {
-			for _, m := range mins {
-				ts = append(ts, fmt.Sprintf("%02d:%02d", h, m))
-			}
-		}
-		when = "At " + joinAnd(ts)
-	default:
-		when = "At minute " + joinAnd(intStrings(mins)) + " past hour " + joinAnd(intStrings(hrs))
-	}
-
-	dom := cronValues(c.dom, 1, 31)
-	dow := cronValues(c.dow, 0, 6)
-	months := cronValues(c.mon, 1, 12)
-	domAll, dowAll := len(dom) == 31, len(dow) == 7
-	dowPhrase := func() string {
-		key := strings.Join(intStrings(dow), ",")
-		switch key {
-		case "1,2,3,4,5":
-			return "on weekdays"
-		case "0,6":
-			return "on weekends"
-		}
-		names := make([]string, len(dow))
-		for i, d := range dow {
-			names[i] = longDays[d]
-		}
-		return "on " + joinAnd(names)
-	}
-	domPhrase := "on day " + joinAnd(intStrings(dom)) + " of the month"
-	var day string
-	switch {
-	case domAll && dowAll:
-		day = ""
-	case dowAll:
-		day = domPhrase
-	case domAll:
-		day = dowPhrase()
-	case c.domStar || c.dowStar:
-		day = domPhrase + ", only when it falls " + dowPhrase()
-	default:
-		day = domPhrase + " and " + dowPhrase()
-	}
-	if len(months) != 12 {
-		ms := make([]string, len(months))
-		for i, m := range months {
-			ms[i] = longMonths[m]
-		}
-		if day == "" {
-			day = "every day"
-		}
-		day += ", in " + joinAnd(ms)
-	}
-	switch {
-	case day != "":
-		return when + ", " + day
-	case strings.HasPrefix(when, "Every"):
-		return when
-	}
-	return when + ", every day"
-}
-
-func fmtWhen(t time.Time) string { return t.Format("Mon 02 Jan 15:04 MST") }
 
 // ---------------------------------------------------------------------------
 // Flow definitions (stored in the flows table, see db.go)
@@ -1384,9 +1104,9 @@ func clipName(s string, n int) string {
 	return strings.TrimSpace(string([]rune(s)[:n]))
 }
 
-// triggerOf reads a flow's trigger from its stored schedule. Blank counts
+// triggerFromSchedule reads a flow's trigger from its stored schedule. Blank counts
 // as manual.
-func triggerOf(schedule string) string {
+func triggerFromSchedule(schedule string) string {
 	switch strings.ToLower(strings.Join(strings.Fields(schedule), " ")) {
 	case scheduleManual, "":
 		return triggerManual
@@ -1398,8 +1118,8 @@ func triggerOf(schedule string) string {
 	return triggerSchedule
 }
 
-// storedSchedule is what goes in the schedule column.
-func storedSchedule(f Flow) string {
+// storedScheduleText is what goes in the schedule column.
+func storedScheduleText(f Flow) string {
 	switch f.Trigger {
 	case triggerJoin:
 		return scheduleJoin
@@ -1415,7 +1135,7 @@ func storedSchedule(f Flow) string {
 // schedule column and its steps from JSON. Steps that can't be read are left
 // empty, so the flow fails its checks and doesn't run.
 func flowFromRow(f *Flow, script, cancel string) {
-	f.Trigger = triggerOf(f.Schedule)
+	f.Trigger = triggerFromSchedule(f.Schedule)
 	if f.Trigger != triggerSchedule {
 		f.Schedule = ""
 	}
@@ -1432,12 +1152,12 @@ func flowFromRow(f *Flow, script, cancel string) {
 			f.OnStop = []Step{}
 		}
 	}
-	f.Steps, f.OnStop = fixSteps(f.Steps), fixSteps(f.OnStop)
+	f.Steps, f.OnStop = normalizeFlowSteps(f.Steps), normalizeFlowSteps(f.OnStop)
 }
 
 // stepsJSON is how steps are stored.
 func stepsJSON(list []Step) string {
-	b, _ := json.Marshal(fixSteps(list))
+	b, _ := json.Marshal(normalizeFlowSteps(list))
 	return string(b)
 }
 
@@ -1454,8 +1174,8 @@ func triggerLabel(t string) string {
 	return "Manual"
 }
 
-// normalizeTrigger checks the trigger the page sent. Empty means manual.
-func normalizeTrigger(t string) (string, error) {
+// normalizeTriggerName checks the trigger the page sent. Empty means manual.
+func normalizeTriggerName(t string) (string, error) {
 	switch t = strings.ToLower(strings.TrimSpace(t)); t {
 	case "":
 		return triggerManual, nil
@@ -1475,17 +1195,17 @@ const cronExamples = `Enter a cron expression such as:
 
 // checkCronSchedule validates the schedule of a schedule-triggered flow.
 func checkCronSchedule(schedule string) error {
-	if triggerOf(schedule) != triggerSchedule {
+	if triggerFromSchedule(schedule) != triggerSchedule {
 		return errors.New("Schedule: " + cronExamples)
 	}
-	if _, err := parseCron(schedule); err != nil {
+	if _, err := parseCronExpression(schedule); err != nil {
 		return errors.New("Schedule: " + err.Error() + ".\n" + cronExamples)
 	}
 	return nil
 }
 
-// delayOf reads a flow's delay in seconds. Errors are user-facing.
-func delayOf(f Flow) (int, error) {
+// flowDelaySeconds reads a flow's delay in seconds. Errors are user-facing.
+func flowDelaySeconds(f Flow) (int, error) {
 	if strings.TrimSpace(f.Delay) == "" {
 		return 0, nil
 	}
@@ -1499,31 +1219,31 @@ func delayOf(f Flow) (int, error) {
 	return secs, nil
 }
 
-// checkFlow runs every check a flow must pass to be saved or run.
-func checkFlow(f Flow) error {
+// checkFlowDefinition runs every check a flow must pass to be saved or run.
+func checkFlowDefinition(f Flow) error {
 	if f.Trigger == triggerSchedule {
 		if err := checkCronSchedule(f.Schedule); err != nil {
 			return err
 		}
 	}
-	if _, err := delayOf(f); err != nil {
+	if _, err := flowDelaySeconds(f); err != nil {
 		return err
 	}
-	return checkSteps(f.Trigger, f.Steps, f.OnStop)
+	return checkFlowSteps(f.Trigger, f.Steps, f.OnStop)
 }
 
-// initFlows creates the flows table (empty on a new database) and logs any
+// initStoredFlows creates the flows table (empty on a new database) and logs any
 // saved flow that can't run.
-func initFlows() error {
+func initStoredFlows() error {
 	if err := globalDatabase.EnsureFlowsTable(); err != nil {
 		return err
 	}
-	flows, err := globalDatabase.ListFlows()
+	flows, err := globalDatabase.ListStoredFlows()
 	if err != nil {
 		return err
 	}
 	for _, f := range flows {
-		if err := checkFlow(f); err != nil {
+		if err := checkFlowDefinition(f); err != nil {
 			log.Printf("flow[%s] won't run until it is fixed: %v", f.Name, err)
 		}
 	}
@@ -1532,7 +1252,7 @@ func initFlows() error {
 
 // flowsWithNextRun lists every flow and fills NextRun and LastRun for the page.
 func flowsWithNextRun() ([]Flow, error) {
-	flows, err := globalDatabase.ListFlows()
+	flows, err := globalDatabase.ListStoredFlows()
 	if err != nil {
 		return nil, err
 	}
@@ -1555,9 +1275,9 @@ func flowsWithNextRun() ([]Flow, error) {
 		case f.Trigger == triggerChat:
 			f.NextRun = "On player message"
 		default:
-			if c, err := parseCron(f.Schedule); err == nil {
+			if c, err := parseCronExpression(f.Schedule); err == nil {
 				if next, ok := c.next(now); ok {
-					delay, _ := delayOf(*f)
+					delay, _ := flowDelaySeconds(*f)
 					f.NextRun = fmtWhen(next.Add(time.Duration(delay) * time.Second))
 				}
 			}
@@ -1584,33 +1304,34 @@ func validateAndSaveFlow(f Flow, isNew bool) (int64, error) {
 	if utf8.RuneCountInString(f.Name) > maxFlowNameLen {
 		return 0, fmt.Errorf("Name: %d characters max", maxFlowNameLen)
 	}
-	trig, err := normalizeTrigger(f.Trigger)
+	trig, err := normalizeTriggerName(f.Trigger)
 	if err != nil {
 		return 0, err
 	}
 	f.Trigger = trig
 	var old Flow
 	if !isNew {
-		if old, err = globalDatabase.GetFlow(f.ID); err != nil {
+		if old, err = globalDatabase.GetStoredFlow(f.ID); err != nil {
 			return 0, errors.New("this flow no longer exists; reload the page")
 		}
 		if old.Trigger != f.Trigger {
 			return 0, fmt.Errorf("a saved flow's trigger can't be changed (this one is %s); make a new flow instead", triggerLabel(old.Trigger))
 		}
 	}
-	f.Steps, f.OnStop = fixSteps(f.Steps), fixSteps(f.OnStop)
+	f.Steps, f.OnStop = normalizeFlowSteps(f.Steps), normalizeFlowSteps(f.OnStop)
 	if f.Trigger != triggerSchedule && f.Trigger != triggerManual {
 		f.OnStop = []Step{}
 	}
-	if err := checkFlow(f); err != nil {
+	if err := checkFlowDefinition(f); err != nil {
 		return 0, err
 	}
-	f.Schedule = storedSchedule(f)
+	f.Schedule = storedScheduleText(f)
 	f.ScheduleEnabled = !isNew && f.Trigger != triggerManual && old.ScheduleEnabled
-	id, err := globalDatabase.SaveFlow(f, isNew, stepsJSON(f.Steps), stepsJSON(f.OnStop))
+	id, err := globalDatabase.SaveStoredFlow(f, isNew, stepsJSON(f.Steps), stepsJSON(f.OnStop))
 	if err != nil {
 		return 0, errors.New("could not save (is the name already used?)")
 	}
+	wakeFlowScheduler() // flows_schedule.go
 	return id, nil
 }
 
@@ -1619,18 +1340,18 @@ func checkFlowCanEnable(f Flow) error {
 	if f.Trigger == triggerManual {
 		return errors.New("manual flows have nothing to enable - press Run to start one, or edit the flow and pick another trigger")
 	}
-	return checkFlow(f)
+	return checkFlowDefinition(f)
 }
 
-// previewFlow is the edit dialog's line under the trigger: what the
+// previewFlowSteps is the edit dialog's line under the trigger: what the
 // schedule means and when the next runs start.
-func previewFlow(f Flow) map[string]any {
-	trig, err := normalizeTrigger(f.Trigger)
+func previewFlowSteps(f Flow) map[string]any {
+	trig, err := normalizeTriggerName(f.Trigger)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	f.Trigger = trig
-	delay, err := delayOf(f)
+	delay, err := flowDelaySeconds(f)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
@@ -1640,7 +1361,7 @@ func previewFlow(f Flow) map[string]any {
 	if err := checkCronSchedule(f.Schedule); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
-	c, _ := parseCron(f.Schedule)
+	c, _ := parseCronExpression(f.Schedule)
 	resp := map[string]any{"ok": true, "description": c.describe()}
 	next := []string{}
 	t := time.Now()
@@ -1685,6 +1406,9 @@ type flowRun struct {
 		set      bool
 		from, to int64
 	}
+	// polled makes the run's first For each poll `players` once, for fresh
+	// pings and anyone the console log missed (pollPlayersNow, rcon.go).
+	polled   sync.Once
 	stopOnce sync.Once
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -1723,7 +1447,7 @@ func (r *flowRun) logf(format string, a ...any) {
 }
 
 // addToRunLog adds a line to the Flows page's run log only. Used for sent
-// commands, which runShared already logs to the container as rcon[name].
+// commands, which runSharedCommand already logs to the container.
 func (r *flowRun) addToRunLog(msg string) {
 	flowRuns.Lock()
 	r.log = append(r.log, time.Now().Format("15:04:05")+"  "+msg)
@@ -1733,7 +1457,7 @@ func (r *flowRun) addToRunLog(msg string) {
 	flowRuns.Unlock()
 }
 
-func (r *flowRun) markFailed() {
+func (r *flowRun) markRunFailed() {
 	flowRuns.Lock()
 	r.failed = true
 	flowRuns.Unlock()
@@ -1746,13 +1470,13 @@ func (r *flowRun) sendOnStop() {
 			return
 		}
 		r.logf("sending the When stopped steps")
-		(&job{run: r, ctx: context.Background()}).exec(r.onStop)
+		(&job{run: r, ctx: context.Background()}).execFlowSteps(r.onStop)
 	})
 }
 
-// jobDone is called when one job finishes. The last one ends the run:
+// finishRunJob is called when one job finishes. The last one ends the run:
 // "stopped" if Stop was pressed, "error" if a command failed, else "done".
-func (r *flowRun) jobDone(stopped bool) {
+func (r *flowRun) finishRunJob(stopped bool) {
 	flowRuns.Lock()
 	defer flowRuns.Unlock()
 	r.stopped = r.stopped || stopped
@@ -1780,7 +1504,7 @@ type runView struct {
 	Log        []string `json:"log"`
 }
 
-func snapshotRuns() []runView {
+func snapshotFlowRuns() []runView {
 	flowRuns.Lock()
 	defer flowRuns.Unlock()
 	out := []runView{}
@@ -1794,42 +1518,8 @@ func snapshotRuns() []runView {
 	return out
 }
 
-// startFlow starts a run now (the Run button). minutes > 0 replaces the
-// flow's delay for this run. Join and chat flows run for a player, so Run
-// can't start them.
-func startFlow(f Flow, minutes int) error {
-	if err := checkFlow(f); err != nil {
-		return err
-	}
-	switch f.Trigger {
-	case triggerJoin:
-		return errors.New("this flow runs for each player who joins, so Run can't start it")
-	case triggerChat:
-		return errors.New("this flow runs for each player message, so Run can't start it")
-	}
-	delay, _ := delayOf(f)
-	if minutes > 0 {
-		delay = minutes * 60
-	}
-	return launch(f, time.Now().Add(time.Duration(delay)*time.Second), sourceManual, nil)
-}
-
-// stopFlow cancels the active run of a flow (the Stop button). The run sends
-// the When stopped steps as it stops.
-func stopFlow(id int64) error {
-	flowRuns.Lock()
-	run := flowRuns.byFlow[id]
-	active := run != nil && run.active
-	flowRuns.Unlock()
-	if !active {
-		return errFlowNotRunning
-	}
-	run.cancel()
-	return nil
-}
-
-// deleteFlow forgets a flow's last run and removes it from the database.
-func deleteFlow(id int64) error {
+// deleteFlowAndRuns forgets a flow's last run and removes it from the database.
+func deleteFlowAndRuns(id int64) error {
 	flowRuns.Lock()
 	if run := flowRuns.byFlow[id]; run != nil && run.active {
 		flowRuns.Unlock()
@@ -1840,14 +1530,16 @@ func deleteFlow(id int64) error {
 	forEachMarks.Lock()
 	delete(forEachMarks.byFlow, id) // a new flow reusing the number starts afresh
 	forEachMarks.Unlock()
-	return globalDatabase.DeleteFlow(id)
+	err := globalDatabase.DeleteStoredFlow(id)
+	wakeFlowScheduler()
+	return err
 }
 
-// launch starts a run of f whose first step goes at `start`. p is the player
+// launchFlowRun starts a run of f whose first step goes at `start`. p is the player
 // for join and chat flows (nil otherwise); a player run adds a job to the
 // flow's active run if there is one, while any other start is refused with
 // errFlowRunning.
-func launch(f Flow, start time.Time, source string, p *flowPlayer) error {
+func launchFlowRun(f Flow, start time.Time, source string, p *flowPlayer) error {
 	flowRuns.Lock()
 	run := flowRuns.byFlow[f.ID]
 	active := run != nil && run.active
@@ -1871,12 +1563,12 @@ func launch(f Flow, start time.Time, source string, p *flowPlayer) error {
 	if !active || p != nil {
 		run.logf("Started by %s", source)
 	}
-	go func() { run.jobDone(runJob(run, f, start, p)) }()
+	go func() { run.finishRunJob(runFlowJob(run, f, start, p)) }()
 	return nil
 }
 
-// runJob works through one job and reports whether it was stopped.
-func runJob(run *flowRun, f Flow, start time.Time, p *flowPlayer) (stopped bool) {
+// runFlowJob works through one job and reports whether it was stopped.
+func runFlowJob(run *flowRun, f Flow, start time.Time, p *flowPlayer) (stopped bool) {
 	who := ""
 	if p != nil {
 		who = fmt.Sprintf(" for %s (#%d)", bareName(p.Name), p.ID)
@@ -1895,7 +1587,7 @@ func runJob(run *flowRun, f Flow, start time.Time, p *flowPlayer) (stopped bool)
 		return true
 	}
 	x := &job{run: run, ctx: run.ctx, p: p}
-	if !x.exec(f.Steps) && run.ctx.Err() != nil {
+	if !x.execFlowSteps(f.Steps) && run.ctx.Err() != nil {
 		run.logf("stopped%s", who)
 		run.sendOnStop()
 		return true
@@ -1905,218 +1597,38 @@ func runJob(run *flowRun, f Flow, start time.Time, p *flowPlayer) (stopped bool)
 }
 
 // ---------------------------------------------------------------------------
-// Scheduler
+// Starting player flows (join and message triggers)
 // ---------------------------------------------------------------------------
 
-// scheduleGrace lets a run whose start just passed (a late tick, a restart a
-// few seconds in) still start instead of being skipped.
-const scheduleGrace = 15 * time.Second
-
-// scheduleTick is how often the scheduler checks for runs to start.
-const scheduleTick = 5 * time.Second
-
-// lastFired is the latest cron time started for each flow, so a finished or
-// stopped run isn't started again for the same time. Only the scheduler
-// goroutine touches it.
-var lastFired = map[int64]time.Time{}
-
-// launchDue reports whether a run that starts at `start` should be launched
-// at this tick. It looks one tick ahead: a run due before the next tick is
-// launched now and sleeps until the exact second.
-func launchDue(now, start time.Time) bool {
-	return !now.Add(scheduleTick).Before(start)
-}
-
-func startScheduler() {
-	go func() {
-		t := time.NewTicker(scheduleTick)
-		defer t.Stop()
-		for now := range t.C {
-			runScheduleTick(now)
-		}
-	}()
-}
-
-// runScheduleTick starts, for every enabled scheduled flow, the first cron
-// time that hasn't been started yet and whose first step (cron time plus the
-// delay) is now or before the next tick. A run more than scheduleGrace late
-// is skipped.
-func runScheduleTick(now time.Time) {
-	flows, err := globalDatabase.ListFlows()
-	if err != nil {
-		log.Printf("scheduler: %v", err)
-		return
-	}
-	// Forget deleted flows: their numbers are reused by new flows, which
-	// must not look as if they had already run.
-	exists := make(map[int64]bool, len(flows))
-	for _, f := range flows {
-		exists[f.ID] = true
-	}
-	for id := range lastFired {
-		if !exists[id] {
-			delete(lastFired, id)
-		}
-	}
-	for _, f := range flows {
-		if !f.ScheduleEnabled || f.Trigger != triggerSchedule || checkFlow(f) != nil {
-			continue
-		}
-		c, err := parseCron(f.Schedule)
-		if err != nil {
-			continue
-		}
-		delay, _ := delayOf(f)
-		d := time.Duration(delay) * time.Second
-		from := now.Add(-scheduleGrace - d)
-		if lf, ok := lastFired[f.ID]; ok && lf.After(from) {
-			from = lf
-		}
-		t, ok := c.next(from)
-		if !ok || !launchDue(now, t.Add(d)) {
-			continue
-		}
-		if err := launch(f, t.Add(d), sourceSchedule, nil); errors.Is(err, errFlowRunning) {
-			continue // busy: retry next tick
-		} else if err != nil {
-			log.Printf("scheduler: %s: %v", f.Name, err)
-		}
-		lastFired[f.ID] = t
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Player-join trigger, and the latest player list
-// ---------------------------------------------------------------------------
-
-// latest is the poller's most recent player list. Flows and chat commands
-// read it, so they don't send their own `players` command.
-var latest struct {
-	sync.Mutex
-	players []Player
-	ok      bool // false until the first successful poll
-}
-
-// lobbySuffix is what BattlEye appends to a name while the player is still on
-// the loading screen.
-const lobbySuffix = "(Lobby)"
-
-func inLobby(p Player) bool {
-	f := strings.Fields(p.Name)
-	return len(f) > 0 && strings.EqualFold(f[len(f)-1], lobbySuffix)
-}
-
-// joinWatch remembers who was online at the last successful poll, by GUID
-// (player numbers get reused). Only the poller goroutine (db.go) touches it.
-var joinWatch = struct {
-	seen   map[string]bool
-	primed bool // false until the first successful poll after startup
-}{seen: map[string]bool{}}
-
-// playersPolled is called by the poller with every successful `players`
-// result. It keeps the latest list and starts the join flows for new
-// arrivals. The first call after startup only records who is online, so a
-// restart doesn't greet everybody.
-func playersPolled(players []Player) {
-	latest.Lock()
-	latest.players, latest.ok = append([]Player(nil), players...), true
-	latest.Unlock()
-	if joined := newArrivals(players); len(joined) > 0 {
-		startJoinFlows(joined)
-	}
-}
-
-// newArrivals updates joinWatch and returns the players who have just
-// finished joining. A "(Lobby)" player is still loading, so they're left out
-// until the tag is gone; one already counted stays counted.
-func newArrivals(players []Player) []Player {
-	online := map[string]bool{}
-	var joined []Player
-	for _, p := range players {
-		if p.GUID == "" || (inLobby(p) && !joinWatch.seen[p.GUID]) {
-			continue
-		}
-		online[p.GUID] = true
-		if joinWatch.primed && !joinWatch.seen[p.GUID] {
-			joined = append(joined, p)
-		}
-	}
-	joinWatch.seen, joinWatch.primed = online, true
-	return joined
-}
-
-// playersLost is called when the game server stops answering. Everyone is
-// forgotten, so players are greeted again when they reconnect.
-func playersLost() {
-	joinWatch.seen = map[string]bool{}
-	latest.Lock()
-	latest.players = nil
-	latest.Unlock()
-}
-
-// playerRole reads a player's role (Player when unknown).
-func playerRole(guid string) int {
+// lookupPlayerRole reads a player's role (Player when unknown).
+func lookupPlayerRole(guid string) int {
 	if globalDatabase == nil {
 		return rolePlayer
 	}
-	return globalDatabase.PlayerRole(guid)
+	return globalDatabase.GetPlayerRole(guid)
 }
 
 // startPlayerFlows runs every enabled flow with the given trigger once for
 // the player, after each flow's delay.
 func startPlayerFlows(trigger, source string, p *flowPlayer) {
-	flows, err := globalDatabase.ListFlows()
+	flows, err := globalDatabase.ListStoredFlows()
 	if err != nil {
 		log.Printf("%s flows: %v", trigger, err)
 		return
 	}
 	for _, f := range flows {
-		if !f.ScheduleEnabled || f.Trigger != trigger || checkFlow(f) != nil {
+		if !f.ScheduleEnabled || f.Trigger != trigger || checkFlowDefinition(f) != nil {
 			continue
 		}
-		delay, _ := delayOf(f)
+		delay, _ := flowDelaySeconds(f)
 		pp := *p
-		launch(f, time.Now().Add(time.Duration(delay)*time.Second), source, &pp)
-	}
-}
-
-// startJoinFlows runs the join flows for each player who just joined.
-func startJoinFlows(joined []Player) {
-	for _, p := range joined {
-		startPlayerFlows(triggerJoin, sourceJoin, &flowPlayer{Player: p, role: playerRole(p.GUID)})
+		launchFlowRun(f, time.Now().Add(time.Duration(delay)*time.Second), source, &pp)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Chat: Player message flows and the built-in chat commands
+// Chat commands
 // ---------------------------------------------------------------------------
-
-// startChatWatcher reacts to every chat line for as long as ReCON runs:
-// built-in chat commands first, then the Player message flows.
-//
-// The sender is found by exact name among the players online (without the
-// "(Lobby)" tag). If nobody online has that name, or more than one player
-// does, the line is ignored; what they may do comes from their GUID's role.
-func startChatWatcher() {
-	events, _ := serverEvents.subscribe(256)
-	go func() {
-		for ev := range events {
-			if ev.Kind == eventChat {
-				handleChatLine(ev.Name, ev.Message)
-			}
-		}
-	}()
-}
-
-func handleChatLine(name, message string) {
-	p, ok := onlineByUniqueName(name)
-	if !ok || p.GUID == "" {
-		return
-	}
-	role := playerRole(p.GUID)
-	handleChatCommand(p, role, message)
-	startPlayerFlows(triggerChat, sourceChat, &flowPlayer{Player: p, role: role, message: strings.TrimSpace(message)})
-}
 
 // chatCommandDef is one built-in chat command as the settings dialog shows
 // it: its default cooldown, whether it has Announce and a vote length, its
@@ -2296,7 +1808,7 @@ func currentChatSettings() chatSettings {
 func loadChatSettings() chatSettings {
 	saved := chatSettings{}
 	if globalDatabase != nil {
-		raw, ok, err := globalDatabase.Setting(chatSettingsKey)
+		raw, ok, err := globalDatabase.GetStoredSetting(chatSettingsKey)
 		if err != nil {
 			log.Printf("chat commands: reading settings: %v", err)
 		}
@@ -2324,7 +1836,7 @@ func saveChatSettings(s chatSettings) (chatSettings, error) {
 		return nil, err
 	}
 	b, _ := json.Marshal(s)
-	if err := globalDatabase.SaveSetting(chatSettingsKey, string(b)); err != nil {
+	if err := globalDatabase.SaveStoredSetting(chatSettingsKey, string(b)); err != nil {
 		return nil, err
 	}
 	chatState.Lock()
@@ -2351,16 +1863,16 @@ var chatSay = func(to Player, everyone bool, text string) bool {
 	if everyone {
 		cmd = "say -1 " + text
 	}
-	_, acked, err := runShared(cmd, 2*time.Second, false, "chat")
+	_, acked, err := runSharedCommand(cmd, 2*time.Second, false, "chat")
 	if err == nil && acked && !everyone {
-		recordSent(to.GUID, cmd)
+		recordSentMessage(to.GUID, cmd)
 	}
 	return err == nil && acked
 }
 
 // chatKick kicks a player for !kick. Tests replace it.
 var chatKick = func(p Player, reason string) bool {
-	_, acked, err := runShared(fmt.Sprintf("kick %d %s", p.ID, reason), 2*time.Second, false, "chat")
+	_, acked, err := runSharedCommand(fmt.Sprintf("kick %d %s", p.ID, reason), 2*time.Second, false, "chat")
 	return err == nil && acked
 }
 
@@ -2380,16 +1892,15 @@ var codeRe = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
 
 // onlineNow is a copy of the latest player list.
 func onlineNow() []Player {
-	latest.Lock()
-	defer latest.Unlock()
-	return append([]Player(nil), latest.players...)
+	players, _ := listOnlinePlayers()
+	return players
 }
 
-// onlineStaff is every mod and admin online.
-func onlineStaff() []Player {
+// listOnlineStaff is every mod and admin online.
+func listOnlineStaff() []Player {
 	roles := map[string]int{}
 	if globalDatabase != nil {
-		if r, err := globalDatabase.Roles(); err == nil {
+		if r, err := globalDatabase.AllPlayerRoles(); err == nil {
 			roles = r
 		}
 	}
@@ -2524,7 +2035,7 @@ func handleChatCommand(p Player, role int, text string) {
 		chatVoteCommand(p, set, rest)
 
 	case "code":
-		staff := onlineStaff()
+		staff := listOnlineStaff()
 		if len(staff) == 0 {
 			return
 		}
@@ -2538,7 +2049,7 @@ func handleChatCommand(p Player, role int, text string) {
 		}
 
 	case "kick", "ban":
-		chatPunish(cmd, p, role, set, args)
+		runPunishCommand(cmd, p, role, set, args)
 	}
 }
 
@@ -2592,11 +2103,11 @@ func chatVoteCommand(p Player, set chatSetting, rest string) {
 	}()
 }
 
-// chatPunish handles !kick <code> [reason] and !ban <code> [reason]. Mods
+// runPunishCommand handles !kick <code> [reason] and !ban <code> [reason]. Mods
 // can kick and ban Players; Admins can also kick and ban Mods. Nobody can
 // kick or ban themselves, or anyone of their own rank or higher, from chat.
 // !ban is always permanent and also finds players who have left.
-func chatPunish(cmd string, p Player, role int, set chatSetting, args []string) {
+func runPunishCommand(cmd string, p Player, role int, set chatSetting, args []string) {
 	if len(args) == 0 || !codeRe.MatchString(args[0]) {
 		return
 	}
@@ -2624,7 +2135,7 @@ func chatPunish(cmd string, p Player, role int, set chatSetting, args []string) 
 		return // nobody, or more than one player, has that code
 	}
 	t := matches[0]
-	if strings.EqualFold(t.GUID, p.GUID) || playerRole(t.GUID) >= role {
+	if strings.EqualFold(t.GUID, p.GUID) || lookupPlayerRole(t.GUID) >= role {
 		return
 	}
 	done := "kicked"
@@ -2641,7 +2152,7 @@ func chatPunish(cmd string, p Player, role int, set chatSetting, args []string) 
 	}
 	markUsed(cmd)
 	vals := map[string]string{"target_name": bareName(t.Name), "player_name": bareName(p.Name), "reason": reason}
-	for _, s := range onlineStaff() {
+	for _, s := range listOnlineStaff() {
 		if !strings.EqualFold(s.GUID, t.GUID) { // a kicked Mod is on their way out
 			chatSay(s, false, fillTemplate(set.Msgs["staff"], vals))
 		}
