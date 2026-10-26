@@ -84,6 +84,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .helpbox ul { margin: 4px 0; padding-left: 20px; }
 .helpbox code { font-family: var(--mono); font-size: 12px; background: #111; padding: 1px 5px; border-radius: 3px; }
 .helpbox .buttons { margin-top: 12px; flex: none; }
+.helpbox > p { margin: 0 0 6px; }
 .helpbox table { table-layout: auto; margin: 6px 0; }
 .helpbox th, .helpbox td { height: auto; font-size: 13px; color: #ccc; vertical-align: top; padding: 7px 9px; }
 .helpbox th { color: #eee; }
@@ -109,7 +110,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 .fb .hint b { color: var(--fg); font-weight: 600; }
 .fb .hint.bad { color: var(--err); white-space: pre-line; }
 .fb-foot { display: flex; align-items: center; gap: 10px; border-top: 1px solid #333; padding-top: 12px; }
-.fb-foot .msg { flex: 1; font-size: 13px; color: var(--err); white-space: pre-line; }
+.fb-foot .spacer { flex: 1; }
+.fb > .msg { margin: 0; font-size: 13px; color: var(--err); white-space: pre-line; }
+.fb > .msg:empty { display: none; }
 .fb-foot button { margin: 0; }
 .tok { font-family: var(--mono); font-size: 12.5px; color: #d7e3fc; }
 .seg { display: flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; width: fit-content; max-width: 100%; }
@@ -167,8 +170,11 @@ button:disabled { opacity: 0.4; cursor: default; }
    (not the page's 40% opacity for disabled buttons). */
 .fb .menu button:disabled { opacity: 1; color: #8a8a8a; cursor: not-allowed; }
 .fb .menu button:disabled small { color: var(--warn); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
-.fb .chips button { font: 12px var(--mono); padding: 2px 7px; border-radius: 10px; }
+/* + Add step's menu opens upward from the footer. */
+.fb-foot .menu { top: auto; bottom: calc(100% + 6px); max-height: min(70vh, 560px); overflow-y: auto; }
+.steps.drop-into { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 6px; }
+.box.valuesbox { width: min(640px, 95vw); height: auto; max-height: 88vh; }
+.valuesbox td:first-child { white-space: nowrap; }
 
 /* Chat commands dialog */
 .box.cmdbox { width: min(920px, 96vw); max-height: 90vh; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
@@ -246,23 +252,20 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<div class="sect">
 				<div class="hd"><h3>Steps</h3><span class="hint">Run top to bottom. Drag <b>⋮⋮</b> or use the arrows to move a step; an If moves with everything inside it.</span></div>
 				<div class="steps" id="steps"></div>
-				<div class="addrow">
-					<button type="button" id="addBtn" aria-haspopup="true" aria-expanded="false">+ Add step</button>
-					<div class="chips" id="chips"></div>
-					<div class="menu" id="menu" hidden></div>
-				</div>
 			</div>
 			<div class="sect" id="stopSection">
-				<div class="hd"><h3>When stopped</h3><span class="hint">Sent if someone presses Stop before the run ends</span></div>
+				<div class="hd"><h3>When stopped</h3><span class="hint">Sent if someone presses Stop before the run ends. Drag Message, Lock, Unlock, Kick everyone or RCON command steps here.</span></div>
 				<div class="steps" id="onStop"></div>
-				<div class="addrow">
-					<button type="button" id="addStopBtn" aria-haspopup="true" aria-expanded="false">+ Add step</button>
-					<div class="menu" id="stopMenu" hidden></div>
-				</div>
 			</div>
 		</div>
+		<p class="msg" id="edMsg" aria-live="polite"></p>
 		<div class="fb-foot">
-			<span class="msg" id="edMsg"></span>
+			<div class="addrow">
+				<button type="button" id="addBtn" aria-haspopup="true" aria-expanded="false">+ Add step</button>
+				<button type="button" id="valuesBtn" aria-haspopup="dialog" title="The placeholders you can type into a step">Values</button>
+				<div class="menu" id="menu" hidden></div>
+			</div>
+			<span class="spacer"></span>
 			<button type="button" id="edCancel">Cancel</button>
 			<button type="button" id="saveBtn">Save</button>
 		</div>
@@ -322,6 +325,19 @@ button:disabled { opacity: 0.4; cursor: default; }
 		</div>
 	</div>
 </div>
+<div id="valuesModal" class="modal" onclick="if (event.target === this) closeValues()">
+	<div class="box helpbox valuesbox" role="dialog" aria-labelledby="valuesTitle">
+		<h2 id="valuesTitle">Values</h2>
+		<p>Type these into a step's text, reason or command; each is filled in when the step runs. The player ones work in On join and Player message flows, and inside a For each.</p>
+		<div class="helppanes">
+			<table>
+				<thead><tr><th>Placeholder</th><th>Is</th></tr></thead>
+				<tbody id="valuesRows"></tbody>
+			</table>
+		</div>
+		<div class="buttons"><button type="button" onclick="closeValues()">Close</button></div>
+	</div>
+</div>
 <div id="helpModal" class="modal" onclick="if (event.target === this) closeHelp()">
 	<div class="box helpbox">
 		<h2>Flow help</h2>
@@ -341,7 +357,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<h3>Making a flow</h3>
 			<ul>
 				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and pick a trigger.</li>
-				<li>Press <b>+ Add step</b> to add steps. Fill in each row; anything missing is shown in red under the row.</li>
+				<li>Press <b>+ Add step</b> (bottom left) to add steps. Fill in each row; anything missing is shown in red under the row. <b>Values</b> lists the placeholders you can type into a step.</li>
 				<li>Move a step with its arrows, or drag it by the <b>⋮⋮</b> handle. Moving an If moves everything inside it.</li>
 				<li>Save. Schedule, On join and Player message flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
 			</ul>
@@ -383,7 +399,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 				</tbody>
 			</table>
 			<h3>When stopped</h3>
-			<p>Schedule and Manual flows can have steps that are sent if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server.</p>
+			<p>Schedule and Manual flows can have steps that are sent if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. <b>+ Add step</b> adds to the steps; drag a Message, Lock, Unlock, Kick everyone or RCON command step by its <b>⋮⋮</b> into When stopped, and back.</p>
 		</div>
 
 		<div class="helppane" data-pane="conditions">
@@ -399,7 +415,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<p>Players BattlEye hasn't verified yet are left out. Stop flow inside it ends the whole run. A For each can't go inside another one. The run log lists each player a condition matched, not every one checked.</p>
 			<p>Examples for a Schedule flow every minute (<code>* * * * *</code>): <b>For each</b> player, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. Or <b>For each</b> message, <b>If</b> <code>{message}</code> contains <code>noob</code>, <b>Message</b> the Player <i>Please keep chat friendly</i>. In a flow without a player of its own, Add step puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so three clicks build either one.</p>
 			<h3>Counter</h3>
-			<p>Each run of a flow keeps a <b>counter</b> for every player, starting at 0. Every If, Else if and Else has a <b>counter</b> setting for what it does to the player's counter when it runs: <b>0</b> nothing, <b>++</b> add 1, <b>--</b> take 1 away (not below 0), <b>reset</b> back to 0. <code>{counter}</code> is the value, and an If can compare it with a number or with <code>{threshold}</code>, the flow's <b>Counter threshold</b> (next to the delay). Counters are only kept while the run lasts, so put the checks in one run: several For each blocks with Waits between them.</p>
+			<p>Each run of a flow keeps a <b>counter</b> for every player, starting at 0. Every If, Else if and Else has a <b>counter</b> setting for what it does to the player's counter when it runs: <b>0</b> nothing, <b>++</b> add 1, <b>--</b> take 1 away (not below 0), <b>reset</b> back to 0. <code>{counter}</code> is the value, and an If can compare it with a number or with <code>{threshold}</code>, the flow's <b>Counter threshold</b> (next to the delay; optional, and <code>{threshold}</code> works only once it's set to 1 or more). Counters are only kept while the run lasts, so put the checks in one run: several For each blocks with Waits between them.</p>
 			<p>Example, Schedule every minute, threshold 4: <b>For each</b> player, <b>If</b> <code>{player_ping} &gt;= 500</code> counter <b>++</b>, then inside it <b>If</b> <code>{counter} &gt;= {threshold}</code> Kick, reason <i>Ping {player_ping} over the limit</i>, <b>Else</b> Message the Player <i>Warning {counter}/{threshold}: ping {player_ping}</i>; the outer <b>Else</b> counter <b>reset</b>, so only high pings in a row count. Duplicate the For each block with a <b>Wait 10s</b> between copies.</p>
 			<h3>What you can compare</h3>
 			<table>
@@ -827,6 +843,7 @@ document.addEventListener('keydown', function(e) {
 	if (e.key !== 'Escape') return;
 	if (document.querySelector('.menu:not([hidden])')) return; // the editor closes its menu
 	if (document.getElementById('confirmModal').style.display === 'flex') closeConfirm();
+	else if (document.getElementById('valuesModal').style.display === 'flex') closeValues();
 	else if (document.getElementById('importModal').style.display === 'flex') closeImport();
 	else if (document.getElementById('srvModal').style.display === 'flex') closeServerCmds();
 	else if (document.getElementById('helpModal').style.display === 'flex') closeHelp();
@@ -918,20 +935,21 @@ const TRIGGER_NAME = Object.fromEntries(TRIGGERS);
 // "The player" is whoever triggered the flow: who joined, or who typed the
 // message. Schedule and Manual flows have no player.
 const TOKENS = [
-	{ tok: '{player_name}', need: 'player', title: 'Name of the player who triggered the flow' },
+	{ tok: '{player_name}', need: 'player', title: 'The player\'s name: who joined, who typed the message, or each player in a For each' },
 	{ tok: '{player_id}', need: 'player', title: 'Their player number' },
 	{ tok: '{player_ping}', need: 'player', title: 'Their ping' },
 	{ tok: '{player_ip}', need: 'player', title: 'Their IP address' },
 	{ tok: '{player_guid}', need: 'player', title: 'Their BattlEye GUID' },
 	{ tok: '{player_role}', need: 'player', title: 'Their role: Player, Mod or Admin' },
-	{ tok: '{message}', need: 'chat', title: 'Everything they typed' },
-	{ tok: '{players_online}', need: '', title: 'How many players are online (works in every flow)' },
-	{ tok: '{counter}', need: 'player', title: 'The player\'s counter in this run of the flow (starts at 0; changed by the counter setting on If, Else if and Else)' },
-	{ tok: '{threshold}', need: '', title: 'This flow\'s counter threshold (set next to the delay)' }
+	{ tok: '{message}', need: 'chat', title: 'What they typed (Player message), or the chat line in a For each' },
+	{ tok: '{players_online}', need: '', title: 'How many players are online (any flow)' },
+	{ tok: '{counter}', need: 'player', title: 'The player\'s counter in this run: starts at 0, changed by the counter setting on If, Else if and Else' },
+	{ tok: '{threshold}', need: 'threshold', title: 'This flow\'s Counter threshold (only once one is set)' }
 ];
 const NEED_TEXT = {
 	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
-	chat: 'needs the Player message trigger'
+	chat: 'needs the Player message trigger',
+	threshold: 'needs a Counter threshold: enter one (1 or more) next to the delay'
 };
 // Kinds: word = the chat message, matched by words; text = exact, wildcard
 // or contains; ident = a player number or GUID (is / is not only); num =
@@ -1042,10 +1060,13 @@ function el(tag, attrs, ...kids) {
 // player (each one in turn) and a {message}: the chat line (For each
 // message) or that player's latest one this session (For each player).
 function ctx(f, inLoop) {
-	const t = f.trigger.type;
-	if (inLoop) return { '': true, player: true, chat: true };
-	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat' };
+	const t = f.trigger.type, threshold = thresholdSet(f.counterThreshold);
+	if (inLoop) return { '': true, player: true, chat: true, threshold };
+	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat', threshold };
 }
+// The Counter threshold is optional: empty is none, else a whole number 1 to 1000.
+const thresholdSet = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 1000;
+const thresholdOk = (v) => String(v).trim() === '' || thresholdSet(v);
 const secsOf = (v) => parseDur(v) || 0;
 // An If: { type: 'if', branches: [{ subject, op, value, steps }, ...], else: [steps] | null }.
 // branches[0] is the If, the rest are Else ifs (checked in order), then the Else.
@@ -1100,6 +1121,7 @@ function condErr(c, b) {
 	const sub = subjectOf(b);
 	if (!c[sub[3]]) return sub[1] + ' ' + NEED_TEXT[sub[3]];
 	if (sub[2] === 'num' && !numValueOk(b.value)) return 'Enter a whole number or {threshold}';
+	if (sub[2] === 'num' && String(b.value).trim() === '{threshold}' && !c.threshold) return '{threshold} ' + NEED_TEXT.threshold;
 	if (sub[0] === 'player_id' && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
 	if (b.counter && !c.player) return 'The counter is kept for each player: ' + NEED_TEXT.player;
 	if (sub[2] === 'role' && !ROLES.some(([v]) => v === String(b.value).trim())) return 'Pick Player, Mod or Admin';
@@ -1227,7 +1249,7 @@ function renderSteps(key) {
 	flatRows[key] = [];
 	jointRefs[key] = [];
 	if (!list.length) {
-		box.append(el('div', { class: 'empty', text: key === 'steps' ? 'No steps yet. Add the first one below.' : 'Nothing is sent when stopped.' }));
+		box.append(el('div', { class: 'empty', text: key === 'steps' ? 'No steps yet. Press + Add step below.' : 'Nothing is sent when stopped. Drag a step here to send it on Stop.' }));
 		return;
 	}
 	const { errs, nums } = validate(ed, list);
@@ -1357,7 +1379,6 @@ function field(s, p, key, inLoop) {
 		inp.addEventListener('input', chk);
 	}
 	inp.addEventListener('input', () => { s[p.k] = inp.value; changed(false); });
-	if (p.kind === 'text') inp.addEventListener('focus', () => { lastText = inp; });
 	return inp;
 }
 
@@ -1451,10 +1472,17 @@ function dropPos(r, above) {
 	return above ? { list: last, i: last.length } : { list: r.list, i: r.i + 1 };
 }
 
+// One drag at a time, within or between the two lists: a step can go from
+// Steps into When stopped (only the kinds that can be sent on Stop) and back.
+let drag = null;
+const canStop = (s) => STOP_TYPES.includes(s.type);
+function clearDragMarks() {
+	document.querySelectorAll('#steps .step, #onStop .step').forEach((r) => r.classList.remove('drop-above', 'drop-below', 'dragging'));
+	$('steps').classList.remove('drop-into');
+	$('onStop').classList.remove('drop-into');
+}
 function setupDrag(box) {
 	const key = box.id === 'steps' ? 'steps' : 'onStop';
-	let drag = null;
-	const rowsEls = () => [...box.querySelectorAll('.step')];
 	box.addEventListener('pointerdown', (e) => {
 		const g = e.target.closest('.grip');
 		const row = g && g.closest('.step');
@@ -1465,36 +1493,42 @@ function setupDrag(box) {
 		if (!row || !row.draggable) { e.preventDefault(); return; }
 		const ri = +row.dataset.r;
 		const r = flatRows[key][ri];
-		drag = { r, from: ri, to: r.last };
+		drag = { key, r, from: ri, to: r.last };
 		e.dataTransfer.effectAllowed = 'move';
 		e.dataTransfer.setData('text/plain', String(ri));
-		rowsEls().forEach((x) => { const j = +x.dataset.r; if (j >= drag.from && j <= drag.to) x.classList.add('dragging'); });
+		box.querySelectorAll('.step').forEach((x) => { const j = +x.dataset.r; if (j >= drag.from && j <= drag.to) x.classList.add('dragging'); });
 	});
-	const clearDrop = () => box.querySelectorAll('.step').forEach((r) => r.classList.remove('drop-above', 'drop-below'));
-	const clear = () => box.querySelectorAll('.step').forEach((r) => r.classList.remove('drop-above', 'drop-below', 'dragging'));
 	const above = (e, row) => e.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2;
-	// A block can't be dropped inside itself.
+	// Where a drop here puts the step: above or below a row, or at the end
+	// of this list (below its last row, or into an empty When stopped). A
+	// block can't go inside itself, and When stopped only takes Message,
+	// Lock, Unlock, Kick everyone and RCON command.
 	const target = (e) => {
+		if (!drag || (key === 'onStop' && !canStop(drag.r.s))) return null;
 		const row = e.target.closest('.step');
-		if (!drag || !row) return null;
+		if (!row) return { row: null, pos: { list: ed[key], i: ed[key].length } };
 		const ri = +row.dataset.r;
-		if (ri >= drag.from && ri <= drag.to) return null;
+		if (drag.key === key && ri >= drag.from && ri <= drag.to) return null;
 		const ab = above(e, row);
 		return { row, ab, pos: dropPos(flatRows[key][ri], ab) };
 	};
 	box.addEventListener('dragover', (e) => {
 		const t = target(e);
-		clearDrop();
+		document.querySelectorAll('#steps .step, #onStop .step').forEach((r) => r.classList.remove('drop-above', 'drop-below'));
+		$('steps').classList.remove('drop-into');
+		$('onStop').classList.remove('drop-into');
 		if (!t) return;
 		e.preventDefault();
-		t.row.classList.add(t.ab ? 'drop-above' : 'drop-below');
+		if (t.row) t.row.classList.add(t.ab ? 'drop-above' : 'drop-below');
+		else box.classList.add('drop-into');
 	});
+	box.addEventListener('dragleave', (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove('drop-into'); });
 	box.addEventListener('drop', (e) => {
 		e.preventDefault();
 		const t = target(e);
 		const d = drag;
 		drag = null;
-		clear();
+		clearDragMarks();
 		if (!t || !d) return;
 		const s = d.r.list.splice(d.r.i, 1)[0];
 		let ti = t.pos.i;
@@ -1504,8 +1538,8 @@ function setupDrag(box) {
 	});
 	box.addEventListener('dragend', () => {
 		drag = null;
-		clear();
-		box.querySelectorAll('.step').forEach((r) => { r.draggable = false; });
+		clearDragMarks();
+		document.querySelectorAll('#steps .step, #onStop .step').forEach((r) => { r.draggable = false; });
 	});
 	// Pointing at an If, its Else or its End if lights up all three.
 	box.addEventListener('mouseover', (e) => {
@@ -1518,40 +1552,36 @@ function setupDrag(box) {
 }
 
 // ---------------------------------------------------------------------------
-// Add-step menus and placeholder chips
+// The + Add step menu and the Values list
 // ---------------------------------------------------------------------------
-function whyDisabled(type, key) {
-	if (key === 'onStop') return STOP_TYPES.includes(type) ? '' : 'not for Stop';
+function whyDisabled(type) {
 	if ((type === 'kick' || type === 'ban') && !ctx(ed).player && !hasLoop(ed.steps)) return 'needs a For each, or On join or Player message';
 	return '';
 }
-function openMenu(key) {
-	const menu = key === 'steps' ? $('menu') : $('stopMenu');
-	const btn = key === 'steps' ? $('addBtn') : $('addStopBtn');
+// + Add step adds to Steps; drag a step into When stopped to send it on Stop.
+function openMenu() {
+	const menu = $('menu');
 	if (!menu.hidden) { closeMenus(); return; }
 	closeMenus();
 	menu.textContent = '';
 	for (const g of GROUPS) {
-		const items = Object.entries(STEPS).filter(([t, d]) => d.group === g && (key === 'steps' || STOP_TYPES.includes(t)));
+		const items = Object.entries(STEPS).filter(([t, d]) => d.group === g);
 		if (!items.length) continue;
 		const grp = el('div', { class: 'grp ' + items[0][1].cat }, el('div', { class: 'gl', text: g }));
 		for (const [type, d] of items) {
-			const why = whyDisabled(type, key);
-			grp.append(el('button', { type: 'button', disabled: !!why, title: why || d.desc, onclick: () => addStep(key, type) }, d.label, el('small', { text: why || d.desc })));
+			const why = whyDisabled(type);
+			grp.append(el('button', { type: 'button', disabled: !!why, title: why || d.desc, onclick: () => addStep('steps', type) }, d.label, el('small', { text: why || d.desc })));
 		}
 		menu.append(grp);
 	}
 	menu.hidden = false;
-	btn.setAttribute('aria-expanded', 'true');
-	menu.scrollIntoView({ block: 'nearest' });
+	$('addBtn').setAttribute('aria-expanded', 'true');
 	const first = menu.querySelector('button:not(:disabled)');
 	if (first) first.focus();
 }
 function closeMenus() {
-	for (const [m, b] of [['menu', 'addBtn'], ['stopMenu', 'addStopBtn']]) {
-		$(m).hidden = true;
-		$(b).setAttribute('aria-expanded', 'false');
-	}
+	$('menu').hidden = true;
+	$('addBtn').setAttribute('aria-expanded', 'false');
 }
 // A new condition on the same subject as the If, with a fresh operator and value.
 function sameSubject(first) {
@@ -1612,29 +1642,14 @@ function addStep(key, type) {
 document.addEventListener('click', (e) => { if (!e.target.closest('.addrow')) closeMenus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 
-function renderChips() {
-	// A For each makes the player placeholders and {message} usable (inside it).
-	const c = hasLoop(ed.steps) ? ctx(ed, true) : ctx(ed);
-	const box = $('chips');
-	box.textContent = '';
-	box.append('Insert:');
-	for (const t of TOKENS) {
-		if (t.need && !c[t.need]) continue;
-		box.append(el('button', {
-			type: 'button', title: t.title, text: t.tok,
-			onmousedown: (e) => e.preventDefault(),
-			onclick: () => {
-				let inp = lastText && document.body.contains(lastText) ? lastText : $('steps').querySelector('input.text');
-				if (!inp) return;
-				const a = inp.selectionStart ?? inp.value.length, b = inp.selectionEnd ?? inp.value.length;
-				inp.value = inp.value.slice(0, a) + t.tok + inp.value.slice(b);
-				inp.focus();
-				inp.setSelectionRange(a + t.tok.length, a + t.tok.length);
-				inp.dispatchEvent(new Event('input'));
-			}
-		}));
-	}
-}
+// Values: every placeholder and what it is, to type into a step by hand.
+window.openValues = function () {
+	const body = $('valuesRows');
+	body.textContent = '';
+	for (const t of TOKENS) body.append(el('tr', null, el('td', null, el('code', { text: t.tok })), el('td', { text: t.title })));
+	$('valuesModal').style.display = 'flex';
+};
+window.closeValues = function () { $('valuesModal').style.display = 'none'; };
 
 
 // ---------------------------------------------------------------------------
@@ -1645,15 +1660,14 @@ function renderChips() {
 // what /api/flows uses.
 let ed = null;
 let edSaved = '';   // ed as last opened or saved, to tell if it changed
-let lastText = null;
 
 function toEditor(f) {
 	return {
 		// null for a new flow: ReCON gives it the lowest free number (0 is a real one).
 		id: typeof f.id === 'number' ? f.id : null, name: f.name || '', scheduleEnabled: !!f.scheduleEnabled,
-		trigger: { type: f.trigger || 'manual', cron: f.trigger === 'schedule' ? (f.schedule || '') : '0 6 * * *', delay: f.delay || '' },
+		trigger: { type: f.trigger || 'manual', cron: f.trigger === 'schedule' ? (f.schedule || '') : '', delay: f.delay || '' },
 		steps: clone(f.steps || []), onStop: clone(f.onStop || []),
-		counterThreshold: String(f.counterThreshold || 3)
+		counterThreshold: f.counterThreshold ? String(f.counterThreshold) : ''
 	};
 }
 function fromEditor() {
@@ -1662,10 +1676,9 @@ function fromEditor() {
 		id: ed.id, name: ed.name, scheduleEnabled: ed.scheduleEnabled, trigger: t.type,
 		schedule: t.type === 'schedule' ? t.cron : '', delay: t.delay || '',
 		steps: ed.steps, onStop: t.type === 'schedule' || t.type === 'manual' ? ed.onStop : [],
-		counterThreshold: counterThresholdOk(ed.counterThreshold) ? +ed.counterThreshold : -1
+		counterThreshold: thresholdSet(ed.counterThreshold) ? +ed.counterThreshold : thresholdOk(ed.counterThreshold) ? 0 : -1
 	};
 }
-const counterThresholdOk = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 1000;
 const edChanged = () => !!ed && JSON.stringify(fromEditor()) !== edSaved;
 
 function openEditor(f, title) {
@@ -1714,7 +1727,7 @@ function renderTrigger() {
 			title: locked && ed.trigger.type !== id ? 'A saved flow\'s trigger can\'t be changed; make a new flow instead' : null,
 			onclick: () => {
 				if (ed.trigger.type === id) return;
-				ed.trigger = { type: id, cron: ed.trigger.cron || '0 6 * * *', delay: ed.trigger.delay };
+				ed.trigger = { type: id, cron: ed.trigger.cron || '', delay: ed.trigger.delay };
 				renderAll();
 			}
 		}));
@@ -1723,20 +1736,20 @@ function renderTrigger() {
 	box.textContent = '';
 	const t = ed.trigger;
 	if (t.type === 'schedule') {
-		const i = el('input', { value: t.cron || '', placeholder: '0 6 * * *', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Schedule (cron)' });
+		const i = el('input', { value: t.cron || '', placeholder: '* * * * *', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Schedule (cron)' });
 		i.addEventListener('input', () => { t.cron = i.value; queuePreview(); });
 		box.append(el('label', { class: 'f' }, 'Schedule (cron)', i));
 	}
-	const d = el('input', { class: 'dur', value: t.delay || '', placeholder: 'none, or e.g. 1m20s', title: 'Seconds, or h m s such as 1m20s', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Delay before step 1' });
+	const d = el('input', { class: 'dur', value: t.delay || '', placeholder: '1s, 30s, 1m30s, 1h', title: 'Time before step 1: seconds, or h m s such as 1m30s', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Delay' });
 	const check = () => d.classList.toggle('bad', d.value.trim() !== '' && parseDur(d.value) == null);
 	d.addEventListener('input', () => { t.delay = d.value; check(); queuePreview(); });
 	check();
-	box.append(el('label', { class: 'f' }, 'Delay before step 1 (optional)', d));
-	const ct = el('input', { class: 'dur', value: ed.counterThreshold, placeholder: '3', inputmode: 'numeric', autocomplete: 'off', title: 'A whole number from 1 to 1000: {threshold}', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Counter threshold' });
-	const ctCheck = () => ct.classList.toggle('bad', !counterThresholdOk(ct.value));
-	ct.addEventListener('input', () => { ed.counterThreshold = ct.value; ctCheck(); });
+	box.append(el('label', { class: 'f' }, 'Delay (optional)', d));
+	const ct = el('input', { class: 'dur', value: ed.counterThreshold, inputmode: 'numeric', autocomplete: 'off', title: 'Optional: a whole number from 1 to 1000, used as {threshold}', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Counter threshold' });
+	const ctCheck = () => ct.classList.toggle('bad', !thresholdOk(ct.value));
+	ct.addEventListener('input', () => { ed.counterThreshold = ct.value; ctCheck(); changed(false); });
 	ctCheck();
-	box.append(el('label', { class: 'f', title: 'Each player\'s counter starts at 0 every run; If, Else if and Else can change it. Compare with {counter} >= {threshold}.' }, 'Counter threshold', ct));
+	box.append(el('label', { class: 'f', title: 'Each player\'s counter starts at 0 every run; If, Else if and Else can change it. Set a threshold to compare with {counter} >= {threshold}.' }, 'Counter threshold (optional)', ct));
 	$('stopSection').hidden = !(t.type === 'schedule' || t.type === 'manual');
 	updateTrigHint();
 }
@@ -1765,6 +1778,10 @@ async function updateTrigHint() {
 		h.textContent = 'Runs only when you press Run (or POST /api/flows/' + (ed.id === null ? '<id>' : ed.id) + '/run).' + delayText + lenText;
 		return;
 	}
+	if (!String(t.cron || '').trim()) {
+		h.textContent = 'Enter when it runs: minute hour day-of-month month day-of-week. * * * * * runs every minute.' + lenText;
+		return;
+	}
 	const sent = JSON.stringify([t.cron, t.delay]);
 	let d;
 	try { d = await post('/api/flows/preview', { trigger: 'schedule', schedule: t.cron, delay: t.delay }); } catch (e) { return; }
@@ -1781,20 +1798,19 @@ async function updateTrigHint() {
 // ---------------------------------------------------------------------------
 function changed(structural) {
 	syncIfs(ed.steps);
-	if (structural) { renderSteps('steps'); renderSteps('onStop'); renderChips(); } // a For each adds the player placeholders
+	if (structural) { renderSteps('steps'); renderSteps('onStop'); }
 	else { updateDerivedRows('steps'); updateDerivedRows('onStop'); }
 	if (ed.trigger.type !== 'schedule') updateTrigHint();
 }
 function renderAll() {
 	$('fName').value = ed.name;
 	renderTrigger();
-	renderChips();
 	renderSteps('steps');
 	renderSteps('onStop');
 }
 $('fName').addEventListener('input', (e) => { ed.name = e.target.value; });
-$('addBtn').addEventListener('click', () => openMenu('steps'));
-$('addStopBtn').addEventListener('click', () => openMenu('onStop'));
+$('addBtn').addEventListener('click', openMenu);
+$('valuesBtn').addEventListener('click', () => { closeMenus(); window.openValues(); });
 $('saveBtn').addEventListener('click', async () => {
 	const msg = $('edMsg');
 	msg.textContent = '';

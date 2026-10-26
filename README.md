@@ -244,11 +244,11 @@ Every time box (Wait, the delay, chat command cooldowns) takes seconds, or hours
 
 Move a step with its arrows, or drag it by the `⋮⋮` handle. Moving an If moves everything inside it. Anything missing is shown in red under the row.
 
-**When stopped:** Schedule and Manual flows can also have steps that are sent if someone presses Stop before the run ends, such as *Server restart cancelled.* and Unlock server.
+**When stopped:** Schedule and Manual flows can also have steps that are sent if someone presses Stop before the run ends, such as *Server restart cancelled.* and Unlock server. **+ Add step** (bottom left of the editor) adds to the steps; drag a Message, Lock, Unlock, Kick everyone or RCON command step into When stopped, and back.
 
 ### Placeholders
 
-Click a placeholder under the steps to insert it into the text box you were typing in. It's filled in when the step runs.
+**Values** (next to **+ Add step**) lists them. Type them into a step's text, reason or command; each is filled in when the step runs.
 
 | Placeholder | Is | Works in |
 | ----------- | -- | -------- |
@@ -276,7 +276,7 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 
 ### Counter
 
-Each run of a flow keeps a **counter** for every player, starting at 0, held in memory only while the run lasts. Every If, Else if and Else has a **counter** setting for what it does to the player's counter when it is the one that runs: **0** nothing, **++** add 1, **--** take 1 away (not below 0), **reset** back to 0. The change happens before its steps, so they see the new `{counter}`. The flow's **Counter threshold** (next to the delay, 3 by default) is `{threshold}`. The counter needs a player: use it inside a For each, or in an On join or Player message flow.
+Each run of a flow keeps a **counter** for every player, starting at 0, held in memory only while the run lasts. Every If, Else if and Else has a **counter** setting for what it does to the player's counter when it is the one that runs: **0** nothing, **++** add 1, **--** take 1 away (not below 0), **reset** back to 0. The change happens before its steps, so they see the new `{counter}`. The flow's **Counter threshold** (next to the delay) is `{threshold}`. It's optional: leave it empty for none, or enter 1 or more, and `{threshold}` works only once it's set. The counter needs a player: use it inside a For each, or in an On join or Player message flow.
 
 Because counters last one run, put repeated checks in one run. For example, a Schedule flow every minute with a threshold of 4 that kicks players whose ping stays at 500 or more:
 

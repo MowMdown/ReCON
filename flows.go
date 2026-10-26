@@ -166,11 +166,9 @@ type Branch struct {
 // Counter changes an If branch or Else can make (Branch.Counter).
 var counterOps = map[string]string{"": "", "inc": "++", "dec": "--", "reset": "reset"}
 
-// Flow counter threshold: the default for a new flow, and the most allowed.
-const (
-	defaultCounterThreshold = 3
-	maxCounterThreshold     = 1000
-)
+// maxCounterThreshold is the highest flow counter threshold. 0 means the
+// flow has none, and then {threshold} can't be used.
+const maxCounterThreshold = 1000
 
 // counterThresholdToken is the one placeholder a number If may compare to.
 const counterThresholdToken = "{threshold}"
@@ -295,16 +293,19 @@ func roleName(r int) string {
 }
 
 // What a placeholder or If subject needs: nothing (any trigger), "player"
-// (On join or Player message) or "chat" (Player message only).
+// (On join or Player message) or "chat" (Player message only), or, for
+// {threshold}, a flow with a Counter threshold.
 const (
-	needNothing = ""
-	needPlayer  = "player"
-	needChat    = "chat"
+	needNothing   = ""
+	needPlayer    = "player"
+	needChat      = "chat"
+	needThreshold = "threshold"
 )
 
 var needText = map[string]string{
-	needPlayer: "needs a player: use the On join or Player message trigger",
-	needChat:   "needs the Player message trigger",
+	needPlayer:    "needs a player: use the On join or Player message trigger",
+	needChat:      "needs the Player message trigger",
+	needThreshold: "needs a Counter threshold: enter one (1 or more) next to the delay",
 }
 
 // flowTokens are the placeholders steps can use, and what each needs.
@@ -312,7 +313,7 @@ var flowTokens = map[string]string{
 	"player_name": needPlayer, "player_id": needPlayer, "player_ping": needPlayer,
 	"player_ip": needPlayer, "player_guid": needPlayer, "player_role": needPlayer,
 	"message": needChat, "players_online": needNothing,
-	"counter": needPlayer, "threshold": needNothing,
+	"counter": needPlayer, "threshold": needThreshold,
 }
 
 var tokenRe = regexp.MustCompile(`\{(\w+)\}`)
@@ -542,7 +543,11 @@ func (c *stepChecker) fail(msg string) error { return fmt.Errorf("%s %d: %s", c.
 // tokensOK reports the first placeholder in text the trigger can't fill.
 func (c *stepChecker) tokensOK(text string) error {
 	for _, m := range tokenRe.FindAllStringSubmatch(text, -1) {
-		if need, ok := flowTokens[m[1]]; ok && need != needNothing && (c.onStop || !c.has[need]) {
+		need, ok := flowTokens[m[1]]
+		if need == needThreshold && !c.has[need] {
+			return c.fail(m[0] + " " + needText[need])
+		}
+		if ok && need != needNothing && need != needThreshold && (c.onStop || !c.has[need]) {
 			if c.onStop {
 				return c.fail(m[0] + " can't be used here: When stopped has no player")
 			}
@@ -632,7 +637,7 @@ func (c *stepChecker) checkForEach(s *Step, depth int) error {
 		return c.fail("pick what For each goes through: player or message")
 	}
 	outer := c.has
-	c.has = map[string]bool{needNothing: true, needPlayer: true, needChat: true}
+	c.has = map[string]bool{needNothing: true, needPlayer: true, needChat: true, needThreshold: outer[needThreshold]}
 	c.inLoop = true
 	err := c.checkStepList(s.Steps, depth+1)
 	c.has, c.inLoop = outer, false
@@ -665,6 +670,9 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 		}
 		switch {
 		case sub.kind == "num" && strings.TrimSpace(b.Value) == counterThresholdToken:
+			if !c.has[needThreshold] {
+				return fmt.Errorf("%s %d: %s %s", c.where, num, counterThresholdToken, needText[needThreshold])
+			}
 		case sub.kind == "num" || first == "player_id":
 			if _, err := strconv.Atoi(strings.TrimSpace(b.Value)); err != nil {
 				return fmt.Errorf("%s %d: Enter a whole number", c.where, num)
@@ -704,8 +712,9 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 }
 
 // checkFlowSteps validates a flow's steps and its When stopped steps for its
-// trigger. Errors name the step as the page numbers them.
-func checkFlowSteps(trigger string, steps, onStop []Step) error {
+// trigger and Counter threshold (0: none). Errors name the step as the page
+// numbers them.
+func checkFlowSteps(trigger string, threshold int, steps, onStop []Step) error {
 	if len(steps) == 0 {
 		return errors.New("add at least one step")
 	}
@@ -713,13 +722,14 @@ func checkFlowSteps(trigger string, steps, onStop []Step) error {
 		return fmt.Errorf("a flow can have %d steps at most", maxSteps)
 	}
 	c := &stepChecker{has: triggerHas(trigger), where: "Step"}
+	c.has[needThreshold] = threshold > 0
 	if err := c.checkStepList(steps, 0); err != nil {
 		return err
 	}
 	if len(onStop) > 0 && trigger != triggerSchedule && trigger != triggerManual {
 		return errors.New("only Schedule and Manual flows have When stopped steps")
 	}
-	s := &stepChecker{has: map[string]bool{}, onStop: true, where: "When stopped, step"}
+	s := &stepChecker{has: map[string]bool{needThreshold: threshold > 0}, onStop: true, where: "When stopped, step"}
 	return s.checkStepList(onStop, 0)
 }
 
@@ -1173,7 +1183,7 @@ type Flow struct {
 	Steps  []Step `json:"steps"`
 	OnStop []Step `json:"onStop"`
 	// CounterThreshold is {threshold}: what the flow's per-player
-	// counters are compared to (1 to maxCounterThreshold).
+	// counters are compared to (1 to maxCounterThreshold), or 0 for none.
 	CounterThreshold int `json:"counterThreshold"`
 	// ScheduleEnabled turns the trigger on (schedule, join and chat flows).
 	ScheduleEnabled bool   `json:"scheduleEnabled"`
@@ -1318,10 +1328,10 @@ func checkFlowDefinition(f Flow) error {
 	if _, err := flowDelaySeconds(f); err != nil {
 		return err
 	}
-	if f.CounterThreshold < 1 || f.CounterThreshold > maxCounterThreshold {
-		return fmt.Errorf("Counter threshold: enter a whole number from 1 to %d", maxCounterThreshold)
+	if f.CounterThreshold < 0 || f.CounterThreshold > maxCounterThreshold {
+		return fmt.Errorf("Counter threshold: leave it empty, or enter a whole number from 1 to %d", maxCounterThreshold)
 	}
-	return checkFlowSteps(f.Trigger, f.Steps, f.OnStop)
+	return checkFlowSteps(f.Trigger, f.CounterThreshold, f.Steps, f.OnStop)
 }
 
 // initStoredFlows creates the flows table (empty on a new database) and logs any
@@ -1390,9 +1400,6 @@ func validateAndSaveFlow(f Flow, isNew bool) (int64, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Schedule = strings.TrimSpace(f.Schedule)
 	f.Delay = strings.ToLower(strings.TrimSpace(f.Delay))
-	if f.CounterThreshold == 0 { // not sent: an older page or flows file
-		f.CounterThreshold = defaultCounterThreshold
-	}
 	if f.Name == "" {
 		return 0, errors.New("name is required")
 	}

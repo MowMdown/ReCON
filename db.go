@@ -1289,7 +1289,7 @@ const flowsTableSQL = `CREATE TABLE %s (
 	schedule TEXT NOT NULL DEFAULT '',
 	schedule_enabled INTEGER NOT NULL DEFAULT 0,
 	position INTEGER NOT NULL DEFAULT 0,
-	counter_threshold INTEGER NOT NULL DEFAULT 3
+	counter_threshold INTEGER NOT NULL DEFAULT 0
 )`
 
 // EnsureFlowsTable creates the flows table if it doesn't exist yet (a new
@@ -1308,7 +1308,7 @@ func (db *Database) EnsureFlowsTable() error {
 	}
 	if !strings.Contains(strings.ToUpper(existing), "AUTOINCREMENT") {
 		if !strings.Contains(existing, "counter_threshold") { // added with flow counters
-			_, err = db.Exec("ALTER TABLE flows ADD COLUMN counter_threshold INTEGER NOT NULL DEFAULT 3")
+			_, err = db.Exec("ALTER TABLE flows ADD COLUMN counter_threshold INTEGER NOT NULL DEFAULT 0")
 		}
 		return err
 	}
