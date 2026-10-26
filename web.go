@@ -165,32 +165,26 @@ func fail(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"ok": false, "error": msg})
 }
 
-// currentRconStatus is the game server connection as the heartbeat (rcon.go) last
-// saw it: connected, retrying (one or two failed checks, or none done yet),
-// or unavailable (3 or more failed checks in a row, the point where the
-// heartbeat treats the server as down).
+// currentRconStatus is the game server connection as the server watch (rcon.go)
+// last saw it: connected, retrying (one or two failed checks, or none done
+// yet), or unavailable (3 or more failed checks in a row, the point where the
+// server watch treats the server as down).
 func currentRconStatus() string {
 	switch f := rconFails.Load(); {
 	case !rconPolled.Load():
 		return "retrying"
 	case f == 0:
 		return "connected"
-	case f >= 3:
+	case f >= downAfterMisses:
 		return "unavailable"
 	}
 	return "retrying"
 }
 
-// rconNextCheck is when ReCON next tries the game server: the heartbeat's next
-// check, or, while it waits between logins (connectWebSession), the first check
-// after that wait.
+// rconNextCheck is when ReCON next tries the game server: the server watch's
+// next check (its next heartbeat while the server is down).
 func rconNextCheck() time.Time {
-	next := time.UnixMilli(rconNextPoll.Load())
-	if dial := nextDialAt(); pollInterval > 0 && dial.After(next) {
-		k := (dial.Sub(next) + pollInterval - 1) / pollInterval
-		next = next.Add(k * pollInterval)
-	}
-	return next
+	return time.UnixMilli(rconNextPoll.Load())
 }
 
 // isRconUnavailable is the 503 the pages read as "retrying...".
@@ -340,12 +334,11 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 // onlinePlayersForPage is the online list for the Players page: the
-// tracker's (players.go), so the page never waits on RCON, and asking marks
-// the page open so the heartbeat polls pings while it is. Before the first
-// poll since the server last answered, it polls once itself. ok is false
-// while the server isn't answering.
+// tracker's (players.go), kept up to date by the server watch's polls, so
+// the page never waits on RCON. Before the first poll since the server last
+// answered, it polls once itself. ok is false while the server isn't
+// answering.
 func onlinePlayersForPage() ([]Player, bool) {
-	playersPageSeen.Store(time.Now().UnixMilli())
 	if currentRconStatus() == "unavailable" {
 		return []Player{}, false
 	}
@@ -829,7 +822,7 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The server just answered the login: show it as connected now rather
-	// than after the heartbeat's next check.
+	// than after the server watch's next check.
 	rconPolled.Store(true)
 	rconFails.Store(0)
 	keepRconOverrides(req)
@@ -841,7 +834,7 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 // handleBansJSON serves GET /api/bans: every ban, the permanent ones from
-// the bans table and the timed ones from memory. The heartbeat keeps both in
+// the bans table and the timed ones from memory. The server watch keeps both in
 // step with BattlEye (syncBanList, db.go), and ban and unban update them
 // straight away, so the page never waits on RCON.
 // "connected" is false while the game server isn't answering.

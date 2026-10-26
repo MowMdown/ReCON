@@ -166,8 +166,8 @@ func main() {
 	startChatWatcher()   // chat commands and Player message flows (flows_message.go)
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
-	startDatabaseSync()    // sessions and chat history from the console log (db.go)
-	startServerHeartbeat() // keeps RCON logged in, polls players and bans (rcon.go)
+	startDatabaseSync() // sessions and chat history from the console log (db.go)
+	startServerWatch()  // keeps RCON logged in, polls players and bans (rcon.go)
 	log.Printf("listening on %s -> RCON %s", addr, address)
 	log.Fatal(runWebServer(addr)) // web.go
 }

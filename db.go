@@ -31,7 +31,7 @@ import (
 //   - flows storage (ListStoredFlows, GetStoredFlow, SaveStoredFlow, ...): steps are kept as JSON
 //
 // The bottom section keeps the database in step with the game server: the
-// BattlEye <-> DB ban sync (run by the heartbeat, rcon.go) and the chat
+// BattlEye <-> DB ban sync (run by the server watch, rcon.go) and the chat
 // recorder. Those are the only parts here that call into rcon.go. Player
 // sessions are driven by the server's messages, in players.go.
 // ============================================================================
@@ -1442,7 +1442,7 @@ func (db *Database) DeleteStoredFlow(id int64) error {
 // list and delete a ban that was just added.
 var banListLock sync.Mutex
 
-// banSyncEvery is how often the heartbeat (rcon.go) reads BattlEye's ban
+// banSyncEvery is how often the server watch (rcon.go) reads BattlEye's ban
 // list. It also reads it after every RCON login, so after a server restart.
 const banSyncEvery = 5 * time.Minute
 
@@ -1520,7 +1520,7 @@ func banStatusOf(guid string) banState {
 }
 
 // nextBanExpiry is when the next timed ban runs out (Unix seconds, 0 for
-// none), so the heartbeat only deletes expired bans when one is due.
+// none), so the server watch only deletes expired bans when one is due.
 var nextBanExpiry atomic.Int64
 
 // refreshBanExpiry re-reads nextBanExpiry after the bans table changed.
@@ -1592,7 +1592,7 @@ func startChatRecorder() {
 // startDatabaseSync keeps the database in step with the game server without
 // any web page open: it starts the chat recorder and the player tracker
 // (players.go), which both read the master console log, and loads when the
-// next timed ban runs out. The heartbeat (rcon.go) does the polling.
+// next timed ban runs out. The server watch (rcon.go) does the polling.
 func startDatabaseSync() {
 	startChatRecorder()
 	startPlayerTracker()

@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -31,19 +30,18 @@ import (
 //
 // The tracker is ReCON's list of who is online: flows, chat commands and the
 // Players page all read it (listOnlinePlayers). A `players` poll (pollPlayersNow,
-// rcon.go) fills in what the messages can't tell, and is only sent when
-// needed: after every RCON login, every 3 seconds while someone is still
-// loading (until "(Lobby)" leaves their name, watchLobbyPlayers), every 5
-// seconds while a Players page is open (for pings, playersPollWanted), and
-// right before a For each runs. A
-// poll also catches anything missed while RCON wasn't listening: a player
-// it doesn't list is closed, one it lists that the tracker doesn't know is
-// opened.
+// rcon.go) fills in what the messages can't tell: every 5 seconds while the
+// server answers (the server watch, rcon.go), every 3 seconds while someone
+// is still loading (until "(Lobby)" leaves their name, watchLobbyPlayers),
+// and right before a For each runs. A poll also catches anything the console
+// log missed: a player it doesn't list is closed, one it lists that the
+// tracker doesn't know is opened.
 //
 // Server restarts: when the server stops answering, every session is closed
 // at the time it last answered (serverWentDown) but remembered. A player who
-// comes back within restartGrace of ReCON's next login keeps the same
-// session, with the time the server was down not counted (ResumePlayerSession).
+// comes back from the same IP within restartGrace of ReCON's next login
+// keeps the same session, with the time the server was down not counted
+// (ResumePlayerSession). Back from another IP, they get a new session.
 // ============================================================================
 
 // trackedPlayer is one player on the server, by their player number.
@@ -100,7 +98,7 @@ var tracker = struct {
 
 // restartGrace is how long after ReCON logs in again following an outage
 // a player may reconnect and keep the session they had before it.
-var restartGrace = 60 * time.Second
+var restartGrace = 5 * time.Minute
 
 // startPlayerTracker feeds every server message to the tracker for as long
 // as ReCON runs.
@@ -232,15 +230,19 @@ func trackServerEvent(ev ServerEvent) (joined Player, ok bool) {
 }
 
 // openTrackedSession writes a player's new session once their GUID is known, or,
-// for a player back within restartGrace after an outage, opens the session
-// they had again (seen at `at`). Caller holds the tracker lock.
+// for a player back from the same IP within restartGrace after an outage,
+// opens the session they had again (seen at `at`). Caller holds the tracker
+// lock.
 func openTrackedSession(t *trackedPlayer, at time.Time) {
 	if t.opened || t.guid == "" {
 		return
 	}
 	if old := tracker.away[t.guid]; old != nil && !at.After(tracker.graceUntil) {
 		delete(tracker.away, t.guid)
-		if err := globalDatabase.ResumePlayerSession(t.guid, old.historyID, t.id, at); err != nil {
+		if t.ip != old.ip {
+			// A new IP is a new session: the old one stays closed at the outage.
+			log.Printf("players: %s is back after the restart from a new IP, new session", t.guid)
+		} else if err := globalDatabase.ResumePlayerSession(t.guid, old.historyID, t.id, at); err != nil {
 			log.Printf("players: resuming the session of %s: %v", t.guid, err)
 		} else {
 			log.Printf("players: %s is back after the restart, same session", t.guid)
@@ -413,7 +415,7 @@ func sessionChatsAfter(after int64) []sessionChat {
 }
 
 // serverWentDown closes every open session when the game server stops answering
-// (the heartbeat's 3rd miss in a row), at `at`, when it last answered. The
+// (the server watch's 3rd miss in a row), at `at`, when it last answered. The
 // players are remembered in tracker.away so those who come back soon after
 // it does keep the same session (openTrackedSession).
 func serverWentDown(at time.Time) {
@@ -443,7 +445,7 @@ func serverLoggedIn(at time.Time) {
 
 // forgetAwayPlayers drops the players who didn't come back within
 // restartGrace; their sessions stay closed at the time the server went down.
-// The heartbeat calls it on every beat.
+// The server watch calls it every round.
 func forgetAwayPlayers(now time.Time) {
 	tracker.Lock()
 	defer tracker.Unlock()
@@ -469,15 +471,4 @@ func listOnlinePlayers() (players []Player, known bool) {
 	}
 	sort.Slice(players, func(a, b int) bool { return players[a].ID < players[b].ID })
 	return players, tracker.known
-}
-
-// playersPageSeen is when a Players page last asked for the online list
-// (Unix milliseconds); pings are polled while one is open.
-var playersPageSeen atomic.Int64
-
-// playersPollWanted reports whether the heartbeat should poll `players`
-// now: a Players page asked within the last two heartbeats. (Players still
-// loading are polled for by watchLobbyPlayers.)
-func playersPollWanted(now time.Time) bool {
-	return now.Sub(time.UnixMilli(playersPageSeen.Load())) < 2*heartbeatEvery
 }
