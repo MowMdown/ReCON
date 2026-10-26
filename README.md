@@ -74,7 +74,8 @@ STEAM_API_KEY=your-steam-web-api-key
 docker compose up -d --build
 docker logs -f recon
 # listening on :8080 -> RCON 192.168.1.10:2305
-# rcon: logged in, sent #unlock (acked=true err=<nil>)
+# rcon: logged in
+# [web] > #unlock (login, acked=true)
 ```
 
 Then open `http://<host>:8080` (it goes to the Players page).
@@ -126,7 +127,7 @@ Mount `/data` as a volume, or everything ReCON has recorded is lost when the con
 
 Every page shows two status lines at the top:
 
-- **RCON Status:** whether ReCON can reach the game server (it reads the player list every 5 seconds and sends a heartbeat every 30; three checks missed in a row means unavailable): *Connected*, or *Unavailable - Retrying...* with a small grey countdown to ReCON's next try. While the server is unavailable, ReCON only sends the heartbeat, every 30 seconds, and logs in again when one goes unanswered: at most one login every 30 seconds, so a restarting server doesn't log a pile of RCon admin logins when it comes back. It keeps retrying in the background on its own.
+- **RCON Status:** whether ReCON can reach the game server (it reads the player list every 5 seconds and sends a heartbeat every 30; three checks missed in a row means unavailable): *Connected*, or *Unavailable - Retrying...* with a small grey countdown to ReCON's next try. While the server is unavailable, ReCON only sends the heartbeat, every 30 seconds, and logs in again when one goes unanswered: at most one login every 30 seconds, so a restarting server doesn't log a pile of RCon admin logins when it comes back. It keeps retrying in the background on its own. [How ReCON logs in again after a restart](docs/rcon-login.md) has the full sequence as a flow chart.
 - **WebGUI Status:** whether your browser can reach ReCON. While it can, the page's count follows *Connected*: players online, bans or flows.
 
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
@@ -550,6 +551,7 @@ ReCON is a single Go program with no dependencies besides the SQLite driver.
 | `steam.go` | SteamID lookups and Steam profiles |
 | `templates/` | The HTML pages, embedded into the binary at build time |
 | `examples/flows.json` | Example flows to import |
+| `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |
 | `docs/preview/` | The static preview pages |
 | `docs/screenshots/` | The images in this README |
 
