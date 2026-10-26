@@ -1780,10 +1780,10 @@ var chatCommandDefs = []chatCommandDef{
 		}},
 	{Cmd: "warning", Staff: true, Cool: "0", Announce: true, Warn: true, Help: "!warning <code or player number> <reason> warns that player. Enough warnings in one visit and they are kicked or banned.",
 		Fields: []chatField{
-			{"player", "Warning (to the player)", "Warning {warnings}/{warning_threshold} from {player_name}: {reason}", []string{"target_name", "player_name", "reason", "warnings", "warning_threshold"}},
-			{"staff", "Notice (to each mod and admin online, always)", "{target_name} was warned by {player_name} ({warnings}/{warning_threshold}): {reason}", []string{"target_name", "player_name", "reason", "warnings", "warning_threshold"}},
-			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been warned: {reason}", []string{"target_name", "reason", "warnings", "warning_threshold"}},
-			{"limit_staff", "At the threshold: notice (to each mod and admin online, always)", "{target_name} reached {warning_threshold} warnings and has been {action}: {reason}", []string{"target_name", "player_name", "reason", "warning_threshold", "action"}},
+			{"player", "Warning (to the player)", "Warning {warnings}/{warn_count} from {player_name}: {reason}", []string{"target_name", "player_name", "reason", "warnings", "warn_count"}},
+			{"staff", "Notice (to each mod and admin online, always)", "{target_name} was warned by {player_name} ({warnings}/{warn_count}): {reason}", []string{"target_name", "player_name", "reason", "warnings", "warn_count"}},
+			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been warned: {reason}", []string{"target_name", "reason", "warnings", "warn_count"}},
+			{"limit_staff", "At the threshold: notice (to each mod and admin online, always)", "{target_name} reached {warn_count} warnings and has been {action}: {reason}", []string{"target_name", "player_name", "reason", "warn_count", "action"}},
 			{"limit_announce", "At the threshold: announcement (to everyone, when Announce is on)", "{target_name} has been {action}", []string{"target_name", "reason", "action"}},
 		}},
 }
@@ -2352,7 +2352,7 @@ func runWarningCommand(p Player, role int, set chatSetting, args []string) {
 	}
 	markUsed("warning")
 	vals := map[string]string{"target_name": bareName(t.Name), "player_name": bareName(p.Name), "reason": reason,
-		"warnings": strconv.Itoa(count), "warning_threshold": strconv.Itoa(set.Threshold)}
+		"warnings": strconv.Itoa(count), "warn_count": strconv.Itoa(set.Threshold)}
 	chatSay(t, false, fillTemplate(set.Msgs["player"], vals))
 	for _, s := range listOnlineStaff() {
 		if !strings.EqualFold(s.GUID, t.GUID) { // a warned Mod has their own message
