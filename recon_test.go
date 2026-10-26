@@ -533,6 +533,7 @@ type fakeBE struct {
 	password string // when set, other passwords are rejected
 	logins   int
 	commands []string
+	beats    int // empty commands (heartbeats)
 }
 
 func newFakeBE(t *testing.T) *fakeBE {
@@ -562,6 +563,8 @@ func newFakeBE(t *testing.T) *fakeBE {
 			case 1:
 				if len(p) > 1 {
 					f.commands = append(f.commands, string(p[1:]))
+				} else {
+					f.beats++
 				}
 			}
 			f.mu.Unlock()
@@ -870,14 +873,13 @@ func TestNoPasswordDoesNotDial(t *testing.T) {
 
 func TestStatusReportsNextRetry(t *testing.T) {
 	resetWeb(t)
-	oldInterval, oldNext, oldFails, oldPolled := pollInterval, rconNextPoll.Load(), rconFails.Load(), rconPolled.Load()
+	oldNext, oldFails, oldPolled := rconNextPoll.Load(), rconFails.Load(), rconPolled.Load()
 	t.Cleanup(func() {
-		pollInterval = oldInterval
 		rconNextPoll.Store(oldNext)
 		rconFails.Store(oldFails)
 		rconPolled.Store(oldPolled)
 	})
-	pollInterval = 5 * time.Second
+	rconFails.Store(0) // answering: checked every pollEvery (5s)
 	rconPolled.Store(true)
 	now := time.Now()
 	rconNextPoll.Store(now.Add(2 * time.Second).UnixMilli())
@@ -1295,25 +1297,27 @@ func TestSentCommandsGoInConsoleLog(t *testing.T) {
 	}
 }
 
-// TestHeartbeat checks that an answered heartbeat after a login polls
-// players and bans once, and that three unanswered ones in a row mark the
-// server down and log in again on the same socket.
-func TestHeartbeat(t *testing.T) {
+// TestServerWatch checks the server watch: `players` every round and the
+// heartbeat every heartbeatEvery while the server answers, the ban list
+// after a login; three unanswered rounds mark the server down and log in
+// again on the same socket; while it's down only the heartbeat checks it.
+func TestServerWatch(t *testing.T) {
 	testDB(t)
 	resetWeb(t)
 	f := newFakeBE(t)
 	setRconTarget(f.conn.LocalAddr().String(), "pw")
-	oldWait, oldReply := heartbeatWait, reloginReplyWait
+	oldBeat, oldPoll, oldReply := heartbeatWait, pollWait, reloginReplyWait
 	t.Cleanup(func() {
-		heartbeatWait, reloginReplyWait = oldWait, oldReply
+		heartbeatWait, pollWait, reloginReplyWait = oldBeat, oldPoll, oldReply
 		rconFails.Store(0)
 		loginPollDue.Store(false)
 		resetReloginPace()
 	})
-	heartbeatWait, reloginReplyWait = 100*time.Millisecond, 50*time.Millisecond
+	heartbeatWait, pollWait, reloginReplyWait = 100*time.Millisecond, 100*time.Millisecond, 50*time.Millisecond
+	rconFails.Store(0)
 	resetReloginPace()
 
-	polls := func() (players, bans int) {
+	sent := func() (beats, players, bans int) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		for _, c := range f.commands {
@@ -1324,36 +1328,49 @@ func TestHeartbeat(t *testing.T) {
 				bans++
 			}
 		}
-		return
+		return f.beats, players, bans
 	}
-	var h heartbeat
-	h.checkServerAlive() // logs in, then polls players and bans
-	if p, b := polls(); p != 1 || b != 1 || loginPollDue.Load() {
-		t.Fatalf("after the first beat: %d players, %d bans polls (due=%v); want 1 and 1", p, b, loginPollDue.Load())
+	want := func(when string, beats, players, bans int) {
+		t.Helper()
+		if b, p, n := sent(); b != beats || p != players || n != bans {
+			t.Fatalf("%s: %d heartbeats, %d players, %d bans; want %d, %d, %d", when, b, p, n, beats, players, bans)
+		}
 	}
-	playersPageSeen.Store(0)
-	h.checkServerAlive()
-	if p, b := polls(); p != 1 || b != 1 {
-		t.Fatalf("a beat with nobody loading and no page open polled players %d and bans %d more time(s)", p-1, b-1)
-	}
-	playersPageSeen.Store(time.Now().UnixMilli()) // a Players page is open: pings
-	h.checkServerAlive()
-	if p, _ := polls(); p != 2 {
-		t.Fatalf("players polled %d time(s) with a page open, want 2", p)
-	}
-	playersPageSeen.Store(0)
+	var w serverWatch
+	t0 := time.Now()
+	w.check(t0) // logs in: heartbeat, players, and the ban list after the login
+	want("first round", 1, 1, 1)
+	w.check(t0.Add(pollEvery))
+	want("second round", 1, 2, 1)
+	w.check(t0.Add(heartbeatEvery))
+	want("a heartbeat later", 2, 3, 1)
 
 	f.set(true)
 	logins, _ := f.counts()
-	for i := 0; i < heartbeatMisses; i++ {
-		h.checkServerAlive()
+	for i := 1; i <= downAfterMisses; i++ {
+		w.check(t0.Add(heartbeatEvery + time.Duration(i)*pollEvery))
 	}
-	if rconFails.Load() != heartbeatMisses || currentRconStatus() != "unavailable" {
+	if rconFails.Load() != downAfterMisses || currentRconStatus() != "unavailable" {
 		t.Fatalf("fails = %d, status %s", rconFails.Load(), currentRconStatus())
 	}
 	if l, _ := f.counts(); l != logins+1 {
 		t.Fatalf("%d login(s) on the 3rd miss, want 1", l-logins)
 	}
+	want("three missed polls", 2, 6, 1)
+	w.check(t0.Add(heartbeatEvery + 4*pollEvery))
+	want("a round while down", 2, 6, 1) // no poll, no heartbeat yet
+	if checkEvery() != heartbeatEvery {
+		t.Fatalf("checked every %v while down, want %v", checkEvery(), heartbeatEvery)
+	}
+
+	f.set(false)
+	w.check(t0.Add(2 * heartbeatEvery)) // the heartbeat finds it back
+	if currentRconStatus() != "connected" {
+		t.Fatalf("status %s after an answered heartbeat", currentRconStatus())
+	}
+	want("back", 3, 6, 1)
+	w.check(t0.Add(2*heartbeatEvery + pollEvery))
+	want("polling again", 3, 7, 1)
 }
 
 // TestRestartKeepsReturningPlayersSession checks the restart grace: a player
@@ -1397,6 +1414,30 @@ func TestRestartKeepsReturningPlayersSession(t *testing.T) {
 	db.QueryRow("SELECT total_playtime_seconds FROM players WHERE guid = ?", testGUID).Scan(&playtime)
 	if playtime != 30*60 {
 		t.Fatalf("playtime = %d, want 1800", playtime)
+	}
+}
+
+// TestRestartNewIPIsNewSession checks that a player back within
+// restartGrace but from another IP gets a new session on that IP, and the
+// old one stays closed at the outage.
+func TestRestartNewIPIsNewSession(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	line("Player #0 Mover (1.1.1.1:2304) connected", t0)
+	line("Player #0 Mover - BE GUID: "+testGUID, t0)
+	down := t0.Add(10 * time.Minute)
+	serverWentDown(down)
+	login := down.Add(time.Minute)
+	serverLoggedIn(login)
+	back := login.Add(time.Minute)
+	line("Player #2 Mover (9.9.9.9:2304) connected", back)
+	line("Player #2 Mover - BE GUID: "+testGUID, back)
+	if h := history(t, db, testGUID); len(h) != 1 || !h[0].at.Equal(down) || h[0].duration != 600 {
+		t.Fatalf("old session = %+v, want closed at the outage", h)
+	}
+	var ip string
+	if err := db.QueryRow("SELECT ip FROM active_sessions WHERE guid = ?", testGUID).Scan(&ip); err != nil || ip != "9.9.9.9" {
+		t.Fatalf("new session ip = %q (%v), want 9.9.9.9", ip, err)
 	}
 }
 
