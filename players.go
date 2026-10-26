@@ -60,6 +60,7 @@ type trackedPlayer struct {
 	chats       []lastChat // what they wrote in chat this session, oldest first (up to maxSessionChats)
 	joining     bool       // seen connecting: join flows start once they have loaded in
 	historyID   int64      // after serverWentDown: the session's history row, for ResumePlayerSession
+	warnings    int        // !warning count this session (warnPlayer)
 }
 
 // maxSessionChats is how many chat lines are kept per player online.
@@ -452,6 +453,26 @@ func forgetAwayPlayers(now time.Time) {
 	if len(tracker.away) > 0 && !tracker.graceUntil.IsZero() && now.After(tracker.graceUntil) {
 		tracker.away = map[string]*trackedPlayer{}
 	}
+}
+
+// warnPlayer adds a !warning to an online player's count for this session
+// (it goes when they leave). When the count reaches threshold it starts
+// again at 0 and reached is true, so two warnings at once can't both act.
+// ok is false if they aren't online.
+func warnPlayer(guid string, threshold int) (count int, reached, ok bool) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	for _, t := range tracker.byID {
+		if strings.EqualFold(t.guid, guid) {
+			t.warnings++
+			count = t.warnings
+			if count >= threshold {
+				t.warnings, reached = 0, true
+			}
+			return count, reached, true
+		}
+	}
+	return 0, false, false
 }
 
 // listOnlinePlayers is who is online, by player number, as the console log and

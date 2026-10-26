@@ -1098,6 +1098,8 @@ type flowFileEntry struct {
 	Delay    string `json:"delay,omitempty"`    // e.g. "5s"
 	Steps    []Step `json:"steps"`
 	OnStop   []Step `json:"onStop,omitempty"`
+	// CounterThreshold is the flow's {threshold}; 0 (or left out) means none.
+	CounterThreshold int `json:"counterThreshold,omitempty"`
 }
 
 type flowFile struct {
@@ -1115,7 +1117,7 @@ func handleFlowExport(w http.ResponseWriter, r *http.Request) {
 	out := flowFile{Flows: make([]flowFileEntry, 0, len(flows))}
 	for _, f := range flows {
 		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Trigger: f.Trigger, Schedule: f.Schedule,
-			Delay: f.Delay, Steps: f.Steps, OnStop: f.OnStop})
+			Delay: f.Delay, Steps: f.Steps, OnStop: f.OnStop, CounterThreshold: f.CounterThreshold})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="flows.json"`)
@@ -1162,7 +1164,7 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 			name = clipName(base, maxFlowNameLen-len(suffix)) + suffix
 		}
 		if _, err := validateAndSaveFlow(Flow{Name: name, Trigger: e.Trigger, Schedule: e.Schedule,
-			Delay: e.Delay, Steps: e.Steps, OnStop: e.OnStop}, true); err != nil {
+			Delay: e.Delay, Steps: e.Steps, OnStop: e.OnStop, CounterThreshold: e.CounterThreshold}, true); err != nil {
 			skipped = append(skipped, base+": "+err.Error())
 			continue
 		}
