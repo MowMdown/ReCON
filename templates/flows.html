@@ -952,8 +952,6 @@ const TOKENS = [
 	{ tok: '{counter}', need: 'player', counters: true, title: 'The player\'s counter in this run: starts at 0, changed by the counter setting on If, Else if and Else' },
 	{ tok: '{threshold}', need: 'threshold', counters: true, title: 'This flow\'s Counter threshold (only once one is set)' }
 ];
-// What a greyed-out If subject needs, in its dropdown.
-const REQUIRES = { player: 'requires On join, Player message or For each', chat: 'requires Player message or For each' };
 const NEED_TEXT = {
 	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
 	chat: 'needs the Player message trigger',
@@ -1353,11 +1351,13 @@ function field(s, p, key, inLoop) {
 	if (p.kind === 'select') {
 		let opts = p.opts;
 		// An If's subject is always a dropdown of every subject; the ones that
-		// don't apply here are greyed out with what they need.
+		// don't apply here are greyed out. The chosen one always stays: if the
+		// trigger changes or the If moves out of a For each, its red note says
+		// what it needs.
 		if (opts === 'subjects') {
 			const c = ctx(ed, inLoop);
 			opts = SUBJECTS.filter((x) => SHOW_COUNTERS || x[0] !== 'counter' || x[0] === s.subject)
-				.map(([v, l, , need]) => c[need] || v === s.subject ? [v, l] : [v, l + ' (' + REQUIRES[need] + ')', true]);
+				.map(([v, l, , need]) => [v, l, !c[need] && v !== s.subject]);
 		}
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
 		if (opts === 'to') opts = toOpts(inLoop ? 'join' : ed.trigger.type);
