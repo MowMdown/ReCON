@@ -262,7 +262,7 @@ Move a step with its arrows, or drag it by the `⋮⋮` handle. Moving an If mov
 
 ### If, Else if, Else
 
-An If compares one thing, such as `{player_ping}`, and runs its steps when the comparison is true. **+ Else if** adds more comparisons of the same thing; the first one that's true runs. **+ Else** runs when none are. Ifs can go inside other Ifs.
+An If compares one thing, such as `{player_ping}`, and runs its steps when the comparison is true. **+ Else if** adds more comparisons of the same thing; the first one that's true runs. **+ Else** runs when none are. Ifs can go inside other Ifs. Deleting an If or a For each keeps the steps inside it: they move out one level, where the block was.
 
 | Compare | Operators |
 | ------- | --------- |

@@ -405,7 +405,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<div class="helppane" data-pane="conditions">
 			<h3>If, Else if, Else</h3>
 			<p>An If compares one thing, such as <code>{player_ping}</code>, and runs its steps when the comparison is true. <b>+ Else if</b> adds more comparisons of the same thing, checked top to bottom: the first one that is true runs, and the rest are skipped. <b>+ Else</b> runs when none are true. Each If has its own End if, so they can't come apart, and Ifs can go inside other Ifs.</p>
-			<p>Reorder Else ifs with their arrows; moving one above the first makes it the If. Removing an Else if or the Else keeps its steps: they move below the End if.</p>
+			<p>Reorder Else ifs with their arrows; moving one above the first makes it the If. Removing an Else if or the Else keeps its steps: they move below the End if. Deleting a whole If or For each keeps what was inside it too: the steps move out one level, where the block was.</p>
 			<h3>For each</h3>
 			<p><b>For each</b> runs the steps inside it (down to its End for each) once per item, with that item's player as the Player, so Kick, Ban, a Message to the Player, the player placeholders and If comparisons work inside it in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies; it acts only when the flow runs, on what happened since the flow's last run. Pick what it goes through:</p>
 			<ul>
@@ -1280,7 +1280,9 @@ function renderSteps(key) {
 					el('button', { type: 'button', title: 'Move up', 'aria-label': 'Move ' + what + ' up', disabled: atTop, onclick: () => moveStep(key, r.list, r.i, -1), text: '▲' }),
 					el('button', { type: 'button', title: 'Move down', 'aria-label': 'Move ' + what + ' down', disabled: atBottom, onclick: () => moveStep(key, r.list, r.i, 1), text: '▼' }),
 					el('button', { type: 'button', title: isBlock(s) ? 'Duplicate the whole ' + blockName + ' block' : 'Duplicate', 'aria-label': 'Duplicate ' + what, onclick: () => { r.list.splice(r.i + 1, 0, clone(s)); changed(true); }, text: '⧉' }),
-					el('button', { type: 'button', title: isBlock(s) ? 'Delete the ' + blockName + ' and every step inside it' : 'Delete', 'aria-label': 'Delete ' + what, onclick: () => { r.list.splice(r.i, 1); changed(true); }, text: '✕' })
+					// Deleting an If or For each keeps what was inside: its steps (every
+					// branch's, in order) move out one level, where the block was.
+					el('button', { type: 'button', title: isBlock(s) ? 'Delete the ' + blockName + ' (the steps inside move out one level)' : 'Delete', 'aria-label': 'Delete ' + what, onclick: () => { r.list.splice(r.i, 1, ...(isBlock(s) ? lists(s).flat() : [])); changed(true); }, text: '✕' })
 				)
 			);
 			rowRefs[key].push({ row, sends, err, s, ek: obj });
