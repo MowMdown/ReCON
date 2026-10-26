@@ -1466,7 +1466,7 @@ func syncBanList() error {
 	added := 0
 	for _, b := range readd {
 		cmd := strings.TrimSpace(fmt.Sprintf("addBan %s 0 %s", b.GUID, cleanReason(b.Reason)))
-		_, acked, err := runSharedCommand(cmd, 1500*time.Millisecond, false, "bans")
+		_, acked, err := runWebCommand(cmd, 1500*time.Millisecond, false, "bans")
 		if err != nil || !acked {
 			log.Printf("bans: re-adding permanent ban %s failed (acked=%v err=%v)", b.GUID, acked, err)
 			continue
@@ -1475,7 +1475,7 @@ func syncBanList() error {
 		added++
 	}
 	if added > 0 {
-		runSharedCommand("writeBans", 1500*time.Millisecond, false, "bans") // persist bans.txt, best effort
+		runWebCommand("writeBans", 1500*time.Millisecond, false, "bans") // persist bans.txt, best effort
 	}
 	return nil
 }
