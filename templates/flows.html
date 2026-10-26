@@ -1161,13 +1161,6 @@ function sendsText(s) {
 	}
 	return '';
 }
-// forEachText explains a For each under its row.
-function forEachText(s) {
-	return s.of === 'message'
-		? 'once for each chat line a player online sent since this flow last ran, as the Player who sent it, with {message} the line'
-		: 'once for each player online, as the Player, with {message} their latest chat line since this flow last ran';
-}
-
 function describeIf(s) {
 	const sub = subjectOf(s);
 	const op = opsFor(sub).find((o) => o[0] === s.op) || opsFor(sub)[0];
@@ -1373,8 +1366,7 @@ function updateDerivedRows(key, errs) {
 	for (const j of jointRefs[key]) j.span.textContent = jointText(j.s, j.isElse);
 	for (const r of rowRefs[key]) {
 		let t = r.s.type ? sendsText(r.s) : '';
-		if (r.s.type === 'forEach') t = 'runs the steps inside ' + forEachText(r.s);
-		else if (r.s.type === 'wait') {
+		if (r.s.type === 'wait') { // a For each has no line under it: Help explains it
 			const secs = secsOf(r.s.time);
 			t = secs > 0 ? 'waits ' + secs + ' second' + (secs === 1 ? '' : 's') : '';
 		} else if (t) t = 'sends: ' + t;
