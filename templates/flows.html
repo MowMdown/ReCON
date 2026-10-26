@@ -172,6 +172,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 .fb .menu button:disabled small { color: var(--warn); }
 /* + Add step's menu opens upward from the footer. */
 .fb-foot .menu { top: auto; bottom: calc(100% + 6px); max-height: min(70vh, 560px); overflow-y: auto; }
+/* Flow counters are hidden from the pages for now (SHOW_COUNTERS). */
+.counters { display: none; }
 .steps.drop-into { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 6px; }
 .box.valuesbox { width: min(640px, 95vw); height: auto; max-height: 88vh; }
 .valuesbox td:first-child { white-space: nowrap; }
@@ -250,11 +252,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 				<p class="hint" id="trigHint"></p>
 			</div>
 			<div class="sect">
-				<div class="hd"><h3>Steps</h3><span class="hint">Run top to bottom. Drag <b>⋮⋮</b> or use the arrows to move a step; an If moves with everything inside it.</span></div>
+				<div class="hd"><h3>Steps</h3></div>
 				<div class="steps" id="steps"></div>
 			</div>
 			<div class="sect" id="stopSection">
-				<div class="hd"><h3>When stopped</h3><span class="hint">Run if someone presses Stop before the run ends; Stop again ends them. Drag steps here from Steps, and back.</span></div>
+				<div class="hd"><h3>When stopped</h3></div>
 				<div class="steps" id="onStop"></div>
 			</div>
 		</div>
@@ -390,8 +392,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 				<thead><tr><th>Placeholder</th><th>Is</th><th>Works in</th></tr></thead>
 				<tbody>
 					<tr><td><code>{players_online}</code></td><td>How many players are online</td><td>Every flow</td></tr>
-					<tr><td><code>{counter}</code></td><td>The player's counter in this run (see <i>If / Else</i>)</td><td>With a player</td></tr>
-					<tr><td><code>{threshold}</code></td><td>This flow's counter threshold</td><td>Every flow</td></tr>
+					<tr class="counters"><td><code>{counter}</code></td><td>The player's counter in this run (see <i>If / Else</i>)</td><td>With a player</td></tr>
+					<tr class="counters"><td><code>{threshold}</code></td><td>This flow's counter threshold</td><td>Every flow</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_id}</code></td><td>The player's name and number</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_ping}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td>Their ping, IP address and GUID</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_role}</code></td><td>Player, Mod or Admin (set on the Players page)</td><td>On join, Player message</td></tr>
@@ -414,9 +416,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 			</ul>
 			<p>Players BattlEye hasn't verified yet are left out. Stop flow inside it ends the whole run. A For each can't go inside another one. The run log lists each player a condition matched, not every one checked.</p>
 			<p>Examples for a Schedule flow every minute (<code>* * * * *</code>): <b>For each</b> player, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. Or <b>For each</b> message, <b>If</b> <code>{message}</code> contains <code>noob</code>, <b>Message</b> the Player <i>Please keep chat friendly</i>. In a flow without a player of its own, Add step puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so three clicks build either one.</p>
-			<h3>Counter</h3>
-			<p>Each run of a flow keeps a <b>counter</b> for every player, starting at 0. Every If, Else if and Else has a <b>counter</b> setting for what it does to the player's counter when it runs: <b>0</b> nothing, <b>++</b> add 1, <b>--</b> take 1 away (not below 0), <b>reset</b> back to 0. <code>{counter}</code> is the value, and an If can compare it with a number or with <code>{threshold}</code>, the flow's <b>Counter threshold</b> (next to the delay; optional, and <code>{threshold}</code> works only once it's set to 1 or more). Counters are only kept while the run lasts, so put the checks in one run: several For each blocks with Waits between them.</p>
-			<p>Example, Schedule every minute, threshold 4: <b>For each</b> player, <b>If</b> <code>{player_ping} &gt;= 500</code> counter <b>++</b>, then inside it <b>If</b> <code>{counter} &gt;= {threshold}</code> Kick, reason <i>Ping {player_ping} over the limit</i>, <b>Else</b> Message the Player <i>Warning {counter}/{threshold}: ping {player_ping}</i>; the outer <b>Else</b> counter <b>reset</b>, so only high pings in a row count. Duplicate the For each block with a <b>Wait 10s</b> between copies.</p>
+			<h3 class="counters">Counter</h3>
+			<p class="counters">Each run of a flow keeps a <b>counter</b> for every player, starting at 0. Every If, Else if and Else has a <b>counter</b> setting for what it does to the player's counter when it runs: <b>0</b> nothing, <b>++</b> add 1, <b>--</b> take 1 away (not below 0), <b>reset</b> back to 0. <code>{counter}</code> is the value, and an If can compare it with a number or with <code>{threshold}</code>, the flow's <b>Counter threshold</b> (next to the delay; optional, and <code>{threshold}</code> works only once it's set to 1 or more). Counters are only kept while the run lasts, so put the checks in one run: several For each blocks with Waits between them.</p>
+			<p class="counters">Example, Schedule every minute, threshold 4: <b>For each</b> player, <b>If</b> <code>{player_ping} &gt;= 500</code> counter <b>++</b>, then inside it <b>If</b> <code>{counter} &gt;= {threshold}</code> Kick, reason <i>Ping {player_ping} over the limit</i>, <b>Else</b> Message the Player <i>Warning {counter}/{threshold}: ping {player_ping}</i>; the outer <b>Else</b> counter <b>reset</b>, so only high pings in a row count. Duplicate the For each block with a <b>Wait 10s</b> between copies.</p>
 			<h3>What you can compare</h3>
 			<table>
 				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
@@ -424,7 +426,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>!discord</code> catches "!discord please" but not "!discordx". <b>is exactly</b>: the whole message is the value. Case is ignored.</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_ip}</code></td><td><b>is</b> / <b>is not</b> ignoring case, <b>matches</b> with <code>*</code> for any characters (<code>*admin*</code>, <code>192.168.*</code>), or <b>contains</b> any part of it</td></tr>
 					<tr><td><code>{player_id}</code> <code>{player_guid}</code></td><td><b>is</b> / <b>is not</b></td></tr>
-					<tr><td><code>{player_ping}</code> <code>{players_online}</code> <code>{counter}</code></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code>, with a whole number or <code>{threshold}</code></td></tr>
+					<tr><td><code>{player_ping}</code> <code>{players_online}</code><span class="counters"> <code>{counter}</code></span></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code><span class="counters">, with a whole number or <code>{threshold}</code></span></td></tr>
 					<tr><td><code>{player_role}</code></td><td><b>is</b>, <b>is not</b>, <b>is at least</b> or <b>is at most</b> Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
 				</tbody>
 			</table>
@@ -927,6 +929,10 @@ setInterval(tickCountdowns, 1000);
 (function () {
 'use strict';
 const TRIGGERS = [['schedule', 'Schedule'], ['join', 'On join'], ['chat', 'Player message'], ['manual', 'Manual']];
+// Flow counters (the counter setting on If, Else if and Else, the Counter
+// threshold, {counter} and {threshold}) are hidden from the editor for now.
+// ReCON still runs them, and a flow that already uses them shows them.
+const SHOW_COUNTERS = false;
 const TRIGGER_NAME = Object.fromEntries(TRIGGERS);
 
 // ---------------------------------------------------------------------------
@@ -943,8 +949,8 @@ const TOKENS = [
 	{ tok: '{player_role}', need: 'player', title: 'Their role: Player, Mod or Admin' },
 	{ tok: '{message}', need: 'chat', title: 'What they typed (Player message), or the chat line in a For each' },
 	{ tok: '{players_online}', need: '', title: 'How many players are online (any flow)' },
-	{ tok: '{counter}', need: 'player', title: 'The player\'s counter in this run: starts at 0, changed by the counter setting on If, Else if and Else' },
-	{ tok: '{threshold}', need: 'threshold', title: 'This flow\'s Counter threshold (only once one is set)' }
+	{ tok: '{counter}', need: 'player', counters: true, title: 'The player\'s counter in this run: starts at 0, changed by the counter setting on If, Else if and Else' },
+	{ tok: '{threshold}', need: 'threshold', counters: true, title: 'This flow\'s Counter threshold (only once one is set)' }
 ];
 const NEED_TEXT = {
 	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
@@ -1332,7 +1338,7 @@ function renderSteps(key) {
 // player's counter for this run when it runs. Shown only where there is a
 // player, or when already set (validation then explains).
 function counterField(obj, k, inLoop) {
-	if (!ctx(ed, inLoop).player && !obj[k]) return null;
+	if ((!SHOW_COUNTERS || !ctx(ed, inLoop).player) && !obj[k]) return null;
 	const sel = el('select', { 'aria-label': 'Counter', title: 'What this does to the player\'s counter when it runs: 0 nothing, ++ add 1, -- take 1 away, reset back to 0' },
 		COUNTER_OPS.map(([v, l]) => el('option', { value: v, text: l, selected: (obj[k] || '') === v })));
 	sel.addEventListener('change', () => { if (sel.value) obj[k] = sel.value; else delete obj[k]; changed(true); });
@@ -1344,7 +1350,7 @@ function counterField(obj, k, inLoop) {
 function field(s, p, key, inLoop) {
 	if (p.kind === 'select') {
 		let opts = p.opts;
-		if (opts === 'subjects') { const c = ctx(ed, inLoop); opts = SUBJECTS.filter((x) => c[x[3]] || x[0] === s.subject).map(([v, l]) => [v, l]); }
+		if (opts === 'subjects') { const c = ctx(ed, inLoop); opts = SUBJECTS.filter((x) => (c[x[3]] && (SHOW_COUNTERS || x[0] !== 'counter')) || x[0] === s.subject).map(([v, l]) => [v, l]); }
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
 		if (opts === 'to') opts = toOpts(inLoop ? 'join' : ed.trigger.type);
 		if (opts === 'who') opts = whoOpts();
@@ -1644,7 +1650,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus
 window.openValues = function () {
 	const body = $('valuesRows');
 	body.textContent = '';
-	for (const t of TOKENS) body.append(el('tr', null, el('td', null, el('code', { text: t.tok })), el('td', { text: t.title })));
+	for (const t of TOKENS.filter((x) => SHOW_COUNTERS || !x.counters)) body.append(el('tr', null, el('td', null, el('code', { text: t.tok })), el('td', { text: t.title })));
 	$('valuesModal').style.display = 'flex';
 };
 window.closeValues = function () { $('valuesModal').style.display = 'none'; };
@@ -1743,11 +1749,14 @@ function renderTrigger() {
 	d.addEventListener('input', () => { t.delay = d.value; check(); queuePreview(); });
 	check();
 	box.append(el('label', { class: 'f' }, 'Delay (optional)', d));
-	const ct = el('input', { class: 'dur', value: ed.counterThreshold, inputmode: 'numeric', autocomplete: 'off', title: 'Optional: a whole number from 1 to 1000, used as {threshold}', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Counter threshold' });
-	const ctCheck = () => ct.classList.toggle('bad', !thresholdOk(ct.value));
-	ct.addEventListener('input', () => { ed.counterThreshold = ct.value; ctCheck(); changed(false); });
-	ctCheck();
-	box.append(el('label', { class: 'f', title: 'Each player\'s counter starts at 0 every run; If, Else if and Else can change it. Set a threshold to compare with {counter} >= {threshold}.' }, 'Counter threshold (optional)', ct));
+	// Hidden while SHOW_COUNTERS is off, unless this flow already has a threshold.
+	if (SHOW_COUNTERS || String(ed.counterThreshold).trim()) {
+		const ct = el('input', { class: 'dur', value: ed.counterThreshold, inputmode: 'numeric', autocomplete: 'off', title: 'Optional: a whole number from 1 to 1000, used as {threshold}', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Counter threshold' });
+		const ctCheck = () => ct.classList.toggle('bad', !thresholdOk(ct.value));
+		ct.addEventListener('input', () => { ed.counterThreshold = ct.value; ctCheck(); changed(false); });
+		ctCheck();
+		box.append(el('label', { class: 'f', title: 'Each player\'s counter starts at 0 every run; If, Else if and Else can change it. Set a threshold to compare with {counter} >= {threshold}.' }, 'Counter threshold (optional)', ct));
+	}
 	$('stopSection').hidden = !(t.type === 'schedule' || t.type === 'manual');
 	updateTrigHint();
 }

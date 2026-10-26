@@ -257,8 +257,6 @@ Move a step with its arrows, or drag it by the `⋮⋮` handle. Moving an If mov
 | `{player_ping}` `{player_ip}` `{player_guid}` | Their ping, IP address and GUID | On join, Player message |
 | `{player_role}` | Player, Mod or Admin | On join, Player message |
 | `{message}` | Everything they typed | Player message |
-| `{counter}` | The player's counter in this run (see [Counter](#counter)) | On join, Player message, inside a For each |
-| `{threshold}` | The flow's counter threshold | Every flow |
 
 ### If, Else if, Else
 
@@ -269,33 +267,10 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 | `{message}` | **contains** any of the words, or a `"quoted phrase"`, as whole words. **starts with**: the first word is one of the words, so `!discord` matches "!discord please" but not "!discordx". **is exactly**: the whole message is the value. Case is ignored |
 | `{player_name}` `{player_ip}` | **is** / **is not** ignoring case, **matches** with `*` wildcards (`*admin*`, `192.168.*`), or **contains** |
 | `{player_id}` `{player_guid}` | **is** / **is not** |
-| `{player_ping}` `{players_online}` `{counter}` | `=` `!=` `>` `>=` `<` `<=`, with a whole number or `{threshold}` |
+| `{player_ping}` `{players_online}` | `=` `!=` `>` `>=` `<` `<=` |
 | `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Mod or Admin (Player < Mod < Admin) |
 
 ![If / Else in the editor](docs/screenshots/flows-edit-if.png)
-
-### Counter
-
-Each run of a flow keeps a **counter** for every player, starting at 0, held in memory only while the run lasts. Every If, Else if and Else has a **counter** setting for what it does to the player's counter when it is the one that runs: **0** nothing, **++** add 1, **--** take 1 away (not below 0), **reset** back to 0. The change happens before its steps, so they see the new `{counter}`. The flow's **Counter threshold** (next to the delay) is `{threshold}`. It's optional: leave it empty for none, or enter 1 or more, and `{threshold}` works only once it's set. The counter needs a player: use it inside a For each, or in an On join or Player message flow.
-
-Because counters last one run, put repeated checks in one run. For example, a Schedule flow every minute with a threshold of 4 that kicks players whose ping stays at 500 or more:
-
-```
-For each player
-    If {player_ping} >= 500                      counter ++
-        If {counter} >= {threshold}
-            Kick the Player, reason "Ping {player_ping} over the limit"
-        Else
-            Message the Player "Warning #{counter}/{threshold} Ping: {player_ping}"
-        End if
-    Else                                         counter reset
-    End if
-End for each
-Wait 10s
-(the same For each block again, and again)
-```
-
-The **reset** on the Else makes only high pings in a row count. The run log notes each change, such as `Laggy (#4): counter ++, now 3/4`.
 
 ### For each
 
