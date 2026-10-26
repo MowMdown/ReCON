@@ -182,15 +182,9 @@ func currentRconStatus() string {
 }
 
 // rconNextCheck is when ReCON next tries the game server: the server watch's
-// next check, or, while it waits between logins (connectWebSession), the
-// first check after that wait.
+// next check (its next heartbeat while the server is down).
 func rconNextCheck() time.Time {
-	next := time.UnixMilli(rconNextPoll.Load())
-	if dial, every := nextDialAt(), checkEvery(); dial.After(next) {
-		k := (dial.Sub(next) + every - 1) / every
-		next = next.Add(k * every)
-	}
-	return next
+	return time.UnixMilli(rconNextPoll.Load())
 }
 
 // isRconUnavailable is the 503 the pages read as "retrying...".

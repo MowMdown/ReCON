@@ -126,7 +126,7 @@ Mount `/data` as a volume, or everything ReCON has recorded is lost when the con
 
 Every page shows two status lines at the top:
 
-- **RCON Status:** whether ReCON can reach the game server (it reads the player list every 5 seconds and sends a heartbeat every 30; three checks missed in a row means unavailable): *Connected*, or *Unavailable - Retrying...* with a small grey countdown to ReCON's next try. While the server is unavailable, ReCON only sends the heartbeat, every 30 seconds, and logs in again when one goes unanswered; it keeps retrying in the background on its own.
+- **RCON Status:** whether ReCON can reach the game server (it reads the player list every 5 seconds and sends a heartbeat every 30; three checks missed in a row means unavailable): *Connected*, or *Unavailable - Retrying...* with a small grey countdown to ReCON's next try. While the server is unavailable, ReCON only sends the heartbeat, every 30 seconds, and logs in again when one goes unanswered: at most one login every 30 seconds, so a restarting server doesn't log a pile of RCon admin logins when it comes back. It keeps retrying in the background on its own.
 - **WebGUI Status:** whether your browser can reach ReCON. While it can, the page's count follows *Connected*: players online, bans or flows.
 
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.

@@ -26,9 +26,9 @@ import (
 //     an optional keepalive. The CLI and its console (-i) dial their own,
 //     logged to the container as [cli]; everything in server mode (pages,
 //     flows, polls) goes through one web session (runWebCommand), logged as
-//     [web]. It opens a new socket only when the old one has died; when the
-//     server stops answering, the heartbeat logs in again on the same socket
-//     (reloginWebSession), so BattlEye keeps the same admin slot.
+//     [web]. Only the heartbeat logs it in, at most once per heartbeat: on a
+//     new socket only when the old one has died, otherwise again on the same
+//     socket (reloginWebSession), so BattlEye keeps the same admin slot.
 //   - the server watch: `players` every 5 seconds while the server answers
 //     (who is online, pings) and an empty command (the heartbeat) every 30
 //     seconds, which notice when the server is down; the ban list after
@@ -493,69 +493,73 @@ func (l *persistentConnection) runRawCommand(command string, wait time.Duration)
 // ---------------------------------------------------------------------------
 
 // webConnection holds the one long-lived session. The Mutex protects the
-// pointer; persistentConnection serialises the commands themselves.
+// fields; persistentConnection serialises the commands themselves.
 // Keepalive is off because the server watch already keeps the session busy.
 // Being permanently logged in is also what lets it receive server messages.
+//
+// Only the server watch logs in (loginWebSession, reloginWebSession), at
+// most once per heartbeat, and RCON Settings' Connect button
+// (reconnectWebSession). Commands never log in: with no live session they
+// fail straight away. A server that is starting up can take packets on its
+// port before it answers them, and then handles the whole backlog at once,
+// so every login sent in that time becomes another "RCon admin logged in".
 var webConnection = struct {
 	sync.Mutex
 	connection *persistentConnection
-	nextDial   time.Time     // no new socket before this, after a failed login
-	dialWait   time.Duration // the wait used after the last failed login
-	lastErr    error         // returned while waiting for nextDial
+	lastErr    error     // why the last login failed, for commands sent meanwhile
+	loggedInAt time.Time // the last accepted login the server hasn't answered a check after
 }{}
-
-// nextDialAt is when connectWebSession may next open a new socket after a failed
-// login, or zero when it isn't waiting (a session is open, or it may dial now).
-func nextDialAt() time.Time {
-	webConnection.Lock()
-	defer webConnection.Unlock()
-	if c := webConnection.connection; c != nil && !c.isClosed() {
-		return time.Time{}
-	}
-	return webConnection.nextDial
-}
 
 // webSource is the web session's label in log lines.
 const webSource = "web"
 
-// connectWebSession returns the web session, dialing a new one if there is
-// none or the current one has died. The lock is held while dialing, so
-// concurrent callers wait for one login instead of each opening their own.
-//
-// Every new login sends #unlock. The web session logs in when ReCON starts
-// and after the session drops, most often because the server restarted, so a
-// restart flow's #lock never outlives the restart. (A lock set some other way
-// is undone if the session reconnects while it's in place; that's accepted.)
-// The CLI and console dial their own sessions and don't unlock.
-func connectWebSession() (*persistentConnection, error) {
+// errNotLoggedIn is returned for commands sent while the web session isn't
+// logged in; the server watch logs in again at its next heartbeat.
+var errNotLoggedIn = errors.New("not logged in to RCON")
+
+// liveWebSession returns the web session, or an error when it isn't logged
+// in (none yet, or its socket has died). It never logs in itself.
+func liveWebSession() (*persistentConnection, error) {
 	webConnection.Lock()
 	defer webConnection.Unlock()
 	if c := webConnection.connection; c != nil && !c.isClosed() {
 		return c, nil
 	}
 	if c := webConnection.connection; c != nil {
-		log.Printf("rcon: connection dropped (socket closed: %v), logging in again", c.err)
+		log.Printf("rcon: connection dropped (socket closed: %v), logging in again at the next heartbeat", c.err)
 		c.close()
 		webConnection.connection = nil
 	}
-	// Every call would otherwise dial (the server watch, every page refresh), and
-	// each new socket leaves a login queued at a server that isn't answering:
-	// after a failed login, wait as reloginWebSession does before dialing again.
-	if time.Now().Before(webConnection.nextDial) {
-		return nil, webConnection.lastErr
+	if err := webConnection.lastErr; err != nil {
+		return nil, fmt.Errorf("%w: %v", errNotLoggedIn, err)
 	}
+	return nil, errNotLoggedIn
+}
+
+// loginWebSession logs the web session in on a new socket if there is no
+// live one, with ONE login packet. Only the server watch calls it, on a
+// heartbeat.
+//
+// Every new login sends #unlock. The web session logs in when ReCON starts
+// and after the session drops, most often because the server restarted, so a
+// restart flow's #lock never outlives the restart. (A lock set some other way
+// is undone if the session reconnects while it's in place; that's accepted.)
+// The CLI and console dial their own sessions and don't unlock.
+func loginWebSession() error {
+	if _, err := liveWebSession(); err == nil {
+		return nil
+	}
+	webConnection.Lock()
+	defer webConnection.Unlock()
 	s, err := dialPersistentConnection(webSource, false)
 	if err != nil {
-		webConnection.dialWait = min(max(2*webConnection.dialWait, reloginFirstWait), reloginMaxWait)
-		webConnection.nextDial = time.Now().Add(webConnection.dialWait)
-		webConnection.lastErr = fmt.Errorf("%w (next login in %s)", err, webConnection.dialWait)
-		return nil, err
+		webConnection.lastErr = err
+		return err
 	}
-	webConnection.nextDial, webConnection.dialWait = time.Time{}, 0
+	webConnection.connection, webConnection.lastErr, webConnection.loggedInAt = s, nil, time.Now()
 	log.Printf("rcon: logged in")
 	unlockAfterLogin(s)
-	webConnection.connection = s
-	return s, nil
+	return nil
 }
 
 // reconnectWebSession logs the web session in to address with password on a
@@ -574,66 +578,46 @@ func reconnectWebSession(address, password string) error {
 	if old := webConnection.connection; old != nil {
 		old.close()
 	}
-	webConnection.connection = s
-	webConnection.nextDial, webConnection.dialWait = time.Time{}, 0
+	webConnection.connection, webConnection.lastErr, webConnection.loggedInAt = s, nil, time.Now()
 	log.Printf("rcon: connected to %s from RCON Settings", address)
 	unlockAfterLogin(s)
 	return nil
 }
 
-// Pacing for reloginWebSession while the server isn't answering. A login that
-// gets no reply waits reloginFirstWait before the next try, doubling up to
-// reloginMaxWait, so a long restart leaves only a few login packets queued
-// at the server (pages and flows can't open a socket more often either).
-// reloginMaxWait stays under heartbeatEvery, the only check while the server
-// is down, so every heartbeat then may log in. After a login is accepted, no
-// new one is sent for
-// reloginSettle: a server that is still starting up can accept a login
-// before it answers `players`, and logging in again then would only add
-// another "logged in" line and another #unlock.
-var (
-	reloginFirstWait = 10 * time.Second
-	reloginMaxWait   = 20 * time.Second
-	reloginSettle    = 60 * time.Second
-)
+// reloginSettle is how long after an accepted login no new one is sent: a
+// server that is still starting up can accept a login before it answers
+// commands, and logging in again then would only add another "logged in"
+// line and another #unlock.
+var reloginSettle = 60 * time.Second
 
-// reloginPace is when reloginWebSession may next send a login, and the wait to
-// use after the next unanswered one. Only the server watch goroutine touches it.
-var reloginPace struct {
-	next time.Time
-	wait time.Duration
+// webSessionAnswered is called by the server watch when the server answers a
+// check, so the next outage may log in again straight away.
+func webSessionAnswered() {
+	webConnection.Lock()
+	webConnection.loggedInAt = time.Time{}
+	webConnection.Unlock()
 }
 
-// resetReloginPace is called by the server watch when the server answers again, so
-// the next outage starts with an immediate login and the shortest wait.
-func resetReloginPace() {
-	reloginPace.next, reloginPace.wait = time.Time{}, 0
-}
-
-// reloginWebSession is called by the server watch when the server has missed
-// 3 checks in a row (it may have restarted and forgotten us). It logs in again
+// reloginWebSession is called by the server watch, on a heartbeat, while the
+// server is down (it may have restarted and forgotten us). It logs in again
 // on the same socket, so the server keeps our admin slot, then sends #unlock
 // as a new login does, and reports whether the server accepted the login.
-// Calls are paced (see reloginFirstWait): one between allowed times does
-// nothing. If there is no live session, the next command opens one.
+// It does nothing within reloginSettle of an accepted login, or when there
+// is no live session (loginWebSession opens one).
 func reloginWebSession() bool {
-	now := time.Now()
-	if now.Before(reloginPace.next) {
-		return false
-	}
 	webConnection.Lock()
-	c := webConnection.connection
+	c, settling := webConnection.connection, time.Since(webConnection.loggedInAt) < reloginSettle
 	webConnection.Unlock()
-	if c == nil || c.isClosed() {
+	if c == nil || c.isClosed() || settling {
 		return false
 	}
 	if err := c.reloginSameSocket(); err != nil {
-		reloginPace.wait = min(max(2*reloginPace.wait, reloginFirstWait), reloginMaxWait)
-		reloginPace.next = time.Now().Add(reloginPace.wait)
-		log.Printf("rcon: no reply from the server; logging in again failed (%v), next try in %s", err, reloginPace.wait)
+		log.Printf("rcon: no reply from the server; logging in again failed (%v), next try at the next heartbeat", err)
 		return false
 	}
-	reloginPace.next, reloginPace.wait = time.Now().Add(reloginSettle), 0
+	webConnection.Lock()
+	webConnection.loggedInAt = time.Now()
+	webConnection.Unlock()
 	log.Printf("rcon: no reply from the server; logged in again on the same connection")
 	unlockAfterLogin(c)
 	return true
@@ -643,7 +627,7 @@ func reloginWebSession() bool {
 const loginSource = "login"
 
 // unlockAfterLogin sends #unlock on a session that has just logged in (see
-// connectWebSession), logs it like any other sent command, and asks the
+// loginWebSession), logs it like any other sent command, and asks the
 // server watch to read the ban list next: the server may have restarted,
 // so the bans ReCON knew may be out of date. It uses runRawCommand
 // because the callers already hold the session.
@@ -667,8 +651,9 @@ var pollEvery = 5 * time.Second
 
 // heartbeatEvery is how often an empty command is sent, whether or not the
 // server is answering. BattlEye drops a client it hasn't heard from in about
-// 45 seconds; while the server is down, the heartbeat is the only check
-// (polls pause) and the one that logs in again.
+// 45 seconds. The heartbeat is also the only thing that logs in, so a server
+// that isn't answering gets at most one login packet per heartbeatEvery;
+// while it's down, the heartbeat is the only check (polls pause).
 var heartbeatEvery = 30 * time.Second
 
 // heartbeatWait is how long a heartbeat waits for its answer, and pollWait
@@ -695,28 +680,30 @@ var (
 // check then reads the ban list.
 var loginPollDue atomic.Bool
 
-// startServerWatch checks the web session every pollEvery:
+// startServerWatch checks the web session every pollEvery, starting now:
 //
 //   - Delete timed bans that have run out, if one is due (db.go), and let go
 //     of players who didn't come back after a restart in time
 //     (forgetAwayPlayers, players.go).
-//   - Every heartbeatEvery, send an empty command (heartbeatWait).
+//   - Every heartbeatEvery, the heartbeat: log in on a new socket if there is
+//     no live session (loginWebSession), then send an empty command
+//     (heartbeatWait). While the server is down and the empty command goes
+//     unanswered, log in again on the same socket (reloginWebSession).
 //   - While the server is answering, poll `players` (pollPlayersNow).
 //     Neither is logged.
 //   - A round with no answer counts as a miss. At exactly downAfterMisses in
 //     a row the server is taken to be down: open sessions are closed once
 //     (serverWentDown, players.go) so playtime stops while it's offline. From
-//     then on only the heartbeat checks it, and each unanswered one logs in
-//     again on the same RCON socket (reloginWebSession, paced). This is the
-//     only place that decides the server isn't answering.
+//     then on only the heartbeat checks it. This is the only place that
+//     decides the server isn't answering.
 //   - An answered round resets the count, and reads the ban list after a
 //     login and every banSyncEvery.
 func startServerWatch() {
-	rconNextPoll.Store(time.Now().Add(pollEvery).UnixMilli())
 	go func() {
+		var w serverWatch
+		w.check(time.Now())
 		t := time.NewTicker(pollEvery)
 		defer t.Stop()
-		var w serverWatch
 		for range t.C {
 			w.check(time.Now())
 		}
@@ -737,6 +724,7 @@ func (w *serverWatch) isDown() bool { return rconFails.Load() >= downAfterMisses
 func (w *serverWatch) check(now time.Time) {
 	expireDueBans(now)     // db.go
 	forgetAwayPlayers(now) // players.go
+	defer w.storeNextCheck(now)
 	heartbeatDue := now.Sub(w.lastHeartbeat) >= heartbeatEvery
 	if w.isDown() && !heartbeatDue {
 		return // only the heartbeat checks a server that's down
@@ -744,16 +732,12 @@ func (w *serverWatch) check(now time.Time) {
 	answered := false
 	if heartbeatDue {
 		w.lastHeartbeat = now
-		_, acked, err := runWebCommand("", heartbeatWait, false, "")
-		answered = err == nil && acked
+		answered = w.heartbeat()
 	}
 	if !w.isDown() {
 		answered = pollPlayersNow() || answered
-	} else if !answered && reloginWebSession() {
-		answered = pollPlayersNow() // logged in again: see who is on now
 	}
 	rconPolled.Store(true)
-	defer w.storeNextCheck(now)
 	if !answered {
 		if rconFails.Add(1) == downAfterMisses {
 			down := w.lastAnswered
@@ -761,13 +745,25 @@ func (w *serverWatch) check(now time.Time) {
 				down = now
 			}
 			serverWentDown(down) // players.go
-			if reloginWebSession() && pollPlayersNow() {
-				w.answered(now)
-			}
 		}
 		return
 	}
 	w.answered(now)
+}
+
+// heartbeat logs in if there is no live session, sends an empty command,
+// and, while the server is down and that goes unanswered, logs in again on
+// the same socket. It reports whether the server answered. At most one login
+// packet goes out per heartbeat.
+func (w *serverWatch) heartbeat() bool {
+	if err := loginWebSession(); err != nil {
+		return false
+	}
+	_, acked, err := runWebCommand("", heartbeatWait, false, "")
+	if err == nil && acked {
+		return true
+	}
+	return w.isDown() && reloginWebSession() && pollPlayersNow()
 }
 
 // answered records a round the server answered: the count starts again,
@@ -775,7 +771,7 @@ func (w *serverWatch) check(now time.Time) {
 func (w *serverWatch) answered(now time.Time) {
 	w.lastAnswered = now
 	rconFails.Store(0)
-	resetReloginPace()
+	webSessionAnswered()
 	if loginPollDue.Swap(false) || time.Since(w.lastBanSync) >= banSyncEvery {
 		w.lastBanSync = time.Now()
 		if err := syncBanList(); err != nil { // db.go
@@ -793,16 +789,6 @@ func (w *serverWatch) storeNextCheck(now time.Time) {
 		next = w.lastHeartbeat.Add(heartbeatEvery)
 	}
 	rconNextPoll.Store(next.UnixMilli())
-}
-
-// checkEvery is how often ReCON checks the server in its current state: a
-// poll every pollEvery, or only the heartbeat while it's down.
-func checkEvery() time.Duration {
-	var w serverWatch
-	if w.isDown() {
-		return heartbeatEvery
-	}
-	return pollEvery
 }
 
 // pollPlayersNow reads `players` (not logged) and hands the list to the
@@ -842,7 +828,8 @@ func pollPlayersNow() bool {
 //
 // A missed reply never drops the session here: retries reuse it, and only
 // the server watch decides the server has stopped answering (see reloginWebSession).
-// A socket that has died is replaced by connectWebSession on the next call.
+// Commands never log in: while the web session isn't logged in they fail
+// with errNotLoggedIn, and the server watch logs in at its next heartbeat.
 func runWebCommand(command string, wait time.Duration, allowRetry bool, logAs string) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
@@ -886,7 +873,7 @@ func runWebAttempts(command string, wait time.Duration, maxAttempts int, logAs s
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		more := attempt+1 < maxAttempts // only pause when another attempt follows
-		s, err := connectWebSession()
+		s, err := liveWebSession()
 		if err != nil {
 			lastErr = err
 			if more {

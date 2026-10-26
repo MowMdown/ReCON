@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -530,6 +531,7 @@ type fakeBE struct {
 	conn     net.PacketConn
 	mu       sync.Mutex
 	silent   bool   // take packets but don't answer, like a server still starting
+	mute     bool   // answer logins but not commands, like a server that's nearly up
 	password string // when set, other passwords are rejected
 	logins   int
 	commands []string
@@ -556,7 +558,7 @@ func newFakeBE(t *testing.T) *fakeBE {
 				continue
 			}
 			f.mu.Lock()
-			silent, accept := f.silent, f.password == "" || string(p) == f.password
+			silent, accept := f.silent || (f.mute && typ == 1), f.password == "" || string(p) == f.password
 			switch typ {
 			case 0:
 				f.logins++
@@ -588,6 +590,8 @@ func newFakeBE(t *testing.T) *fakeBE {
 
 func (f *fakeBE) set(silent bool) { f.mu.Lock(); f.silent = silent; f.mu.Unlock() }
 
+func (f *fakeBE) setMute(mute bool) { f.mu.Lock(); f.mute = mute; f.mu.Unlock() }
+
 func (f *fakeBE) setPassword(pw string) { f.mu.Lock(); f.password = pw; f.mu.Unlock() }
 
 func (f *fakeBE) counts() (logins, unlocks int) {
@@ -601,85 +605,75 @@ func (f *fakeBE) counts() (logins, unlocks int) {
 	return f.logins, unlocks
 }
 
-// TestReloginIsPaced checks that a server which stops answering doesn't get
-// a login packet on every poll (each queued packet becomes another
-// "RCon admin logged in" when the server catches up), and that one accepted
-// login is followed by exactly one #unlock.
-func TestReloginIsPaced(t *testing.T) {
+// TestOneLoginPerHeartbeat checks that a server which isn't answering gets
+// at most one login packet per heartbeat (each queued packet becomes another
+// "RCon admin logged in" when the server catches up), that commands never
+// log in, and that an accepted login is followed by exactly one #unlock and
+// no new login while it settles.
+func TestOneLoginPerHeartbeat(t *testing.T) {
+	testDB(t)
+	resetWeb(t)
 	f := newFakeBE(t)
-	oldAddr, oldPass := currentRconTarget()
-	oldWait, oldFirst, oldMax, oldSettle := reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle
-	t.Cleanup(func() {
-		setRconTarget(oldAddr, oldPass)
-		reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = oldWait, oldFirst, oldMax, oldSettle
-		webConnection.Lock()
-		if webConnection.connection != nil {
-			webConnection.connection.close()
-		}
-		webConnection.connection, webConnection.nextDial, webConnection.dialWait = nil, time.Time{}, 0
-		webConnection.Unlock()
-		resetReloginPace()
-	})
 	setRconTarget(f.conn.LocalAddr().String(), "pw")
-	reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = 20*time.Millisecond, 200*time.Millisecond, 400*time.Millisecond, time.Second
-	resetReloginPace()
+	oldBeat, oldPoll, oldReply, oldSettle := heartbeatWait, pollWait, reloginReplyWait, reloginSettle
+	t.Cleanup(func() {
+		heartbeatWait, pollWait, reloginReplyWait, reloginSettle = oldBeat, oldPoll, oldReply, oldSettle
+		rconFails.Store(0)
+		loginPollDue.Store(false)
+	})
+	heartbeatWait, pollWait, reloginReplyWait = 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond
+	rconFails.Store(0)
 
-	if _, err := connectWebSession(); err != nil {
-		t.Fatal(err)
-	}
-	if l, u := f.counts(); l != 1 || u != 1 {
-		t.Fatalf("first login: %d login(s), %d #unlock(s); want 1 and 1", l, u)
-	}
-
-	// The server stops answering. The poller calls reloginWebSession on every
-	// round; here it's called every 10ms for 1s (100 calls).
+	// Nothing is logged in yet: commands fail without logging in.
 	f.set(true)
-	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		reloginWebSession()
+	for i := 0; i < 5; i++ {
+		if _, _, err := runWebCommand("players", 10*time.Millisecond, false, ""); !errors.Is(err, errNotLoggedIn) {
+			t.Fatalf("err = %v, want errNotLoggedIn", err)
+		}
 	}
-	l, _ := f.counts()
-	// Allowed: one now, then 200ms and 400ms (capped) waits: about 4 in 1s.
-	if sent := l - 1; sent < 2 || sent > 5 {
-		t.Fatalf("%d login packets while the server wasn't answering; want a paced few", sent)
+	if l, _ := f.counts(); l != 0 {
+		t.Fatalf("commands sent %d login(s)", l)
 	}
 
-	// The server answers again: one login, one #unlock, and nothing more
-	// while it settles even though polls may still miss.
+	var w serverWatch
+	t0 := time.Now()
+	logins := func() int { l, _ := f.counts(); return l }
+	// A minute of rounds against a silent server: one login per heartbeat
+	// (new sockets while none is accepted).
+	for i := 0; i <= 12; i++ {
+		w.check(t0.Add(time.Duration(i) * pollEvery))
+	}
+	if l := logins(); l != 3 {
+		t.Fatalf("%d login packets in a minute of rounds; want 3 (one per heartbeat)", l)
+	}
+	if currentRconStatus() != "unavailable" {
+		t.Fatalf("status %s", currentRconStatus())
+	}
+
+	// The server takes logins but doesn't answer commands yet (it's starting
+	// up): one login, one #unlock, and no new login while it settles.
 	f.set(false)
-	time.Sleep(reloginMaxWait)
-	before, unlocksBefore := f.counts()
-	for end := time.Now().Add(500 * time.Millisecond); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		reloginWebSession()
+	f.setMute(true)
+	for i := 6; i <= 12; i++ {
+		w.check(t0.Add(time.Duration(i) * heartbeatEvery / 2))
 	}
-	after, unlocks := f.counts()
-	if after-before != 1 || unlocks-unlocksBefore != 1 {
-		t.Fatalf("after the server came back: %d login(s), %d #unlock(s); want 1 and 1", after-before, unlocks-unlocksBefore)
+	if l, u := f.counts(); l != 4 || u != 1 {
+		t.Fatalf("while settling: %d login(s), %d #unlock(s); want 4 and 1", l, u)
 	}
-}
-
-// TestConnectWebPacesNewSockets checks that when no session can be
-// opened, callers don't each dial a new socket (and queue a new login).
-func TestConnectWebPacesNewSockets(t *testing.T) {
-	f := newFakeBE(t)
-	f.set(true)
-	oldAddr, oldPass := currentRconTarget()
-	oldWait, oldFirst := reloginReplyWait, reloginFirstWait
-	t.Cleanup(func() {
-		setRconTarget(oldAddr, oldPass)
-		reloginReplyWait, reloginFirstWait = oldWait, oldFirst
-		webConnection.Lock()
-		webConnection.connection, webConnection.nextDial, webConnection.dialWait = nil, time.Time{}, 0
-		webConnection.Unlock()
-	})
-	setRconTarget(f.conn.LocalAddr().String(), "pw")
-	reloginReplyWait, reloginFirstWait = 20*time.Millisecond, time.Hour
-	for i := 0; i < 20; i++ {
-		if _, err := connectWebSession(); err == nil {
-			t.Fatal("connected to a server that doesn't answer")
-		}
+	// Once it has settled, a heartbeat logs in again on the same socket.
+	reloginSettle = 0
+	w.check(t0.Add(7 * heartbeatEvery))
+	if l, u := f.counts(); l != 5 || u != 2 {
+		t.Fatalf("after settling: %d login(s), %d #unlock(s); want 5 and 2", l, u)
 	}
-	if l, _ := f.counts(); l != 1 {
-		t.Fatalf("%d login packets from 20 calls; want 1", l)
+	// It answers: connected, and no more logins.
+	f.setMute(false)
+	w.check(t0.Add(8 * heartbeatEvery))
+	if currentRconStatus() != "connected" {
+		t.Fatalf("status %s after an answered heartbeat", currentRconStatus())
+	}
+	if l := logins(); l != 5 {
+		t.Fatalf("%d login(s) once answering, want 5", l)
 	}
 }
 
@@ -744,7 +738,7 @@ func resetWeb(t *testing.T) {
 	if webConnection.connection != nil {
 		webConnection.connection.close()
 	}
-	webConnection.connection, webConnection.nextDial, webConnection.dialWait = nil, time.Time{}, 0
+	webConnection.connection, webConnection.lastErr, webConnection.loggedInAt = nil, nil, time.Time{}
 	webConnection.Unlock()
 	t.Cleanup(func() {
 		setRconTarget(oldAddr, oldPass)
@@ -752,7 +746,7 @@ func resetWeb(t *testing.T) {
 		if webConnection.connection != nil {
 			webConnection.connection.close()
 		}
-		webConnection.connection, webConnection.nextDial, webConnection.dialWait = nil, time.Time{}, 0
+		webConnection.connection, webConnection.lastErr, webConnection.loggedInAt = nil, nil, time.Time{}
 		webConnection.Unlock()
 	})
 }
@@ -764,7 +758,10 @@ func TestReconnectWebOnlySwitchesOnSuccess(t *testing.T) {
 	b.setPassword("bpw")
 	addrA, addrB := a.conn.LocalAddr().String(), b.conn.LocalAddr().String()
 	setRconTarget(addrA, "apw")
-	old, err := connectWebSession()
+	if err := loginWebSession(); err != nil {
+		t.Fatal(err)
+	}
+	old, err := liveWebSession()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +773,7 @@ func TestReconnectWebOnlySwitchesOnSuccess(t *testing.T) {
 	if addr, _ := currentRconTarget(); addr != addrA {
 		t.Fatalf("target moved to %s after a failed connect", addr)
 	}
-	if c, _ := connectWebSession(); c != old || old.isClosed() {
+	if c, _ := liveWebSession(); c != old || old.isClosed() {
 		t.Fatal("the working session was replaced or closed after a failed connect")
 	}
 
@@ -787,7 +784,7 @@ func TestReconnectWebOnlySwitchesOnSuccess(t *testing.T) {
 	if addr, pass := currentRconTarget(); addr != addrB || pass != "bpw" {
 		t.Fatalf("target = %s %q", addr, pass)
 	}
-	if c, _ := connectWebSession(); c == old {
+	if c, _ := liveWebSession(); c == old {
 		t.Fatal("still on the old session")
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -879,21 +876,21 @@ func TestStatusReportsNextRetry(t *testing.T) {
 		rconFails.Store(oldFails)
 		rconPolled.Store(oldPolled)
 	})
-	rconFails.Store(0) // answering: checked every pollEvery (5s)
 	rconPolled.Store(true)
 	now := time.Now()
-	rconNextPoll.Store(now.Add(2 * time.Second).UnixMilli())
 
-	// No login wait: the next try is the next poll.
-	if got := rconNextCheck(); !got.Equal(time.UnixMilli(now.Add(2 * time.Second).UnixMilli())) {
-		t.Fatalf("next check = %v, want the next poll", got.Sub(now))
+	// Answering, or missed one or two: the next try is the next round.
+	rconFails.Store(1)
+	w := serverWatch{lastHeartbeat: now.Add(-10 * time.Second)}
+	w.storeNextCheck(now)
+	if d := rconNextCheck().Sub(now); d < 4900*time.Millisecond || d > 5100*time.Millisecond {
+		t.Fatalf("next check in %v, want the next round (5s)", d)
 	}
-	// Waiting 13s between logins: the first poll after that, 2s + 3*5s = 17s.
-	webConnection.Lock()
-	webConnection.nextDial = now.Add(13 * time.Second)
-	webConnection.Unlock()
-	if d := rconNextCheck().Sub(now); d < 16900*time.Millisecond || d > 17100*time.Millisecond {
-		t.Fatalf("next check in %v, want 17s", d)
+	// Down: only the heartbeat tries, 30s after the last one (20s from now).
+	rconFails.Store(downAfterMisses)
+	w.storeNextCheck(now)
+	if d := rconNextCheck().Sub(now); d < 19900*time.Millisecond || d > 20100*time.Millisecond {
+		t.Fatalf("next check in %v, want the next heartbeat (20s)", d)
 	}
 
 	status := func() map[string]any {
@@ -903,8 +900,7 @@ func TestStatusReportsNextRetry(t *testing.T) {
 		json.Unmarshal(rec.Body.Bytes(), &out)
 		return out
 	}
-	rconFails.Store(1)
-	if ms, ok := status()["retryInMs"].(float64); !ok || ms < 16000 || ms > 17100 {
+	if ms, ok := status()["retryInMs"].(float64); !ok || ms < 19000 || ms > 20100 {
 		t.Fatalf("retryInMs = %v while unavailable", status()["retryInMs"])
 	}
 	rconFails.Store(0)
@@ -1271,7 +1267,7 @@ func TestSentCommandsGoInConsoleLog(t *testing.T) {
 	t.Cleanup(func() { loginPollDue.Store(false) })
 
 	start := serverEvents.lastSeq()
-	if _, _, err := runWebCommand("", time.Second, false, ""); err != nil {
+	if err := loginWebSession(); err != nil {
 		t.Fatal(err)
 	}
 	if !loginPollDue.Load() {
@@ -1299,8 +1295,8 @@ func TestSentCommandsGoInConsoleLog(t *testing.T) {
 
 // TestServerWatch checks the server watch: `players` every round and the
 // heartbeat every heartbeatEvery while the server answers, the ban list
-// after a login; three unanswered rounds mark the server down and log in
-// again on the same socket; while it's down only the heartbeat checks it.
+// after a login; three unanswered rounds mark the server down without
+// logging in; while it's down only the heartbeat checks it.
 func TestServerWatch(t *testing.T) {
 	testDB(t)
 	resetWeb(t)
@@ -1311,11 +1307,9 @@ func TestServerWatch(t *testing.T) {
 		heartbeatWait, pollWait, reloginReplyWait = oldBeat, oldPoll, oldReply
 		rconFails.Store(0)
 		loginPollDue.Store(false)
-		resetReloginPace()
 	})
 	heartbeatWait, pollWait, reloginReplyWait = 100*time.Millisecond, 100*time.Millisecond, 50*time.Millisecond
 	rconFails.Store(0)
-	resetReloginPace()
 
 	sent := func() (beats, players, bans int) {
 		f.mu.Lock()
@@ -1353,15 +1347,12 @@ func TestServerWatch(t *testing.T) {
 	if rconFails.Load() != downAfterMisses || currentRconStatus() != "unavailable" {
 		t.Fatalf("fails = %d, status %s", rconFails.Load(), currentRconStatus())
 	}
-	if l, _ := f.counts(); l != logins+1 {
-		t.Fatalf("%d login(s) on the 3rd miss, want 1", l-logins)
+	if l, _ := f.counts(); l != logins {
+		t.Fatalf("%d login(s) between heartbeats, want 0", l-logins)
 	}
 	want("three missed polls", 2, 6, 1)
 	w.check(t0.Add(heartbeatEvery + 4*pollEvery))
 	want("a round while down", 2, 6, 1) // no poll, no heartbeat yet
-	if checkEvery() != heartbeatEvery {
-		t.Fatalf("checked every %v while down, want %v", checkEvery(), heartbeatEvery)
-	}
 
 	f.set(false)
 	w.check(t0.Add(2 * heartbeatEvery)) // the heartbeat finds it back
