@@ -1350,7 +1350,10 @@ function counterField(obj, k, inLoop) {
 function field(s, p, key, inLoop) {
 	if (p.kind === 'select') {
 		let opts = p.opts;
-		if (opts === 'subjects') { const c = ctx(ed, inLoop); opts = SUBJECTS.filter((x) => (c[x[3]] && (SHOW_COUNTERS || x[0] !== 'counter')) || x[0] === s.subject).map(([v, l]) => [v, l]); }
+		// Every subject is offered wherever the If is; one that needs what this
+		// place doesn't have (a player outside a For each in a Schedule flow)
+		// is flagged in red under the row until the If is moved or changed.
+		if (opts === 'subjects') opts = SUBJECTS.filter((x) => SHOW_COUNTERS || x[0] !== 'counter' || x[0] === s.subject).map(([v, l]) => [v, l]);
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
 		if (opts === 'to') opts = toOpts(inLoop ? 'join' : ed.trigger.type);
 		if (opts === 'who') opts = whoOpts();
