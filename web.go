@@ -182,7 +182,7 @@ func currentRconStatus() string {
 }
 
 // rconNextCheck is when ReCON next tries the game server: the heartbeat's next
-// check, or, while it waits between logins (connectSharedSession), the first check
+// check, or, while it waits between logins (connectWebSession), the first check
 // after that wait.
 func rconNextCheck() time.Time {
 	next := time.UnixMilli(rconNextPoll.Load())
@@ -258,7 +258,7 @@ func handleRconCommand(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "no command")
 		return
 	}
-	out, acked, err := runSharedCommand(cmd, 2*time.Second, false, "web")
+	out, acked, err := runWebCommand(cmd, 2*time.Second, false, "web")
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
@@ -280,7 +280,7 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 	if body.Reason == "" {
 		body.Reason = "Server restarting"
 	}
-	rep, err := kickAllShared(body.Reason, "web")
+	rep, err := kickAllWeb(body.Reason, "web")
 	if err != nil {
 		fail(w, 502, err.Error())
 		return
@@ -295,7 +295,7 @@ func handleKickAll(w http.ResponseWriter, r *http.Request) {
 // readLivePlayers reads the connected players (retrying read). ok is false when
 // RCON can't be reached; the 503 has already been written in that case.
 func readLivePlayers(w http.ResponseWriter) ([]Player, bool) {
-	out, acked, err := runSharedCommand("players", 3*time.Second, true, "")
+	out, acked, err := runWebCommand("players", 3*time.Second, true, "")
 	if err != nil || !acked {
 		isRconUnavailable(w, "RCON unavailable")
 		return nil, false
@@ -405,7 +405,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "message is required")
 			return
 		}
-		_, acked, err := runSharedCommand(fmt.Sprintf("say %d %s", id, msg), 2*time.Second, false, "web")
+		_, acked, err := runWebCommand(fmt.Sprintf("say %d %s", id, msg), 2*time.Second, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -436,7 +436,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if action == "kick" {
-		_, acked, err := runSharedCommand(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
+		_, acked, err := runWebCommand(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -478,7 +478,7 @@ func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResu
 	defer banListLock.Unlock()
 	res := banResult{Online: online, Perm: minutes == 0, code: http.StatusOK}
 	placed := time.Now()
-	_, guidAck, guidErr := runSharedCommand(fmt.Sprintf("addBan %s %d %s", p.GUID, minutes, reason), 1500*time.Millisecond, false, logAs)
+	_, guidAck, guidErr := runWebCommand(fmt.Sprintf("addBan %s %d %s", p.GUID, minutes, reason), 1500*time.Millisecond, false, logAs)
 	if guidErr != nil {
 		res.Error, res.code = guidErr.Error(), http.StatusBadGateway
 		return res
@@ -491,7 +491,7 @@ func banByGUID(p Player, online bool, minutes int, reason, logAs string) banResu
 	dbErr := globalDatabase.RecordPlayerBan(p.GUID, bareName(p.Name), p.IP, reason, res.Perm, placed.Add(time.Duration(minutes)*time.Minute))
 	refreshBanExpiry()
 	if online {
-		_, kickAck, kickErr := runSharedCommand(fmt.Sprintf("kick %d %s", p.ID, reason), 1500*time.Millisecond, false, logAs)
+		_, kickAck, kickErr := runWebCommand(fmt.Sprintf("kick %d %s", p.ID, reason), 1500*time.Millisecond, false, logAs)
 		res.Kicked = kickErr == nil && kickAck
 		if !res.Kicked {
 			log.Printf("ban: kick of player %d after ban not confirmed (err=%v)", p.ID, kickErr)
@@ -682,7 +682,7 @@ func handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd := fmt.Sprintf("say %d %s", p.ID, msg)
-	_, acked, err := runSharedCommand(cmd, 2*time.Second, false, "web")
+	_, acked, err := runWebCommand(cmd, 2*time.Second, false, "web")
 	if err != nil {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
@@ -725,7 +725,7 @@ func handleConsoleEvents(w http.ResponseWriter, r *http.Request) {
 var consoleSayRe = regexp.MustCompile(`(?i)^say\s+(\d+)\s+(.+)$`)
 
 // handleConsoleCommand serves POST /api/console {"command": "..."}: runs one
-// command exactly as typed; runSharedCommand puts it and its outcome in the
+// command exactly as typed; runWebCommand puts it and its outcome in the
 // console log (as consoleSource). kickall is
 // ReCON's own command, as in the CLI console; everything else goes to
 // BattlEye.
@@ -744,7 +744,7 @@ func handleConsoleCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	if low := strings.ToLower(cmd); low == "kickall" || strings.HasPrefix(low, "kickall ") {
 		reason := strings.TrimSpace(cmd[len("kickall"):])
-		rep, err := kickAllShared(reason, consoleSource)
+		rep, err := kickAllWeb(reason, consoleSource)
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -753,7 +753,7 @@ func handleConsoleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, acked, err := runSharedCommand(cmd, 3*time.Second, false, consoleSource)
+	out, acked, err := runWebCommand(cmd, 3*time.Second, false, consoleSource)
 	if err != nil {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
@@ -819,7 +819,7 @@ func handleRconSettingsConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	address, password := req.effective()
-	if err := reconnectSharedSession(address, password); err != nil {
+	if err := reconnectWebSession(address, password); err != nil {
 		log.Printf("rcon: RCON Settings: connecting to %s failed: %v", address, err)
 		why := err.Error()
 		if errors.Is(err, syscall.ECONNREFUSED) {
@@ -943,7 +943,7 @@ func handlePlayerUnban(w http.ResponseWriter, r *http.Request) {
 		if idx < 0 {
 			break // GUID no longer listed: done
 		}
-		_, acked, err := runSharedCommand(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false, "web")
+		_, acked, err := runWebCommand(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false, "web")
 		if err == nil && !acked {
 			err = errors.New("removeBan was not acknowledged")
 		}
@@ -957,7 +957,7 @@ func handlePlayerUnban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, saved, _ := runSharedCommand("writeBans", 1500*time.Millisecond, false, "web") // persist bans.txt, best effort
+	_, saved, _ := runWebCommand("writeBans", 1500*time.Millisecond, false, "web") // persist bans.txt, best effort
 
 	err := globalDatabase.DeletePlayerBan(guid)
 	refreshBanExpiry()
@@ -1217,7 +1217,7 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	switch name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(req.Command), "#")); name {
 	case "lock", "unlock":
-		_, acked, err := runSharedCommand("#"+name, 2*time.Second, true, "web")
+		_, acked, err := runWebCommand("#"+name, 2*time.Second, true, "web")
 		if err == nil && !acked {
 			err = errors.New("#" + name + " was not acknowledged")
 		}
@@ -1228,14 +1228,14 @@ func handleQuickCommand(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "#" + name + " sent"})
 	case "shutdown":
 		// The server may die before it acknowledges, so only a transport error is a failure.
-		_, acked, err := runSharedCommand("#shutdown", 2*time.Second, false, "web")
+		_, acked, err := runWebCommand("#shutdown", 2*time.Second, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "acked": acked, "message": "#shutdown sent"})
 	case "kickall":
-		rep, err := kickAllShared("Server restarting", "web")
+		rep, err := kickAllWeb("Server restarting", "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return

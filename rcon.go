@@ -25,11 +25,11 @@ import (
 //   - persistentConnection: a logged-in session with a background reader and
 //     an optional keepalive. The CLI and its console (-i) dial their own,
 //     logged to the container as [cli]; everything in server mode (pages,
-//     flows, polls) goes through one shared session (runSharedCommand), logged as
+//     flows, polls) goes through one web session (runWebCommand), logged as
 //     [web]. It opens a new socket only when the old one has died; when the
 //     server stops answering, the heartbeat logs in again on the same socket
-//     (reloginSharedSession), so BattlEye keeps the same admin slot.
-//   - the heartbeat: an empty command every 5 seconds keeps the shared
+//     (reloginWebSession), so BattlEye keeps the same admin slot.
+//   - the heartbeat: an empty command every 5 seconds keeps the web
 //     session alive and notices when the server is down; it polls players
 //     and bans after every login.
 //   - the master console log (serverEvents): the lines BattlEye pushes to a
@@ -128,7 +128,7 @@ var errNoPassword = errors.New("no RCON password set: set RCON_PASSWORD, or ente
 
 // loginWithPassword authenticates on an already-dialed UDP connection. It sends the
 // loginWithPassword packet up to `tries` times, waiting `wait` for a reply each time.
-// The CLI and console try 3 times (UDP is lossy); the shared session sends
+// The CLI and console try 3 times (UDP is lossy); the web session sends
 // one packet, because every packet a busy server queues becomes another
 // "RCon admin logged in" when it catches up.
 func loginWithPassword(conn net.Conn, buf []byte, password string, tries int, wait time.Duration) error {
@@ -214,7 +214,7 @@ type persistentConnection struct {
 
 // dialPersistentConnection connects to the current target (currentRconTarget), logs in,
 // and starts the background reader (and the keepalive heartbeat when
-// enableKeepalive is true). The shared session (sharedSource) sends one
+// enableKeepalive is true). The web session (webSource) sends one
 // login and waits 3s; the CLI and console try 3 times, 1s apart.
 func dialPersistentConnection(src string, enableKeepalive bool) (*persistentConnection, error) {
 	address, password := currentRconTarget()
@@ -231,7 +231,7 @@ func dialRconAddress(address, password, src string, enableKeepalive bool) (*pers
 		return nil, err
 	}
 	tries, wait := 3, time.Second
-	if src == sharedSource {
+	if src == webSource {
 		tries, wait = 1, reloginReplyWait
 	}
 	if err := loginWithPassword(conn, make([]byte, 4096), password, tries, wait); err != nil {
@@ -382,7 +382,7 @@ var reloginReplyWait = 3 * time.Second
 // times out). It sends ONE login packet: while the server is restarting, its
 // port can take packets without answering and then handle the whole backlog
 // at once, so every extra packet becomes another "RCon admin logged in" (see
-// reloginSharedSession for the pacing). On success the command sequence starts
+// reloginWebSession for the pacing). On success the command sequence starts
 // again at 0.
 func (l *persistentConnection) reloginSameSocket() error {
 	l.commandLock.Lock() // no command in flight while logging in
@@ -417,8 +417,8 @@ func (l *persistentConnection) isResponsive() bool {
 }
 
 // run executes a command and logs it to the container log as [cli] (empty
-// probes aren't logged). The CLI and its console (-i) use it; the shared
-// session logs in runSharedCommand instead. It satisfies the commandRunner
+// probes aren't logged). The CLI and its console (-i) use it; the web
+// session logs in runWebCommand instead. It satisfies the commandRunner
 // interface.
 func (l *persistentConnection) run(command string, wait time.Duration) (string, bool, error) {
 	out, acked, err := l.runRawCommand(command, wait)
@@ -433,7 +433,7 @@ func (l *persistentConnection) run(command string, wait time.Duration) (string, 
 //	[web] > kick 3 Bye (flow "Ping kicker", acked=true)
 //	[cli] > players (acked=true)
 //
-// origin is the session (sharedSource or "cli"), by who asked for it.
+// origin is the session (webSource or "cli"), by who asked for it.
 func logSentCommand(origin, by, command string, acked bool, err error) {
 	detail := fmt.Sprintf("acked=%v", acked)
 	if err != nil {
@@ -488,14 +488,14 @@ func (l *persistentConnection) runRawCommand(command string, wait time.Duration)
 }
 
 // ---------------------------------------------------------------------------
-// Shared session (server mode: web layer, heartbeat, flows)
+// Web session (server mode: web layer, heartbeat, flows)
 // ---------------------------------------------------------------------------
 
-// sharedConnection holds the one long-lived session. The Mutex protects the
+// webConnection holds the one long-lived session. The Mutex protects the
 // pointer; persistentConnection serialises the commands themselves.
 // Keepalive is off because the heartbeat already keeps the session busy.
 // Being permanently logged in is also what lets it receive server messages.
-var sharedConnection = struct {
+var webConnection = struct {
 	sync.Mutex
 	connection *persistentConnection
 	nextDial   time.Time     // no new socket before this, after a failed login
@@ -503,84 +503,84 @@ var sharedConnection = struct {
 	lastErr    error         // returned while waiting for nextDial
 }{}
 
-// nextDialAt is when connectSharedSession may next open a new socket after a failed
+// nextDialAt is when connectWebSession may next open a new socket after a failed
 // login, or zero when it isn't waiting (a session is open, or it may dial now).
 func nextDialAt() time.Time {
-	sharedConnection.Lock()
-	defer sharedConnection.Unlock()
-	if c := sharedConnection.connection; c != nil && !c.isClosed() {
+	webConnection.Lock()
+	defer webConnection.Unlock()
+	if c := webConnection.connection; c != nil && !c.isClosed() {
 		return time.Time{}
 	}
-	return sharedConnection.nextDial
+	return webConnection.nextDial
 }
 
-// sharedSource is the shared session's label in log lines.
-const sharedSource = "web"
+// webSource is the web session's label in log lines.
+const webSource = "web"
 
-// connectSharedSession returns the shared session, dialing a new one if there is
+// connectWebSession returns the web session, dialing a new one if there is
 // none or the current one has died. The lock is held while dialing, so
 // concurrent callers wait for one login instead of each opening their own.
 //
-// Every new login sends #unlock. The shared session logs in when ReCON starts
+// Every new login sends #unlock. The web session logs in when ReCON starts
 // and after the session drops, most often because the server restarted, so a
 // restart flow's #lock never outlives the restart. (A lock set some other way
 // is undone if the session reconnects while it's in place; that's accepted.)
 // The CLI and console dial their own sessions and don't unlock.
-func connectSharedSession() (*persistentConnection, error) {
-	sharedConnection.Lock()
-	defer sharedConnection.Unlock()
-	if c := sharedConnection.connection; c != nil && !c.isClosed() {
+func connectWebSession() (*persistentConnection, error) {
+	webConnection.Lock()
+	defer webConnection.Unlock()
+	if c := webConnection.connection; c != nil && !c.isClosed() {
 		return c, nil
 	}
-	if c := sharedConnection.connection; c != nil {
+	if c := webConnection.connection; c != nil {
 		log.Printf("rcon: connection dropped (socket closed: %v), logging in again", c.err)
 		c.close()
-		sharedConnection.connection = nil
+		webConnection.connection = nil
 	}
 	// Every call would otherwise dial (the heartbeat, every page refresh), and
 	// each new socket leaves a login queued at a server that isn't answering:
-	// after a failed login, wait as reloginSharedSession does before dialing again.
-	if time.Now().Before(sharedConnection.nextDial) {
-		return nil, sharedConnection.lastErr
+	// after a failed login, wait as reloginWebSession does before dialing again.
+	if time.Now().Before(webConnection.nextDial) {
+		return nil, webConnection.lastErr
 	}
-	s, err := dialPersistentConnection(sharedSource, false)
+	s, err := dialPersistentConnection(webSource, false)
 	if err != nil {
-		sharedConnection.dialWait = min(max(2*sharedConnection.dialWait, reloginFirstWait), reloginMaxWait)
-		sharedConnection.nextDial = time.Now().Add(sharedConnection.dialWait)
-		sharedConnection.lastErr = fmt.Errorf("%w (next login in %s)", err, sharedConnection.dialWait)
+		webConnection.dialWait = min(max(2*webConnection.dialWait, reloginFirstWait), reloginMaxWait)
+		webConnection.nextDial = time.Now().Add(webConnection.dialWait)
+		webConnection.lastErr = fmt.Errorf("%w (next login in %s)", err, webConnection.dialWait)
 		return nil, err
 	}
-	sharedConnection.nextDial, sharedConnection.dialWait = time.Time{}, 0
+	webConnection.nextDial, webConnection.dialWait = time.Time{}, 0
 	log.Printf("rcon: logged in")
 	unlockAfterLogin(s)
-	sharedConnection.connection = s
+	webConnection.connection = s
 	return s, nil
 }
 
-// reconnectSharedSession logs the shared session in to address with password on a
-// new socket and, only if the server accepts it, makes that the shared
+// reconnectWebSession logs the web session in to address with password on a
+// new socket and, only if the server accepts it, makes that the web
 // session and the target for later logins, closing the old session. This is
 // RCON Settings' Connect button: a wrong address or password changes
 // nothing. Like every new login it sends #unlock and re-reads the ban list.
-func reconnectSharedSession(address, password string) error {
-	sharedConnection.Lock()
-	defer sharedConnection.Unlock()
-	s, err := dialRconAddress(address, password, sharedSource, false)
+func reconnectWebSession(address, password string) error {
+	webConnection.Lock()
+	defer webConnection.Unlock()
+	s, err := dialRconAddress(address, password, webSource, false)
 	if err != nil {
 		return err
 	}
 	setRconTarget(address, password)
-	if old := sharedConnection.connection; old != nil {
+	if old := webConnection.connection; old != nil {
 		old.close()
 	}
-	sharedConnection.connection = s
-	sharedConnection.nextDial, sharedConnection.dialWait = time.Time{}, 0
+	webConnection.connection = s
+	webConnection.nextDial, webConnection.dialWait = time.Time{}, 0
 	log.Printf("rcon: connected to %s from RCON Settings", address)
 	unlockAfterLogin(s)
 	return nil
 }
 
-// Pacing for reloginSharedSession while the server isn't answering. A login that
+// Pacing for reloginWebSession while the server isn't answering. A login that
 // gets no reply waits reloginFirstWait before the next try, doubling up to
 // reloginMaxWait, so a long restart leaves only a few login packets queued
 // at the server. After a login is accepted, no new one is sent for
@@ -593,7 +593,7 @@ var (
 	reloginSettle    = 60 * time.Second
 )
 
-// reloginPace is when reloginSharedSession may next send a login, and the wait to
+// reloginPace is when reloginWebSession may next send a login, and the wait to
 // use after the next unanswered one. Only the heartbeat goroutine touches it.
 var reloginPace struct {
 	next time.Time
@@ -606,20 +606,20 @@ func resetReloginPace() {
 	reloginPace.next, reloginPace.wait = time.Time{}, 0
 }
 
-// reloginSharedSession is called by the heartbeat when the server has missed 3 checks
+// reloginWebSession is called by the heartbeat when the server has missed 3 checks
 // in a row (it may have restarted and forgotten us). It logs in again on the
 // same socket, so the server keeps our admin slot, then sends #unlock as a
 // new login does. Calls are paced (see reloginFirstWait): one between
 // allowed times does nothing. If there is no live session, the next command
 // opens one.
-func reloginSharedSession() {
+func reloginWebSession() {
 	now := time.Now()
 	if now.Before(reloginPace.next) {
 		return
 	}
-	sharedConnection.Lock()
-	c := sharedConnection.connection
-	sharedConnection.Unlock()
+	webConnection.Lock()
+	c := webConnection.connection
+	webConnection.Unlock()
 	if c == nil || c.isClosed() {
 		return
 	}
@@ -638,24 +638,24 @@ func reloginSharedSession() {
 const loginSource = "login"
 
 // unlockAfterLogin sends #unlock on a session that has just logged in (see
-// connectSharedSession), logs it like any other sent command, and asks the
+// connectWebSession), logs it like any other sent command, and asks the
 // heartbeat to poll players and bans next: the server may have restarted,
 // so the players and bans ReCON knew may be out of date. It uses runRawCommand
 // because the callers already hold the session.
 func unlockAfterLogin(s *persistentConnection) {
 	serverEvents.publish(ServerEvent{Time: time.Now(), Kind: eventSent, Text: "> #unlock", Source: loginSource, PlayerID: -1})
 	out, acked, err := s.runRawCommand("#unlock", 2*time.Second)
-	logSentCommand(sharedSource, loginSource, "#unlock", acked, err)
+	logSentCommand(webSource, loginSource, "#unlock", acked, err)
 	logCommandResult(loginSource, out, acked, err)
 	serverLoggedIn(time.Now()) // players.go
 	loginPollDue.Store(true)
 }
 
 // ---------------------------------------------------------------------------
-// Heartbeat and polls (shared session)
+// Heartbeat and polls (web session)
 // ---------------------------------------------------------------------------
 
-// heartbeatEvery is how often the heartbeat checks the shared session with
+// heartbeatEvery is how often the heartbeat checks the web session with
 // an empty command. It keeps the session from going idle (BattlEye drops a
 // client it hasn't heard from in about 45 seconds) and is how ReCON notices
 // the server has stopped answering.
@@ -679,18 +679,18 @@ var (
 	pollInterval time.Duration
 )
 
-// loginPollDue is set by every login of the shared session; the next
+// loginPollDue is set by every login of the web session; the next
 // answered heartbeat then polls players and bans.
 var loginPollDue atomic.Bool
 
-// startServerHeartbeat checks the shared session every heartbeatEvery:
+// startServerHeartbeat checks the web session every heartbeatEvery:
 //
 //   - Delete timed bans that have run out, if one is due (db.go).
 //   - Send an empty command (heartbeatWait). Nothing is logged for it.
 //   - Unanswered: count it. At exactly heartbeatMisses in a row the server
 //     is taken to be down: open sessions are closed once (serverWentDown,
 //     players.go) so playtime stops while it's offline. From then on, each
-//     round logs in again on the same RCON socket (reloginSharedSession, paced).
+//     round logs in again on the same RCON socket (reloginWebSession, paced).
 //     This is the only place that decides the server isn't answering.
 //   - Answered: reset the count. Poll players after a login, and while a
 //     Players page is open (playersPollWanted, players.go); read the ban
@@ -722,7 +722,7 @@ func (h *heartbeat) checkServerAlive() {
 	now := time.Now()
 	expireDueBans(now)     // db.go
 	forgetAwayPlayers(now) // players.go
-	_, acked, err := runSharedCommand("", heartbeatWait, false, "")
+	_, acked, err := runWebCommand("", heartbeatWait, false, "")
 	rconPolled.Store(true)
 	if err != nil || !acked {
 		h.fails++
@@ -735,7 +735,7 @@ func (h *heartbeat) checkServerAlive() {
 			serverWentDown(down) // players.go
 		}
 		if h.fails >= heartbeatMisses {
-			reloginSharedSession()
+			reloginWebSession()
 		}
 		return
 	}
@@ -761,7 +761,7 @@ func (h *heartbeat) checkServerAlive() {
 // server answered.
 func pollPlayersNow() bool {
 	sentAt := time.Now()
-	out, acked, err := runSharedCommand("players", 3*time.Second, false, "")
+	out, acked, err := runWebCommand("players", 3*time.Second, false, "")
 	if err != nil || !acked {
 		return false
 	}
@@ -773,7 +773,7 @@ func pollPlayersNow() bool {
 	return true
 }
 
-// runSharedCommand runs a command on the shared session.
+// runWebCommand runs a command on the web session.
 //
 //   - allowRetry=false: one attempt. Used for state-changing commands (kick,
 //     ban, say, ...) so a slow-but-successful command is never repeated.
@@ -791,9 +791,9 @@ func pollPlayersNow() bool {
 // tell "server never got it" from "server didn't answer" (e.g. #shutdown).
 //
 // A missed reply never drops the session here: retries reuse it, and only
-// the heartbeat decides the server has stopped answering (see reloginSharedSession).
-// A socket that has died is replaced by connectSharedSession on the next call.
-func runSharedCommand(command string, wait time.Duration, allowRetry bool, logAs string) (string, bool, error) {
+// the heartbeat decides the server has stopped answering (see reloginWebSession).
+// A socket that has died is replaced by connectWebSession on the next call.
+func runWebCommand(command string, wait time.Duration, allowRetry bool, logAs string) (string, bool, error) {
 	maxAttempts := 1
 	if allowRetry {
 		maxAttempts = 3
@@ -801,7 +801,7 @@ func runSharedCommand(command string, wait time.Duration, allowRetry bool, logAs
 	if logAs != "" {
 		serverEvents.publish(ServerEvent{Time: time.Now(), Kind: eventSent, Text: "> " + command, Source: logAs, PlayerID: -1})
 	}
-	out, acked, err := runSharedAttempts(command, wait, maxAttempts, logAs)
+	out, acked, err := runWebAttempts(command, wait, maxAttempts, logAs)
 	if logAs != "" {
 		logCommandResult(logAs, out, acked, err)
 	}
@@ -825,18 +825,18 @@ func logCommandResult(logAs, out string, acked bool, err error) {
 	}
 }
 
-// flowSource is the runSharedCommand logAs label for a flow's commands.
+// flowSource is the runWebCommand logAs label for a flow's commands.
 func flowSource(name string) string {
 	return "flow " + strconv.Quote(name)
 }
 
-// runSharedAttempts is runSharedCommand's send loop: up to maxAttempts tries with
+// runWebAttempts is runWebCommand's send loop: up to maxAttempts tries with
 // 1s pauses between them.
-func runSharedAttempts(command string, wait time.Duration, maxAttempts int, logAs string) (string, bool, error) {
+func runWebAttempts(command string, wait time.Duration, maxAttempts int, logAs string) (string, bool, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		more := attempt+1 < maxAttempts // only pause when another attempt follows
-		s, err := connectSharedSession()
+		s, err := connectWebSession()
 		if err != nil {
 			lastErr = err
 			if more {
@@ -846,7 +846,7 @@ func runSharedAttempts(command string, wait time.Duration, maxAttempts int, logA
 		}
 		out, acked, err := s.runRawCommand(command, wait)
 		if logAs != "" {
-			logSentCommand(sharedSource, logAs, command, acked, err)
+			logSentCommand(webSource, logAs, command, acked, err)
 		}
 		if err == nil && acked {
 			return out, true, nil
@@ -859,32 +859,32 @@ func runSharedAttempts(command string, wait time.Duration, maxAttempts int, logA
 	return "", false, lastErr
 }
 
-// sharedRunner adapts runSharedCommand to the commandRunner interface (single
+// webRunner adapts runWebCommand to the commandRunner interface (single
 // attempt per command) for kickAllPlayers. The kicks are logged as logAs; the
 // `players` reads around them are polls and aren't.
-type sharedRunner struct{ logAs string }
+type webRunner struct{ logAs string }
 
-func (r sharedRunner) run(command string, wait time.Duration) (string, bool, error) {
+func (r webRunner) run(command string, wait time.Duration) (string, bool, error) {
 	if command == "players" {
-		return runSharedCommand(command, wait, false, "")
+		return runWebCommand(command, wait, false, "")
 	}
-	return runSharedCommand(command, wait, false, r.logAs)
+	return runWebCommand(command, wait, false, r.logAs)
 }
 
-// kickAllShared runs ReCON's own kickall command on the shared session for
-// logAs (see runSharedCommand): "> kickall <reason>" and then its summary go into
+// kickAllWeb runs ReCON's own kickall command on the web session for
+// logAs (see runWebCommand): "> kickall <reason>" and then its summary go into
 // the master console log and the container log, with each kick between.
-func kickAllShared(reason, logAs string) (*kickReport, error) {
+func kickAllWeb(reason, logAs string) (*kickReport, error) {
 	if reason = cleanReason(reason); reason == "" {
 		reason = "Server restarting"
 	}
 	serverEvents.publish(ServerEvent{Time: time.Now(), Kind: eventSent, Text: "> kickall " + reason, Source: logAs, PlayerID: -1})
-	rep, err := kickAllPlayers(sharedRunner{logAs}, reason)
+	rep, err := kickAllPlayers(webRunner{logAs}, reason)
 	if err != nil {
 		logCommandResult(logAs, "", false, fmt.Errorf("kickall failed: %w", err))
 		return nil, err
 	}
-	log.Printf("[%s] > %s (%s)", sharedSource, rep.summary(reason), logAs)
+	log.Printf("[%s] > %s (%s)", webSource, rep.summary(reason), logAs)
 	logCommandResult(logAs, rep.summary(reason), true, nil)
 	return rep, nil
 }
@@ -905,9 +905,9 @@ func kickAllShared(reason, logAs string) (*kickReport, error) {
 // subscriber that falls behind misses events instead.
 //
 // Messages sent while the server isn't talking to us (a restart, before
-// reloginSharedSession gets in again) are lost; BattlEye keeps no backlog.
+// reloginWebSession gets in again) are lost; BattlEye keeps no backlog.
 
-// consoleSource is the runSharedCommand logAs label for commands typed in the
+// consoleSource is the runWebCommand logAs label for commands typed in the
 // console page; only those are echoed into its log.
 const consoleSource = "console"
 
@@ -1010,7 +1010,7 @@ type eventHub struct {
 }
 
 // serverEvents receives every server message from every session in this
-// process (in server mode, only the shared session exists).
+// process (in server mode, only the web session exists).
 var serverEvents = &eventHub{subs: map[chan ServerEvent]struct{}{}}
 
 // publish numbers an event, records it and hands it to every subscriber
@@ -1294,7 +1294,7 @@ func parseBansReply(out string) (bans []Ban, ok bool) {
 // readBanList reads the live GUID ban list from BattlEye (retrying read).
 // An unrecognised reply is logged and returned as an error, not an empty list.
 func readBanList() ([]Ban, error) {
-	out, acked, err := runSharedCommand("bans", 4*time.Second, true, "")
+	out, acked, err := runWebCommand("bans", 4*time.Second, true, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1332,7 +1332,7 @@ func (rep *kickReport) summary(reason string) string {
 }
 
 // commandRunner is what kickAllPlayers needs: a persistentConnection (CLI,
-// console) or sharedRunner (server mode).
+// console) or webRunner (server mode).
 type commandRunner interface {
 	run(command string, wait time.Duration) (string, bool, error)
 }

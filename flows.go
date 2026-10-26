@@ -1017,7 +1017,7 @@ func runFlowCommand(run *flowRun, cmd string) {
 	// lists the players and kicks each (kickAllPlayers).
 	if bare := strings.TrimPrefix(lower, "#"); bare == "kickall" || strings.HasPrefix(bare, "kickall ") {
 		reason := strings.TrimSpace(strings.TrimPrefix(cmd, "#")[len("kickall"):])
-		rep, err := kickAllShared(reason, flowSource(run.name))
+		rep, err := kickAllWeb(reason, flowSource(run.name))
 		if err != nil {
 			run.logf("kickall failed: %v", err)
 			run.markRunFailed()
@@ -1028,7 +1028,7 @@ func runFlowCommand(run *flowRun, cmd string) {
 	}
 
 	retry := lower == "#lock" || lower == "#unlock"
-	_, acked, err := runSharedCommand(cmd, 2*time.Second, retry, flowSource(run.name))
+	_, acked, err := runWebCommand(cmd, 2*time.Second, retry, flowSource(run.name))
 	run.addToRunLog(fmt.Sprintf("sent %q (acked=%v err=%v)", cmd, acked, err))
 	if err != nil || (!acked && lower != "#shutdown") {
 		run.markRunFailed()
@@ -1447,7 +1447,7 @@ func (r *flowRun) logf(format string, a ...any) {
 }
 
 // addToRunLog adds a line to the Flows page's run log only. Used for sent
-// commands, which runSharedCommand already logs to the container.
+// commands, which runWebCommand already logs to the container.
 func (r *flowRun) addToRunLog(msg string) {
 	flowRuns.Lock()
 	r.log = append(r.log, time.Now().Format("15:04:05")+"  "+msg)
@@ -1863,7 +1863,7 @@ var chatSay = func(to Player, everyone bool, text string) bool {
 	if everyone {
 		cmd = "say -1 " + text
 	}
-	_, acked, err := runSharedCommand(cmd, 2*time.Second, false, "chat")
+	_, acked, err := runWebCommand(cmd, 2*time.Second, false, "chat")
 	if err == nil && acked && !everyone {
 		recordSentMessage(to.GUID, cmd)
 	}
@@ -1872,7 +1872,7 @@ var chatSay = func(to Player, everyone bool, text string) bool {
 
 // chatKick kicks a player for !kick. Tests replace it.
 var chatKick = func(p Player, reason string) bool {
-	_, acked, err := runSharedCommand(fmt.Sprintf("kick %d %s", p.ID, reason), 2*time.Second, false, "chat")
+	_, acked, err := runWebCommand(fmt.Sprintf("kick %d %s", p.ID, reason), 2*time.Second, false, "chat")
 	return err == nil && acked
 }
 

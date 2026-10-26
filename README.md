@@ -541,7 +541,7 @@ ReCON is a single Go program with no dependencies besides the SQLite driver.
 | File | Contents |
 | ---- | -------- |
 | `main.go` | Startup, configuration and the command-line tool |
-| `rcon.go` | The BattlEye RCON protocol, the shared session, the heartbeat and polls, and the console log |
+| `rcon.go` | The BattlEye RCON protocol, the web session, the heartbeat and polls, and the console log |
 | `web.go` | HTTP routes, the JSON API and page rendering |
 | `db.go` | SQLite storage, the ban list sync and the chat recorder |
 | `players.go` | Who is online and their sessions, from the console log; keeps a session across a server restart for players back within 60 seconds |

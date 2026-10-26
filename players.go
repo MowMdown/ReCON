@@ -430,7 +430,7 @@ func serverWentDown(at time.Time) {
 	}
 }
 
-// serverLoggedIn is called on every login of the shared session (rcon.go).
+// serverLoggedIn is called on every login of the web session (rcon.go).
 // After an outage, it starts the restartGrace in which players who come
 // back keep their session.
 func serverLoggedIn(at time.Time) {

@@ -609,30 +609,30 @@ func TestReloginIsPaced(t *testing.T) {
 	t.Cleanup(func() {
 		setRconTarget(oldAddr, oldPass)
 		reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = oldWait, oldFirst, oldMax, oldSettle
-		sharedConnection.Lock()
-		if sharedConnection.connection != nil {
-			sharedConnection.connection.close()
+		webConnection.Lock()
+		if webConnection.connection != nil {
+			webConnection.connection.close()
 		}
-		sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
-		sharedConnection.Unlock()
+		webConnection.connection, webConnection.nextDial, webConnection.dialWait = nil, time.Time{}, 0
+		webConnection.Unlock()
 		resetReloginPace()
 	})
 	setRconTarget(f.conn.LocalAddr().String(), "pw")
 	reloginReplyWait, reloginFirstWait, reloginMaxWait, reloginSettle = 20*time.Millisecond, 200*time.Millisecond, 400*time.Millisecond, time.Second
 	resetReloginPace()
 
-	if _, err := connectSharedSession(); err != nil {
+	if _, err := connectWebSession(); err != nil {
 		t.Fatal(err)
 	}
 	if l, u := f.counts(); l != 1 || u != 1 {
 		t.Fatalf("first login: %d login(s), %d #unlock(s); want 1 and 1", l, u)
 	}
 
-	// The server stops answering. The poller calls reloginSharedSession on every
+	// The server stops answering. The poller calls reloginWebSession on every
 	// round; here it's called every 10ms for 1s (100 calls).
 	f.set(true)
 	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		reloginSharedSession()
+		reloginWebSession()
 	}
 	l, _ := f.counts()
 	// Allowed: one now, then 200ms and 400ms (capped) waits: about 4 in 1s.
@@ -646,7 +646,7 @@ func TestReloginIsPaced(t *testing.T) {
 	time.Sleep(reloginMaxWait)
 	before, unlocksBefore := f.counts()
 	for end := time.Now().Add(500 * time.Millisecond); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-		reloginSharedSession()
+		reloginWebSession()
 	}
 	after, unlocks := f.counts()
 	if after-before != 1 || unlocks-unlocksBefore != 1 {
@@ -654,9 +654,9 @@ func TestReloginIsPaced(t *testing.T) {
 	}
 }
 
-// TestConnectSharedPacesNewSockets checks that when no session can be
+// TestConnectWebPacesNewSockets checks that when no session can be
 // opened, callers don't each dial a new socket (and queue a new login).
-func TestConnectSharedPacesNewSockets(t *testing.T) {
+func TestConnectWebPacesNewSockets(t *testing.T) {
 	f := newFakeBE(t)
 	f.set(true)
 	oldAddr, oldPass := currentRconTarget()
@@ -664,14 +664,14 @@ func TestConnectSharedPacesNewSockets(t *testing.T) {
 	t.Cleanup(func() {
 		setRconTarget(oldAddr, oldPass)
 		reloginReplyWait, reloginFirstWait = oldWait, oldFirst
-		sharedConnection.Lock()
-		sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
-		sharedConnection.Unlock()
+		webConnection.Lock()
+		webConnection.connection, webConnection.nextDial, webConnection.dialWait = nil, time.Time{}, 0
+		webConnection.Unlock()
 	})
 	setRconTarget(f.conn.LocalAddr().String(), "pw")
 	reloginReplyWait, reloginFirstWait = 20*time.Millisecond, time.Hour
 	for i := 0; i < 20; i++ {
-		if _, err := connectSharedSession(); err == nil {
+		if _, err := connectWebSession(); err == nil {
 			t.Fatal("connected to a server that doesn't answer")
 		}
 	}
@@ -733,58 +733,58 @@ func TestRootRedirectsToPlayers(t *testing.T) {
 	}
 }
 
-// resetShared starts a test with no shared session and no wait before the
+// resetWeb starts a test with no web session and no wait before the
 // next login, and closes it and restores the RCON target after the test.
-func resetShared(t *testing.T) {
+func resetWeb(t *testing.T) {
 	oldAddr, oldPass := currentRconTarget()
-	sharedConnection.Lock()
-	if sharedConnection.connection != nil {
-		sharedConnection.connection.close()
+	webConnection.Lock()
+	if webConnection.connection != nil {
+		webConnection.connection.close()
 	}
-	sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
-	sharedConnection.Unlock()
+	webConnection.connection, webConnection.nextDial, webConnection.dialWait = nil, time.Time{}, 0
+	webConnection.Unlock()
 	t.Cleanup(func() {
 		setRconTarget(oldAddr, oldPass)
-		sharedConnection.Lock()
-		if sharedConnection.connection != nil {
-			sharedConnection.connection.close()
+		webConnection.Lock()
+		if webConnection.connection != nil {
+			webConnection.connection.close()
 		}
-		sharedConnection.connection, sharedConnection.nextDial, sharedConnection.dialWait = nil, time.Time{}, 0
-		sharedConnection.Unlock()
+		webConnection.connection, webConnection.nextDial, webConnection.dialWait = nil, time.Time{}, 0
+		webConnection.Unlock()
 	})
 }
 
-func TestReconnectSharedOnlySwitchesOnSuccess(t *testing.T) {
-	resetShared(t)
+func TestReconnectWebOnlySwitchesOnSuccess(t *testing.T) {
+	resetWeb(t)
 	a, b := newFakeBE(t), newFakeBE(t)
 	a.setPassword("apw")
 	b.setPassword("bpw")
 	addrA, addrB := a.conn.LocalAddr().String(), b.conn.LocalAddr().String()
 	setRconTarget(addrA, "apw")
-	old, err := connectSharedSession()
+	old, err := connectWebSession()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Wrong password for B: nothing changes.
-	if err := reconnectSharedSession(addrB, "nope"); err == nil {
+	if err := reconnectWebSession(addrB, "nope"); err == nil {
 		t.Fatal("a rejected login was accepted")
 	}
 	if addr, _ := currentRconTarget(); addr != addrA {
 		t.Fatalf("target moved to %s after a failed connect", addr)
 	}
-	if c, _ := connectSharedSession(); c != old || old.isClosed() {
+	if c, _ := connectWebSession(); c != old || old.isClosed() {
 		t.Fatal("the working session was replaced or closed after a failed connect")
 	}
 
 	// Right password: B becomes the session and the target; A's session closes.
-	if err := reconnectSharedSession(addrB, "bpw"); err != nil {
+	if err := reconnectWebSession(addrB, "bpw"); err != nil {
 		t.Fatal(err)
 	}
 	if addr, pass := currentRconTarget(); addr != addrB || pass != "bpw" {
 		t.Fatalf("target = %s %q", addr, pass)
 	}
-	if c, _ := connectSharedSession(); c == old {
+	if c, _ := connectWebSession(); c == old {
 		t.Fatal("still on the old session")
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -797,7 +797,7 @@ func TestReconnectSharedOnlySwitchesOnSuccess(t *testing.T) {
 
 	// Connecting again to the same place does a fresh handshake.
 	before, _ := b.counts()
-	if err := reconnectSharedSession(addrB, "bpw"); err != nil {
+	if err := reconnectWebSession(addrB, "bpw"); err != nil {
 		t.Fatal(err)
 	}
 	if after, _ := b.counts(); after != before+1 {
@@ -807,7 +807,7 @@ func TestReconnectSharedOnlySwitchesOnSuccess(t *testing.T) {
 
 func TestRconSettingsPage(t *testing.T) {
 	testDB(t)
-	resetShared(t)
+	resetWeb(t)
 	f := newFakeBE(t)
 	f.setPassword("secret")
 	host, port, _ := net.SplitHostPort(f.conn.LocalAddr().String())
@@ -863,13 +863,13 @@ func TestRconSettingsPage(t *testing.T) {
 }
 
 func TestNoPasswordDoesNotDial(t *testing.T) {
-	if _, err := dialRconAddress("127.0.0.1:1", "", sharedSource, false); err != errNoPassword {
+	if _, err := dialRconAddress("127.0.0.1:1", "", webSource, false); err != errNoPassword {
 		t.Fatalf("err = %v, want errNoPassword", err)
 	}
 }
 
 func TestStatusReportsNextRetry(t *testing.T) {
-	resetShared(t)
+	resetWeb(t)
 	oldInterval, oldNext, oldFails, oldPolled := pollInterval, rconNextPoll.Load(), rconFails.Load(), rconPolled.Load()
 	t.Cleanup(func() {
 		pollInterval = oldInterval
@@ -887,9 +887,9 @@ func TestStatusReportsNextRetry(t *testing.T) {
 		t.Fatalf("next check = %v, want the next poll", got.Sub(now))
 	}
 	// Waiting 13s between logins: the first poll after that, 2s + 3*5s = 17s.
-	sharedConnection.Lock()
-	sharedConnection.nextDial = now.Add(13 * time.Second)
-	sharedConnection.Unlock()
+	webConnection.Lock()
+	webConnection.nextDial = now.Add(13 * time.Second)
+	webConnection.Unlock()
 	if d := rconNextCheck().Sub(now); d < 16900*time.Millisecond || d > 17100*time.Millisecond {
 		t.Fatalf("next check in %v, want 17s", d)
 	}
@@ -1067,7 +1067,7 @@ func TestFlowAPIUsesMissingIDForNew(t *testing.T) {
 // TestConnectTriesOnce checks that RCON Settings' Connect sends one login per
 // press, even to a server that doesn't answer, and changes nothing.
 func TestConnectTriesOnce(t *testing.T) {
-	resetShared(t)
+	resetWeb(t)
 	oldWait := reloginReplyWait
 	t.Cleanup(func() { reloginReplyWait = oldWait })
 	reloginReplyWait = 50 * time.Millisecond
@@ -1075,7 +1075,7 @@ func TestConnectTriesOnce(t *testing.T) {
 	f.set(true)
 	setRconTarget("127.0.0.1:1", "pw")
 	for press := 1; press <= 3; press++ {
-		if err := reconnectSharedSession(f.conn.LocalAddr().String(), "pw"); err == nil {
+		if err := reconnectWebSession(f.conn.LocalAddr().String(), "pw"); err == nil {
 			t.Fatal("connected to a server that doesn't answer")
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -1262,23 +1262,23 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 // the server doesn't answer; polls and heartbeats don't go in at all; a new
 // login logs its #unlock and asks for a players and bans poll.
 func TestSentCommandsGoInConsoleLog(t *testing.T) {
-	resetShared(t)
+	resetWeb(t)
 	f := newFakeBE(t)
 	setRconTarget(f.conn.LocalAddr().String(), "pw")
 	loginPollDue.Store(false)
 	t.Cleanup(func() { loginPollDue.Store(false) })
 
 	start := serverEvents.lastSeq()
-	if _, _, err := runSharedCommand("", time.Second, false, ""); err != nil {
+	if _, _, err := runWebCommand("", time.Second, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !loginPollDue.Load() {
 		t.Fatal("a new login didn't ask for a poll")
 	}
-	runSharedCommand("players", time.Second, false, "")
-	runSharedCommand("say -1 hello", time.Second, false, flowSource("Greeter"))
+	runWebCommand("players", time.Second, false, "")
+	runWebCommand("say -1 hello", time.Second, false, flowSource("Greeter"))
 	f.set(true)
-	runSharedCommand("kick 3 bye", 300*time.Millisecond, false, "web")
+	runWebCommand("kick 3 bye", 300*time.Millisecond, false, "web")
 
 	var got []string
 	for _, ev := range serverEvents.after(start) {
@@ -1300,7 +1300,7 @@ func TestSentCommandsGoInConsoleLog(t *testing.T) {
 // server down and log in again on the same socket.
 func TestHeartbeat(t *testing.T) {
 	testDB(t)
-	resetShared(t)
+	resetWeb(t)
 	f := newFakeBE(t)
 	setRconTarget(f.conn.LocalAddr().String(), "pw")
 	oldWait, oldReply := heartbeatWait, reloginReplyWait
