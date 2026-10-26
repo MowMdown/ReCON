@@ -1269,7 +1269,7 @@ function renderSteps(key) {
 			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
 			const obj = s.type === 'if' ? s.branches[0] : s;
 			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
-			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop));
+			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop) || ''); // null when hidden: append would write "null"
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
 			const atTop = r.list === list && r.i === 0;
@@ -1299,7 +1299,7 @@ function renderSteps(key) {
 			for (const p of STEPS.if.parts) sentence.append(p.k === 'subject'
 				? el('span', { class: 'w', title: 'Set by the If: change it there', style: 'color:var(--fg);font-family:var(--mono);font-size:12.5px;padding:0 4px', text: subjectOf(b)[1] })
 				: field(b, p, key, r.inLoop));
-			sentence.append(counterField(b, 'counter', r.inLoop));
+			sentence.append(counterField(b, 'counter', r.inLoop) || '');
 			const err = el('div', { class: 'err' });
 			const what = 'Else if ' + k + ' of step ' + n;
 			row = el('div', { class: 'step joint branch', 'data-r': ri, 'data-if': ifId(s), style },
