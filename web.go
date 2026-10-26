@@ -1098,7 +1098,7 @@ type flowFileEntry struct {
 	Delay    string `json:"delay,omitempty"`    // e.g. "5s"
 	Steps    []Step `json:"steps"`
 	OnStop   []Step `json:"onStop,omitempty"`
-	// CounterThreshold is the flow's {counter_threshold}; 0 (an older file) means the default.
+	// CounterThreshold is the flow's {threshold}; 0 (an older file) means the default.
 	CounterThreshold int `json:"counterThreshold,omitempty"`
 }
 

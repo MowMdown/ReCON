@@ -173,7 +173,7 @@ const (
 )
 
 // counterThresholdToken is the one placeholder a number If may compare to.
-const counterThresholdToken = "{counter_threshold}"
+const counterThresholdToken = "{threshold}"
 
 // What a For each goes through.
 const (
@@ -312,7 +312,7 @@ var flowTokens = map[string]string{
 	"player_name": needPlayer, "player_id": needPlayer, "player_ping": needPlayer,
 	"player_ip": needPlayer, "player_guid": needPlayer, "player_role": needPlayer,
 	"message": needChat, "players_online": needNothing,
-	"counter": needPlayer, "counter_threshold": needNothing,
+	"counter": needPlayer, "threshold": needNothing,
 }
 
 var tokenRe = regexp.MustCompile(`\{(\w+)\}`)
@@ -766,7 +766,7 @@ func (x *job) placeholderValue(name string) (string, bool) {
 	switch name {
 	case "players_online":
 		return strconv.Itoa(len(onlineNow())), true
-	case "counter_threshold":
+	case "threshold":
 		return strconv.Itoa(x.run.counterThreshold), true
 	}
 	if x.p == nil {
@@ -1172,7 +1172,7 @@ type Flow struct {
 	Delay  string `json:"delay"`
 	Steps  []Step `json:"steps"`
 	OnStop []Step `json:"onStop"`
-	// CounterThreshold is {counter_threshold}: what the flow's per-player
+	// CounterThreshold is {threshold}: what the flow's per-player
 	// counters are compared to (1 to maxCounterThreshold).
 	CounterThreshold int `json:"counterThreshold"`
 	// ScheduleEnabled turns the trigger on (schedule, join and chat flows).

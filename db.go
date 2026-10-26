@@ -1279,7 +1279,7 @@ func (db *Database) GetBanState(guid string) (banState, error) {
 // Columns: script holds the steps as JSON, cancel the When stopped steps,
 // timer the delay before step 1, schedule the trigger ("manual", "on-join",
 // "on-chat" or a cron expression; see triggerFromSchedule in flows.go), and
-// counter_threshold the flow's {counter_threshold}.
+// counter_threshold the flow's {threshold}.
 const flowsTableSQL = `CREATE TABLE %s (
 	id INTEGER PRIMARY KEY,
 	name TEXT NOT NULL UNIQUE,

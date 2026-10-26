@@ -1668,9 +1668,9 @@ func TestWarningSettingsChecked(t *testing.T) {
 // pingCounterFlow is the ping-warning example: ++ on a high ping, kick at
 // the threshold, otherwise a warning; reset when the ping is fine.
 func pingCounterFlow() []Step {
-	inner := Step{Type: "if", Branches: []Branch{{Subject: "counter", Op: "ge", Value: "{counter_threshold}",
+	inner := Step{Type: "if", Branches: []Branch{{Subject: "counter", Op: "ge", Value: "{threshold}",
 		Steps: []Step{{Type: "kick", Who: "player", Reason: "Ping {player_ping} over the limit"}}}},
-		Else: &[]Step{{Type: "message", To: "player", Text: "Warning {counter}/{counter_threshold}"}}}
+		Else: &[]Step{{Type: "message", To: "player", Text: "Warning {counter}/{threshold}"}}}
 	return []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "if",
 		Branches:    []Branch{{Subject: "player_ping", Op: "ge", Value: "500", Counter: "inc", Steps: []Step{inner}}},
 		Else:        &[]Step{},
@@ -1678,7 +1678,7 @@ func pingCounterFlow() []Step {
 }
 
 // TestFlowCounter checks the per-player counter of a run: ++ on each high
-// ping, reset when it's fine, {counter} and {counter_threshold} in messages
+// ping, reset when it's fine, {counter} and {threshold} in messages
 // and Ifs, and a fresh run starting at 0.
 func TestFlowCounter(t *testing.T) {
 	testDB(t)
@@ -1741,7 +1741,7 @@ func TestFlowCounterChecked(t *testing.T) {
 	}
 	word := []Step{{Type: "if", Branches: []Branch{{Subject: "player_ping", Op: "gt", Value: "{player_ping}", Steps: []Step{}}}}}
 	if err := checkFlowSteps(triggerJoin, word, nil); err == nil {
-		t.Fatal("a number If compared with a placeholder other than {counter_threshold}")
+		t.Fatal("a number If compared with a placeholder other than {threshold}")
 	}
 	for _, n := range []int{0, -2, 1001} {
 		f := Flow{Name: "x", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}, CounterThreshold: n}
