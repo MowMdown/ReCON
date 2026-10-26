@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -32,16 +33,24 @@ func startFlowNow(f Flow, minutes int) error {
 	return launchFlowRun(f, time.Now().Add(time.Duration(delay)*time.Second), sourceManual, nil)
 }
 
-// stopFlowRun cancels the active run of a flow (the Stop button). The run sends
-// the When stopped steps as it stops.
+// stopFlowRun cancels the active run of a flow (the Stop button). The run
+// then runs its When stopped steps; pressing Stop again while they run ends
+// them too.
 func stopFlowRun(id int64) error {
 	flowRuns.Lock()
 	run := flowRuns.byFlow[id]
 	active := run != nil && run.active
+	var stopCancel context.CancelFunc
+	if active {
+		stopCancel = run.stopCancel
+	}
 	flowRuns.Unlock()
 	if !active {
 		return errFlowNotRunning
 	}
 	run.cancel()
+	if stopCancel != nil {
+		stopCancel()
+	}
 	return nil
 }

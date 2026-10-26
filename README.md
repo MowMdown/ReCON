@@ -244,7 +244,7 @@ Every time box (Wait, the delay, chat command cooldowns) takes seconds, or hours
 
 Move a step with its arrows, or drag it by the `⋮⋮` handle. Moving an If moves everything inside it. Anything missing is shown in red under the row.
 
-**When stopped:** Schedule and Manual flows can also have steps that are sent if someone presses Stop before the run ends, such as *Server restart cancelled.* and Unlock server. **+ Add step** (bottom left of the editor) adds to the steps; drag a Message, Lock, Unlock, Kick everyone or RCON command step into When stopped, and back.
+**When stopped:** Schedule and Manual flows can also have steps that run if someone presses Stop before the run ends, such as *Server restart cancelled.* and Unlock server. They can be any steps, with the same rules as the main steps (a For each with Ifs and Kicks, Waits, and so on); pressing Stop again ends them. **+ Add step** (bottom left of the editor) adds to the main steps; drag a step into When stopped, and back.
 
 ### Placeholders
 

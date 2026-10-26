@@ -254,7 +254,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 				<div class="steps" id="steps"></div>
 			</div>
 			<div class="sect" id="stopSection">
-				<div class="hd"><h3>When stopped</h3><span class="hint">Sent if someone presses Stop before the run ends. Drag Message, Lock, Unlock, Kick everyone or RCON command steps here.</span></div>
+				<div class="hd"><h3>When stopped</h3><span class="hint">Run if someone presses Stop before the run ends; Stop again ends them. Drag steps here from Steps, and back.</span></div>
 				<div class="steps" id="onStop"></div>
 			</div>
 		</div>
@@ -399,7 +399,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 				</tbody>
 			</table>
 			<h3>When stopped</h3>
-			<p>Schedule and Manual flows can have steps that are sent if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. <b>+ Add step</b> adds to the steps; drag a Message, Lock, Unlock, Kick everyone or RCON command step by its <b>⋮⋮</b> into When stopped, and back.</p>
+			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its <b>⋮⋮</b> into When stopped, and back.</p>
 		</div>
 
 		<div class="helppane" data-pane="conditions">
@@ -1040,7 +1040,6 @@ const STEPS = {
 		parts: [{ k: 'cmd', kind: 'text', ph: 'kick {player_id} Example', mono: true }], def: { cmd: '' } }
 };
 const GROUPS = ['Messages', 'Timing', 'Server', 'Players', 'Logic', 'Advanced'];
-const STOP_TYPES = ['message', 'lock', 'unlock', 'kickAll', 'command'];
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 const $ = (id) => document.getElementById(id);
@@ -1347,7 +1346,6 @@ function field(s, p, key, inLoop) {
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
 		if (opts === 'to') opts = toOpts(inLoop ? 'join' : ed.trigger.type);
 		if (opts === 'who') opts = whoOpts();
-		if (key === 'onStop' && p.k === 'to') opts = [['all', 'Everyone']];
 		if (!opts.some(([v]) => v === String(s[p.k]))) s[p.k] = opts[0][0];
 		// Only one choice: show it as words, not a dropdown.
 		if (opts.length === 1) return el('span', { class: 'w', style: 'color:var(--fg)', text: opts[0][1] });
@@ -1473,9 +1471,8 @@ function dropPos(r, above) {
 }
 
 // One drag at a time, within or between the two lists: a step can go from
-// Steps into When stopped (only the kinds that can be sent on Stop) and back.
+// Steps into When stopped and back.
 let drag = null;
-const canStop = (s) => STOP_TYPES.includes(s.type);
 function clearDragMarks() {
 	document.querySelectorAll('#steps .step, #onStop .step').forEach((r) => r.classList.remove('drop-above', 'drop-below', 'dragging'));
 	$('steps').classList.remove('drop-into');
@@ -1501,10 +1498,9 @@ function setupDrag(box) {
 	const above = (e, row) => e.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2;
 	// Where a drop here puts the step: above or below a row, or at the end
 	// of this list (below its last row, or into an empty When stopped). A
-	// block can't go inside itself, and When stopped only takes Message,
-	// Lock, Unlock, Kick everyone and RCON command.
+	// block can't go inside itself.
 	const target = (e) => {
-		if (!drag || (key === 'onStop' && !canStop(drag.r.s))) return null;
+		if (!drag) return null;
 		const row = e.target.closest('.step');
 		if (!row) return { row: null, pos: { list: ed[key], i: ed[key].length } };
 		const ri = +row.dataset.r;

@@ -303,7 +303,7 @@ const (
 )
 
 var needText = map[string]string{
-	needPlayer:    "needs a player: use the On join or Player message trigger",
+	needPlayer:    "needs a player: put it inside a For each, or use the On join or Player message trigger",
 	needChat:      "needs the Player message trigger",
 	needThreshold: "needs a Counter threshold: enter one (1 or more) next to the delay",
 }
@@ -518,9 +518,6 @@ var stepTypes = map[string]bool{"message": true, "playerList": true, "wait": tru
 	"unlock": true, "shutdown": true, "kick": true, "ban": true, "kickAll": true, "command": true,
 	"stop": true, "if": true, "forEach": true}
 
-// stopTypes are the steps allowed in "When stopped": they go out once, with no player.
-var stopTypes = map[string]bool{"message": true, "lock": true, "unlock": true, "kickAll": true, "command": true}
-
 // triggerHas is what a trigger provides: a player, and a chat message.
 func triggerHas(trigger string) map[string]bool {
 	return map[string]bool{
@@ -533,7 +530,6 @@ func triggerHas(trigger string) map[string]bool {
 type stepChecker struct {
 	has    map[string]bool
 	n      int    // step number, counted as the page numbers them
-	onStop bool   // checking "When stopped"
 	inLoop bool   // inside a For each player
 	where  string // "Step" or "When stopped, step"
 }
@@ -547,10 +543,7 @@ func (c *stepChecker) tokensOK(text string) error {
 		if need == needThreshold && !c.has[need] {
 			return c.fail(m[0] + " " + needText[need])
 		}
-		if ok && need != needNothing && need != needThreshold && (c.onStop || !c.has[need]) {
-			if c.onStop {
-				return c.fail(m[0] + " can't be used here: When stopped has no player")
-			}
+		if ok && need != needNothing && need != needThreshold && !c.has[need] {
 			return c.fail(m[0] + " " + needText[need])
 		}
 	}
@@ -567,10 +560,7 @@ func (c *stepChecker) checkStepList(list []Step, depth int) error {
 		if !stepTypes[s.Type] {
 			return c.fail(fmt.Sprintf("unknown step %q", s.Type))
 		}
-		if c.onStop && !stopTypes[s.Type] {
-			return c.fail("only Message, Lock, Unlock, Kick everyone and RCON command steps can go here")
-		}
-		player := c.has[needPlayer] && !c.onStop
+		player := c.has[needPlayer]
 		switch s.Type {
 		case "message", "playerList":
 			switch s.To {
@@ -699,7 +689,7 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 		if _, ok := counterOps[op]; !ok {
 			return fmt.Errorf("%s %d: pick what the counter does: 0, ++, -- or reset", c.where, num)
 		}
-		if op != "" && (c.onStop || !c.has[needPlayer]) {
+		if op != "" && !c.has[needPlayer] {
 			return fmt.Errorf("%s %d: the counter is kept for each player, so it needs a player: use it inside a For each, or with the On join or Player message trigger", c.where, num)
 		}
 	}
@@ -712,8 +702,8 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 }
 
 // checkFlowSteps validates a flow's steps and its When stopped steps for its
-// trigger and Counter threshold (0: none). Errors name the step as the page
-// numbers them.
+// trigger and Counter threshold (0: none). When stopped takes every kind of
+// step, with the same rules. Errors name the step as the page numbers them.
 func checkFlowSteps(trigger string, threshold int, steps, onStop []Step) error {
 	if len(steps) == 0 {
 		return errors.New("add at least one step")
@@ -729,7 +719,8 @@ func checkFlowSteps(trigger string, threshold int, steps, onStop []Step) error {
 	if len(onStop) > 0 && trigger != triggerSchedule && trigger != triggerManual {
 		return errors.New("only Schedule and Manual flows have When stopped steps")
 	}
-	s := &stepChecker{has: map[string]bool{needThreshold: threshold > 0}, onStop: true, where: "When stopped, step"}
+	s := &stepChecker{has: triggerHas(trigger), where: "When stopped, step"}
+	s.has[needThreshold] = threshold > 0
 	return s.checkStepList(onStop, 0)
 }
 
@@ -1519,6 +1510,9 @@ type flowRun struct {
 	stopOnce sync.Once
 	ctx      context.Context
 	cancel   context.CancelFunc
+	// stopCancel ends the When stopped steps while they run (Stop pressed
+	// again). Set by sendOnStop, under flowRuns' lock.
+	stopCancel context.CancelFunc
 }
 
 // flowRuns holds each flow's current or last run, in memory only.
@@ -1570,14 +1564,23 @@ func (r *flowRun) markRunFailed() {
 	flowRuns.Unlock()
 }
 
-// sendOnStop sends the When stopped steps, once per run.
+// sendOnStop runs the When stopped steps, once per run. They can be any
+// steps, Waits included: pressing Stop again ends them (stopFlowRun), and
+// like a run they stop after 24 hours at most.
 func (r *flowRun) sendOnStop() {
 	r.stopOnce.Do(func() {
 		if len(r.onStop) == 0 {
 			return
 		}
-		r.logf("sending the When stopped steps")
-		(&job{run: r, ctx: context.Background()}).execFlowSteps(r.onStop)
+		ctx, cancel := context.WithTimeout(context.Background(), maxTimeSecs*time.Second)
+		defer cancel()
+		flowRuns.Lock()
+		r.stopCancel = cancel
+		flowRuns.Unlock()
+		r.logf("running the When stopped steps")
+		if !(&job{run: r, ctx: ctx}).execFlowSteps(r.onStop) && ctx.Err() != nil {
+			r.logf("When stopped steps stopped")
+		}
 	})
 }
 

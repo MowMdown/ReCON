@@ -1127,8 +1127,12 @@ func TestForEachValidation(t *testing.T) {
 	if err := checkFlowSteps(triggerSchedule, 0, afterLoop, nil); err == nil {
 		t.Error("a Kick after the loop was accepted")
 	}
-	if err := checkFlowSteps(triggerSchedule, 0, []Step{{Type: "lock"}}, []Step{{Type: "forEach"}}); err == nil {
-		t.Error("For each player was accepted in When stopped")
+	// When stopped takes every kind of step, with the same rules as Steps.
+	if err := checkFlowSteps(triggerSchedule, 0, []Step{{Type: "lock"}}, append(pingKickFlow(), Step{Type: "wait", Time: "5s"}, Step{Type: "shutdown"})); err != nil {
+		t.Errorf("When stopped with For each, If, Kick, Wait and Shut down: %v", err)
+	}
+	if err := checkFlowSteps(triggerSchedule, 0, []Step{{Type: "lock"}}, kick); err == nil {
+		t.Error("a Kick with no player was accepted in When stopped")
 	}
 	if n := countAllSteps(pingKickFlow()); n != 3 {
 		t.Errorf("countAllSteps = %d, want 3", n)
@@ -1799,5 +1803,48 @@ func TestFlowCounterThresholdStored(t *testing.T) {
 	}
 	if f, _ := db.GetStoredFlow(id); f.CounterThreshold != 0 {
 		t.Fatalf("threshold not sent: %d, want none", f.CounterThreshold)
+	}
+}
+
+// TestStopEndsWhenStopped checks that the When stopped steps run after Stop,
+// and that pressing Stop again ends them, even during a Wait.
+func TestStopEndsWhenStopped(t *testing.T) {
+	testDB(t)
+	var mu sync.Mutex
+	var sent []string
+	oldSend := sendCommand
+	sendCommand = func(_ *flowRun, cmd string) { mu.Lock(); sent = append(sent, cmd); mu.Unlock() }
+	t.Cleanup(func() { sendCommand = oldSend })
+	f := Flow{ID: 77, Name: "restart", Trigger: triggerManual,
+		Steps:  []Step{{Type: "wait", Time: "1h"}},
+		OnStop: []Step{{Type: "unlock"}, {Type: "wait", Time: "1h"}, {Type: "lock"}}}
+	if err := launchFlowRun(f, time.Now(), "test", nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+			if ok() {
+				return
+			}
+		}
+		t.Fatal(what)
+	}
+	if err := stopFlowRun(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("When stopped didn't start", func() bool { mu.Lock(); defer mu.Unlock(); return len(sent) == 1 && sent[0] == "#unlock" })
+	if err := stopFlowRun(f.ID); err != nil { // still running: the When stopped Wait
+		t.Fatalf("second Stop: %v", err)
+	}
+	waitFor("the second Stop didn't end the run", func() bool {
+		flowRuns.Lock()
+		defer flowRuns.Unlock()
+		return !flowRuns.byFlow[f.ID].active
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if fmt.Sprint(sent) != fmt.Sprint([]string{"#unlock"}) {
+		t.Fatalf("sent %q; the Lock after the Wait should not go out", sent)
 	}
 }
