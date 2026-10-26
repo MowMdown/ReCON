@@ -952,6 +952,8 @@ const TOKENS = [
 	{ tok: '{counter}', need: 'player', counters: true, title: 'The player\'s counter in this run: starts at 0, changed by the counter setting on If, Else if and Else' },
 	{ tok: '{threshold}', need: 'threshold', counters: true, title: 'This flow\'s Counter threshold (only once one is set)' }
 ];
+// What a greyed-out If subject needs, in its dropdown.
+const REQUIRES = { player: 'requires On join, Player message or For each', chat: 'requires Player message or For each' };
 const NEED_TEXT = {
 	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
 	chat: 'needs the Player message trigger',
@@ -1350,14 +1352,20 @@ function counterField(obj, k, inLoop) {
 function field(s, p, key, inLoop) {
 	if (p.kind === 'select') {
 		let opts = p.opts;
-		if (opts === 'subjects') { const c = ctx(ed, inLoop); opts = SUBJECTS.filter((x) => (c[x[3]] && (SHOW_COUNTERS || x[0] !== 'counter')) || x[0] === s.subject).map(([v, l]) => [v, l]); }
+		// An If's subject is always a dropdown of every subject; the ones that
+		// don't apply here are greyed out with what they need.
+		if (opts === 'subjects') {
+			const c = ctx(ed, inLoop);
+			opts = SUBJECTS.filter((x) => SHOW_COUNTERS || x[0] !== 'counter' || x[0] === s.subject)
+				.map(([v, l, , need]) => c[need] || v === s.subject ? [v, l] : [v, l + ' (' + REQUIRES[need] + ')', true]);
+		}
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
 		if (opts === 'to') opts = toOpts(inLoop ? 'join' : ed.trigger.type);
 		if (opts === 'who') opts = whoOpts();
 		if (!opts.some(([v]) => v === String(s[p.k]))) s[p.k] = opts[0][0];
 		// Only one choice: show it as words, not a dropdown.
 		if (opts.length === 1) return el('span', { class: 'w', style: 'color:var(--fg)', text: opts[0][1] });
-		const sel = el('select', { 'aria-label': p.k }, opts.map(([v, l]) => el('option', { value: v, text: l, selected: String(s[p.k]) === v })));
+		const sel = el('select', { 'aria-label': p.k }, opts.map(([v, l, off]) => el('option', { value: v, text: l, disabled: !!off, selected: String(s[p.k]) === v })));
 		sel.addEventListener('change', () => {
 			s[p.k] = sel.value;
 			if (p.k === 'subject') Object.assign(s, defaultCond(s.subject));
