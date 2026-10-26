@@ -1277,8 +1277,9 @@ func (db *Database) GetBanState(guid string) (banState, error) {
 // (from 0), so deleting flows frees their numbers for the next ones.
 //
 // Columns: script holds the steps as JSON, cancel the When stopped steps,
-// timer the delay before step 1, and schedule the trigger: "manual",
-// "on-join", "on-chat" or a cron expression (see triggerFromSchedule in flows.go).
+// timer the delay before step 1, schedule the trigger ("manual", "on-join",
+// "on-chat" or a cron expression; see triggerFromSchedule in flows.go), and
+// counter_threshold the flow's {counter_threshold}.
 const flowsTableSQL = `CREATE TABLE %s (
 	id INTEGER PRIMARY KEY,
 	name TEXT NOT NULL UNIQUE,
@@ -1287,7 +1288,8 @@ const flowsTableSQL = `CREATE TABLE %s (
 	timer TEXT NOT NULL DEFAULT '',
 	schedule TEXT NOT NULL DEFAULT '',
 	schedule_enabled INTEGER NOT NULL DEFAULT 0,
-	position INTEGER NOT NULL DEFAULT 0
+	position INTEGER NOT NULL DEFAULT 0,
+	counter_threshold INTEGER NOT NULL DEFAULT 3
 )`
 
 // EnsureFlowsTable creates the flows table if it doesn't exist yet (a new
@@ -1305,7 +1307,10 @@ func (db *Database) EnsureFlowsTable() error {
 		return err
 	}
 	if !strings.Contains(strings.ToUpper(existing), "AUTOINCREMENT") {
-		return nil
+		if !strings.Contains(existing, "counter_threshold") { // added with flow counters
+			_, err = db.Exec("ALTER TABLE flows ADD COLUMN counter_threshold INTEGER NOT NULL DEFAULT 3")
+		}
+		return err
 	}
 	tx, err := db.Begin()
 	if err != nil {
@@ -1329,7 +1334,7 @@ func (db *Database) EnsureFlowsTable() error {
 
 // ListStoredFlows returns every flow in display order, read with flowFromRow.
 func (db *Database) ListStoredFlows() ([]Flow, error) {
-	rows, err := db.Query("SELECT id, name, script, cancel, timer, schedule, schedule_enabled FROM flows ORDER BY position, id")
+	rows, err := db.Query("SELECT id, name, script, cancel, timer, schedule, schedule_enabled, counter_threshold FROM flows ORDER BY position, id")
 	if err != nil {
 		return nil, err
 	}
@@ -1339,7 +1344,7 @@ func (db *Database) ListStoredFlows() ([]Flow, error) {
 		var f Flow
 		var script, cancel string
 		var en int
-		if err := rows.Scan(&f.ID, &f.Name, &script, &cancel, &f.Delay, &f.Schedule, &en); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &script, &cancel, &f.Delay, &f.Schedule, &en, &f.CounterThreshold); err != nil {
 			return nil, err
 		}
 		f.ScheduleEnabled = en != 0
@@ -1354,8 +1359,8 @@ func (db *Database) GetStoredFlow(id int64) (Flow, error) {
 	var f Flow
 	var script, cancel string
 	var en int
-	err := db.QueryRow("SELECT id, name, script, cancel, timer, schedule, schedule_enabled FROM flows WHERE id = ?", id).
-		Scan(&f.ID, &f.Name, &script, &cancel, &f.Delay, &f.Schedule, &en)
+	err := db.QueryRow("SELECT id, name, script, cancel, timer, schedule, schedule_enabled, counter_threshold FROM flows WHERE id = ?", id).
+		Scan(&f.ID, &f.Name, &script, &cancel, &f.Delay, &f.Schedule, &en, &f.CounterThreshold)
 	if err != nil {
 		return f, err
 	}
@@ -1376,23 +1381,24 @@ func (db *Database) SaveStoredFlow(f Flow, isNew bool, script, cancel string) (i
 	if isNew {
 		// One statement, so two flows saved at once can't take the same number.
 		res, err := db.Exec(`
-			INSERT INTO flows (id, name, script, cancel, timer, schedule, schedule_enabled, position)
+			INSERT INTO flows (id, name, script, cancel, timer, schedule, schedule_enabled, position, counter_threshold)
 			VALUES (
 				(SELECT CASE
 					WHEN NOT EXISTS (SELECT 1 FROM flows WHERE id = 0) THEN 0
 					ELSE (SELECT MIN(f.id) + 1 FROM flows f WHERE NOT EXISTS (SELECT 1 FROM flows g WHERE g.id = f.id + 1))
 				END),
 				?, ?, ?, ?, ?, ?,
-				(SELECT COALESCE(MAX(position), 0) + 1 FROM flows)
+				(SELECT COALESCE(MAX(position), 0) + 1 FROM flows),
+				?
 			)`,
-			f.Name, script, cancel, f.Delay, f.Schedule, en)
+			f.Name, script, cancel, f.Delay, f.Schedule, en, f.CounterThreshold)
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
-	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, schedule = ?, schedule_enabled = ? WHERE id = ?",
-		f.Name, script, cancel, f.Delay, f.Schedule, en, f.ID)
+	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, schedule = ?, schedule_enabled = ?, counter_threshold = ? WHERE id = ?",
+		f.Name, script, cancel, f.Delay, f.Schedule, en, f.CounterThreshold, f.ID)
 	if err != nil {
 		return 0, err
 	}

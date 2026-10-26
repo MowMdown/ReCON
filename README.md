@@ -257,6 +257,8 @@ Click a placeholder under the steps to insert it into the text box you were typi
 | `{player_ping}` `{player_ip}` `{player_guid}` | Their ping, IP address and GUID | On join, Player message |
 | `{player_role}` | Player, Mod or Admin | On join, Player message |
 | `{message}` | Everything they typed | Player message |
+| `{counter}` | The player's counter in this run (see [Counter](#counter)) | On join, Player message, inside a For each |
+| `{counter_threshold}` | The flow's counter threshold | Every flow |
 
 ### If, Else if, Else
 
@@ -267,10 +269,33 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 | `{message}` | **contains** any of the words, or a `"quoted phrase"`, as whole words. **starts with**: the first word is one of the words, so `!discord` matches "!discord please" but not "!discordx". **is exactly**: the whole message is the value. Case is ignored |
 | `{player_name}` `{player_ip}` | **is** / **is not** ignoring case, **matches** with `*` wildcards (`*admin*`, `192.168.*`), or **contains** |
 | `{player_id}` `{player_guid}` | **is** / **is not** |
-| `{player_ping}` `{players_online}` | `=` `!=` `>` `>=` `<` `<=` |
+| `{player_ping}` `{players_online}` `{counter}` | `=` `!=` `>` `>=` `<` `<=`, with a whole number or `{counter_threshold}` |
 | `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Mod or Admin (Player < Mod < Admin) |
 
 ![If / Else in the editor](docs/screenshots/flows-edit-if.png)
+
+### Counter
+
+Each run of a flow keeps a **counter** for every player, starting at 0, held in memory only while the run lasts. Every If, Else if and Else has a **counter** setting for what it does to the player's counter when it is the one that runs: **0** nothing, **++** add 1, **--** take 1 away (not below 0), **reset** back to 0. The change happens before its steps, so they see the new `{counter}`. The flow's **Counter threshold** (next to the delay, 3 by default) is `{counter_threshold}`. The counter needs a player: use it inside a For each, or in an On join or Player message flow.
+
+Because counters last one run, put repeated checks in one run. For example, a Schedule flow every minute with a threshold of 4 that kicks players whose ping stays at 500 or more:
+
+```
+For each player
+    If {player_ping} >= 500                      counter ++
+        If {counter} >= {counter_threshold}
+            Kick the Player, reason "Ping {player_ping} over the limit"
+        Else
+            Message the Player "Warning #{counter}/{counter_threshold} Ping: {player_ping}"
+        End if
+    Else                                         counter reset
+    End if
+End for each
+Wait 10s
+(the same For each block again, and again)
+```
+
+The **reset** on the Else makes only high pings in a row count. The run log notes each change, such as `Laggy (#4): counter ++, now 3/4`.
 
 ### For each
 
@@ -364,12 +389,15 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 | `!players` | Everyone | Lists everyone online with their number |
 | `!vote <question>` | Everyone | Starts a server-wide vote; everyone answers `!vote y` or `!vote n`, and more yes than no passes |
 | `!code` | Everyone | Sends the player's code (the last 6 characters of their GUID) to the mods and admins online |
-| `!kick <code> <reason>` | Mods, Admins | Kicks that player |
-| `!ban <code> <reason>` | Mods, Admins | Bans that player permanently, even if they've left |
+| `!kick <code or number> <reason>` | Mods, Admins | Kicks that player |
+| `!ban <code or number> <reason>` | Mods, Admins | Bans that player permanently; by code, even if they've left |
+| `!warning <code or number> <reason>` | Mods, Admins | Warns that player (see below) |
 
+- **Code or number:** a player's code is the last 6 characters of their GUID (they can type `!code`); their number is the one `!players` shows (`12` or `#12`).
 - **Roles** are set on the Players page, under **Details → Permissions**, and are stored with the player's GUID, so they survive a name change. New players are Players.
-- Mods can kick and ban Players. Admins can also kick and ban Mods. Nobody can kick or ban an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
-- Every mod and admin online is told about each kick and ban. With **Announce** on, everyone is told.
+- Mods can kick, ban and warn Players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
+- Every mod and admin online is told about each kick, ban and warning. With **Announce** on, everyone is told.
+- **Warnings:** each `!warning` is sent to the player with its reason and adds one to their warnings. Warnings are counted per visit: they start again at 0 when the player leaves. The warning that reaches the threshold (**Warnings until**, 2 by default, 1 or more) is followed 5 seconds later by a kick or a permanent ban with that warning's reason, whichever the **Kick / Ban** setting next to it says at that moment, and the count starts again.
 - Only a command that works gets a reply. A typo, a cooldown or a missing permission is silently ignored, though the line still appears in the player's chat history.
 
 **Chat commands** on the Flows page turns each command on or off, sets its cooldown and edits the wording of everything ReCON sends. Cooldowns are server-wide: once anyone uses a command, it's ignored for everyone until the time is up.

@@ -1542,3 +1542,246 @@ func TestSteamBatchTiming(t *testing.T) {
 		t.Fatalf("%d players: due %v, want now", steamBatchMaxPlayers, due)
 	}
 }
+
+// TestWarningCommand checks !warning: a code or a player number finds the
+// player, each warning is sent to them and the staff, the warning that
+// reaches the threshold is followed by the kick or ban the settings name,
+// and Players can't warn. It also checks !kick by player number.
+func TestWarningCommand(t *testing.T) {
+	db := testDB(t)
+	const modGUID = "0000000000000000000000000000a11a"
+	now := time.Now()
+	for _, p := range []Player{{ID: 1, GUID: modGUID, Name: "Mod"}, {ID: 4, GUID: testGUID, Name: "Rowdy"}, {ID: 6, GUID: testGUID2, Name: "Other"}} {
+		if err := db.OpenPlayerSession(p.GUID, p.Name, "1.2.3.4", p.ID, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.SetPlayerRole(modGUID, roleMod); err != nil {
+		t.Fatal(err)
+	}
+	mod := Player{ID: 1, GUID: modGUID, Name: "Mod"}
+	setOnline(mod, Player{ID: 4, GUID: testGUID, Name: "Rowdy"}, Player{ID: 6, GUID: testGUID2, Name: "Other"})
+
+	var mu sync.Mutex
+	var said, kicked, banned []string
+	oldSay, oldKick, oldBan, oldDelay := chatSay, chatKick, banStep, warningActionDelay
+	t.Cleanup(func() {
+		chatSay, chatKick, banStep, warningActionDelay = oldSay, oldKick, oldBan, oldDelay
+		chatState.Lock()
+		chatState.loaded = false
+		chatState.Unlock()
+	})
+	chatSay = func(to Player, everyone bool, text string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		if everyone {
+			said = append(said, "all: "+text)
+		} else {
+			said = append(said, fmt.Sprintf("%d: %s", to.ID, text))
+		}
+		return true
+	}
+	chatKick = func(p Player, reason string) bool {
+		mu.Lock()
+		kicked = append(kicked, fmt.Sprintf("%d %s", p.ID, reason))
+		mu.Unlock()
+		return true
+	}
+	banStep = func(p Player, online bool, minutes int, reason, logAs string) banResult {
+		mu.Lock()
+		banned = append(banned, fmt.Sprintf("%s %d %s", p.GUID, minutes, reason))
+		mu.Unlock()
+		return banResult{OK: true}
+	}
+	warningActionDelay = 10 * time.Millisecond
+	settings := defaultChatSettings()
+	w := settings["warning"]
+	w.Announce = false
+	settings["warning"] = w
+	chatState.Lock()
+	chatState.settings, chatState.loaded = settings, true
+	chatState.Unlock()
+	take := func() (s, k, b []string) {
+		mu.Lock()
+		defer mu.Unlock()
+		s, k, b, said, kicked, banned = said, kicked, banned, nil, nil, nil
+		return
+	}
+	wait := func() { time.Sleep(100 * time.Millisecond) }
+
+	handleChatCommand(mod, roleMod, "!warning 4 spamming chat")
+	wait()
+	s, k, b := take()
+	if fmt.Sprint(s) != fmt.Sprint([]string{"4: Warning 1/2 from Mod: spamming chat", "1: Rowdy was warned by Mod (1/2): spamming chat"}) || k != nil || b != nil {
+		t.Fatalf("first warning: said %q, kicked %q, banned %q", s, k, b)
+	}
+	handleChatCommand(mod, roleMod, "!warning #4 still spamming")
+	wait()
+	s, k, b = take()
+	if len(s) != 3 || s[0] != "4: Warning 2/2 from Mod: still spamming" || s[2] != "1: Rowdy reached 2 warnings and has been banned: still spamming" {
+		t.Fatalf("second warning said %q", s)
+	}
+	if fmt.Sprint(b) != fmt.Sprint([]string{testGUID + " 0 still spamming"}) || k != nil {
+		t.Fatalf("at the threshold: banned %q, kicked %q; want a permanent ban with the last reason", b, k)
+	}
+	// The count starts again after the threshold.
+	handleChatCommand(mod, roleMod, "!warning 4 again")
+	wait()
+	if s, _, b := take(); len(s) == 0 || s[0] != "4: Warning 1/2 from Mod: again" || b != nil {
+		t.Fatalf("after the ban the count didn't start again: %q", s)
+	}
+
+	// Kick at a threshold of 1, by code; Players can't warn.
+	w = settings["warning"]
+	w.Threshold, w.Action = 1, "kick"
+	settings["warning"] = w
+	handleChatCommand(Player{ID: 6, GUID: testGUID2, Name: "Other"}, rolePlayer, "!warning 1 abuse")
+	handleChatCommand(mod, roleMod, "!warning "+codeOf(testGUID2)+" teamkilling")
+	wait()
+	if _, k, b := take(); fmt.Sprint(k) != fmt.Sprint([]string{"6 teamkilling"}) || b != nil {
+		t.Fatalf("threshold 1, kick: kicked %q, banned %q", k, b)
+	}
+
+	// !kick by player number.
+	handleChatCommand(mod, roleMod, "!kick 4 bye")
+	if _, k, _ := take(); fmt.Sprint(k) != fmt.Sprint([]string{"4 bye"}) {
+		t.Fatalf("!kick 4: kicked %q", k)
+	}
+}
+
+func TestWarningSettingsChecked(t *testing.T) {
+	for _, c := range []struct {
+		threshold int
+		action    string
+		ok        bool
+	}{{2, "ban", true}, {1, "kick", true}, {0, "ban", false}, {-1, "ban", false}, {101, "ban", false}, {2, "mute", false}} {
+		s := defaultChatSettings()
+		w := s["warning"]
+		w.Threshold, w.Action = c.threshold, c.action
+		s["warning"] = w
+		if err := checkChatSettings(s); (err == nil) != c.ok {
+			t.Errorf("threshold %d, action %q: err = %v", c.threshold, c.action, err)
+		}
+	}
+}
+
+// pingCounterFlow is the ping-warning example: ++ on a high ping, kick at
+// the threshold, otherwise a warning; reset when the ping is fine.
+func pingCounterFlow() []Step {
+	inner := Step{Type: "if", Branches: []Branch{{Subject: "counter", Op: "ge", Value: "{counter_threshold}",
+		Steps: []Step{{Type: "kick", Who: "player", Reason: "Ping {player_ping} over the limit"}}}},
+		Else: &[]Step{{Type: "message", To: "player", Text: "Warning {counter}/{counter_threshold}"}}}
+	return []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "if",
+		Branches:    []Branch{{Subject: "player_ping", Op: "ge", Value: "500", Counter: "inc", Steps: []Step{inner}}},
+		Else:        &[]Step{},
+		ElseCounter: "reset"}}}}
+}
+
+// TestFlowCounter checks the per-player counter of a run: ++ on each high
+// ping, reset when it's fine, {counter} and {counter_threshold} in messages
+// and Ifs, and a fresh run starting at 0.
+func TestFlowCounter(t *testing.T) {
+	testDB(t)
+	var sent []string
+	oldSend := sendCommand
+	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
+	t.Cleanup(func() { sendCommand = oldSend })
+	if err := checkFlowSteps(triggerSchedule, pingCounterFlow(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &flowRun{name: "ping", ctx: ctx, cancel: cancel, counterThreshold: 3}
+	x := &job{run: run, ctx: ctx}
+	pass := func(lagPing, flakyPing int) []string {
+		sent = nil
+		setOnline(Player{ID: 4, GUID: testGUID, Name: "Laggy", Ping: lagPing}, Player{ID: 6, GUID: testGUID2, Name: "Flaky", Ping: flakyPing})
+		if !x.execFlowSteps(pingCounterFlow()) {
+			t.Fatal("the run ended early")
+		}
+		return sent
+	}
+	steps := [][2]int{{600, 700}, {650, 40}, {700, 800}, {700, 900}}
+	want := [][]string{
+		{"say 4 Warning 1/3", "say 6 Warning 1/3"},
+		{"say 4 Warning 2/3"},                                   // Flaky's ping is fine: reset
+		{"kick 4 Ping 700 over the limit", "say 6 Warning 1/3"}, // Laggy's 3rd in a row
+		{"kick 4 Ping 700 over the limit", "say 6 Warning 2/3"}, // still over: the counter stays past the threshold
+	}
+	for i, p := range steps {
+		if got := pass(p[0], p[1]); fmt.Sprint(got) != fmt.Sprint(want[i]) {
+			t.Fatalf("pass %d sent %q, want %q", i+1, got, want[i])
+		}
+	}
+	if !strings.Contains(strings.Join(run.log, "\n"), "Laggy (#4): counter ++, now 3/3") {
+		t.Fatalf("run log:\n%s", strings.Join(run.log, "\n"))
+	}
+
+	// A new run starts every counter at 0.
+	run2 := &flowRun{name: "ping", ctx: ctx, cancel: cancel, counterThreshold: 3}
+	x = &job{run: run2, ctx: ctx}
+	if got := pass(600, 40); fmt.Sprint(got) != fmt.Sprint([]string{"say 4 Warning 1/3"}) {
+		t.Fatalf("new run sent %q", got)
+	}
+}
+
+func TestFlowCounterChecked(t *testing.T) {
+	// A counter needs a player: not outside a For each in a Schedule flow.
+	top := []Step{{Type: "if", Branches: []Branch{{Subject: "players_online", Op: "gt", Value: "0", Counter: "inc", Steps: []Step{}}}}}
+	if err := checkFlowSteps(triggerSchedule, top, nil); err == nil || !strings.Contains(err.Error(), "needs a player") {
+		t.Fatalf("counter without a player: err = %v", err)
+	}
+	if err := checkFlowSteps(triggerJoin, top, nil); err != nil {
+		t.Fatalf("counter in a join flow: %v", err)
+	}
+	bad := []Step{{Type: "if", Branches: []Branch{{Subject: "player_ping", Op: "gt", Value: "0", Counter: "double", Steps: []Step{}}}}}
+	if err := checkFlowSteps(triggerJoin, bad, nil); err == nil {
+		t.Fatal("an unknown counter change was accepted")
+	}
+	word := []Step{{Type: "if", Branches: []Branch{{Subject: "player_ping", Op: "gt", Value: "{player_ping}", Steps: []Step{}}}}}
+	if err := checkFlowSteps(triggerJoin, word, nil); err == nil {
+		t.Fatal("a number If compared with a placeholder other than {counter_threshold}")
+	}
+	for _, n := range []int{0, -2, 1001} {
+		f := Flow{Name: "x", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}, CounterThreshold: n}
+		if err := checkFlowDefinition(f); err == nil {
+			t.Errorf("counter threshold %d accepted", n)
+		}
+	}
+}
+
+// TestFlowCounterThresholdStored checks the threshold is saved and read
+// back, defaults to 3 when not sent, and that a flows table from before
+// counters gets the column.
+func TestFlowCounterThresholdStored(t *testing.T) {
+	db := testDB(t)
+	if _, err := db.Exec(`CREATE TABLE flows (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, script TEXT NOT NULL,
+		cancel TEXT NOT NULL DEFAULT '', timer TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL DEFAULT '',
+		schedule_enabled INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO flows (id, name, script, schedule) VALUES (0, 'old', '[{"type":"lock"}]', 'manual')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.EnsureFlowsTable(); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := db.GetStoredFlow(0); err != nil || f.CounterThreshold != defaultCounterThreshold {
+		t.Fatalf("old flow: threshold %d, err %v; want the default", f.CounterThreshold, err)
+	}
+	id, err := validateAndSaveFlow(Flow{Name: "four", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}, CounterThreshold: 4}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := db.GetStoredFlow(id); f.CounterThreshold != 4 {
+		t.Fatalf("saved threshold %d, want 4", f.CounterThreshold)
+	}
+	id, err = validateAndSaveFlow(Flow{Name: "unsent", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := db.GetStoredFlow(id); f.CounterThreshold != defaultCounterThreshold {
+		t.Fatalf("threshold not sent: %d, want the default", f.CounterThreshold)
+	}
+}

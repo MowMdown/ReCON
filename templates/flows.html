@@ -187,6 +187,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .cmdbox input { margin: 0; }
 .opt input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; }
 .opt input.dur { width: 84px; padding: 5px 7px; font-family: var(--mono); font-size: 13px; }
+.opt select { width: auto; margin: 0; padding: 5px 7px; background: #111; color: #eee; border: 1px solid #555; border-radius: 4px; font: inherit; font-size: 13px; }
 .cmdbox input.bad { border-color: #f28b82; }
 .fields { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .field label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
@@ -272,7 +273,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 <div id="cmdModal" class="modal">
 	<div class="box cmdbox" role="dialog" aria-labelledby="cmdTitle">
 		<h2 id="cmdTitle">Chat commands</h2>
-		<p class="intro">Built-in commands players type in game chat. Turn each on or off, set its cooldown (server-wide: after anyone uses it, it's ignored for everyone until the time is up; 0 = none; times are seconds, or h m s such as <code>1m30s</code>), and change the wording and order of what ReCON sends. Words in braces such as <code>{player_name}</code> are filled in when the message is sent. Who may use !kick and !ban is set on the Players page: Details, Permissions.</p>
+		<p class="intro">Built-in commands players type in game chat. Turn each on or off, set its cooldown (server-wide: after anyone uses it, it's ignored for everyone until the time is up; 0 = none; times are seconds, or h m s such as <code>1m30s</code>), and change the wording and order of what ReCON sends. Words in braces such as <code>{player_name}</code> are filled in when the message is sent. Who may use !kick, !ban and !warning is set on the Players page: Details, Permissions.</p>
 		<div class="cmdlist" id="cmdList"></div>
 		<div class="cmdfoot">
 			<button type="button" id="cmdReset">Reset to defaults</button>
@@ -373,6 +374,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 				<thead><tr><th>Placeholder</th><th>Is</th><th>Works in</th></tr></thead>
 				<tbody>
 					<tr><td><code>{players_online}</code></td><td>How many players are online</td><td>Every flow</td></tr>
+					<tr><td><code>{counter}</code></td><td>The player's counter in this run (see <i>If / Else</i>)</td><td>With a player</td></tr>
+					<tr><td><code>{counter_threshold}</code></td><td>This flow's counter threshold</td><td>Every flow</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_id}</code></td><td>The player's name and number</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_ping}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td>Their ping, IP address and GUID</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_role}</code></td><td>Player, Mod or Admin (set on the Players page)</td><td>On join, Player message</td></tr>
@@ -395,6 +398,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 			</ul>
 			<p>Players BattlEye hasn't verified yet are left out. Stop flow inside it ends the whole run. A For each can't go inside another one. The run log lists each player a condition matched, not every one checked.</p>
 			<p>Examples for a Schedule flow every minute (<code>* * * * *</code>): <b>For each</b> player, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. Or <b>For each</b> message, <b>If</b> <code>{message}</code> contains <code>noob</code>, <b>Message</b> the Player <i>Please keep chat friendly</i>. In a flow without a player of its own, Add step puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so three clicks build either one.</p>
+			<h3>Counter</h3>
+			<p>Each run of a flow keeps a <b>counter</b> for every player, starting at 0. Every If, Else if and Else has a <b>counter</b> setting for what it does to the player's counter when it runs: <b>0</b> nothing, <b>++</b> add 1, <b>--</b> take 1 away (not below 0), <b>reset</b> back to 0. <code>{counter}</code> is the value, and an If can compare it with a number or with <code>{counter_threshold}</code>, the flow's <b>Counter threshold</b> (next to the delay). Counters are only kept while the run lasts, so put the checks in one run: several For each blocks with Waits between them.</p>
+			<p>Example, Schedule every minute, threshold 4: <b>For each</b> player, <b>If</b> <code>{player_ping} &gt;= 500</code> counter <b>++</b>, then inside it <b>If</b> <code>{counter} &gt;= {counter_threshold}</code> Kick, reason <i>Ping {player_ping} over the limit</i>, <b>Else</b> Message the Player <i>Warning {counter}/{counter_threshold}: ping {player_ping}</i>; the outer <b>Else</b> counter <b>reset</b>, so only high pings in a row count. Duplicate the For each block with a <b>Wait 10s</b> between copies.</p>
 			<h3>What you can compare</h3>
 			<table>
 				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
@@ -402,7 +408,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>!discord</code> catches "!discord please" but not "!discordx". <b>is exactly</b>: the whole message is the value. Case is ignored.</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_ip}</code></td><td><b>is</b> / <b>is not</b> ignoring case, <b>matches</b> with <code>*</code> for any characters (<code>*admin*</code>, <code>192.168.*</code>), or <b>contains</b> any part of it</td></tr>
 					<tr><td><code>{player_id}</code> <code>{player_guid}</code></td><td><b>is</b> / <b>is not</b></td></tr>
-					<tr><td><code>{player_ping}</code> <code>{players_online}</code></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td></tr>
+					<tr><td><code>{player_ping}</code> <code>{players_online}</code> <code>{counter}</code></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code>, with a whole number or <code>{counter_threshold}</code></td></tr>
 					<tr><td><code>{player_role}</code></td><td><b>is</b>, <b>is not</b>, <b>is at least</b> or <b>is at most</b> Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
 				</tbody>
 			</table>
@@ -455,7 +461,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 		<div class="helppane" data-pane="chat">
 			<h3>Built-in chat commands</h3>
-			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) turns each on or off, sets its cooldown and changes the wording ReCON sends. Who may use !kick and !ban is set on the Players page: <b>Details</b>, <b>Permissions</b>.</p>
+			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) turns each on or off, sets its cooldown and changes the wording ReCON sends. Who may use !kick, !ban and !warning is set on the Players page: <b>Details</b>, <b>Permissions</b>.</p>
 			<table>
 				<thead><tr><th>Command</th><th>Does</th></tr></thead>
 				<tbody>
@@ -465,13 +471,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td><code>!players</code></td><td>Lists everyone online with their number</td></tr>
 					<tr><td><code>!vote &lt;question&gt;</code></td><td>Starts a server-wide vote; everyone answers <code>!vote y</code> or <code>!vote n</code>. More yes than no passes.</td></tr>
 					<tr><td><code>!code</code></td><td>Sends the player's code (last 6 characters of their GUID) to the mods and admins online</td></tr>
-					<tr><td><code>!kick &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
-					<tr><td><code>!ban &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently, even if they have left</td></tr>
+					<tr><td><code>!kick &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
+					<tr><td><code>!ban &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently; by code, even if they have left</td></tr>
+					<tr><td><code>!warning &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: warns that player. The warning that reaches the threshold (2 by default, counted per visit) is followed 5 seconds later by a kick or a permanent ban with its reason, as set in the settings</td></tr>
 				</tbody>
 			</table>
 			<ul>
-				<li>Mods can kick and ban Players. Admins can also kick and ban Mods. Nobody can kick or ban an Admin from chat; the Kick and Ban buttons on these pages work on everyone.</li>
-				<li>Every mod and admin online is told about each kick and ban. <b>Announce</b> also tells everyone.</li>
+				<li>A player's code is the last 6 characters of their GUID (they can type <code>!code</code>); their number is in <code>!players</code>.</li>
+				<li>Mods can kick, ban and warn Players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat; the Kick and Ban buttons on these pages work on everyone.</li>
+				<li>Every mod and admin online is told about each kick, ban and warning. <b>Announce</b> also tells everyone.</li>
 				<li>Only a command that works gets an answer. Anything else (a typo, a cooldown, no permission) is ignored; the line is still in the player's chat history.</li>
 			</ul>
 		</div>
@@ -917,7 +925,9 @@ const TOKENS = [
 	{ tok: '{player_guid}', need: 'player', title: 'Their BattlEye GUID' },
 	{ tok: '{player_role}', need: 'player', title: 'Their role: Player, Mod or Admin' },
 	{ tok: '{message}', need: 'chat', title: 'Everything they typed' },
-	{ tok: '{players_online}', need: '', title: 'How many players are online (works in every flow)' }
+	{ tok: '{players_online}', need: '', title: 'How many players are online (works in every flow)' },
+	{ tok: '{counter}', need: 'player', title: 'The player\'s counter in this run of the flow (starts at 0; changed by the counter setting on If, Else if and Else)' },
+	{ tok: '{counter_threshold}', need: '', title: 'This flow\'s counter threshold (set next to the delay)' }
 ];
 const NEED_TEXT = {
 	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
@@ -940,8 +950,13 @@ const SUBJECTS = [
 	['player_ip', '{player_ip}', 'text', 'player'],
 	['player_guid', '{player_guid}', 'ident', 'player'],
 	['player_role', '{player_role}', 'role', 'player'],
-	['players_online', '{players_online}', 'num', '']
+	['players_online', '{players_online}', 'num', ''],
+	['counter', '{counter}', 'num', 'player']
 ];
+// What an If, Else if or Else does to the player's counter when it runs.
+const COUNTER_OPS = [['', '0'], ['inc', '++'], ['dec', '--'], ['reset', 'reset']];
+// A number If may compare to a whole number or to {counter_threshold}.
+const numValueOk = (v) => /^\d+$/.test(String(v).trim()) || String(v).trim() === '{counter_threshold}';
 const subjectOf = (s) => SUBJECTS.find((x) => x[0] === s.subject) || SUBJECTS[1];
 const OPS_BY_KIND = { word: WORD_OPS, text: TEXT_OPS, ident: IDENT_OPS, num: NUM_OPS, role: ROLE_OPS };
 const opsFor = (sub) => OPS_BY_KIND[sub[2]] || NUM_OPS;
@@ -1084,7 +1099,9 @@ function stepNeeds(s) {
 function condErr(c, b) {
 	const sub = subjectOf(b);
 	if (!c[sub[3]]) return sub[1] + ' ' + NEED_TEXT[sub[3]];
-	if ((sub[2] === 'num' || sub[0] === 'player_id') && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
+	if (sub[2] === 'num' && !numValueOk(b.value)) return 'Enter a whole number or {counter_threshold}';
+	if (sub[0] === 'player_id' && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
+	if (b.counter && !c.player) return 'The counter is kept for each player: ' + NEED_TEXT.player;
 	if (sub[2] === 'role' && !ROLES.some(([v]) => v === String(b.value).trim())) return 'Pick Player, Mod or Admin';
 	if (sub[0] === 'player_guid' && !/^[0-9a-fA-F]{32}$/.test(String(b.value).trim())) return 'Enter a GUID (32 letters and digits, 0-9 and a-f)';
 	if (sub[2] === 'word' && !terms(b.value).length) return 'Enter a word, several words, or a "quoted phrase"';
@@ -1095,7 +1112,7 @@ function stepErr(c, s) {
 	if (s.type === 'message' && !String(s.text || '').trim()) return 'Add the message text';
 	if (s.type === 'command' && !String(s.cmd || '').trim()) return 'Type the command to send';
 	if (s.type === 'wait' && !(secsOf(s.time) > 0)) return 'Enter a time: 30 (seconds), 90s, 1m20s or 1h';
-	if (s.type === 'if' && subjectOf(s)[2] === 'num' && !/^\d+$/.test(String(s.value).trim())) return 'Enter a whole number';
+	if (s.type === 'if' && subjectOf(s)[2] === 'num' && !numValueOk(s.value)) return 'Enter a whole number or {counter_threshold}';
 	return '';
 }
 // Step numbers in the order the rows are shown (Else and End rows have none),
@@ -1232,6 +1249,7 @@ function renderSteps(key) {
 			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
 			const obj = s.type === 'if' ? s.branches[0] : s;
 			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
+			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop));
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
 			const atTop = r.list === list && r.i === 0;
@@ -1259,6 +1277,7 @@ function renderSteps(key) {
 			for (const p of STEPS.if.parts) sentence.append(p.k === 'subject'
 				? el('span', { class: 'w', title: 'Set by the If: change it there', style: 'color:var(--fg);font-family:var(--mono);font-size:12.5px;padding:0 4px', text: subjectOf(b)[1] })
 				: field(b, p, key, r.inLoop));
+			sentence.append(counterField(b, 'counter', r.inLoop));
 			const err = el('div', { class: 'err' });
 			const what = 'Else if ' + k + ' of step ' + n;
 			row = el('div', { class: 'step joint branch', 'data-r': ri, 'data-if': ifId(s), style },
@@ -1280,7 +1299,7 @@ function renderSteps(key) {
 				el('span', { class: 'num' }),
 				el('div', { class: 'body' }, el('div', { class: 'sentence' },
 					el('span', { class: 'pill logic', text: isElse ? 'Else' : s.type === 'forEach' ? 'End for each' : 'End if' }),
-					jointLabel(key, s, isElse))),
+					jointLabel(key, s, isElse), isElse ? counterField(s, 'elseCounter', r.inLoop) : null)),
 				el('div', { class: 'tools' }, isElse ? el('button', {
 					type: 'button', title: 'Remove the Else (its steps move below the End if)', 'aria-label': 'Remove Else of step ' + n,
 					onclick: () => { const moved = s.else; s.else = null; r.list.splice(r.i + 1, 0, ...moved); changed(true); }, text: '✕'
@@ -1290,6 +1309,18 @@ function renderSteps(key) {
 		box.append(row);
 	});
 	updateDerivedRows(key, errs);
+}
+
+// counterField is the counter setting of an If, Else if (obj is the branch,
+// k 'counter') or Else (obj is the If, k 'elseCounter'): what it does to the
+// player's counter for this run when it runs. Shown only where there is a
+// player, or when already set (validation then explains).
+function counterField(obj, k, inLoop) {
+	if (!ctx(ed, inLoop).player && !obj[k]) return null;
+	const sel = el('select', { 'aria-label': 'Counter', title: 'What this does to the player\'s counter when it runs: 0 nothing, ++ add 1, -- take 1 away, reset back to 0' },
+		COUNTER_OPS.map(([v, l]) => el('option', { value: v, text: l, selected: (obj[k] || '') === v })));
+	sel.addEventListener('change', () => { if (sel.value) obj[k] = sel.value; else delete obj[k]; changed(true); });
+	return el('span', { class: 'w counter' }, 'counter ', sel);
 }
 
 // field draws one input of a step. inLoop: the step is inside a For each
@@ -1629,7 +1660,8 @@ function toEditor(f) {
 		// null for a new flow: ReCON gives it the lowest free number (0 is a real one).
 		id: typeof f.id === 'number' ? f.id : null, name: f.name || '', scheduleEnabled: !!f.scheduleEnabled,
 		trigger: { type: f.trigger || 'manual', cron: f.trigger === 'schedule' ? (f.schedule || '') : '0 6 * * *', delay: f.delay || '' },
-		steps: clone(f.steps || []), onStop: clone(f.onStop || [])
+		steps: clone(f.steps || []), onStop: clone(f.onStop || []),
+		counterThreshold: String(f.counterThreshold || 3)
 	};
 }
 function fromEditor() {
@@ -1637,9 +1669,11 @@ function fromEditor() {
 	return {
 		id: ed.id, name: ed.name, scheduleEnabled: ed.scheduleEnabled, trigger: t.type,
 		schedule: t.type === 'schedule' ? t.cron : '', delay: t.delay || '',
-		steps: ed.steps, onStop: t.type === 'schedule' || t.type === 'manual' ? ed.onStop : []
+		steps: ed.steps, onStop: t.type === 'schedule' || t.type === 'manual' ? ed.onStop : [],
+		counterThreshold: counterThresholdOk(ed.counterThreshold) ? +ed.counterThreshold : -1
 	};
 }
+const counterThresholdOk = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 1000;
 const edChanged = () => !!ed && JSON.stringify(fromEditor()) !== edSaved;
 
 function openEditor(f, title) {
@@ -1706,6 +1740,11 @@ function renderTrigger() {
 	d.addEventListener('input', () => { t.delay = d.value; check(); queuePreview(); });
 	check();
 	box.append(el('label', { class: 'f' }, 'Delay before step 1 (optional)', d));
+	const ct = el('input', { class: 'dur', value: ed.counterThreshold, placeholder: '3', inputmode: 'numeric', autocomplete: 'off', title: 'A whole number from 1 to 1000: {counter_threshold}', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Counter threshold' });
+	const ctCheck = () => ct.classList.toggle('bad', !counterThresholdOk(ct.value));
+	ct.addEventListener('input', () => { ed.counterThreshold = ct.value; ctCheck(); });
+	ctCheck();
+	box.append(el('label', { class: 'f', title: 'Each player\'s counter starts at 0 every run; If, Else if and Else can change it. Compare with {counter} >= {counter_threshold}.' }, 'Counter threshold', ct));
 	$('stopSection').hidden = !(t.type === 'schedule' || t.type === 'manual');
 	updateTrigHint();
 }
@@ -1840,6 +1879,22 @@ function renderCmds() {
 		if (c.length) {
 			head.append(el('label', { class: 'opt', for: 'len-' + c.cmd }, 'Vote lasts', durInput('len-' + c.cmd, s.length, '5m', false, (v) => { s.length = v; })));
 		}
+		if (c.warn) {
+			const th = el('input', { class: 'dur', id: 'th-' + c.cmd, value: s.threshold, placeholder: '2', autocomplete: 'off', inputmode: 'numeric', title: 'A whole number, 1 or more' });
+			const chk = () => {
+				const ok = /^\d+$/.test(th.value.trim()) && +th.value >= 1 && +th.value <= 100;
+				th.classList.toggle('bad', !ok);
+				return ok;
+			};
+			th.addEventListener('input', () => { s.threshold = chk() ? +th.value : th.value; dirty(); });
+			chk();
+			head.append(el('label', { class: 'opt', for: th.id }, 'Warnings until', th));
+			const act = el('select', { id: 'act-' + c.cmd },
+				el('option', { value: 'kick', text: 'Kick' }), el('option', { value: 'ban', text: 'Ban' }));
+			act.value = s.action;
+			act.addEventListener('change', () => { s.action = act.value; dirty(); });
+			head.append(el('label', { class: 'opt', for: act.id }, act));
+		}
 		let annBox = null;
 		if (c.announce) {
 			annBox = el('input', { type: 'checkbox', checked: s.announce, id: 'ann-' + c.cmd });
@@ -1861,7 +1916,7 @@ function renderCmds() {
 			};
 			inp.addEventListener('input', () => { s.msgs[f.key] = inp.value; upd(); dirty(); });
 			upd();
-			if (f.key === 'announce' && annBox) {
+			if ((f.key === 'announce' || f.key === 'limit_announce') && annBox) {
 				const sync = () => { wrap.style.opacity = s.announce ? '' : '.45'; };
 				annBox.addEventListener('change', () => { s.announce = annBox.checked; sync(); dirty(); });
 				sync();

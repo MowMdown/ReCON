@@ -40,7 +40,7 @@ import (
 // Schedule and Manual flows have no player, so they message everyone only.
 //
 // This file has what every trigger shares, and the built-in chat commands
-// (!help, !shout, !whisper, !players, !vote, !code, !kick, !ban).
+// (!help, !shout, !whisper, !players, !vote, !code, !kick, !ban, !warning).
 //
 // Sections: times, steps and conditions, validation, the runner (including
 // For each), flow definitions, runs, starting player flows, and the chat
@@ -124,7 +124,9 @@ func fmtDur(secs int) string {
 //	kickAll     Reason
 //	command     Cmd: any RCON command
 //	stop        ends the run
-//	if          Branches (the If, then any Else ifs) and Else
+//	if          Branches (the If, then any Else ifs) and Else. Each branch,
+//	            and the Else (ElseCounter), can change the player's counter
+//	            when it runs (see Branch.Counter)
 //	forEach     Of (player | message) and Steps. player: the steps run once
 //	            for every player online, as "the player", with {message} their
 //	            latest chat line this session. message: once for every chat
@@ -144,6 +146,8 @@ type Step struct {
 	Else     *[]Step  `json:"else,omitempty"`  // nil: no Else
 	Steps    []Step   `json:"steps,omitempty"` // forEach: the steps run for each player or message
 	Of       string   `json:"of,omitempty"`    // forEach: "player" or "message"
+	// ElseCounter is what the Else does to the player's counter, like Branch.Counter.
+	ElseCounter string `json:"elseCounter,omitempty"`
 }
 
 // Branch is the If or one Else if: a condition and the steps it runs. Every
@@ -153,7 +157,23 @@ type Branch struct {
 	Op      string `json:"op"`
 	Value   string `json:"value"`
 	Steps   []Step `json:"steps"`
+	// Counter is what this branch does to the player's counter for this
+	// run when it is the one that runs, before its steps: "" nothing,
+	// "inc" +1, "dec" -1 (not below 0) or "reset" back to 0.
+	Counter string `json:"counter,omitempty"`
 }
+
+// Counter changes an If branch or Else can make (Branch.Counter).
+var counterOps = map[string]string{"": "", "inc": "++", "dec": "--", "reset": "reset"}
+
+// Flow counter threshold: the default for a new flow, and the most allowed.
+const (
+	defaultCounterThreshold = 3
+	maxCounterThreshold     = 1000
+)
+
+// counterThresholdToken is the one placeholder a number If may compare to.
+const counterThresholdToken = "{counter_threshold}"
 
 // What a For each goes through.
 const (
@@ -195,12 +215,16 @@ func normalizeFlowSteps(list []Step) []Step {
 		for j := range s.Branches {
 			b := &s.Branches[j]
 			b.Subject, b.Op, b.Value = strings.TrimSpace(b.Subject), strings.TrimSpace(b.Op), cleanReason(b.Value)
+			b.Counter = strings.TrimSpace(b.Counter)
 			b.Steps = normalizeFlowSteps(b.Steps)
 		}
 		if s.Else != nil {
 			e := normalizeFlowSteps(*s.Else)
 			s.Else = &e
+		} else {
+			s.ElseCounter = ""
 		}
+		s.ElseCounter = strings.TrimSpace(s.ElseCounter)
 		if s.Type == "forEach" {
 			s.Steps = normalizeFlowSteps(s.Steps)
 			if s.Of = strings.TrimSpace(s.Of); s.Of == "" {
@@ -288,6 +312,7 @@ var flowTokens = map[string]string{
 	"player_name": needPlayer, "player_id": needPlayer, "player_ping": needPlayer,
 	"player_ip": needPlayer, "player_guid": needPlayer, "player_role": needPlayer,
 	"message": needChat, "players_online": needNothing,
+	"counter": needPlayer, "counter_threshold": needNothing,
 }
 
 var tokenRe = regexp.MustCompile(`\{(\w+)\}`)
@@ -313,6 +338,8 @@ var condSubjects = map[string]condSubject{
 	// How many players are online (the tracker, players.go). Works on
 	// every trigger: "If {players_online} > 0, Kick everyone, else Shut down".
 	"players_online": {"num", needNothing},
+	// The player's counter in this run of the flow (see Branch.Counter).
+	"counter": {"num", needPlayer},
 }
 
 var condOps = map[string][]string{
@@ -637,6 +664,7 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 			return fmt.Errorf("%s %d: pick an operator", c.where, num)
 		}
 		switch {
+		case sub.kind == "num" && strings.TrimSpace(b.Value) == counterThresholdToken:
 		case sub.kind == "num" || first == "player_id":
 			if _, err := strconv.Atoi(strings.TrimSpace(b.Value)); err != nil {
 				return fmt.Errorf("%s %d: Enter a whole number", c.where, num)
@@ -653,6 +681,18 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 			if len(terms(b.Value)) == 0 {
 				return fmt.Errorf(`%s %d: Enter a word, several words, or a "quoted phrase"`, c.where, num)
 			}
+		}
+	}
+	counters := []string{s.ElseCounter}
+	for _, b := range s.Branches {
+		counters = append(counters, b.Counter)
+	}
+	for _, op := range counters {
+		if _, ok := counterOps[op]; !ok {
+			return fmt.Errorf("%s %d: pick what the counter does: 0, ++, -- or reset", c.where, num)
+		}
+		if op != "" && (c.onStop || !c.has[needPlayer]) {
+			return fmt.Errorf("%s %d: the counter is kept for each player, so it needs a player: use it inside a For each, or with the On join or Player message trigger", c.where, num)
 		}
 	}
 	for _, l := range branchLists(s) {
@@ -723,8 +763,11 @@ func (x *job) currentID() (int, bool) {
 
 // placeholderValue is what a placeholder or If subject stands for in this run.
 func (x *job) placeholderValue(name string) (string, bool) {
-	if name == "players_online" {
+	switch name {
+	case "players_online":
 		return strconv.Itoa(len(onlineNow())), true
+	case "counter_threshold":
+		return strconv.Itoa(x.run.counterThreshold), true
 	}
 	if x.p == nil {
 		return "", false
@@ -747,6 +790,8 @@ func (x *job) placeholderValue(name string) (string, bool) {
 		return roleName(x.p.role), true
 	case "message":
 		return x.p.message, true
+	case "counter":
+		return strconv.Itoa(x.run.counterOf(x.p.GUID)), true
 	}
 	return "", false
 }
@@ -881,7 +926,11 @@ func (x *job) execFlowSteps(list []Step) bool {
 			ran := false
 			for k, b := range s.Branches {
 				v, _ := x.ifSubjectValue(b.Subject)
-				ok := evaluateIfCondition(b, v)
+				cmp := b
+				if strings.TrimSpace(cmp.Value) == counterThresholdToken {
+					cmp.Value = strconv.Itoa(x.run.counterThreshold)
+				}
+				ok := evaluateIfCondition(cmp, v)
 				word := "If "
 				if k > 0 {
 					word = "Else if "
@@ -892,6 +941,7 @@ func (x *job) execFlowSteps(list []Step) bool {
 					x.run.logf("%s (#%d): %s%s", bareName(x.p.Name), x.p.ID, word, describeIfCondition(b))
 				}
 				if ok {
+					x.changeCounter(b.Counter)
 					if !x.execFlowSteps(b.Steps) {
 						return false
 					}
@@ -905,6 +955,7 @@ func (x *job) execFlowSteps(list []Step) bool {
 				} else {
 					x.run.logf("Else")
 				}
+				x.changeCounter(s.ElseCounter)
 				if !x.execFlowSteps(*s.Else) {
 					return false
 				}
@@ -912,6 +963,41 @@ func (x *job) execFlowSteps(list []Step) bool {
 		}
 	}
 	return true
+}
+
+// counterOf is a player's counter in this run (0 until a branch changes it).
+func (r *flowRun) counterOf(guid string) int {
+	r.counterMu.Lock()
+	defer r.counterMu.Unlock()
+	return r.counters[strings.ToLower(guid)]
+}
+
+// changeCounter applies an If branch's or Else's counter change (see
+// Branch.Counter) to the player, and logs the new value when it changes.
+func (x *job) changeCounter(op string) {
+	if op == "" || x.p == nil {
+		return
+	}
+	r, g := x.run, strings.ToLower(x.p.GUID)
+	r.counterMu.Lock()
+	if r.counters == nil {
+		r.counters = map[string]int{}
+	}
+	old := r.counters[g]
+	n := old
+	switch op {
+	case "inc":
+		n++
+	case "dec":
+		n = max(n-1, 0)
+	case "reset":
+		n = 0
+	}
+	r.counters[g] = n
+	r.counterMu.Unlock()
+	if n != old {
+		r.logf("%s (#%d): counter %s, now %d/%d", bareName(x.p.Name), x.p.ID, counterOps[op], n, r.counterThreshold)
+	}
 }
 
 // forEachMarks is, per flow, the Seq of the last server event its previous
@@ -1086,6 +1172,9 @@ type Flow struct {
 	Delay  string `json:"delay"`
 	Steps  []Step `json:"steps"`
 	OnStop []Step `json:"onStop"`
+	// CounterThreshold is {counter_threshold}: what the flow's per-player
+	// counters are compared to (1 to maxCounterThreshold).
+	CounterThreshold int `json:"counterThreshold"`
 	// ScheduleEnabled turns the trigger on (schedule, join and chat flows).
 	ScheduleEnabled bool   `json:"scheduleEnabled"`
 	NextRun         string `json:"nextRun,omitempty"` // for the page, not stored
@@ -1229,6 +1318,9 @@ func checkFlowDefinition(f Flow) error {
 	if _, err := flowDelaySeconds(f); err != nil {
 		return err
 	}
+	if f.CounterThreshold < 1 || f.CounterThreshold > maxCounterThreshold {
+		return fmt.Errorf("Counter threshold: enter a whole number from 1 to %d", maxCounterThreshold)
+	}
 	return checkFlowSteps(f.Trigger, f.Steps, f.OnStop)
 }
 
@@ -1298,6 +1390,9 @@ func validateAndSaveFlow(f Flow, isNew bool) (int64, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Schedule = strings.TrimSpace(f.Schedule)
 	f.Delay = strings.ToLower(strings.TrimSpace(f.Delay))
+	if f.CounterThreshold == 0 { // not sent: an older page or flows file
+		f.CounterThreshold = defaultCounterThreshold
+	}
 	if f.Name == "" {
 		return 0, errors.New("name is required")
 	}
@@ -1406,6 +1501,11 @@ type flowRun struct {
 		set      bool
 		from, to int64
 	}
+	// counters is each player's counter (by lower-case GUID) for this run,
+	// all 0 when it starts; counterThreshold is the flow's threshold.
+	counterMu        sync.Mutex
+	counters         map[string]int
+	counterThreshold int
 	// polled makes the run's first For each poll `players` once, for fresh
 	// pings and anyone the console log missed (pollPlayersNow, rcon.go).
 	polled   sync.Once
@@ -1550,7 +1650,7 @@ func launchFlowRun(f Flow, start time.Time, source string, p *flowPlayer) error 
 	if !active {
 		ctx, cancel := context.WithCancel(context.Background())
 		run = &flowRun{flowID: f.ID, name: f.Name, status: "running", active: true,
-			onStop: f.OnStop, ctx: ctx, cancel: cancel}
+			onStop: f.OnStop, ctx: ctx, cancel: cancel, counterThreshold: f.CounterThreshold}
 		if old := flowRuns.byFlow[f.ID]; old != nil && p != nil {
 			run.log = old.log // join and chat flows keep one running log
 		}
@@ -1631,15 +1731,16 @@ func startPlayerFlows(trigger, source string, p *flowPlayer) {
 // ---------------------------------------------------------------------------
 
 // chatCommandDef is one built-in chat command as the settings dialog shows
-// it: its default cooldown, whether it has Announce and a vote length, its
-// help text, and the messages it sends (each with its default wording and
-// the placeholders it may use).
+// it: its default cooldown, whether it has Announce, a vote length or a
+// warning threshold, its help text, and the messages it sends (each with its
+// default wording and the placeholders it may use).
 type chatCommandDef struct {
 	Cmd      string      `json:"cmd"`
 	Staff    bool        `json:"staff"`    // mods and admins only
 	Cool     string      `json:"cool"`     // default cooldown
 	Announce bool        `json:"announce"` // has the Announce setting
 	Length   bool        `json:"length"`   // has the vote length setting
+	Warn     bool        `json:"warn"`     // has the warning threshold and the Kick/Ban setting
 	Help     string      `json:"help"`     // what !help !<cmd> sends
 	Fields   []chatField `json:"fields"`
 }
@@ -1667,17 +1768,32 @@ var chatCommandDefs = []chatCommandDef{
 		}},
 	{Cmd: "code", Cool: "0", Help: "!code sends your player code to the admins and mods online, so they can find you.",
 		Fields: []chatField{{"staff", "Message (to each mod and admin online)", "Code for {player_name} (#{player_id}): {code}", []string{"player_name", "player_id", "code"}}}},
-	{Cmd: "kick", Staff: true, Cool: "0", Announce: true, Help: "!kick <code> <reason> kicks the player with that code. Ask them to type !code first.",
+	{Cmd: "kick", Staff: true, Cool: "0", Announce: true, Help: "!kick <code or player number> <reason> kicks that player. Their code comes from !code, their number from !players.",
 		Fields: []chatField{
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been kicked by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
 			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been kicked", []string{"target_name", "reason"}},
 		}},
-	{Cmd: "ban", Staff: true, Cool: "0", Announce: true, Help: "!ban <code> <reason> permanently bans the player with that code (the last 6 characters of their GUID). Ask them to type !code first.",
+	{Cmd: "ban", Staff: true, Cool: "0", Announce: true, Help: "!ban <code or player number> <reason> permanently bans that player. Their code (the last 6 characters of their GUID) comes from !code, their number from !players.",
 		Fields: []chatField{
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been banned by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
 			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been banned", []string{"target_name", "reason"}},
 		}},
+	{Cmd: "warning", Staff: true, Cool: "0", Announce: true, Warn: true, Help: "!warning <code or player number> <reason> warns that player. Enough warnings in one visit and they are kicked or banned.",
+		Fields: []chatField{
+			{"player", "Warning (to the player)", "Warning {warnings}/{warning_threshold} from {player_name}: {reason}", []string{"target_name", "player_name", "reason", "warnings", "warning_threshold"}},
+			{"staff", "Notice (to each mod and admin online, always)", "{target_name} was warned by {player_name} ({warnings}/{warning_threshold}): {reason}", []string{"target_name", "player_name", "reason", "warnings", "warning_threshold"}},
+			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been warned: {reason}", []string{"target_name", "reason", "warnings", "warning_threshold"}},
+			{"limit_staff", "At the threshold: notice (to each mod and admin online, always)", "{target_name} reached {warning_threshold} warnings and has been {action}: {reason}", []string{"target_name", "player_name", "reason", "warning_threshold", "action"}},
+			{"limit_announce", "At the threshold: announcement (to everyone, when Announce is on)", "{target_name} has been {action}", []string{"target_name", "reason", "action"}},
+		}},
 }
+
+// Defaults for !warning: kick or ban at the second warning.
+const (
+	defaultWarnThreshold = 2
+	defaultWarnAction    = "ban"
+	maxWarnThreshold     = 100
+)
 
 func chatDef(cmd string) *chatCommandDef {
 	for i := range chatCommandDefs {
@@ -1690,11 +1806,15 @@ func chatDef(cmd string) *chatCommandDef {
 
 // chatSetting is one command's settings as stored and edited.
 type chatSetting struct {
-	On       bool              `json:"on"`
-	Cool     string            `json:"cool"`               // server-wide cooldown, "0" = none
-	Announce bool              `json:"announce,omitempty"` // kick and ban: also tell everyone
-	Length   string            `json:"length,omitempty"`   // vote: how long it stays open
-	Msgs     map[string]string `json:"msgs"`
+	On       bool   `json:"on"`
+	Cool     string `json:"cool"`               // server-wide cooldown, "0" = none
+	Announce bool   `json:"announce,omitempty"` // kick and ban: also tell everyone
+	Length   string `json:"length,omitempty"`   // vote: how long it stays open
+	// warning: how many warnings in one visit set off Action ("kick" or
+	// "ban"). Action is read when a player reaches the threshold.
+	Threshold int               `json:"threshold,omitempty"`
+	Action    string            `json:"action,omitempty"`
+	Msgs      map[string]string `json:"msgs"`
 }
 
 // chatSettings is every command's settings, by command name.
@@ -1709,6 +1829,9 @@ func defaultChatSettings() chatSettings {
 		s := chatSetting{On: true, Cool: d.Cool, Announce: d.Announce, Msgs: map[string]string{}}
 		if d.Length {
 			s.Length = "5m"
+		}
+		if d.Warn {
+			s.Threshold, s.Action = defaultWarnThreshold, defaultWarnAction
 		}
 		for _, f := range d.Fields {
 			s.Msgs[f.Key] = f.Def
@@ -1735,6 +1858,9 @@ func mergeChatSettings(saved chatSettings) chatSettings {
 		if d.Length && s.Length != "" {
 			m.Length = s.Length
 		}
+		if d.Warn {
+			m.Threshold, m.Action = s.Threshold, s.Action
+		}
 		for _, f := range d.Fields {
 			if v, ok := s.Msgs[f.Key]; ok {
 				m.Msgs[f.Key] = v
@@ -1756,6 +1882,14 @@ func checkChatSettings(s chatSettings) error {
 		if d.Length {
 			if secs, ok := parseDur(c.Length); !ok || secs < 1 || secs > 3600 {
 				return fmt.Errorf("/%s length: enter a time from 1s to 1h, such as 5m", d.Cmd)
+			}
+		}
+		if d.Warn {
+			if c.Threshold < 1 || c.Threshold > maxWarnThreshold {
+				return fmt.Errorf("/%s threshold: enter a whole number from 1 to %d", d.Cmd, maxWarnThreshold)
+			}
+			if c.Action != "kick" && c.Action != "ban" {
+				return fmt.Errorf("/%s: pick Kick or Ban", d.Cmd)
 			}
 		}
 		for _, f := range d.Fields {
@@ -2050,6 +2184,9 @@ func handleChatCommand(p Player, role int, text string) {
 
 	case "kick", "ban":
 		runPunishCommand(cmd, p, role, set, args)
+
+	case "warning":
+		runWarningCommand(p, role, set, args)
 	}
 }
 
@@ -2103,39 +2240,63 @@ func chatVoteCommand(p Player, set chatSetting, rest string) {
 	}()
 }
 
-// runPunishCommand handles !kick <code> [reason] and !ban <code> [reason]. Mods
-// can kick and ban Players; Admins can also kick and ban Mods. Nobody can
-// kick or ban themselves, or anyone of their own rank or higher, from chat.
-// !ban is always permanent and also finds players who have left.
+// findChatTarget finds the player a staff command names: a code (6 hex
+// characters, the end of their GUID, from !code) or a player number (12 or
+// #12, from !players). A number must be online; a code may also find a
+// player who has left when offline is true (!ban). ok is false unless
+// exactly one player matches.
+func findChatTarget(arg string, offline bool) (t Player, online, ok bool) {
+	if codeRe.MatchString(arg) {
+		code := strings.ToLower(arg)
+		var matches []Player
+		for _, o := range onlineNow() {
+			if codeOf(o.GUID) == code {
+				matches = append(matches, o)
+			}
+		}
+		online = len(matches) > 0
+		if !online && offline && globalDatabase != nil {
+			known, err := globalDatabase.PlayersByCode(code)
+			if err != nil {
+				log.Printf("chat: lookup of code %s: %v", code, err)
+				return Player{}, false, false
+			}
+			matches = known
+		}
+		if len(matches) != 1 {
+			return Player{}, false, false // nobody, or more than one player, has that code
+		}
+		return matches[0], online, true
+	}
+	id, err := strconv.Atoi(strings.TrimPrefix(arg, "#"))
+	if err != nil || id < 0 {
+		return Player{}, false, false
+	}
+	t, online = onlineByID(id)
+	return t, online, online
+}
+
+// chatTargetAllowed reports whether p (of role) may punish t: nobody can
+// punish themselves, or anyone of their own rank or higher, from chat.
+func chatTargetAllowed(p Player, role int, t Player) bool {
+	return !strings.EqualFold(t.GUID, p.GUID) && lookupPlayerRole(t.GUID) < role
+}
+
+// runPunishCommand handles !kick and !ban <code or player number> [reason].
+// Mods can kick and ban Players; Admins can also kick and ban Mods. Nobody
+// can kick or ban themselves, or anyone of their own rank or higher, from
+// chat. !ban is always permanent and, by code, also finds players who have
+// left.
 func runPunishCommand(cmd string, p Player, role int, set chatSetting, args []string) {
-	if len(args) == 0 || !codeRe.MatchString(args[0]) {
+	if len(args) == 0 {
 		return
 	}
-	code := strings.ToLower(args[0])
 	reason := cleanReason(strings.Join(args[1:], " "))
 	if reason == "" {
 		reason = "No reason given"
 	}
-	var matches []Player
-	for _, o := range onlineNow() {
-		if codeOf(o.GUID) == code {
-			matches = append(matches, o)
-		}
-	}
-	online := len(matches) > 0
-	if !online && cmd == "ban" && globalDatabase != nil {
-		known, err := globalDatabase.PlayersByCode(code)
-		if err != nil {
-			log.Printf("chat: !ban lookup: %v", err)
-			return
-		}
-		matches = known
-	}
-	if len(matches) != 1 {
-		return // nobody, or more than one player, has that code
-	}
-	t := matches[0]
-	if strings.EqualFold(t.GUID, p.GUID) || lookupPlayerRole(t.GUID) >= role {
+	t, online, ok := findChatTarget(args[0], cmd == "ban")
+	if !ok || !chatTargetAllowed(p, role, t) {
 		return
 	}
 	done := "kicked"
@@ -2161,4 +2322,82 @@ func runPunishCommand(cmd string, p Player, role int, set chatSetting, args []st
 		chatSay(Player{}, true, fillTemplate(set.Msgs["announce"], vals))
 	}
 	log.Printf("chat: %s %s %s (%s)", bareName(p.Name), done, bareName(t.Name), reason)
+}
+
+// warningActionDelay is the pause between the warning that reaches the
+// threshold and the kick or ban, so the player can read why. Tests shorten it.
+var warningActionDelay = 5 * time.Second
+
+// runWarningCommand handles !warning <code or player number> [reason]: it
+// adds one to the player's warnings for this visit, sends them the warning
+// and tells the staff (and everyone, with Announce). The warning that reaches
+// the threshold is followed, warningActionDelay later, by a kick or a
+// permanent ban with that warning's reason, whichever the settings say at
+// that moment. Who may warn whom is as for !kick.
+func runWarningCommand(p Player, role int, set chatSetting, args []string) {
+	if len(args) == 0 {
+		return
+	}
+	t, _, ok := findChatTarget(args[0], false)
+	if !ok || !chatTargetAllowed(p, role, t) {
+		return
+	}
+	reason := cleanReason(strings.Join(args[1:], " "))
+	if reason == "" {
+		reason = "No reason given"
+	}
+	count, reached, ok := warnPlayer(t.GUID, set.Threshold) // players.go
+	if !ok {
+		return
+	}
+	markUsed("warning")
+	vals := map[string]string{"target_name": bareName(t.Name), "player_name": bareName(p.Name), "reason": reason,
+		"warnings": strconv.Itoa(count), "warning_threshold": strconv.Itoa(set.Threshold)}
+	chatSay(t, false, fillTemplate(set.Msgs["player"], vals))
+	for _, s := range listOnlineStaff() {
+		if !strings.EqualFold(s.GUID, t.GUID) { // a warned Mod has their own message
+			chatSay(s, false, fillTemplate(set.Msgs["staff"], vals))
+		}
+	}
+	if set.Announce {
+		chatSay(Player{}, true, fillTemplate(set.Msgs["announce"], vals))
+	}
+	log.Printf("chat: %s warned %s (%d/%d): %s", bareName(p.Name), bareName(t.Name), count, set.Threshold, reason)
+	if !reached {
+		return
+	}
+	action := set.Action
+	go func() {
+		time.Sleep(warningActionDelay)
+		cur, online := onlineByGUID(t.GUID) // their number now
+		done := "kicked"
+		if action == "kick" {
+			if !online {
+				log.Printf("chat: %s left before the warning kick", bareName(t.Name))
+				return
+			}
+			if !chatKick(cur, reason) {
+				return
+			}
+		} else {
+			done = "banned"
+			if !online {
+				cur = t
+			}
+			if res := banStep(cur, online, 0, reason, "chat"); !res.OK {
+				log.Printf("chat: warning ban of %s failed: %s", bareName(t.Name), res.Error)
+				return
+			}
+		}
+		vals["action"] = done
+		for _, s := range listOnlineStaff() {
+			if !strings.EqualFold(s.GUID, t.GUID) {
+				chatSay(s, false, fillTemplate(set.Msgs["limit_staff"], vals))
+			}
+		}
+		if set.Announce {
+			chatSay(Player{}, true, fillTemplate(set.Msgs["limit_announce"], vals))
+		}
+		log.Printf("chat: %s %s after %d warnings (%s)", bareName(t.Name), done, count, reason)
+	}()
 }
