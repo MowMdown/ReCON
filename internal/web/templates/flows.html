@@ -42,10 +42,10 @@
 .quick button { margin-right: 0; }
 /* The flow list: the Flow column takes the spare width and shrinks with the
    window down to 340px; narrower than that, Flow to Next run scroll
-   sideways under Actions, which stays put. 1310px = Flow 340 + the fixed
-   columns 970. */
-.tablewrap { overflow-x: auto; }
-#flowsTable { min-width: 1310px; }
+   sideways under Actions, which stays put. 1280px = Flow 340 + the fixed
+   columns 940. */
+.tablewrap { overflow-x: auto; overscroll-behavior-x: none; } /* no bounce: it would drag Actions along */
+#flowsTable { min-width: 1280px; }
 /* Actions stays in view: the other columns scroll underneath it. */
 #flowsTable th:last-child, #flowsTable td:last-child { position: sticky; right: 0; z-index: 1; background: #111; }
 /* A command's result ("#lock sent"), just above the Commands button. Placed
@@ -243,7 +243,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<col style="width: 130px">
 		<col style="width: 190px">
 		<col style="width: 190px">
-		<col style="width: 290px">
+		<col style="width: 260px">
 	</colgroup>
 	<thead>
 		<tr><th>Flow</th><th>Trigger</th><th>Status</th><th>Last run</th><th>Next run</th><th>Actions</th></tr>
