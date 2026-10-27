@@ -55,7 +55,11 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 <style>
 td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
 select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; background: #111; color: #eee; border: 1px solid #555; }
-.topbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+ 
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
+.toolbar .banbtns { display: flex; flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+.toolbar .right { margin-left: auto; flex: none; }
+.toolbar .right button { margin-right: 0; }
 .box.importbox.wide { width: min(720px, 95vw); }
 .importbox .pick .guid { font-family: monospace; color: #aaa; font-size: 12px; }
 .importbox label.pick.locked { opacity: .5; cursor: not-allowed; }
@@ -135,12 +139,14 @@ var setStatusCount;
 </script>
 <div class="top">
 	<h1>Server Bans</h1>
-	<div class="topbtns">
-		<button onclick="exportBans()" title="Save permanent bans to bans.json">Export</button>
+</div>
+<div class="toolbar">
+	<div class="banbtns">
 		<button onclick="document.getElementById('banFile').click()" title="Add permanent bans from a bans.json file">Import</button>
-		<button onclick="openBan()">Ban Player</button>
+		<button onclick="exportBans()" title="Save permanent bans to bans.json">Export</button>
 		<input type="file" id="banFile" accept=".json,application/json" style="display:none" onchange="importBans(this)">
 	</div>
+	<div class="right"><button onclick="openBan()">Ban Player</button></div>
 </div>
 <table>
 	<colgroup>
