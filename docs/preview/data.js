@@ -376,7 +376,7 @@ window.RECON_PREVIEW_DATA = {
 							{
 								"type": "message",
 								"to": "player",
-								"text": "Welcome {player_name} to our DayZ server!"
+								"text": "Welcome {player_name} to this DayZ server!"
 							}
 						]
 					}
@@ -392,10 +392,6 @@ window.RECON_PREVIEW_DATA = {
 						"type": "message",
 						"to": "all",
 						"text": "Admins are active, please play respectfully."
-					},
-					{
-						"type": "wait",
-						"time": "2s"
 					},
 					{
 						"type": "message",
@@ -469,7 +465,7 @@ window.RECON_PREVIEW_DATA = {
 					{
 						"type": "message",
 						"to": "all",
-						"text": "Server is going to restart in \u003c 2 minutes, you will be kicked."
+						"text": "Server is going to restart, you will be kicked in \u003c 2 minutes."
 					},
 					{
 						"type": "wait",
@@ -495,6 +491,29 @@ window.RECON_PREVIEW_DATA = {
 					},
 					{
 						"type": "unlock"
+					}
+				]
+			},
+			{
+				"name": "!restart",
+				"trigger": "chat",
+				"steps": [
+					{
+						"type": "if",
+						"branches": [
+							{
+								"subject": "message",
+								"op": "exact",
+								"value": "!restarts",
+								"steps": [
+									{
+										"type": "message",
+										"to": "player",
+										"text": "Server restarts at 00:00, 06:00, 12:00, 18:00 EST"
+									}
+								]
+							}
+						]
 					}
 				]
 			}
