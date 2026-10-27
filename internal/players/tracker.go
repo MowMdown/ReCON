@@ -104,7 +104,7 @@ func StartTracker() {
 	events, _ := rcon.Events.Subscribe(256)
 	go func() {
 		for ev := range events {
-			if p, ok := trackServerEvent(ev); ok {
+			if p, ok := Track(ev); ok {
 				playersJoined([]battleye.Player{p})
 			}
 			if ev.Kind == battleye.EventConnect {
@@ -115,10 +115,10 @@ func StartTracker() {
 	go watchLobbyPlayers()
 }
 
-// trackServerEvent updates the tracker (and the database) for one server message.
-// It returns a player who has finished joining (see playersPolledTracker),
+// Track updates the tracker (and the database) for one server message.
+// It returns a player who has finished joining (see ApplyPoll),
 // for the rare GUID line that arrives after they have loaded in.
-func trackServerEvent(ev battleye.ServerEvent) (joined battleye.Player, ok bool) {
+func Track(ev battleye.ServerEvent) (joined battleye.Player, ok bool) {
 	switch ev.Kind {
 	case battleye.EventConnect, battleye.EventGUID, battleye.EventKick, battleye.EventDisconnect, battleye.EventChat:
 	default:
@@ -252,11 +252,11 @@ func closeTrackedSession(t *trackedPlayer, at time.Time) {
 	}
 }
 
-// playersPolledTracker reconciles the tracker with a `players` poll that
+// ApplyPoll reconciles the tracker with a `players` poll that
 // was sent at sentAt. A tracked player it doesn't list (and no disconnect
 // line came for) is closed at sentAt. It returns the players who were seen
 // connecting and have now finished loading in, for the join flows.
-func playersPolledTracker(players []battleye.Player, sentAt time.Time) (joined []battleye.Player) {
+func ApplyPoll(players []battleye.Player, sentAt time.Time) (joined []battleye.Player) {
 	tracker.Lock()
 	defer tracker.Unlock()
 	tracker.known = true
@@ -378,4 +378,14 @@ func Warn(guid string, threshold int) (count int, reached, ok bool) {
 		}
 	}
 	return 0, false, false
+}
+
+// Reset forgets every tracked and remembered player, as when ReCON starts.
+// The database is left as it is.
+func Reset() {
+	tracker.Lock()
+	defer tracker.Unlock()
+	tracker.byID, tracker.ended = map[int]*trackedPlayer{}, map[string]time.Time{}
+	tracker.away, tracker.recent, tracker.known = map[string]*trackedPlayer{}, map[string]*trackedPlayer{}, false
+	tracker.downAt, tracker.graceUntil = time.Time{}, time.Time{}
 }

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/MowMdown/ReCON/internal/battleye"
-	"github.com/MowMdown/ReCON/internal/battleye/betest"
+	"github.com/MowMdown/ReCON/internal/test"
 )
 
 // resetWeb starts a test with no web session and no wait before the
@@ -22,7 +22,7 @@ func resetWeb(t *testing.T) {
 
 func TestReconnectWebOnlySwitchesOnSuccess(t *testing.T) {
 	resetWeb(t)
-	a, b := betest.New(t), betest.New(t)
+	a, b := test.NewServer(t), test.NewServer(t)
 	a.SetPassword("apw")
 	b.SetPassword("bpw")
 	addrA, addrB := a.Addr(), b.Addr()
@@ -87,7 +87,7 @@ func TestConnectTriesOnce(t *testing.T) {
 	oldWait := battleye.ReloginReplyWait
 	t.Cleanup(func() { battleye.ReloginReplyWait = oldWait })
 	battleye.ReloginReplyWait = 50 * time.Millisecond
-	f := betest.New(t)
+	f := test.NewServer(t)
 	f.SetSilent(true)
 	SetTarget("127.0.0.1:1", "pw")
 	for press := 1; press <= 3; press++ {
@@ -110,7 +110,7 @@ func TestConnectTriesOnce(t *testing.T) {
 // login logs its #unlock and asks for a players and bans poll.
 func TestSentCommandsGoInConsoleLog(t *testing.T) {
 	resetWeb(t)
-	f := betest.New(t)
+	f := test.NewServer(t)
 	SetTarget(f.Addr(), "pw")
 	LoginPollDue.Store(false)
 	t.Cleanup(func() { LoginPollDue.Store(false) })

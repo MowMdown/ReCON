@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/MowMdown/ReCON/internal/store"
-	"github.com/MowMdown/ReCON/internal/store/storetest"
+	"github.com/MowMdown/ReCON/internal/test"
 )
 
 // previousSchema is the tables as the previous release created them.
@@ -54,14 +54,14 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 		sql  string
 		args []any
 	}{
-		{"INSERT INTO players (guid, username, last_ip, first_seen, last_seen, total_playtime_seconds, role) VALUES (?, 'Survivor', '1.2.3.4', ?, ?, 3600, 1)", []any{storetest.GUID1, t0, t0}},
+		{"INSERT INTO players (guid, username, last_ip, first_seen, last_seen, total_playtime_seconds, role) VALUES (?, 'Survivor', '1.2.3.4', ?, ?, 3600, 1)", []any{test.GUID1, t0, t0}},
 		{"INSERT INTO players (guid, username, last_ip, first_seen, last_seen) VALUES ('-', 'New Guy (Lobby)', '5.6.7.8', ?, ?)", []any{t0, t0}},
-		{"INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds) VALUES (?, '1.2.3.4', ?, ?, 3600)", []any{storetest.GUID1, t0, t0.Add(time.Hour)}},
+		{"INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds) VALUES (?, '1.2.3.4', ?, ?, 3600)", []any{test.GUID1, t0, t0.Add(time.Hour)}},
 		{"INSERT INTO session_history (guid, ip, connected_at, disconnected_at, duration_seconds) VALUES ('-', '5.6.7.8', ?, ?, 60)", []any{t0, t0.Add(time.Minute)}},
 		{"INSERT INTO player_ips (guid, ip, first_seen, last_seen) VALUES ('-', '5.6.7.8', ?, ?)", []any{t0, t0}},
-		{"INSERT INTO active_sessions (guid, ip, connected_at) VALUES (?, '1.2.3.4', ?)", []any{storetest.GUID1, t0}},
+		{"INSERT INTO active_sessions (guid, ip, connected_at) VALUES (?, '1.2.3.4', ?)", []any{test.GUID1, t0}},
 		{"INSERT INTO chat_messages (at, guid, direction, line) VALUES (?, '-', 'in', '(Global) New Guy: hi')", []any{t0}},
-		{"INSERT INTO bans (guid, player_name, ip, reason, perm) VALUES (?, 'Cheater', '9.9.9.9', 'aimbot', 1)", []any{storetest.GUID2}},
+		{"INSERT INTO bans (guid, player_name, ip, reason, perm) VALUES (?, 'Cheater', '9.9.9.9', 'aimbot', 1)", []any{test.GUID2}},
 		{"INSERT INTO bans (guid, player_name, ip, reason, perm) VALUES ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'Toxic', '8.8.8.8', 'spam', 0)", nil},
 	} {
 		if _, err := old.Exec(q.sql, q.args...); err != nil {
@@ -89,7 +89,7 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 		}
 	}
 	// Real players keep their history.
-	d, err := db.GetPlayerDetails(storetest.GUID1)
+	d, err := db.GetPlayerDetails(test.GUID1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,10 +97,10 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 		t.Fatalf("details after upgrade = %+v", d)
 	}
 	// An old open session (no player number, no loaded_at) closes normally.
-	if _, err := db.ClosePlayerSession(storetest.GUID1, t0.Add(30*time.Minute), store.EndDisconnected); err != nil {
+	if _, err := db.ClosePlayerSession(test.GUID1, t0.Add(30*time.Minute), store.EndDisconnected); err != nil {
 		t.Fatal(err)
 	}
-	if h := storetest.History(t, db, storetest.GUID1); len(h) != 2 || h[1].Duration != 1800 || h[1].Loaded || h[1].Ended != store.EndDisconnected {
+	if h := test.History(t, db, test.GUID1); len(h) != 2 || h[1].Duration != 1800 || h[1].Loaded || h[1].Ended != store.EndDisconnected {
 		t.Fatalf("history after upgrade = %+v", h)
 	}
 	// Old bans: the permanent one stays; the timed one is dropped from the
@@ -109,13 +109,13 @@ func TestUpgradeFromPreviousRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st := states[storetest.GUID2]; !st.Banned || !st.Perm {
+	if st := states[test.GUID2]; !st.Banned || !st.Perm {
 		t.Errorf("permanent ban = %+v", st)
 	}
 	if st := states["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]; st.Banned {
 		t.Errorf("timed ban still stored: %+v", st)
 	}
-	if n := storetest.CountRows(t, db, "bans"); n != 1 {
+	if n := test.CountRows(t, db, "bans"); n != 1 {
 		t.Errorf("%d rows in bans, want 1", n)
 	}
 	// Opening it again (the next restart) changes nothing and doesn't fail.

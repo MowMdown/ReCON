@@ -1,5 +1,4 @@
-// Package storetest has helpers for tests that need a player database.
-package storetest
+package test
 
 import (
 	"path/filepath"
@@ -15,8 +14,8 @@ const (
 	GUID2 = "fedcba9876543210fedcba9876543210"
 )
 
-// Open opens a fresh database in a temp folder, closed when the test ends.
-func Open(t testing.TB) *store.Database {
+// OpenDB opens a fresh database in a temp folder, closed when the test ends.
+func OpenDB(t testing.TB) *store.Database {
 	t.Helper()
 	db, err := store.OpenPlayerDatabase(filepath.Join(t.TempDir(), "players.db"))
 	if err != nil {

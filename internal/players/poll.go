@@ -19,7 +19,7 @@ func PollNow() bool {
 	if err != nil || !acked {
 		return false
 	}
-	playersJoined(playersPolledTracker(battleye.ParsePlayersReply(out), sentAt))
+	playersJoined(ApplyPoll(battleye.ParsePlayersReply(out), sentAt))
 	if anyoneInLobby() {
 		wakeLobbyWatcher() // someone was already loading
 	}

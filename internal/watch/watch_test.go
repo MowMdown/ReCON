@@ -7,21 +7,20 @@ import (
 
 	"github.com/MowMdown/ReCON/internal/bans"
 	"github.com/MowMdown/ReCON/internal/battleye"
-	"github.com/MowMdown/ReCON/internal/battleye/betest"
 	"github.com/MowMdown/ReCON/internal/players"
 	"github.com/MowMdown/ReCON/internal/rcon"
 	"github.com/MowMdown/ReCON/internal/store"
-	"github.com/MowMdown/ReCON/internal/store/storetest"
+	"github.com/MowMdown/ReCON/internal/test"
 )
 
 // testDB opens a fresh database for the packages the server watch uses,
 // and resets the player tracker.
 func testDB(t *testing.T) *store.Database {
 	t.Helper()
-	db := storetest.Open(t)
+	db := test.OpenDB(t)
 	players.SetDatabase(db)
 	bans.SetDatabase(db)
-	players.ResetForTesting()
+	players.Reset()
 	return db
 }
 
@@ -44,7 +43,7 @@ func resetWeb(t *testing.T) {
 func TestOneLoginPerHeartbeat(t *testing.T) {
 	testDB(t)
 	resetWeb(t)
-	f := betest.New(t)
+	f := test.NewServer(t)
 	rcon.SetTarget(f.Addr(), "pw")
 	oldBeat, oldPoll, oldReply, oldSettle := heartbeatWait, players.PollWait, battleye.ReloginReplyWait, rcon.ReloginSettle
 	t.Cleanup(func() {
@@ -115,7 +114,7 @@ func TestOneLoginPerHeartbeat(t *testing.T) {
 func TestServerWatch(t *testing.T) {
 	testDB(t)
 	resetWeb(t)
-	f := betest.New(t)
+	f := test.NewServer(t)
 	rcon.SetTarget(f.Addr(), "pw")
 	oldBeat, oldPoll, oldReply := heartbeatWait, players.PollWait, battleye.ReloginReplyWait
 	t.Cleanup(func() {

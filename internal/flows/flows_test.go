@@ -13,24 +13,38 @@ import (
 	"github.com/MowMdown/ReCON/internal/players"
 	"github.com/MowMdown/ReCON/internal/rcon"
 	"github.com/MowMdown/ReCON/internal/store"
-	"github.com/MowMdown/ReCON/internal/store/storetest"
+	"github.com/MowMdown/ReCON/internal/test"
 )
 
 // testDB opens a fresh database for this package and the ones flows use,
 // and resets the player tracker.
 func testDB(t *testing.T) *store.Database {
 	t.Helper()
-	db := storetest.Open(t)
+	db := test.OpenDB(t)
 	SetDatabase(db)
 	players.SetDatabase(db)
 	bans.SetDatabase(db)
-	players.ResetForTesting()
+	players.Reset()
 	return db
 }
 
 // setOnline puts players in the tracker as if the console log and a poll
 // had told it about them (no database writes).
-func setOnline(online ...battleye.Player) { players.SetOnlineForTesting(online...) }
+func setOnline(online ...battleye.Player) {
+	players.Reset()
+	now := time.Now()
+	for _, p := range online {
+		name := battleye.BareName(p.Name)
+		track(fmt.Sprintf("Player #%d %s (127.0.0.1:2304) connected", p.ID, name), now)
+		if p.GUID != "" {
+			track(fmt.Sprintf("Player #%d %s - BE GUID: %s", p.ID, name, p.GUID), now)
+		}
+	}
+	players.ApplyPoll(online, now.Add(time.Millisecond))
+}
+
+// track feeds one server message to the player tracker as if it arrived at `at`.
+func track(text string, at time.Time) { players.Track(battleye.ParseServerMessage(text, at)) }
 
 func TestEvalCond(t *testing.T) {
 	cases := []struct {
@@ -44,8 +58,8 @@ func TestEvalCond(t *testing.T) {
 		{"player_role", "ne", "0", "1", true},
 		{"player_id", "eq", "3", "03", true},
 		{"player_id", "ne", "3", "4", true},
-		{"player_guid", "eq", strings.ToUpper(storetest.GUID1), storetest.GUID1, true},
-		{"player_guid", "ne", storetest.GUID1, storetest.GUID1, false},
+		{"player_guid", "eq", strings.ToUpper(test.GUID1), test.GUID1, true},
+		{"player_guid", "ne", test.GUID1, test.GUID1, false},
 		{"player_name", "eq", "survivor", "Survivor", true},
 		{"player_name", "has", "ADMIN", "TheAdminGuy", true},
 		{"player_name", "wild", "*admin*", "TheAdminGuy", true},
@@ -236,8 +250,8 @@ func TestForEachKicksOnlyMatchingPlayers(t *testing.T) {
 	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
 	t.Cleanup(func() { sendCommand = oldSend })
 	setOnline(
-		battleye.Player{ID: 4, GUID: storetest.GUID1, Name: "Laggy", Ping: 820},
-		battleye.Player{ID: 1, GUID: storetest.GUID2, Name: "Fine", Ping: 40},
+		battleye.Player{ID: 4, GUID: test.GUID1, Name: "Laggy", Ping: 820},
+		battleye.Player{ID: 1, GUID: test.GUID2, Name: "Fine", Ping: 40},
 		battleye.Player{ID: 7, GUID: "", Name: "Loading (Lobby)", Ping: 999}, // not verified yet: skipped
 		battleye.Player{ID: 2, GUID: "0000000000000000000000000000beef", Name: "Edge", Ping: 500},
 		battleye.Player{ID: 9, GUID: "0000000000000000000000000000cafe", Name: "Awful", Ping: 1500},
@@ -280,17 +294,17 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
 	t.Cleanup(func() { sendCommand = oldSend })
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	players.TrackLineForTesting("Player #3 Survivor (1.2.3.4:2304) connected", t0)
-	players.TrackLineForTesting("Player #3 Survivor - BE GUID: "+storetest.GUID1, t0)
-	players.TrackLineForTesting("Player #5 Calm (5.6.7.8:2304) connected", t0)
-	players.TrackLineForTesting("Player #5 Calm - BE GUID: "+storetest.GUID2, t0)
+	track("Player #3 Survivor (1.2.3.4:2304) connected", t0)
+	track("Player #3 Survivor - BE GUID: "+test.GUID1, t0)
+	track("Player #5 Calm (5.6.7.8:2304) connected", t0)
+	track("Player #5 Calm - BE GUID: "+test.GUID2, t0)
 	// chat sends a line through the event hub, as the server does, so it
 	// gets a real Seq, then to the tracker.
 	chat := func(text string) {
 		ev := battleye.ParseServerMessage(text, t0)
 		rcon.Events.Publish(ev)
 		ev.Seq = rcon.Events.LastSeq()
-		players.TrackEventForTesting(ev)
+		players.Track(ev)
 	}
 	const flowID = 42
 	t.Cleanup(func() { forEachMarks.Lock(); delete(forEachMarks.byFlow, flowID); forEachMarks.Unlock() })
@@ -343,8 +357,8 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 	}
 
 	// A player's lines go when they leave.
-	players.TrackLineForTesting("Player #3 Survivor disconnected", t0.Add(time.Hour))
-	if _, ok := players.LatestChatOf(storetest.GUID1); ok {
+	track("Player #3 Survivor disconnected", t0.Add(time.Hour))
+	if _, ok := players.LatestChatOf(test.GUID1); ok {
 		t.Fatal("a player who left still has session lines")
 	}
 }
@@ -399,7 +413,7 @@ func TestWarningCommand(t *testing.T) {
 	db := testDB(t)
 	const modGUID = "0000000000000000000000000000a11a"
 	now := time.Now()
-	for _, p := range []battleye.Player{{ID: 1, GUID: modGUID, Name: "Mod"}, {ID: 4, GUID: storetest.GUID1, Name: "Rowdy"}, {ID: 6, GUID: storetest.GUID2, Name: "Other"}} {
+	for _, p := range []battleye.Player{{ID: 1, GUID: modGUID, Name: "Mod"}, {ID: 4, GUID: test.GUID1, Name: "Rowdy"}, {ID: 6, GUID: test.GUID2, Name: "Other"}} {
 		if err := db.OpenPlayerSession(p.GUID, p.Name, "1.2.3.4", p.ID, now); err != nil {
 			t.Fatal(err)
 		}
@@ -408,7 +422,7 @@ func TestWarningCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	mod := battleye.Player{ID: 1, GUID: modGUID, Name: "Mod"}
-	setOnline(mod, battleye.Player{ID: 4, GUID: storetest.GUID1, Name: "Rowdy"}, battleye.Player{ID: 6, GUID: storetest.GUID2, Name: "Other"})
+	setOnline(mod, battleye.Player{ID: 4, GUID: test.GUID1, Name: "Rowdy"}, battleye.Player{ID: 6, GUID: test.GUID2, Name: "Other"})
 
 	var mu sync.Mutex
 	var said, kicked, banned []string
@@ -469,7 +483,7 @@ func TestWarningCommand(t *testing.T) {
 	if len(s) != 3 || s[0] != "4: Warning 2/2 from Mod: still spamming" || s[2] != "1: Rowdy reached 2 warnings and has been banned: still spamming" {
 		t.Fatalf("second warning said %q", s)
 	}
-	if fmt.Sprint(b) != fmt.Sprint([]string{storetest.GUID1 + " 0 still spamming"}) || k != nil {
+	if fmt.Sprint(b) != fmt.Sprint([]string{test.GUID1 + " 0 still spamming"}) || k != nil {
 		t.Fatalf("at the threshold: banned %q, kicked %q; want a permanent ban with the last reason", b, k)
 	}
 	// The count starts again after the threshold.
@@ -483,8 +497,8 @@ func TestWarningCommand(t *testing.T) {
 	w = settings["warning"]
 	w.Threshold, w.Action = 1, "kick"
 	settings["warning"] = w
-	handleChatCommand(battleye.Player{ID: 6, GUID: storetest.GUID2, Name: "Other"}, RolePlayer, "!warning 1 abuse")
-	handleChatCommand(mod, roleMod, "!warning "+codeOf(storetest.GUID2)+" teamkilling")
+	handleChatCommand(battleye.Player{ID: 6, GUID: test.GUID2, Name: "Other"}, RolePlayer, "!warning 1 abuse")
+	handleChatCommand(mod, roleMod, "!warning "+codeOf(test.GUID2)+" teamkilling")
 	wait()
 	if _, k, b := take(); fmt.Sprint(k) != fmt.Sprint([]string{"6 teamkilling"}) || b != nil {
 		t.Fatalf("threshold 1, kick: kicked %q, banned %q", k, b)
@@ -547,7 +561,7 @@ func TestFlowCounter(t *testing.T) {
 	x := &job{run: run, ctx: ctx}
 	pass := func(lagPing, flakyPing int) []string {
 		sent = nil
-		setOnline(battleye.Player{ID: 4, GUID: storetest.GUID1, Name: "Laggy", Ping: lagPing}, battleye.Player{ID: 6, GUID: storetest.GUID2, Name: "Flaky", Ping: flakyPing})
+		setOnline(battleye.Player{ID: 4, GUID: test.GUID1, Name: "Laggy", Ping: lagPing}, battleye.Player{ID: 6, GUID: test.GUID2, Name: "Flaky", Ping: flakyPing})
 		if !x.execFlowSteps(pingCounterFlow()) {
 			t.Fatal("the run ended early")
 		}

@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/MowMdown/ReCON/internal/battleye"
-	"github.com/MowMdown/ReCON/internal/store/storetest"
+	"github.com/MowMdown/ReCON/internal/test"
 )
 
 func TestOpenDatabasePragmasOnEveryConnection(t *testing.T) {
-	db := storetest.Open(t)
+	db := test.OpenDB(t)
 	ctx := context.Background()
 	// Hold two connections at once so they are different ones from the pool.
 	c1, err := db.Conn(ctx)
@@ -37,7 +37,7 @@ func TestOpenDatabasePragmasOnEveryConnection(t *testing.T) {
 			t.Errorf("connection %d: foreign_keys=%d busy_timeout=%d", i, fk, timeout)
 		}
 	}
-	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT role FROM players WHERE lower(guid) = lower(?)", storetest.GUID1)
+	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT role FROM players WHERE lower(guid) = lower(?)", test.GUID1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,17 +57,17 @@ func TestOpenDatabasePragmasOnEveryConnection(t *testing.T) {
 }
 
 func TestSyncBans(t *testing.T) {
-	db := storetest.Open(t)
+	db := test.OpenDB(t)
 	read := time.Unix(1_700_000_000, 0)
 	readd, err := db.SyncBansFromServer([]battleye.Ban{
-		{Index: 0, GUID: storetest.GUID1, Minutes: "perm", Perm: true, Reason: "cheating"},
-		{Index: 1, GUID: storetest.GUID2, Minutes: "60", Reason: "toxic"},
-		{Index: 2, GUID: storetest.GUID2, Minutes: "30", Reason: "toxic"}, // listed twice: the longer one counts
+		{Index: 0, GUID: test.GUID1, Minutes: "perm", Perm: true, Reason: "cheating"},
+		{Index: 1, GUID: test.GUID2, Minutes: "60", Reason: "toxic"},
+		{Index: 2, GUID: test.GUID2, Minutes: "30", Reason: "toxic"}, // listed twice: the longer one counts
 	}, read)
 	if err != nil || len(readd) != 0 {
 		t.Fatalf("first sync: readd=%v err=%v", readd, err)
 	}
-	if n := storetest.CountRows(t, db, "bans"); n != 1 {
+	if n := test.CountRows(t, db, "bans"); n != 1 {
 		t.Fatalf("%d rows in bans, want only the permanent ban", n)
 	}
 	next, _ := db.NextBanExpiry()
@@ -77,8 +77,8 @@ func TestSyncBans(t *testing.T) {
 
 	// Read again 10s later: the expiry doesn't jitter.
 	if _, err := db.SyncBansFromServer([]battleye.Ban{
-		{Index: 0, GUID: storetest.GUID1, Minutes: "perm", Perm: true, Reason: "cheating"},
-		{Index: 1, GUID: storetest.GUID2, Minutes: "59", Reason: "toxic"},
+		{Index: 0, GUID: test.GUID1, Minutes: "perm", Perm: true, Reason: "cheating"},
+		{Index: 1, GUID: test.GUID2, Minutes: "59", Reason: "toxic"},
 	}, read.Add(10*time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -93,26 +93,26 @@ func TestSyncBans(t *testing.T) {
 	if n, _ := db.ExpireTimedBans(read.Add(time.Hour)); n != 1 {
 		t.Fatalf("expired %d bans at the hour, want 1", n)
 	}
-	if st, _ := db.GetBanState(storetest.GUID2); st.Banned {
+	if st, _ := db.GetBanState(test.GUID2); st.Banned {
 		t.Fatal("expired ban still shows as banned")
 	}
 
 	// A timed ban BattlEye stops listing is deleted; a permanent one is kept
 	// and handed back to be re-added.
-	if err := db.RecordPlayerBan(storetest.GUID2, "Someone", "1.2.3.4", "spam", false, read.Add(2*time.Hour)); err != nil {
+	if err := db.RecordPlayerBan(test.GUID2, "Someone", "1.2.3.4", "spam", false, read.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	readd, err = db.SyncBansFromServer(nil, read.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(readd) != 1 || readd[0].GUID != storetest.GUID1 || readd[0].Reason != "cheating" {
+	if len(readd) != 1 || readd[0].GUID != test.GUID1 || readd[0].Reason != "cheating" {
 		t.Fatalf("readd = %+v, want the permanent ban", readd)
 	}
-	if st, _ := db.GetBanState(storetest.GUID1); !st.Banned || !st.Perm {
+	if st, _ := db.GetBanState(test.GUID1); !st.Banned || !st.Perm {
 		t.Fatalf("permanent ban state = %+v", st)
 	}
-	if st, _ := db.GetBanState(storetest.GUID2); st.Banned {
+	if st, _ := db.GetBanState(test.GUID2); st.Banned {
 		t.Fatal("timed ban missing from BattlEye was kept")
 	}
 	list, err := db.ListAllBans()

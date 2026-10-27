@@ -1,5 +1,4 @@
-// Package betest has a fake BattlEye RCON server for tests.
-package betest
+package test
 
 import (
 	"net"
@@ -23,8 +22,8 @@ type Server struct {
 	beats    int // empty commands (heartbeats)
 }
 
-// New starts a fake server, stopped when the test ends.
-func New(t testing.TB) *Server {
+// NewServer starts a fake server, stopped when the test ends.
+func NewServer(t testing.TB) *Server {
 	t.Helper()
 	c, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {

@@ -11,26 +11,25 @@ import (
 	"time"
 
 	"github.com/MowMdown/ReCON/internal/bans"
-	"github.com/MowMdown/ReCON/internal/battleye/betest"
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/players"
 	"github.com/MowMdown/ReCON/internal/rcon"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
-	"github.com/MowMdown/ReCON/internal/store/storetest"
+	"github.com/MowMdown/ReCON/internal/test"
 )
 
 // testDB opens a fresh database for the pages and the packages they use,
 // and resets the player tracker.
 func testDB(t *testing.T) *store.Database {
 	t.Helper()
-	db := storetest.Open(t)
+	db := test.OpenDB(t)
 	SetDatabase(db)
 	flows.SetDatabase(db)
 	players.SetDatabase(db)
 	bans.SetDatabase(db)
 	steam.SetDatabase(db)
-	players.ResetForTesting()
+	players.Reset()
 	return db
 }
 
@@ -76,7 +75,7 @@ func TestRootRedirectsToPlayers(t *testing.T) {
 func TestRconSettingsPage(t *testing.T) {
 	testDB(t)
 	resetWeb(t)
-	f := betest.New(t)
+	f := test.NewServer(t)
 	f.SetPassword("secret")
 	host, port, _ := net.SplitHostPort(f.Addr())
 	t.Setenv("RCON_HOST", "10.9.9.9")
