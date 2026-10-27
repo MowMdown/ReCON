@@ -21,6 +21,9 @@
 .toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow-x: auto; }
 .toolbar .flowbtns button { flex: none; }
+/* Room under the buttons for scrollbars drawn over the content (macOS), so
+   the scrollbar shows below the buttons rather than over them. */
+.toolbar .flowbtns { padding-bottom: 12px; }
 .toolbar .flowbtns, .tablewrap { scrollbar-color: #555 #1b1b1b; } /* dark scrollbars */
 .quick { display: flex; align-items: center; gap: 6px; margin-left: auto; position: relative; flex: none; }
 .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
@@ -45,9 +48,12 @@
    sideways under Actions, which stays put. 1280px = Flow 340 + the fixed
    columns 940. */
 .tablewrap { overflow-x: auto; overscroll-behavior-x: none; } /* no bounce: it would drag Actions along */
+/* Room under the table for scrollbars drawn over the content (macOS), so
+   the last row's Actions doesn't cover the scrollbar. */
+.tablewrap { padding-bottom: 12px; }
 #flowsTable { min-width: 1280px; }
 /* Actions stays in view: the other columns scroll underneath it. */
-#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; right: 0; z-index: 1; background: #111; }
+#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; right: 0; background: #111; }
 /* A command's result ("#lock sent"), just above the Commands button. Placed
    outside the row's flow, so it doesn't push the buttons around. */
 #quickMsg { position: absolute; right: 0; bottom: 100%; z-index: 1; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }

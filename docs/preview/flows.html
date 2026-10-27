@@ -65,6 +65,8 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow-x: auto; }
 .toolbar .flowbtns button { flex: none; }
+ 
+.toolbar .flowbtns { padding-bottom: 12px; }
 .toolbar .flowbtns, .tablewrap { scrollbar-color: #555 #1b1b1b; }  
 .quick { display: flex; align-items: center; gap: 6px; margin-left: auto; position: relative; flex: none; }
 .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
@@ -86,9 +88,11 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .quick button { margin-right: 0; }
  
 .tablewrap { overflow-x: auto; overscroll-behavior-x: none; }  
+ 
+.tablewrap { padding-bottom: 12px; }
 #flowsTable { min-width: 1280px; }
  
-#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; right: 0; z-index: 1; background: #111; }
+#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; right: 0; background: #111; }
  
 #quickMsg { position: absolute; right: 0; bottom: 100%; z-index: 1; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
 .run { margin-top: 24px; }
