@@ -608,11 +608,27 @@ async function refresh() {
 				'<td>' + esc(next) + '</td>' +
 				'<td class="actions">' + buttons + '</td></tr>';
 		}).join('');
-		document.getElementById('runs').innerHTML = flows.filter(function(f) { return runs[f.id]; }).map(function(f) {
+		let runsBox = document.getElementById('runs');
+		let runsHtml = flows.filter(function(f) { return runs[f.id]; }).map(function(f) {
 			let x = runs[f.id];
-			return '<div class="run"><b>' + esc(f.name) + '</b> - ' + statusCell(x) +
+			return '<div class="run" data-id="' + f.id + '"><b>' + esc(f.name) + '</b> - ' + statusCell(x) +
 				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
 		}).join('');
+		// Rebuild the run logs only when they changed, and keep where each one
+		// was scrolled to (at the bottom, it follows new lines).
+		if (runsHtml !== runsBox.dataset.html) {
+			let kept = {};
+			runsBox.querySelectorAll('.run').forEach(function(el) {
+				let pre = el.querySelector('pre.log');
+				kept[el.dataset.id] = { top: pre.scrollTop, bottom: pre.scrollHeight - pre.scrollTop - pre.clientHeight < 4 };
+			});
+			runsBox.innerHTML = runsHtml;
+			runsBox.dataset.html = runsHtml;
+			runsBox.querySelectorAll('.run').forEach(function(el) {
+				let k = kept[el.dataset.id], pre = el.querySelector('pre.log');
+				if (k) pre.scrollTop = k.bottom ? pre.scrollHeight : k.top;
+			});
+		}
 	} catch(e) {
 		setStatusCount(''); // the status bar shows that ReCON can't be reached
 	}
