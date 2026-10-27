@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1897,5 +1898,37 @@ func TestShutdownKeepsSession(t *testing.T) {
 	// 21:45:31 to 22:05:51, less the 88s away (22:03:05 to 22:04:33).
 	if len(h) != 1 || !h[0].connected.Equal(t0) || h[0].duration != 20*60+20-88 {
 		t.Fatalf("session = %+v, want one from 21:45:31 lasting %ds", h, 20*60+20-88)
+	}
+}
+
+// TestKickAllRestartKeepsSessions: a restart flow's Kick everyone kicks
+// each player (BattlEye's kick line, then the disconnect) shortly before
+// #shutdown; players back after the restart keep their sessions.
+func TestKickAllRestartKeepsSessions(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Date(2026, 10, 26, 21, 0, 0, 0, time.UTC)
+	players := []struct{ id, name, guid, ip string }{{"0", "Alpha", testGUID, "1.1.1.1"}, {"1", "Bravo", testGUID2, "2.2.2.2"}}
+	for _, p := range players {
+		line("Player #"+p.id+" "+p.name+" ("+p.ip+":2304) connected", t0)
+		line("Player #"+p.id+" "+p.name+" - BE GUID: "+p.guid, t0)
+	}
+	kickall := t0.Add(time.Hour)
+	for _, p := range players {
+		line("Player #"+p.id+" "+p.name+" ("+p.guid+") has been kicked by BattlEye: Admin Kick (Server restarting)", kickall)
+		line("Player #"+p.id+" "+p.name+" disconnected", kickall)
+	}
+	down := kickall.Add(30 * time.Second) // Wait 30s, then #shutdown
+	serverWentDown(down)
+	serverLoggedIn(down.Add(90 * time.Second))
+	back := down.Add(2 * time.Minute)
+	for i, p := range players {
+		id := strconv.Itoa(i + 5)
+		line("Player #"+id+" "+p.name+" ("+p.ip+":2304) connected", back)
+		line("Player #"+id+" "+p.name+" - BE GUID: "+p.guid, back)
+	}
+	for _, p := range players {
+		if h := history(t, db, p.guid); len(h) != 0 || countRows(t, db, "active_sessions") != 2 {
+			t.Fatalf("%s wasn't carried over after Kick everyone: history %+v", p.name, h)
+		}
 	}
 }
