@@ -40,7 +40,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	online, connected := onlinePlayersForPage()
 	offlinePlayers, err := database.ListOfflinePlayers()
 	if err != nil {
-		log.Printf("error reading offline online from DB: %v", err)
+		log.Printf("error reading offline players from DB: %v", err)
 		offlinePlayers = []battleye.Player{}
 	}
 	if roles, err := database.AllPlayerRoles(); err == nil {
@@ -59,7 +59,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"connected":      connected,
-		"online":         online,
+		"players":        online,
 		"count":          len(online),
 		"offlinePlayers": offlinePlayers,
 		"bans":           bans.AllStatuses(),

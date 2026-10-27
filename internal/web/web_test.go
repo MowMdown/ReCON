@@ -198,3 +198,32 @@ func TestFlowAPIUsesMissingIDForNew(t *testing.T) {
 		t.Fatalf("negative id: %d", code)
 	}
 }
+
+// TestPageAPIKeys checks the JSON keys the pages read their lists from.
+func TestPageAPIKeys(t *testing.T) {
+	testDB(t)
+	if err := flows.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := flows.Save(flows.Flow{Name: "MOTD", Trigger: "manual", Steps: []flows.Step{{Type: "message", To: "all", Text: "hi"}}}, true); err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string) map[string]any {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		var out map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return out
+	}
+	if list, ok := get("/api/flows")["flows"].([]any); !ok || len(list) != 1 {
+		t.Fatalf("/api/flows has no flows list: %v", get("/api/flows"))
+	}
+	for _, key := range []string{"players", "offlinePlayers", "bans", "connected", "count"} {
+		if _, ok := get("/api/players")[key]; !ok {
+			t.Errorf("/api/players has no %q", key)
+		}
+	}
+}

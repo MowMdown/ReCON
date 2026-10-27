@@ -18,7 +18,7 @@ func handleFlowsList(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "list": list, "runs": flows.SnapshotRuns()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "flows": list, "runs": flows.SnapshotRuns()})
 }
 
 // handleFlowSave serves POST /api/flows: with "id" it updates that flow;
