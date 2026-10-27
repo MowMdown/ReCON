@@ -99,7 +99,9 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 .dim { color: #888; }
 /* Fixed size: a long note scrolls inside the box instead of growing it. */
 #noteInput { margin: 0; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.4; height: 28em; resize: none; overflow-y: auto; }
-#detChat { height: min(300px, 38vh); margin-bottom: 10px; }
+/* The Chat tab fills the panel: the log takes the room the message bar leaves. */
+.dpane.active[data-pane="chat"] { display: flex; flex-direction: column; height: 100%; }
+#detChat { flex: 1; min-height: 120px; margin-bottom: 10px; }
 #detChatInput:disabled { opacity: 0.5; }
 .notebar { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .notebar .count { font-size: 12px; color: #888; }
