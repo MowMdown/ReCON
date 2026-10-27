@@ -1,0 +1,253 @@
+{{define "style"}}<style>
+body { font-family: system-ui, sans-serif; margin: 24px; background: #111; color: #eee; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th, td { padding: 9px; height: 42px; border-bottom: 1px solid #333; text-align: left; font-size: 14px; vertical-align: middle; overflow: hidden; }
+th { font-size: 14px; }
+button { margin-right: 5px; padding: 6px 10px; }
+#status { margin-bottom: 15px; color: #aaa; }
+.modal { display: none; position: fixed; inset: 0; background: #0009; align-items: center; justify-content: center; }
+.box { background: #222; padding: 20px; border-radius: 8px; width: min(420px, 90vw); }
+input, textarea { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; background: #111; color: #eee; border: 1px solid #555; }
+/* Text fields: no browser focus highlight; the blinking cursor shows which
+   one is active. */
+input:focus, textarea:focus { outline: none; }
+.buttons { text-align: right; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
+nav { margin-bottom: 16px; }
+nav a { color: #8ab4f8; margin-right: 16px; text-decoration: none; }
+nav a.active { color: #eee; font-weight: bold; }
+nav a#resetCols { float: right; margin-right: 0; color: #888; font-size: 13px; }
+th[draggable="true"] { cursor: grab; user-select: none; }
+th.dragging { opacity: 0.4; }
+th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
+th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+.statusbar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; font-size: 13px; color: #aaa; }
+/* Every page's title row: the title, plus any buttons on the right. Same
+   spacing on every page: no title margins, 16px below the row. */
+.top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.top h1 { margin: 0; }
+.top button { margin-right: 0; }
+.statusbar b { font-weight: 600; }
+.st.connected { color: #81c995; }
+.st.retrying { color: #fdd663; }
+.st.unavailable { color: #f28b82; }
+.statusbar .retry { color: #777; font-size: 12px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+/* Pick dialogs (Import and Export on the Flows and Server Bans pages): a list with a checkbox each */
+.box.importbox { width: min(560px, 95vw); max-height: 88vh; display: flex; flex-direction: column; box-sizing: border-box; }
+.importbox h2 { margin: 0 0 6px; }
+.importbox .intro { margin: 0 0 12px; font-size: 13px; color: #aaa; }
+.importbox input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; flex: none; }
+.importbox label.pick { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #333; cursor: pointer; }
+.importbox label.pick:hover { background: #2a2a2a; }
+.importbox label.all { border-bottom: 1px solid #555; font-weight: 600; }
+.importlist { overflow-y: auto; min-height: 0; flex: 1; }
+.importbox .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
+.importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
+.importbox .buttons { margin-top: 12px; flex: none; }
+</style>{{end}}
+
+{{define "statusbar"}}<div class="statusbar">
+	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
+	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
+</div>
+<script>
+// Status bar shown on every page. RCON is the game server as ReCON's
+// 5-second player check last saw it (GET /api/status): Connected, or
+// "Unavailable - Retrying..." with a grey countdown to ReCON's next try
+// (ReCON keeps retrying in the background). WebGUI is whether this page can
+// reach ReCON: Retrying after a failed check, Unavailable after 3 in a row.
+// While ReCON can't be reached, RCON's state can't be known: it shows
+// Unavailable - Retrying... with no countdown.
+//
+// A page puts its count (players, bans, flows) after WebGUI's "Connected"
+// with setStatusCount(text), e.g. "Connected - 2 player(s) online". The
+// RCON line never shows a count. The count is only shown while WebGUI is
+// Connected; pass '' to clear it.
+var setStatusCount;
+(function () {
+	var fails = 0;
+	var text = { connected: 'Connected', retrying: 'Retrying ...', unavailable: 'Unavailable' };
+	var state = {}, count = {};
+	var retryAt = 0; // when ReCON next tries the game server (this browser's clock), 0 = unknown
+	function show(id, s) {
+		if (s) state[id] = s;
+		var el = document.getElementById(id);
+		if (!state[id]) return;
+		var label = text[state[id]] || state[id];
+		var cls = state[id];
+		if (id === 'rconStatus' && state[id] !== 'connected') {
+			// Not answering for one check or many: ReCON retries either way.
+			label = 'Unavailable - Retrying...';
+			cls = 'unavailable';
+		}
+		el.textContent = label + (state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
+		el.className = 'st ' + cls;
+	}
+	// tickRetry shows the countdown to the next try next to the RCON status.
+	function tickRetry() {
+		var el = document.getElementById('rconRetry');
+		if (state.rconStatus === 'connected' || !retryAt) { el.textContent = ''; return; }
+		var s = Math.ceil((retryAt - Date.now()) / 1000);
+		el.textContent = s > 0 ? 'next try in ' + (s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's') : 'trying now...';
+	}
+	setStatusCount = function (t) {
+		count.webStatus = t;
+		show('webStatus');
+	};
+	async function check() {
+		try {
+			var d = await (await fetch('/api/status', { cache: 'no-store' })).json();
+			fails = 0;
+			retryAt = typeof d.retryInMs === 'number' ? Date.now() + d.retryInMs : 0;
+			show('webStatus', 'connected');
+			show('rconStatus', d.rcon);
+		} catch (e) {
+			fails++;
+			retryAt = 0;
+			var state = fails >= 3 ? 'unavailable' : 'retrying';
+			show('webStatus', state);
+			show('rconStatus', state);
+		}
+		tickRetry();
+	}
+	check();
+	setInterval(check, 5000);
+	setInterval(tickRetry, 1000);
+})();
+</script>{{end}}
+
+{{define "reorder"}}<script>
+// Drag-and-drop column reordering for every table on the page that has a
+// <thead> and a <tbody id="...">. Drag a header onto another header to move
+// the column. The order is remembered per table in localStorage, and is
+// re-applied each time the table body is re-rendered by the polling code.
+(function () {
+	var resets = [];
+
+	function readOrder(storeKey, keys) {
+		try {
+			var saved = JSON.parse(localStorage.getItem(storeKey) || 'null');
+			if (Array.isArray(saved) && saved.length === keys.length &&
+				keys.every(function (k) { return saved.indexOf(k) !== -1; })) {
+				return saved;
+			}
+		} catch (e) {}
+		return keys.slice();
+	}
+
+	function saveOrder(storeKey, order, isDefault) {
+		try {
+			if (isDefault) { localStorage.removeItem(storeKey); }
+			else { localStorage.setItem(storeKey, JSON.stringify(order)); }
+		} catch (e) {}
+	}
+
+	function setup(table) {
+		var headRow = table.tHead && table.tHead.rows[0];
+		var body = table.tBodies[0];
+		if (!headRow || !body || !body.id) { return; }
+
+		var ths = Array.prototype.slice.call(headRow.cells);
+		var keys = ths.map(function (th) { return th.textContent.trim(); });
+		var storeKey = 'cols:' + location.pathname + ':' + body.id;
+		var order = readOrder(storeKey, keys);
+
+		var thByKey = {};
+		ths.forEach(function (th, i) { thByKey[keys[i]] = th; });
+
+		// <col> elements follow their columns so the widths move too.
+		var colgroup = table.querySelector('colgroup');
+		var cols = colgroup ? Array.prototype.slice.call(colgroup.children) : [];
+		var colByKey = null;
+		if (cols.length === keys.length) {
+			colByKey = {};
+			cols.forEach(function (c, i) { colByKey[keys[i]] = c; });
+		}
+
+		// Body rows are rebuilt in the default order by the page script, so each
+		// cell is tagged with its default column key the first time it is seen.
+		function reorderRow(row) {
+			var cells = Array.prototype.slice.call(row.children);
+			if (cells.length !== keys.length) { return; } // e.g. a one-cell message row
+			var map = {};
+			cells.forEach(function (c, i) {
+				if (!c.dataset.ck) { c.dataset.ck = keys[i]; }
+				map[c.dataset.ck] = c;
+			});
+			order.forEach(function (k) { if (map[k]) { row.appendChild(map[k]); } });
+		}
+
+		function applyBody() { Array.prototype.forEach.call(body.rows, reorderRow); }
+
+		function applyAll() {
+			order.forEach(function (k) { headRow.appendChild(thByKey[k]); });
+			if (colByKey) { order.forEach(function (k) { colgroup.appendChild(colByKey[k]); }); }
+			applyBody();
+		}
+
+		// Re-apply whenever the page script replaces the rows. Moving cells inside
+		// a row doesn't change the tbody's own children, so this can't loop.
+		new MutationObserver(applyBody).observe(body, { childList: true });
+
+		var dragKey = null;
+		function clearMarks() {
+			ths.forEach(function (t) { t.classList.remove('dragging', 'drag-over-left', 'drag-over-right'); });
+		}
+
+		ths.forEach(function (th, i) {
+			var key = keys[i];
+			th.draggable = true;
+			th.title = 'Drag to reorder';
+
+			th.addEventListener('dragstart', function (e) {
+				dragKey = key;
+				e.dataTransfer.effectAllowed = 'move';
+				e.dataTransfer.setData('text/plain', key); // Firefox needs data to start a drag
+				th.classList.add('dragging');
+			});
+			th.addEventListener('dragend', function () { dragKey = null; clearMarks(); });
+			th.addEventListener('dragover', function (e) {
+				if (dragKey === null || dragKey === key) { return; }
+				e.preventDefault();
+				e.dataTransfer.dropEffect = 'move';
+				var movingRight = order.indexOf(dragKey) < order.indexOf(key);
+				th.classList.toggle('drag-over-right', movingRight);
+				th.classList.toggle('drag-over-left', !movingRight);
+			});
+			th.addEventListener('dragleave', function () {
+				th.classList.remove('drag-over-left', 'drag-over-right');
+			});
+			th.addEventListener('drop', function (e) {
+				e.preventDefault();
+				if (dragKey === null || dragKey === key) { clearMarks(); return; }
+				var from = order.indexOf(dragKey);
+				var to = order.indexOf(key);
+				order.splice(from, 1);
+				order.splice(to, 0, dragKey);
+				clearMarks();
+				dragKey = null;
+				saveOrder(storeKey, order, order.join('\u0000') === keys.join('\u0000'));
+				applyAll();
+			});
+		});
+
+		resets.push(function () {
+			order = keys.slice();
+			saveOrder(storeKey, order, true);
+			applyAll();
+		});
+		applyAll();
+	}
+
+	Array.prototype.forEach.call(document.querySelectorAll('table'), setup);
+
+	var link = document.getElementById('resetCols');
+	if (link) {
+		link.addEventListener('click', function (e) {
+			e.preventDefault();
+			resets.forEach(function (fn) { fn(); });
+		});
+	}
+})();
+</script>{{end}}

@@ -179,6 +179,8 @@ The list follows the server's ban list: ReCON reads it when it logs in to RCON (
 
 **Ban Player** (top right) bans anyone who has ever played on the server, online or not. Pick them by name (online players are marked, and the start of the GUID tells apart players with the same name), enter a reason (the player sees it), and leave the duration at **0 for permanent** or enter minutes. An online player is kicked straight away.
 
+**Export** and **Import** move **permanent** bans between servers as a `bans.json` file; timed bans stay with the server that placed them. Both list the bans as *Name - GUID* with a checkbox each (and **Select all**). Export starts with every permanent ban ticked and saves the ticked ones. Import reads a file and ticks every ban in it except ones it can't add, which are greyed out with the reason (*already banned*, *not a valid GUID*); the ticked ones become permanent bans here, go on the server's ban list (when the server isn't answering, as soon as ReCON next connects), and anyone online among them is kicked. A ban with no name or reason in the file is added as *Unknown* / *Imported ban*.
+
 ![Server Bans](docs/screenshots/bans.png)
 
 ### Flows: `/flows`
@@ -201,7 +203,7 @@ A flow is a list of steps ReCON runs for you: send a message, wait, lock the ser
 | Delete           | Deletes the flow (stop it first). This is the only action that asks first |
 | New flow         | Creates a flow |
 | Help             | The full guide: steps, placeholders, If / Else, triggers, cron and chat commands |
-| Export / Import  | Download every flow as `flows.json`, or add flows from a file: Import lists the file's flows with a checkbox each (and **Select all**), and only the ticked ones are added, at the bottom, disabled |
+| Export / Import  | Save flows to `flows.json`, or add flows from a file. Both list the flows with a checkbox each (and **Select all**): Export starts with every flow ticked and saves only the ticked ones; Import adds only the ticked ones, at the bottom, disabled |
 | Chat commands    | The [chat command settings](#5-chat-commands-and-roles) |
 
 Drag rows to reorder the list. Each flow's latest run log is shown under the table: every message sent, every If decision, and how the run ended.
@@ -492,6 +494,8 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 | GET  | `/api/bans` | | The GUID bans |
 | POST | `/api/bans/<guid>/ban` | `{"reason": "...", "minutes": 0}` (optional) | Ban any player ReCON has seen, online or not. Online players are kicked too |
 | POST | `/api/bans/<guid>/unban` | | Remove every ban for that GUID |
+| GET  | `/api/bans/export` | optional `?guids=a,b` | Download the permanent bans as `bans.json`: every one, or only those GUIDs |
+| POST | `/api/bans/import` | a `bans.json` file: `{"bans": [{"guid", "name", "reason", "ip", "steamId"}]}` | Add those bans as permanent bans. Returns `added`, `skipped` (with reasons), `onServer` and `kicked` |
 
 ### Console
 
@@ -513,7 +517,7 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 | POST | `/api/flows/<id>/enable` | | Turn the trigger on |
 | POST | `/api/flows/<id>/disable` | | Turn the trigger off |
 | POST | `/api/flows/<id>/delete` | | Delete a flow |
-| GET  | `/api/flows/export` | | Download `flows.json` |
+| GET  | `/api/flows/export` | optional `?ids=0,3,5` | Download `flows.json`: every flow, or only those numbers |
 | POST | `/api/flows/import` | `{"flows": [...]}` | Add flows from an export |
 | POST | `/api/flows/command` | `{"command": "lock"}` | `lock`, `unlock`, `shutdown` or `kickall` |
 | GET  | `/api/chat-commands` | | Chat command settings and defaults |
@@ -540,19 +544,26 @@ Any tool with a "POST to a URI" action can call these routes. For example: URI `
 
 ## 9. Development
 
-ReCON is a single Go program with no dependencies besides the SQLite driver.
+ReCON is a single Go program with no dependencies besides the SQLite driver. It follows the standard Go layout: the program in `cmd/recon`, its packages under `internal/`.
 
-| File | Contents |
+```bash
+go build -o recon ./cmd/recon   # build
+go test ./...                   # test every package (tests are the *_test.go files next to the code)
+```
+
+| Path | Contents |
 | ---- | -------- |
-| `main.go` | Startup, configuration and the command-line tool |
-| `rcon.go` | The BattlEye RCON protocol, the web session, the server watch (polls and heartbeat), and the console log |
-| `web.go` | HTTP routes, the JSON API and page rendering |
-| `db.go` | SQLite storage, the ban list sync and the chat recorder |
-| `players.go` | Who is online and their sessions, from the console log; keeps a session across a server restart for players back from the same IP within 5 minutes |
-| `flows.go` | Flows (steps, conditions, runner) and the chat commands |
-| `flows_schedule.go`, `flows_join.go`, `flows_message.go`, `flows_manual.go` | One file per flow trigger |
-| `steam.go` | SteamID lookups and Steam profiles |
-| `templates/` | The HTML pages, embedded into the binary at build time |
+| `cmd/recon/` | Startup (wiring the packages together) and the command-line tool |
+| `internal/battleye/` | The BattlEye RCON protocol: packets, login, sessions, parsing server messages and replies, kickall |
+| `internal/rcon/` | ReCON's web session (shared by the pages, flows and polls), RCON settings, the console log and the connection status |
+| `internal/watch/` | The server watch: polls, the heartbeat and logins after a shutdown or restart |
+| `internal/players/` | Who is online and their sessions, from the console log; keeps a session across a server restart for players back from the same IP within 5 minutes; chat history |
+| `internal/bans/` | Keeping the ban list in step with BattlEye's, and placing bans |
+| `internal/flows/` | Flows (steps, conditions, runner, one file per trigger) and the chat commands |
+| `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
+| `internal/store/` | The SQLite database: every SQL statement |
+| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages, embedded into the binary at build time |
+| `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |
 | `examples/flows.json` | Example flows to import |
 | `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |
 | `docs/preview/` | The static preview pages |
@@ -563,7 +574,7 @@ ReCON is a single Go program with no dependencies besides the SQLite driver.
 The preview pages are generated from the real templates, so they never drift from the app:
 
 ```bash
-RECON_PREVIEW=1 go test -run TestPreview .
+RECON_PREVIEW=1 go test -run TestPreview ./internal/web
 ```
 
 This rewrites `docs/preview/players.html`, `bans.html`, `flows.html` and `data.js`. The sample players, bans and flows, and the stand-in for the API, are in `docs/preview/preview.js`. A plain `go test` skips this test.

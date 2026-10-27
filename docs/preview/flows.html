@@ -37,6 +37,20 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .st.connected { color: #81c995; }
 .st.retrying { color: #fdd663; }
 .st.unavailable { color: #f28b82; }
+.statusbar .retry { color: #777; font-size: 12px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+ 
+.box.importbox { width: min(560px, 95vw); max-height: 88vh; display: flex; flex-direction: column; box-sizing: border-box; }
+.importbox h2 { margin: 0 0 6px; }
+.importbox .intro { margin: 0 0 12px; font-size: 13px; color: #aaa; }
+.importbox input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; flex: none; }
+.importbox label.pick { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #333; cursor: pointer; }
+.importbox label.pick:hover { background: #2a2a2a; }
+.importbox label.all { border-bottom: 1px solid #555; font-weight: 600; }
+.importlist { overflow-y: auto; min-height: 0; flex: 1; }
+.importbox .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
+.importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
+.importbox .buttons { margin-top: 12px; flex: none; }
 </style>
 <style>
 :root {
@@ -46,9 +60,37 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 	--mono: ui-monospace, Consolas, monospace;
 }
 [hidden] { display: none !important; }
-.quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+ 
+.toolbarwrap { position: relative; margin: 0 0 16px; }
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow-x: auto; }
+.toolbar .flowbtns button { flex: none; }
+.toolbar .flowbtns, .tablewrap { scrollbar-color: #555 #1b1b1b; }  
+.quick { display: flex; align-items: center; gap: 6px; margin-left: auto; position: relative; flex: none; }
+.icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+ 
+.box.srvbox { width: min(380px, 92vw); }
+.srvbox h2 { margin: 0 0 12px; }
+.srvlist { display: flex; flex-direction: column; gap: 8px; }
+.srvlist button { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 10px 12px; text-align: left; color: var(--fg); background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px; cursor: pointer; }
+.srvlist button:hover, .srvlist button:focus-visible { background: #333; border-color: #555; outline: none; }
+.srvlist b { display: block; font-size: 14px; font-weight: 600; }
+.srvlist small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.srvlist .ic { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; flex: none; }
+.srvlist .ic.lock { color: var(--warn); background: #2e2a18; }
+.srvlist .ic.unlock { color: var(--ok); background: #1a2a1f; }
+.srvlist .ic.kick { color: var(--c-player); background: #2e2318; }
+.srvlist .ic.power { color: var(--err); background: #2e1c1c; }
+.srvbox .buttons { margin-top: 14px; }
 .quick button { margin-right: 0; }
-#quickMsg { color: #aaa; font-size: 13px; margin-right: 8px; }
+ 
+.tablewrap { overflow-x: auto; }
+#flowsTable { min-width: 1310px; }
+ 
+#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; right: 0; z-index: 1; background: #111; }
+ 
+#quickMsg { position: absolute; right: 0; bottom: 100%; z-index: 1; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
 .run { margin-top: 24px; }
 #confirmText { white-space: pre-line; }
 .sub { color: #aaa; font-size: 12px; }
@@ -63,6 +105,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 #flows tr.drop-below td { box-shadow: inset 0 -3px 0 #8ab4f8; }
 .modal { z-index: 10; padding: 12px; box-sizing: border-box; }
 #confirmModal { z-index: 30; }
+
 
  
 .box.helpbox { width: min(860px, 95vw); height: min(680px, 88vh); display: flex; flex-direction: column; box-sizing: border-box; }
@@ -80,14 +123,16 @@ button:disabled { opacity: 0.4; cursor: default; }
 .helpbox ul { margin: 4px 0; padding-left: 20px; }
 .helpbox code { font-family: var(--mono); font-size: 12px; background: #111; padding: 1px 5px; border-radius: 3px; }
 .helpbox .buttons { margin-top: 12px; flex: none; }
+.helpbox > p { margin: 0 0 6px; }
 .helpbox table { table-layout: auto; margin: 6px 0; }
 .helpbox th, .helpbox td { height: auto; font-size: 13px; color: #ccc; vertical-align: top; padding: 7px 9px; }
 .helpbox th { color: #eee; }
 
  
-.box.fb { width: min(1000px, 96vw); max-height: 92vh; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; overflow: hidden; }
+.box.fb { width: min(1500px, 96vw); min-height: min(525px, 92vh); max-height: 92vh; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; overflow: hidden; }
 .fb-head { display: flex; align-items: center; gap: 12px; }
 .fb-head h2 { margin: 0; flex: 1; }
+.fb-head h2 .fnum { margin-left: 10px; font-size: 13px; font-weight: 400; color: #777; font-family: var(--mono); }
 .fb-scroll { overflow-y: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 16px; padding-right: 4px; }
 .fb input, .fb select { width: auto; margin: 0; padding: 5px 7px; box-sizing: border-box; background: #111; color: #eee; border: 1px solid #555; border-radius: 4px; font: inherit; font-size: 14px; min-width: 0; }
 .fb select:focus, .fb input:focus { border-color: var(--accent); }
@@ -103,7 +148,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 .fb .hint b { color: var(--fg); font-weight: 600; }
 .fb .hint.bad { color: var(--err); white-space: pre-line; }
 .fb-foot { display: flex; align-items: center; gap: 10px; border-top: 1px solid #333; padding-top: 12px; }
-.fb-foot .msg { flex: 1; font-size: 13px; color: var(--err); white-space: pre-line; }
+.fb-foot .spacer { flex: 1; }
+.fb > .msg { margin: 0; font-size: 13px; color: var(--err); white-space: pre-line; }
+.fb > .msg:empty { display: none; }
 .fb-foot button { margin: 0; }
 .tok { font-family: var(--mono); font-size: 12.5px; color: #d7e3fc; }
 .seg { display: flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; width: fit-content; max-width: 100%; }
@@ -119,7 +166,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 .step.joint { padding: 4px 8px; background: #1c1922; border-style: dashed; border-color: #3d3350; }
 .step.joint .num { visibility: hidden; }
 .step.hl { border-color: var(--c-logic); }
-.grip { cursor: grab; color: var(--faint); padding: 2px 4px; user-select: none; font-size: 15px; line-height: 1; }
+ 
+.grip { display: inline-flex; width: 15px; height: 15px; padding: 2px 4px; color: var(--faint); user-select: none; }
+.grip.handle { cursor: grab; }
+ 
+.fb .fold { background: none; border: 0; padding: 0 2px; margin: 0; width: 24px; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.fb .fold:hover { color: var(--fg); }
+.folded { color: var(--muted); font-size: 12.5px; padding-left: 4px; }
+.folded.bad { color: var(--err); }
+.grip.handle::before { content: ""; width: 15px; height: 15px; background: radial-gradient(circle, currentColor 1.4px, transparent 1.7px) 0 0 / 5px 5px; }
 .num { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
 .body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
@@ -142,14 +197,30 @@ button:disabled { opacity: 0.4; cursor: default; }
 .fb .tools button.addelse { font-size: 12px; color: var(--c-logic); }
 .empty { color: var(--faint); font-size: 13px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 6px; text-align: center; }
 .addrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; position: relative; }
-.menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; background: #1e1e1e; border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px; width: min(560px, calc(100vw - 48px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 14px; box-shadow: 0 10px 30px #000a; }
+.menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; background: #1e1e1e; border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px; width: min(620px, calc(100vw - 48px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px 18px; box-shadow: 0 10px 30px #000a; }
 .menu .grp { display: flex; flex-direction: column; gap: 3px; }
-.menu .gl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 2px; }
-.fb .menu button { text-align: left; background: transparent; border: 1px solid transparent; padding: 4px 6px; }
-.fb .menu button:hover:not(:disabled) { background: #2b2b2b; }
-.menu button small { display: block; color: var(--faint); font-size: 11px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
-.fb .chips button { font: 12px var(--mono); padding: 2px 7px; border-radius: 10px; }
+ 
+.menu .gl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 2px; padding-left: 6px; border-left: 3px solid currentColor; }
+.menu .grp.msg .gl { color: var(--c-msg); }
+.menu .grp.time .gl { color: var(--c-time); }
+.menu .grp.server .gl { color: var(--c-server); }
+.menu .grp.player .gl { color: var(--c-player); }
+.menu .grp.logic .gl { color: var(--c-logic); }
+.menu .grp.adv .gl { color: var(--c-adv); }
+ 
+.fb .menu button { text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 7px; color: var(--fg); font-size: 14px; cursor: pointer; }
+.fb .menu button:hover:not(:disabled), .fb .menu button:focus-visible { background: #2e2e2e; border-color: #444; outline: none; }
+.menu button small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; line-height: 1.35; }
+ 
+.fb .menu button:disabled { opacity: 1; color: #8a8a8a; cursor: not-allowed; }
+.fb .menu button:disabled small { color: var(--warn); }
+ 
+.fb-foot .menu { top: auto; bottom: calc(100% + 6px); max-height: min(70vh, 560px); overflow-y: auto; }
+ 
+.counters { display: none; }
+.steps.drop-into { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 6px; }
+.box.valuesbox { width: min(640px, 95vw); height: auto; max-height: 88vh; }
+.valuesbox td:first-child { white-space: nowrap; }
 
  
 .box.cmdbox { width: min(920px, 96vw); max-height: 90vh; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
@@ -168,6 +239,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .cmdbox input { margin: 0; }
 .opt input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; }
 .opt input.dur { width: 84px; padding: 5px 7px; font-family: var(--mono); font-size: 13px; }
+.opt select { width: auto; margin: 0; padding: 5px 7px; background: #111; color: #eee; border: 1px solid #555; border-radius: 4px; font: inherit; font-size: 13px; }
 .cmdbox input.bad { border-color: #f28b82; }
 .fields { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .field label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
@@ -182,12 +254,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 </style>
 </head>
 <body>
-<nav><a href="players.html">Players</a><a href="bans.html">Server Bans</a><a class="active" href="flows.html">Flows</a></nav>
+<nav><a href="/players">Players</a><a href="/bans">Server Bans</a><a class="active" href="/flows">Flows</a></nav>
 <div class="statusbar">
-	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b></span>
+	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
 </div>
 <script>
+
+
+
 
 
 
@@ -202,52 +277,72 @@ var setStatusCount;
 	var fails = 0;
 	var text = { connected: 'Connected', retrying: 'Retrying ...', unavailable: 'Unavailable' };
 	var state = {}, count = {};
+	var retryAt = 0; 
 	function show(id, s) {
 		if (s) state[id] = s;
 		var el = document.getElementById(id);
 		if (!state[id]) return;
-		el.textContent = (text[state[id]] || state[id]) +
-			(state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
-		el.className = 'st ' + state[id];
+		var label = text[state[id]] || state[id];
+		var cls = state[id];
+		if (id === 'rconStatus' && state[id] !== 'connected') {
+			
+			label = 'Unavailable - Retrying...';
+			cls = 'unavailable';
+		}
+		el.textContent = label + (state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
+		el.className = 'st ' + cls;
 	}
-	setStatusCount = function (which, t) {
-		var id = which === 'rcon' ? 'rconStatus' : 'webStatus';
-		count[id] = t;
-		show(id);
+	
+	function tickRetry() {
+		var el = document.getElementById('rconRetry');
+		if (state.rconStatus === 'connected' || !retryAt) { el.textContent = ''; return; }
+		var s = Math.ceil((retryAt - Date.now()) / 1000);
+		el.textContent = s > 0 ? 'next try in ' + (s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's') : 'trying now...';
+	}
+	setStatusCount = function (t) {
+		count.webStatus = t;
+		show('webStatus');
 	};
 	async function check() {
 		try {
 			var d = await (await fetch('/api/status', { cache: 'no-store' })).json();
 			fails = 0;
+			retryAt = typeof d.retryInMs === 'number' ? Date.now() + d.retryInMs : 0;
 			show('webStatus', 'connected');
 			show('rconStatus', d.rcon);
 		} catch (e) {
 			fails++;
+			retryAt = 0;
 			var state = fails >= 3 ? 'unavailable' : 'retrying';
 			show('webStatus', state);
 			show('rconStatus', state);
 		}
+		tickRetry();
 	}
 	check();
-	setInterval(check,  5000 );
+	setInterval(check, 5000);
+	setInterval(tickRetry, 1000);
 })();
 </script>
 <div class="top">
 	<h1>Flows</h1>
+</div>
+
+<div class="toolbarwrap">
+<span id="quickMsg"></span>
+<div class="toolbar">
+	<div class="flowbtns"><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><button onclick="openCmds()">Chat commands</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></div>
 	<div class="quick">
-		<span id="quickMsg"></span>
-		<button onclick="quick('lock')">#Lock</button>
-		<button onclick="quick('unlock')">#Unlock</button>
-		<button onclick="quick('shutdown')">#Shutdown</button>
-		<button onclick="quick('kickall')">#Kick All</button>
+		<button type="button" class="icon-btn" onclick="openServerCmds()" title="#lock, #unlock, #shutdown, kickall"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg> Commands</button>
 	</div>
 </div>
-<p><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><button onclick="openCmds()">Chat commands</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></p>
-<table>
+</div>
+<div class="tablewrap">
+<table id="flowsTable">
 	<colgroup>
-		<col style="width: 340px">
-		<col style="width: 170px">
 		<col>
+		<col style="width: 170px">
+		<col style="width: 130px">
 		<col style="width: 190px">
 		<col style="width: 190px">
 		<col style="width: 290px">
@@ -257,12 +352,13 @@ var setStatusCount;
 	</thead>
 	<tbody id="flows"></tbody>
 </table>
+</div>
 <div id="runs"></div>
 
 
 <div id="editModal" class="modal">
 	<div class="box fb" role="dialog" aria-labelledby="edTitle">
-		<div class="fb-head"><h2 id="edTitle">Edit flow</h2></div>
+		<div class="fb-head"><h2><span id="edTitle">Edit flow</span><span id="edNum" class="fnum"></span></h2></div>
 		<div class="fb-scroll">
 			<label class="f">Name<input id="fName" maxlength="48" autocomplete="off"></label>
 			<div class="sect">
@@ -272,25 +368,22 @@ var setStatusCount;
 				<p class="hint" id="trigHint"></p>
 			</div>
 			<div class="sect">
-				<div class="hd"><h3>Steps</h3><span class="hint">Run top to bottom. Drag <b>⋮⋮</b> or use the arrows to move a step; an If moves with everything inside it.</span></div>
+				<div class="hd"><h3>Steps</h3></div>
 				<div class="steps" id="steps"></div>
-				<div class="addrow">
-					<button type="button" id="addBtn" aria-haspopup="true" aria-expanded="false">+ Add step</button>
-					<div class="chips" id="chips"></div>
-					<div class="menu" id="menu" hidden></div>
-				</div>
 			</div>
 			<div class="sect" id="stopSection">
-				<div class="hd"><h3>When stopped</h3><span class="hint">Sent if someone presses Stop before the run ends</span></div>
+				<div class="hd"><h3>When stopped</h3></div>
 				<div class="steps" id="onStop"></div>
-				<div class="addrow">
-					<button type="button" id="addStopBtn" aria-haspopup="true" aria-expanded="false">+ Add step</button>
-					<div class="menu" id="stopMenu" hidden></div>
-				</div>
 			</div>
 		</div>
+		<p class="msg" id="edMsg" aria-live="polite"></p>
 		<div class="fb-foot">
-			<span class="msg" id="edMsg"></span>
+			<div class="addrow">
+				<button type="button" id="addBtn" aria-haspopup="true" aria-expanded="false">+ Add step</button>
+				<button type="button" id="valuesBtn" aria-haspopup="dialog" title="The placeholders you can type into a step">Values</button>
+				<div class="menu" id="menu" hidden></div>
+			</div>
+			<span class="spacer"></span>
 			<button type="button" id="edCancel">Cancel</button>
 			<button type="button" id="saveBtn">Save</button>
 		</div>
@@ -301,7 +394,7 @@ var setStatusCount;
 <div id="cmdModal" class="modal">
 	<div class="box cmdbox" role="dialog" aria-labelledby="cmdTitle">
 		<h2 id="cmdTitle">Chat commands</h2>
-		<p class="intro">Built-in commands players type in game chat. Turn each on or off, set its cooldown (server-wide: after anyone uses it, it's ignored for everyone until the time is up; 0 = none; times are seconds, or h m s such as <code>1m30s</code>), and change the wording and order of what ReCON sends. Words in braces such as <code>{player_name}</code> are filled in when the message is sent. Who may use !kick and !ban is set on the Players page: Details, Permissions.</p>
+		<p class="intro">Built-in commands players type in game chat. Turn each on or off, set its cooldown (server-wide: after anyone uses it, it's ignored for everyone until the time is up; 0 = none; times are seconds, or h m s such as <code>1m30s</code>), and change the wording and order of what ReCON sends. Words in braces such as <code>{player_name}</code> are filled in when the message is sent. Who may use !kick, !ban and !warning is set on the Players page: Details, Permissions.</p>
 		<div class="cmdlist" id="cmdList"></div>
 		<div class="cmdfoot">
 			<button type="button" id="cmdReset">Reset to defaults</button>
@@ -323,6 +416,59 @@ var setStatusCount;
 		</div>
 	</div>
 </div>
+
+<div id="srvModal" class="modal" onclick="if (event.target === this) closeServerCmds()">
+	<div class="box srvbox" role="dialog" aria-labelledby="srvTitle">
+		<h2 id="srvTitle">Commands</h2>
+		<div class="srvlist">
+			<button type="button" onclick="serverCmd('lock')"><span class="ic lock"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span><span><b>Lock server</b><small>#lock: no new players can join</small></span></button>
+			<button type="button" onclick="serverCmd('unlock')"><span class="ic unlock"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg></span><span><b>Unlock server</b><small>#unlock: players can join again</small></span></button>
+			<button type="button" onclick="serverCmd('kickall')"><span class="ic kick"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="18" y1="8" x2="23" y2="13"></line><line x1="23" y1="8" x2="18" y2="13"></line></svg></span><span><b>Kick everyone</b><small>kickall: kicks every connected player</small></span></button>
+			<button type="button" onclick="serverCmd('shutdown')"><span class="ic power"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg></span><span><b>Shut down server</b><small>#shutdown: stops the server now</small></span></button>
+		</div>
+		<div class="buttons"><button type="button" onclick="closeServerCmds()">Close</button></div>
+	</div>
+</div>
+
+
+<div id="importModal" class="modal" onclick="if (event.target === this) closeImport()">
+	<div class="box importbox" role="dialog" aria-labelledby="importTitle">
+		<h2 id="importTitle">Import flows</h2>
+		<p class="intro" id="importIntro"></p>
+		<label class="pick all"><input type="checkbox" id="importAll" onchange="importSelectAll(this.checked)"><span class="nm">Select all</span></label>
+		<div class="importlist" id="importList"></div>
+		<div class="buttons">
+			<button type="button" onclick="closeImport()">Cancel</button>
+			<button type="button" id="importGo" onclick="importChosen()">Import</button>
+		</div>
+	</div>
+</div>
+
+<div id="exportModal" class="modal" onclick="if (event.target === this) closeExport()">
+	<div class="box importbox" role="dialog" aria-labelledby="exportTitle">
+		<h2 id="exportTitle">Export flows</h2>
+		<p class="intro">Picked flows are saved to flows.json, in list order. Whether a flow is enabled is not saved.</p>
+		<label class="pick all"><input type="checkbox" id="exportAll" onchange="exportSelectAll(this.checked)"><span class="nm">Select all</span></label>
+		<div class="importlist" id="exportList"></div>
+		<div class="buttons">
+			<button type="button" onclick="closeExport()">Cancel</button>
+			<button type="button" id="exportGo" onclick="exportChosen()">Export</button>
+		</div>
+	</div>
+</div>
+<div id="valuesModal" class="modal" onclick="if (event.target === this) closeValues()">
+	<div class="box helpbox valuesbox" role="dialog" aria-labelledby="valuesTitle">
+		<h2 id="valuesTitle">Values</h2>
+		<p>Type these into a step's text, reason or command; each is filled in when the step runs. The player ones work in On join and Player message flows, and inside a For each.</p>
+		<div class="helppanes">
+			<table>
+				<thead><tr><th>Placeholder</th><th>Is</th></tr></thead>
+				<tbody id="valuesRows"></tbody>
+			</table>
+		</div>
+		<div class="buttons"><button type="button" onclick="closeValues()">Close</button></div>
+	</div>
+</div>
 <div id="helpModal" class="modal" onclick="if (event.target === this) closeHelp()">
 	<div class="box helpbox">
 		<h2>Flow help</h2>
@@ -342,8 +488,8 @@ var setStatusCount;
 			<h3>Making a flow</h3>
 			<ul>
 				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and pick a trigger.</li>
-				<li>Press <b>+ Add step</b> to add steps. Fill in each row; anything missing is shown in red under the row.</li>
-				<li>Move a step with its arrows, or drag it by the <b>⋮⋮</b> handle. Moving an If moves everything inside it.</li>
+				<li>Press <b>+ Add step</b> (bottom left) to add steps. Fill in each row; anything missing is shown in red under the row. <b>Values</b> lists the placeholders you can type into a step.</li>
+				<li>Move a step with its arrows, or drag it by the dotted handle on its left. Moving an If moves everything inside it.</li>
 				<li>Save. Schedule, On join and Player message flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
 			</ul>
 			<h3>Times</h3>
@@ -364,6 +510,7 @@ var setStatusCount;
 					<tr><td>Kick / Ban</td><td>Kicks or bans (by GUID) the Player</td></tr>
 					<tr><td>Kick everyone</td><td>Kicks every player online</td></tr>
 					<tr><td>If</td><td>Runs its steps only when its condition is true (see <i>If / Else</i>)</td></tr>
+					<tr><td>For each</td><td>Runs the steps inside it once per player online, or per new chat message, with that player as the Player (see <i>For each</i>)</td></tr>
 					<tr><td>Stop flow</td><td>Ends the run there</td></tr>
 					<tr><td>RCON command</td><td>Any command, as typed</td></tr>
 				</tbody>
@@ -374,6 +521,8 @@ var setStatusCount;
 				<thead><tr><th>Placeholder</th><th>Is</th><th>Works in</th></tr></thead>
 				<tbody>
 					<tr><td><code>{players_online}</code></td><td>How many players are online</td><td>Every flow</td></tr>
+					<tr class="counters"><td><code>{counter}</code></td><td>The player's counter in this run (see <i>If / Else</i>)</td><td>With a player</td></tr>
+					<tr class="counters"><td><code>{threshold}</code></td><td>This flow's counter threshold</td><td>Every flow</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_id}</code></td><td>The player's name and number</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_ping}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td>Their ping, IP address and GUID</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_role}</code></td><td>Player, Mod or Admin (set on the Players page)</td><td>On join, Player message</td></tr>
@@ -381,21 +530,33 @@ var setStatusCount;
 				</tbody>
 			</table>
 			<h3>When stopped</h3>
-			<p>Schedule and Manual flows can have steps that are sent if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server.</p>
+			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its dotted handle into When stopped, and back.</p>
 		</div>
 
 		<div class="helppane" data-pane="conditions">
 			<h3>If, Else if, Else</h3>
 			<p>An If compares one thing, such as <code>{player_ping}</code>, and runs its steps when the comparison is true. <b>+ Else if</b> adds more comparisons of the same thing, checked top to bottom: the first one that is true runs, and the rest are skipped. <b>+ Else</b> runs when none are true. Each If has its own End if, so they can't come apart, and Ifs can go inside other Ifs.</p>
-			<p>Reorder Else ifs with their arrows; moving one above the first makes it the If. Removing an Else if or the Else keeps its steps: they move below the End if.</p>
+			<p>Reorder Else ifs with their arrows; moving one above the first makes it the If. Removing an Else if or the Else keeps its steps: they move below the End if. Deleting a whole If or For each keeps what was inside it too: the steps move out one level, where the block was.</p>
+			<h3>For each</h3>
+			<p><b>For each</b> runs the steps inside it (down to its End for each) once per item, with that item's player as the Player, so Kick, Ban, a Message to the Player, the player placeholders and If comparisons work inside it in any trigger, Schedule and Manual included. Ifs inside decide who or what qualifies; it acts only when the flow runs, on what happened since the flow's last run. Pick what it goes through:</p>
+			<ul>
+				<li><b>player</b>: every player online (the latest 5-second player check's), one after another. <code>{message}</code> is that player's latest chat line since this flow last ran (empty if they haven't chatted since).</li>
+				<li><b>message</b>: every chat line players online sent since this flow last ran, oldest first, as the player who sent it. <code>{message}</code> is the line. A flow every minute sees each line once.</li>
+			</ul>
+			<p>Players BattlEye hasn't verified yet are left out. Stop flow inside it ends the whole run. A For each can't go inside another one. The run log lists each player a condition matched, not every one checked.</p>
+			<p>Examples for a Schedule flow every minute (<code>* * * * *</code>): <b>For each</b> player, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. Or <b>For each</b> message, <b>If</b> <code>{message}</code> contains <code>noob</code>, <b>Message</b> the Player <i>Please keep chat friendly</i>. In a flow without a player of its own, Add step puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so three clicks build either one.</p>
+			<h3 class="counters">Counter</h3>
+			<p class="counters">Each run of a flow keeps a <b>counter</b> for every player, starting at 0. Every If, Else if and Else has a <b>counter</b> setting for what it does to the player's counter when it runs: <b>0</b> nothing, <b>++</b> add 1, <b>--</b> take 1 away (not below 0), <b>reset</b> back to 0. <code>{counter}</code> is the value, and an If can compare it with a number or with <code>{threshold}</code>, the flow's <b>Counter threshold</b> (next to the delay; optional, and <code>{threshold}</code> works only once it's set to 1 or more). Counters are only kept while the run lasts, so put the checks in one run: several For each blocks with Waits between them.</p>
+			<p class="counters">Example, Schedule every minute, threshold 4: <b>For each</b> player, <b>If</b> <code>{player_ping} &gt;= 500</code> counter <b>++</b>, then inside it <b>If</b> <code>{counter} &gt;= {threshold}</code> Kick, reason <i>Ping {player_ping} over the limit</i>, <b>Else</b> Message the Player <i>Warning {counter}/{threshold}: ping {player_ping}</i>; the outer <b>Else</b> counter <b>reset</b>, so only high pings in a row count. Duplicate the For each block with a <b>Wait 10s</b> between copies.</p>
 			<h3>What you can compare</h3>
 			<table>
 				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
 				<tbody>
-					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>!discord</code> catches "!discord please" but not "!discordx". Case is ignored.</td></tr>
-					<tr><td><code>{player_name}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td><code>==</code> <code>!=</code> ignoring case, or <b>matches</b> with <code>*</code> for any characters: <code>*admin*</code>, <code>192.168.*</code></td></tr>
-					<tr><td><code>{player_id}</code> <code>{player_ping}</code> <code>{players_online}</code></td><td><code>==</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td></tr>
-					<tr><td><code>{player_role}</code></td><td>The same, against Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
+					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>!discord</code> catches "!discord please" but not "!discordx". <b>is exactly</b>: the whole message is the value. Case is ignored.</td></tr>
+					<tr><td><code>{player_name}</code> <code>{player_ip}</code></td><td><b>is</b> / <b>is not</b> ignoring case, <b>matches</b> with <code>*</code> for any characters (<code>*admin*</code>, <code>192.168.*</code>), or <b>contains</b> any part of it</td></tr>
+					<tr><td><code>{player_id}</code> <code>{player_guid}</code></td><td><b>is</b> / <b>is not</b></td></tr>
+					<tr><td><code>{player_ping}</code> <code>{players_online}</code><span class="counters"> <code>{counter}</code></span></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code><span class="counters">, with a whole number or <code>{threshold}</code></span></td></tr>
+					<tr><td><code>{player_role}</code></td><td><b>is</b>, <b>is not</b>, <b>is at least</b> or <b>is at most</b> Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
 				</tbody>
 			</table>
 			<h3>Examples</h3>
@@ -447,7 +608,7 @@ var setStatusCount;
 
 		<div class="helppane" data-pane="chat">
 			<h3>Built-in chat commands</h3>
-			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) turns each on or off, sets its cooldown and changes the wording ReCON sends. Who may use !kick and !ban is set on the Players page: <b>Details</b>, <b>Permissions</b>.</p>
+			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) turns each on or off, sets its cooldown and changes the wording ReCON sends. Who may use !kick, !ban and !warning is set on the Players page: <b>Details</b>, <b>Permissions</b>.</p>
 			<table>
 				<thead><tr><th>Command</th><th>Does</th></tr></thead>
 				<tbody>
@@ -457,13 +618,15 @@ var setStatusCount;
 					<tr><td><code>!players</code></td><td>Lists everyone online with their number</td></tr>
 					<tr><td><code>!vote &lt;question&gt;</code></td><td>Starts a server-wide vote; everyone answers <code>!vote y</code> or <code>!vote n</code>. More yes than no passes.</td></tr>
 					<tr><td><code>!code</code></td><td>Sends the player's code (last 6 characters of their GUID) to the mods and admins online</td></tr>
-					<tr><td><code>!kick &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
-					<tr><td><code>!ban &lt;code&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently, even if they have left</td></tr>
+					<tr><td><code>!kick &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
+					<tr><td><code>!ban &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently; by code, even if they have left</td></tr>
+					<tr><td><code>!warning &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: warns that player. The warning that reaches the threshold (2 by default, counted per visit) is followed 5 seconds later by a kick or a permanent ban with its reason, as set in the settings</td></tr>
 				</tbody>
 			</table>
 			<ul>
-				<li>Mods can kick and ban Players. Admins can also kick and ban Mods. Nobody can kick or ban an Admin from chat; the Kick and Ban buttons on these pages work on everyone.</li>
-				<li>Every mod and admin online is told about each kick and ban. <b>Announce</b> also tells everyone.</li>
+				<li>A player's code is the last 6 characters of their GUID (they can type <code>!code</code>); their number is in <code>!players</code>.</li>
+				<li>Mods can kick, ban and warn Players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat; the Kick and Ban buttons on these pages work on everyone.</li>
+				<li>Every mod and admin online is told about each kick, ban and warning. <b>Announce</b> also tells everyone.</li>
 				<li>Only a command that works gets an answer. Anything else (a typo, a cooldown, no permission) is ignored; the line is still in the player's chat history.</li>
 			</ul>
 		</div>
@@ -546,14 +709,14 @@ async function refresh() {
 	try {
 		let r = await fetch('/api/flows');
 		let d = await r.json();
-		if (!d.ok) { setStatusCount('web', ''); return; } 
+		if (!d.ok) { setStatusCount(''); return; } 
 		if (editorOpen()) { 
 			flows = d.flows || flows;
 		}
 		flows = d.flows || [];
 		let runs = {};
 		(d.runs || []).forEach(function(x) { runs[x.flowId] = x; });
-		setStatusCount('web', flows.length + ' flow(s)');
+		setStatusCount(flows.length + ' flow(s)');
 		document.getElementById('flows').innerHTML = flows.map(function(f) {
 			let run = runs[f.id];
 			let active = !!(run && run.active);
@@ -574,13 +737,14 @@ async function refresh() {
 				'<td>' + esc(next) + '</td>' +
 				'<td class="actions">' + buttons + '</td></tr>';
 		}).join('');
+		
 		document.getElementById('runs').innerHTML = flows.filter(function(f) { return runs[f.id]; }).map(function(f) {
 			let x = runs[f.id];
 			return '<div class="run"><b>' + esc(f.name) + '</b> - ' + statusCell(x) +
-				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
+				'<pre class="log">' + esc((x.log || []).slice().reverse().join('\n')) + '</pre></div>';
 		}).join('');
 	} catch(e) {
-		setStatusCount('web', ''); 
+		setStatusCount(''); 
 	}
 }
 
@@ -630,6 +794,18 @@ function quick(cmd) {
 
 
 
+function openServerCmds() {
+	document.getElementById('srvModal').style.display = 'flex';
+	document.querySelector('#srvModal .srvlist button').focus();
+}
+function closeServerCmds() { document.getElementById('srvModal').style.display = 'none'; }
+function serverCmd(cmd) {
+	closeServerCmds();
+	quick(cmd);
+}
+
+
+
 function showConfirm(title, text, okLabel, onOk) {
 	document.getElementById('confirmTitle').textContent = title;
 	document.getElementById('confirmText').textContent = text;
@@ -668,7 +844,68 @@ async function sendQuick(cmd) {
 	refresh();
 }
 
-function exportFlows() { location.href = '/api/flows/export'; }
+
+
+function exportFlows() {
+	if (!flows.length) { showMessage('Export', 'There are no flows to export yet.'); return; }
+	let list = document.getElementById('exportList');
+	list.textContent = '';
+	flows.forEach(function(f) {
+		let row = document.createElement('label');
+		row.className = 'pick';
+		let box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = true;
+		box.setAttribute('data-id', f.id);
+		box.onchange = updateExportPicks;
+		let nm = document.createElement('span');
+		nm.className = 'nm';
+		nm.textContent = f.name;
+		nm.title = f.name;
+		let info = document.createElement('span');
+		info.className = 'info';
+		info.textContent = importSummary(f);
+		row.append(box, nm, info);
+		list.append(row);
+	});
+	updateExportPicks();
+	document.getElementById('exportModal').style.display = 'flex';
+}
+
+function exportBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#exportList input[type=checkbox]')); }
+
+function exportSelectAll(on) {
+	exportBoxes().forEach(function(b) { b.checked = on; });
+	updateExportPicks();
+}
+
+
+
+function updateExportPicks() {
+	let boxes = exportBoxes(), n = boxes.filter(function(b) { return b.checked; }).length;
+	let all = document.getElementById('exportAll');
+	all.checked = n > 0 && n === boxes.length;
+	all.indeterminate = n > 0 && n < boxes.length;
+	let go = document.getElementById('exportGo');
+	go.disabled = n === 0;
+	go.textContent = n ? 'Export ' + n + ' flow' + (n === 1 ? '' : 's') : 'Export';
+}
+
+function closeExport() { document.getElementById('exportModal').style.display = 'none'; }
+
+function exportChosen() {
+	let ids = exportBoxes().filter(function(b) { return b.checked; }).map(function(b) { return b.getAttribute('data-id'); });
+	if (!ids.length) return;
+	closeExport();
+	downloadFile('/api/flows/export?ids=' + ids.join(','));
+}
+
+
+function downloadFile(url) { location.href = url; }
+
+
+
+let importing = []; 
 
 async function importFlows(input) {
 	let file = input.files[0];
@@ -676,7 +913,89 @@ async function importFlows(input) {
 	if (!file) return;
 	let data;
 	try { data = JSON.parse(await file.text()); } catch(e) { showMessage('Import failed', 'That file is not valid JSON.'); return; }
-	let d = await post('/api/flows/import', data);
+	if (!data || !Array.isArray(data.flows) || !data.flows.length) { showMessage('Import failed', 'No flows in that file.'); return; }
+	importing = data.flows;
+	let taken = {};
+	flows.forEach(function(f) { taken[String(f.name).toLowerCase()] = true; });
+	let list = document.getElementById('importList');
+	list.textContent = '';
+	let span = function(cls, text, title) {
+		let e = document.createElement('span');
+		e.className = cls;
+		e.textContent = text;
+		if (title) e.title = title;
+		return e;
+	};
+	importing.forEach(function(f, i) {
+		let name = String((f && f.name) || '').trim();
+		let row = document.createElement('label');
+		row.className = 'pick';
+		let box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = true;
+		box.setAttribute('data-i', i);
+		box.onchange = updateImportPicks;
+		row.append(box, span('nm', name || '(no name)', name));
+		if (taken[name.toLowerCase()]) row.append(span('taken', 'name in use', 'A flow already has this name; the import gets " (2)" added'));
+		row.append(span('info', importSummary(f)));
+		list.append(row);
+	});
+	document.getElementById('importIntro').textContent = file.name + ': ' + importing.length + ' flow(s). Picked flows are added at the bottom of the list, disabled.';
+	updateImportPicks();
+	document.getElementById('importModal').style.display = 'flex';
+}
+
+
+function importSummary(f) {
+	let t = { schedule: 'Schedule', join: 'On join', chat: 'Player message' }[f && f.trigger] || 'Manual';
+	let n = importStepCount(f && f.steps);
+	return t + ' · ' + n + ' step' + (n === 1 ? '' : 's');
+}
+
+
+function importStepCount(list) {
+	if (!Array.isArray(list)) return 0;
+	let n = 0;
+	list.forEach(function(s) {
+		n++;
+		if (s && s.type === 'if') {
+			(s.branches || []).forEach(function(b) { n += importStepCount(b && b.steps); });
+			n += importStepCount(s.else);
+		}
+		if (s && s.type === 'forEach') n += importStepCount(s.steps);
+	});
+	return n;
+}
+
+function importBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#importList input[type=checkbox]')); }
+
+function importSelectAll(on) {
+	importBoxes().forEach(function(b) { b.checked = on; });
+	updateImportPicks();
+}
+
+
+
+function updateImportPicks() {
+	let boxes = importBoxes(), n = boxes.filter(function(b) { return b.checked; }).length;
+	let all = document.getElementById('importAll');
+	all.checked = n > 0 && n === boxes.length;
+	all.indeterminate = n > 0 && n < boxes.length;
+	let go = document.getElementById('importGo');
+	go.disabled = n === 0;
+	go.textContent = n ? 'Import ' + n + ' flow' + (n === 1 ? '' : 's') : 'Import';
+}
+
+function closeImport() { document.getElementById('importModal').style.display = 'none'; importing = []; }
+
+async function importChosen() {
+	let picked = importBoxes().filter(function(b) { return b.checked; }).map(function(b) { return importing[+b.getAttribute('data-i')]; });
+	if (!picked.length) return;
+	let go = document.getElementById('importGo');
+	go.disabled = true;
+	let d;
+	try { d = await post('/api/flows/import', { flows: picked }); } catch(e) { d = { ok: false, error: 'ReCON could not be reached; nothing was imported.' }; }
+	closeImport();
 	if (!d.ok) { showMessage('Import failed', d.error || 'Import failed'); return; }
 	let msg = 'Imported ' + d.added + ' flow(s) at the bottom of the list. They start disabled.';
 	if (d.skipped && d.skipped.length) msg += '\n\nSkipped:\n' + d.skipped.join('\n');
@@ -713,6 +1032,10 @@ document.addEventListener('keydown', function(e) {
 	if (e.key !== 'Escape') return;
 	if (document.querySelector('.menu:not([hidden])')) return; 
 	if (document.getElementById('confirmModal').style.display === 'flex') closeConfirm();
+	else if (document.getElementById('valuesModal').style.display === 'flex') closeValues();
+	else if (document.getElementById('importModal').style.display === 'flex') closeImport();
+	else if (document.getElementById('exportModal').style.display === 'flex') closeExport();
+	else if (document.getElementById('srvModal').style.display === 'flex') closeServerCmds();
 	else if (document.getElementById('helpModal').style.display === 'flex') closeHelp();
 	else if (cmdsOpen()) document.getElementById('cmdCancel').click();
 	else if (editorOpen()) cancelEditor();
@@ -785,7 +1108,7 @@ flowsBody.addEventListener('drop', async function(e) {
 flowsBody.addEventListener('dragend', endDrag);
 
 refresh();
-setInterval(refresh,  5000 );
+setInterval(refresh, 5000);
 setInterval(tickCountdowns, 1000);
 
 
@@ -794,6 +1117,10 @@ setInterval(tickCountdowns, 1000);
 (function () {
 'use strict';
 const TRIGGERS = [['schedule', 'Schedule'], ['join', 'On join'], ['chat', 'Player message'], ['manual', 'Manual']];
+
+
+
+const SHOW_COUNTERS = false;
 const TRIGGER_NAME = Object.fromEntries(TRIGGERS);
 
 
@@ -802,41 +1129,53 @@ const TRIGGER_NAME = Object.fromEntries(TRIGGERS);
 
 
 const TOKENS = [
-	{ tok: '{player_name}', need: 'player', title: 'Name of the player who triggered the flow' },
+	{ tok: '{player_name}', need: 'player', title: 'The player\'s name: who joined, who typed the message, or each player in a For each' },
 	{ tok: '{player_id}', need: 'player', title: 'Their player number' },
 	{ tok: '{player_ping}', need: 'player', title: 'Their ping' },
 	{ tok: '{player_ip}', need: 'player', title: 'Their IP address' },
 	{ tok: '{player_guid}', need: 'player', title: 'Their BattlEye GUID' },
 	{ tok: '{player_role}', need: 'player', title: 'Their role: Player, Mod or Admin' },
-	{ tok: '{message}', need: 'chat', title: 'Everything they typed' },
-	{ tok: '{players_online}', need: '', title: 'How many players are online (works in every flow)' }
+	{ tok: '{message}', need: 'chat', title: 'What they typed (Player message), or the chat line in a For each' },
+	{ tok: '{players_online}', need: '', title: 'How many players are online (any flow)' },
+	{ tok: '{counter}', need: 'player', counters: true, title: 'The player\'s counter in this run: starts at 0, changed by the counter setting on If, Else if and Else' },
+	{ tok: '{threshold}', need: 'threshold', counters: true, title: 'This flow\'s Counter threshold (only once one is set)' }
 ];
 const NEED_TEXT = {
-	player: 'needs a player: use the On join or Player message trigger',
-	chat: 'needs the Player message trigger'
+	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
+	chat: 'needs the Player message trigger',
+	threshold: 'needs a Counter threshold: enter one (1 or more) next to the delay'
 };
 
 
-const WORD_OPS = [['has', 'contains'], ['starts', 'starts with']];
-const TEXT_OPS = [['eq', '=='], ['ne', '!='], ['wild', 'matches']];
-const NUM_OPS = [['eq', '=='], ['ne', '!='], ['gt', '>'], ['ge', '>='], ['lt', '<'], ['le', '<=']];
+
+const WORD_OPS = [['has', 'contains'], ['starts', 'starts with'], ['exact', 'is exactly']];
+const TEXT_OPS = [['eq', 'is'], ['ne', 'is not'], ['wild', 'matches'], ['has', 'contains']];
+const IDENT_OPS = [['eq', 'is'], ['ne', 'is not']];
+const NUM_OPS = [['eq', '='], ['ne', '!='], ['gt', '>'], ['ge', '>='], ['lt', '<'], ['le', '<=']];
+const ROLE_OPS = [['eq', 'is'], ['ne', 'is not'], ['ge', 'is at least'], ['le', 'is at most']];
 const ROLES = [['0', 'Player'], ['1', 'Mod'], ['2', 'Admin']];
 const SUBJECTS = [
 	['message', '{message}', 'word', 'chat'],
 	['player_name', '{player_name}', 'text', 'player'],
-	['player_id', '{player_id}', 'num', 'player'],
+	['player_id', '{player_id}', 'ident', 'player'],
 	['player_ping', '{player_ping}', 'num', 'player'],
 	['player_ip', '{player_ip}', 'text', 'player'],
-	['player_guid', '{player_guid}', 'text', 'player'],
+	['player_guid', '{player_guid}', 'ident', 'player'],
 	['player_role', '{player_role}', 'role', 'player'],
-	['players_online', '{players_online}', 'num', '']
+	['players_online', '{players_online}', 'num', ''],
+	['counter', '{counter}', 'num', 'player']
 ];
+
+const COUNTER_OPS = [['', '0'], ['inc', '++'], ['dec', '--'], ['reset', 'reset']];
+
+const numValueOk = (v) => /^\d+$/.test(String(v).trim()) || String(v).trim() === '{threshold}';
 const subjectOf = (s) => SUBJECTS.find((x) => x[0] === s.subject) || SUBJECTS[1];
-const opsFor = (sub) => sub[2] === 'word' ? WORD_OPS : sub[2] === 'text' ? TEXT_OPS : NUM_OPS;
+const OPS_BY_KIND = { word: WORD_OPS, text: TEXT_OPS, ident: IDENT_OPS, num: NUM_OPS, role: ROLE_OPS };
+const opsFor = (sub) => OPS_BY_KIND[sub[2]] || NUM_OPS;
 function defaultCond(subject) {
 	const kind = (SUBJECTS.find((x) => x[0] === subject) || SUBJECTS[1])[2];
 	if (kind === 'word') return { subject, op: 'has', value: '' };
-	if (kind === 'text') return { subject, op: 'eq', value: '' };
+	if (kind === 'text' || kind === 'ident') return { subject, op: 'eq', value: '' };
 	if (kind === 'role') return { subject, op: 'ge', value: '1' };
 	return { subject, op: 'ge', value: '0' };
 }
@@ -888,12 +1227,13 @@ const STEPS = {
 		parts: ['reason', { k: 'reason', kind: 'text', ph: 'Server restart' }], def: { reason: 'Server restart' } },
 	if:         { label: 'If', cat: 'logic', group: 'Logic', desc: 'Run steps only when… (comes with its End if)',
 		parts: [{ k: 'subject', kind: 'select', opts: 'subjects' }, { k: 'op', kind: 'select', opts: 'ops' }, { k: 'value', kind: 'val' }], def: { subject: 'player_ping', op: 'ge', value: '500' } },
+	forEach:    { label: 'For each', cat: 'logic', group: 'Logic', desc: 'Run steps once per player online, or per new chat message (comes with its End for each)',
+		parts: [{ k: 'of', kind: 'select', opts: [['player', 'player'], ['message', 'message']] }], def: { of: 'player' } },
 	stop:       { label: 'Stop flow', cat: 'logic', group: 'Logic', desc: 'End the run here', parts: ['end the run here'], def: {} },
 	command:    { label: 'RCON command', cat: 'adv', group: 'Advanced', desc: 'Any command, placeholders allowed',
 		parts: [{ k: 'cmd', kind: 'text', ph: 'kick {player_id} Example', mono: true }], def: { cmd: '' } }
 };
 const GROUPS = ['Messages', 'Timing', 'Server', 'Players', 'Logic', 'Advanced'];
-const STOP_TYPES = ['message', 'lock', 'unlock', 'kickAll', 'command'];
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 const $ = (id) => document.getElementById(id);
@@ -909,17 +1249,30 @@ function el(tag, attrs, ...kids) {
 	for (const c of kids.flat(Infinity)) if (c != null) n.append(c);
 	return n;
 }
-function ctx(f) {
-	const t = f.trigger.type;
-	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat' };
+
+
+
+function ctx(f, inLoop) {
+	const t = f.trigger.type, threshold = thresholdSet(f.counterThreshold);
+	if (inLoop) return { '': true, player: true, chat: true, threshold };
+	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat', threshold };
 }
+
+const thresholdSet = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 1000;
+const thresholdOk = (v) => String(v).trim() === '' || thresholdSet(v);
 const secsOf = (v) => parseDur(v) || 0;
 
 
-const lists = (s) => s.branches.map((b) => b.steps).concat(s.else ? [s.else] : []);
+
+
+
+
+const isBlock = (s) => s.type === 'if' || s.type === 'forEach';
+const lists = (s) => s.type === 'forEach' ? [s.steps] : s.branches.map((b) => b.steps).concat(s.else ? [s.else] : []);
+const hasLoop = (list) => list.some((s) => s.type === 'forEach' || (isBlock(s) && lists(s).some(hasLoop)));
 function countSteps(list) {
 	let n = 0;
-	for (const s of list) { n++; if (s.type === 'if') for (const l of lists(s)) n += countSteps(l); }
+	for (const s of list) { n++; if (isBlock(s)) for (const l of lists(s)) n += countSteps(l); }
 	return n;
 }
 function fmtSecs(secs) {
@@ -937,6 +1290,7 @@ function runLength(list) {
 	for (const s of list) {
 		if (s.type === 'wait') len += secsOf(s.time);
 		else if (s.type === 'if') len += Math.max(0, ...lists(s).map(runLength));
+		else if (s.type === 'forEach') len += runLength(s.steps); 
 	}
 	return len;
 }
@@ -959,7 +1313,12 @@ function stepNeeds(s) {
 function condErr(c, b) {
 	const sub = subjectOf(b);
 	if (!c[sub[3]]) return sub[1] + ' ' + NEED_TEXT[sub[3]];
-	if ((sub[2] === 'num' || sub[2] === 'role') && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
+	if (sub[2] === 'num' && !numValueOk(b.value)) return 'Enter a whole number or {threshold}';
+	if (sub[2] === 'num' && String(b.value).trim() === '{threshold}' && !c.threshold) return '{threshold} ' + NEED_TEXT.threshold;
+	if (sub[0] === 'player_id' && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
+	if (b.counter && !c.player) return 'The counter is kept for each player: ' + NEED_TEXT.player;
+	if (sub[2] === 'role' && !ROLES.some(([v]) => v === String(b.value).trim())) return 'Pick Player, Mod or Admin';
+	if (sub[0] === 'player_guid' && !/^[0-9a-fA-F]{32}$/.test(String(b.value).trim())) return 'Enter a GUID (32 letters and digits, 0-9 and a-f)';
 	if (sub[2] === 'word' && !terms(b.value).length) return 'Enter a word, several words, or a "quoted phrase"';
 	return '';
 }
@@ -968,23 +1327,26 @@ function stepErr(c, s) {
 	if (s.type === 'message' && !String(s.text || '').trim()) return 'Add the message text';
 	if (s.type === 'command' && !String(s.cmd || '').trim()) return 'Type the command to send';
 	if (s.type === 'wait' && !(secsOf(s.time) > 0)) return 'Enter a time: 30 (seconds), 90s, 1m20s or 1h';
-	if (s.type === 'if' && subjectOf(s)[2] === 'num' && !/^\d+$/.test(String(s.value).trim())) return 'Enter a whole number';
+	if (s.type === 'if' && subjectOf(s)[2] === 'num' && !numValueOk(s.value)) return 'Enter a whole number or {threshold}';
 	return '';
 }
 
-function numbering(list, map = new Map()) {
+
+function numbering(list, map = new Map(), loop = new Set(), inLoop = false) {
 	for (const s of list) {
 		map.set(s, map.size + 1);
-		if (s.type === 'if') for (const l of lists(s)) numbering(l, map);
+		if (inLoop) loop.add(s);
+		if (isBlock(s)) for (const l of lists(s)) numbering(l, map, loop, inLoop || s.type === 'forEach');
 	}
 	return map;
 }
 function validate(f, list) {
-	const c = ctx(f);
-	const nums = numbering(list);
+	const loop = new Set();
+	const nums = numbering(list, new Map(), loop);
 	const errs = new Map();
 	let first = null;
 	for (const [s, n] of nums) {
+		const c = ctx(f, loop.has(s));
 		if (s.type === 'if') {
 			for (const b of s.branches) {
 				const e = condErr(c, b);
@@ -992,10 +1354,10 @@ function validate(f, list) {
 			}
 			continue;
 		}
-		const e = stepErr(c, s);
+		const e = s.type === 'forEach' && loop.has(s) ? 'A For each can\'t go inside another one' : stepErr(c, s);
 		if (e) { errs.set(s, e); if (first == null) first = n; }
 	}
-	return { errs, first, nums };
+	return { errs, first, nums, loop };
 }
 
 function sendsText(s) {
@@ -1014,11 +1376,11 @@ function sendsText(s) {
 	}
 	return '';
 }
-
 function describeIf(s) {
 	const sub = subjectOf(s);
 	const op = opsFor(sub).find((o) => o[0] === s.op) || opsFor(sub)[0];
-	const val = sub[2] === 'role' ? (ROLES.find((r) => r[0] === String(s.value)) || ROLES[0])[1] : sub[2] === 'num' || sub[2] === 'word' || s.op === 'wild' ? s.value : '"' + s.value + '"';
+	const val = sub[2] === 'role' ? (ROLES.find((r) => r[0] === String(s.value)) || ROLES[0])[1] :
+		sub[2] === 'num' || sub[2] === 'ident' || (sub[2] === 'word' && s.op !== 'exact') || s.op === 'wild' ? s.value : '"' + s.value + '"';
 	return sub[1] + ' ' + op[1] + ' ' + val;
 }
 
@@ -1029,7 +1391,7 @@ let rowRefs = { steps: [], onStop: [] };
 let flatRows = { steps: [], onStop: [] };
 let jointRefs = { steps: [], onStop: [] };
 
-const jointText = (s, isElse) => isElse ? '' : describeIf(s.branches[0]);
+const jointText = (s, isElse) => isElse || s.type === 'forEach' ? '' : describeIf(s.branches[0]);
 function jointLabel(key, s, isElse) {
 	const span = el('span', { class: 'w', style: 'font-family:var(--mono);font-size:12.5px', text: jointText(s, isElse) });
 	jointRefs[key].push({ span, s, isElse });
@@ -1041,17 +1403,40 @@ const ifId = (s) => { if (!ifIds.has(s)) ifIds.set(s, ++ifSeq); return ifIds.get
 
 
 
-function flatten(list, depth = 0, out = []) {
+let collapsed = new WeakSet();
+const isFolded = (s) => isBlock(s) && collapsed.has(s);
+
+
+function insideCount(s, errs, nums) {
+	let steps = 0;
+	const bad = [];
+	for (const l of lists(s)) for (const x of l) {
+		steps++;
+		if (errs.has(x) || (x.type === 'if' && x.branches.some((b) => errs.has(b)))) bad.push(nums.get(x));
+		if (isBlock(x)) { const c = insideCount(x, errs, nums); steps += c.steps; bad.push(...c.bad); }
+	}
+	return { steps, bad };
+}
+
+
+
+
+function flatten(list, depth = 0, out = [], inLoop = false) {
 	list.forEach((s, i) => {
 		const start = out.length;
-		out.push({ kind: 'step', s, list, i, depth });
-		if (s.type === 'if') {
+		out.push({ kind: 'step', s, list, i, depth, inLoop });
+		if (isFolded(s)) {
+			
+		} else if (s.type === 'if') {
 			s.branches.forEach((b, k) => {
-				if (k) out.push({ kind: 'elif', s, b, k, list, i, depth });
-				flatten(b.steps, depth + 1, out);
+				if (k) out.push({ kind: 'elif', s, b, k, list, i, depth, inLoop });
+				flatten(b.steps, depth + 1, out, inLoop);
 			});
-			if (s.else) { out.push({ kind: 'else', s, list, i, depth }); flatten(s.else, depth + 1, out); }
-			out.push({ kind: 'end', s, list, i, depth });
+			if (s.else) { out.push({ kind: 'else', s, list, i, depth, inLoop }); flatten(s.else, depth + 1, out, inLoop); }
+			out.push({ kind: 'end', s, list, i, depth, inLoop });
+		} else if (s.type === 'forEach') {
+			flatten(s.steps, depth + 1, out, true);
+			out.push({ kind: 'end', s, list, i, depth, inLoop });
 		}
 		out[start].last = out.length - 1; 
 	});
@@ -1060,7 +1445,7 @@ function flatten(list, depth = 0, out = []) {
 function findParent(root, target) {
 	for (let i = 0; i < root.length; i++) {
 		const s = root[i];
-		if (s.type !== 'if') continue;
+		if (!isBlock(s)) continue;
 		const ls = lists(s);
 		const idx = ls.indexOf(target);
 		if (idx >= 0) return { node: s, idx, ls, list: root, i };
@@ -1077,7 +1462,7 @@ function renderSteps(key) {
 	flatRows[key] = [];
 	jointRefs[key] = [];
 	if (!list.length) {
-		box.append(el('div', { class: 'empty', text: key === 'steps' ? 'No steps yet. Add the first one below.' : 'Nothing is sent when stopped.' }));
+		box.append(el('div', { class: 'empty', text: key === 'steps' ? 'No steps yet. Press + Add step below.' : 'Nothing is sent when stopped. Drag a step here to send it on Stop.' }));
 		return;
 	}
 	const { errs, nums } = validate(ed, list);
@@ -1090,15 +1475,28 @@ function renderSteps(key) {
 		if (r.kind === 'step') {
 			const def = STEPS[s.type];
 			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
+			if (isBlock(s)) {
+				const folded = collapsed.has(s);
+				sentence.prepend(el('button', { type: 'button', class: 'fold', 'aria-expanded': String(!folded),
+					title: folded ? 'Show the steps inside' : 'Hide the steps inside', 'aria-label': (folded ? 'Expand' : 'Collapse') + ' step ' + n,
+					onclick: () => { if (folded) collapsed.delete(s); else collapsed.add(s); changed(true); }, text: folded ? '▸' : '▾' }));
+			}
 			const obj = s.type === 'if' ? s.branches[0] : s;
-			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key));
+			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
+			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop) || ''); 
+			if (isFolded(s)) {
+				const c = insideCount(s, errs, nums);
+				sentence.append(el('span', { class: 'folded' + (c.bad.length ? ' bad' : ''),
+					text: c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' + (c.bad.length ? ', error: step' + (c.bad.length === 1 ? ' ' : 's ') + c.bad.join(', ') : '') }));
+			}
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
 			const atTop = r.list === list && r.i === 0;
 			const atBottom = r.list === list && r.i === list.length - 1;
-			const what = s.type === 'if' ? 'If block on step ' + n : 'step ' + n;
-			row = el('div', { class: 'step', 'data-r': ri, 'data-if': s.type === 'if' ? ifId(s) : null, style },
-				el('span', { class: 'grip', title: s.type === 'if' ? 'Drag to move the whole If block' : 'Drag to move', 'aria-hidden': 'true', text: '⋮⋮' }),
+			const blockName = s.type === 'if' ? 'If' : 'For each';
+			const what = isBlock(s) ? blockName + ' block on step ' + n : 'step ' + n;
+			row = el('div', { class: 'step', 'data-r': ri, 'data-if': isBlock(s) ? ifId(s) : null, style },
+				el('span', { class: 'grip handle', title: isBlock(s) ? 'Drag to move the whole ' + blockName + ' block' : 'Drag to move', 'aria-hidden': 'true' }),
 				el('span', { class: 'num', text: String(n) }),
 				el('div', { class: 'body' }, sentence, sends, err),
 				el('div', { class: 'tools' },
@@ -1106,8 +1504,10 @@ function renderSteps(key) {
 					s.type === 'if' && !s.else ? el('button', { type: 'button', class: 'addelse', title: 'Add an Else to this If', 'aria-label': 'Add Else to step ' + n, onclick: () => { s.else = []; changed(true); }, text: '+ Else' }) : null,
 					el('button', { type: 'button', title: 'Move up', 'aria-label': 'Move ' + what + ' up', disabled: atTop, onclick: () => moveStep(key, r.list, r.i, -1), text: '▲' }),
 					el('button', { type: 'button', title: 'Move down', 'aria-label': 'Move ' + what + ' down', disabled: atBottom, onclick: () => moveStep(key, r.list, r.i, 1), text: '▼' }),
-					el('button', { type: 'button', title: s.type === 'if' ? 'Duplicate the whole If block' : 'Duplicate', 'aria-label': 'Duplicate ' + what, onclick: () => { r.list.splice(r.i + 1, 0, clone(s)); changed(true); }, text: '⧉' }),
-					el('button', { type: 'button', title: s.type === 'if' ? 'Delete the If and every step inside it' : 'Delete', 'aria-label': 'Delete ' + what, onclick: () => { r.list.splice(r.i, 1); changed(true); }, text: '✕' })
+					el('button', { type: 'button', title: isBlock(s) ? 'Duplicate the whole ' + blockName + ' block' : 'Duplicate', 'aria-label': 'Duplicate ' + what, onclick: () => { r.list.splice(r.i + 1, 0, clone(s)); changed(true); }, text: '⧉' }),
+					
+					
+					el('button', { type: 'button', title: isBlock(s) ? 'Delete the ' + blockName + ' (the steps inside move out one level)' : 'Delete', 'aria-label': 'Delete ' + what, onclick: () => { r.list.splice(r.i, 1, ...(isBlock(s) ? lists(s).flat() : [])); changed(true); }, text: '✕' })
 				)
 			);
 			rowRefs[key].push({ row, sends, err, s, ek: obj });
@@ -1117,7 +1517,8 @@ function renderSteps(key) {
 			
 			for (const p of STEPS.if.parts) sentence.append(p.k === 'subject'
 				? el('span', { class: 'w', title: 'Set by the If: change it there', style: 'color:var(--fg);font-family:var(--mono);font-size:12.5px;padding:0 4px', text: subjectOf(b)[1] })
-				: field(b, p, key));
+				: field(b, p, key, r.inLoop));
+			sentence.append(counterField(b, 'counter', r.inLoop) || '');
 			const err = el('div', { class: 'err' });
 			const what = 'Else if ' + k + ' of step ' + n;
 			row = el('div', { class: 'step joint branch', 'data-r': ri, 'data-if': ifId(s), style },
@@ -1138,8 +1539,8 @@ function renderSteps(key) {
 				el('span', { class: 'grip', 'aria-hidden': 'true' }),
 				el('span', { class: 'num' }),
 				el('div', { class: 'body' }, el('div', { class: 'sentence' },
-					el('span', { class: 'pill logic', text: isElse ? 'Else' : 'End if' }),
-					jointLabel(key, s, isElse))),
+					el('span', { class: 'pill logic', text: isElse ? 'Else' : s.type === 'forEach' ? 'End for each' : 'End if' }),
+					jointLabel(key, s, isElse), isElse ? counterField(s, 'elseCounter', r.inLoop) : null)),
 				el('div', { class: 'tools' }, isElse ? el('button', {
 					type: 'button', title: 'Remove the Else (its steps move below the End if)', 'aria-label': 'Remove Else of step ' + n,
 					onclick: () => { const moved = s.else; s.else = null; r.list.splice(r.i + 1, 0, ...moved); changed(true); }, text: '✕'
@@ -1151,18 +1552,39 @@ function renderSteps(key) {
 	updateDerivedRows(key, errs);
 }
 
-function field(s, p, key) {
+
+
+
+
+function counterField(obj, k, inLoop) {
+	if ((!SHOW_COUNTERS || !ctx(ed, inLoop).player) && !obj[k]) return null;
+	const sel = el('select', { 'aria-label': 'Counter', title: 'What this does to the player\'s counter when it runs: 0 nothing, ++ add 1, -- take 1 away, reset back to 0' },
+		COUNTER_OPS.map(([v, l]) => el('option', { value: v, text: l, selected: (obj[k] || '') === v })));
+	sel.addEventListener('change', () => { if (sel.value) obj[k] = sel.value; else delete obj[k]; changed(true); });
+	return el('span', { class: 'w counter' }, 'counter ', sel);
+}
+
+
+
+function field(s, p, key, inLoop) {
 	if (p.kind === 'select') {
 		let opts = p.opts;
-		if (opts === 'subjects') { const c = ctx(ed); opts = SUBJECTS.filter((x) => c[x[3]] || x[0] === s.subject).map(([v, l]) => [v, l]); }
+		
+		
+		
+		
+		if (opts === 'subjects') {
+			const c = ctx(ed, inLoop);
+			opts = SUBJECTS.filter((x) => SHOW_COUNTERS || x[0] !== 'counter' || x[0] === s.subject)
+				.map(([v, l, , need]) => [v, l, !c[need] && v !== s.subject]);
+		}
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
-		if (opts === 'to') opts = toOpts(ed.trigger.type);
+		if (opts === 'to') opts = toOpts(inLoop ? 'join' : ed.trigger.type);
 		if (opts === 'who') opts = whoOpts();
-		if (key === 'onStop' && p.k === 'to') opts = [['all', 'Everyone']];
 		if (!opts.some(([v]) => v === String(s[p.k]))) s[p.k] = opts[0][0];
 		
 		if (opts.length === 1) return el('span', { class: 'w', style: 'color:var(--fg)', text: opts[0][1] });
-		const sel = el('select', { 'aria-label': p.k }, opts.map(([v, l]) => el('option', { value: v, text: l, selected: String(s[p.k]) === v })));
+		const sel = el('select', { 'aria-label': p.k }, opts.map(([v, l, off]) => el('option', { value: v, text: l, disabled: !!off, selected: String(s[p.k]) === v })));
 		sel.addEventListener('change', () => {
 			s[p.k] = sel.value;
 			if (p.k === 'subject') Object.assign(s, defaultCond(s.subject));
@@ -1180,7 +1602,9 @@ function field(s, p, key) {
 	const inp = el('input', { class: cls, value: s[p.k] == null ? '' : s[p.k], placeholder: p.ph || '', 'aria-label': p.k, autocomplete: 'off', spellcheck: p.kind === 'text' && !p.mono ? 'true' : 'false', style: p.mono ? 'font-family:var(--mono);font-size:13px' : null });
 	if (p.kind === 'val') {
 		const kind = subjectOf(s)[2];
-		inp.placeholder = kind === 'num' ? '0' : kind === 'word' ? (s.op === 'starts' ? '!discord' : 'noob idiot "a phrase"') : s.op === 'wild' ? '*admin* or 192.168.*' : 'exact value';
+		inp.placeholder = kind === 'num' ? '0' : kind === 'ident' ? (s.subject === 'player_id' ? '3' : '32-character GUID') :
+			kind === 'word' ? (s.op === 'starts' ? '!discord' : s.op === 'exact' ? '!rules' : 'noob idiot "a phrase"') :
+			s.op === 'wild' ? '*admin* or 192.168.*' : s.op === 'has' ? 'part of the value' : 'exact value';
 	}
 	if (p.kind === 'dur') {
 		const chk = () => inp.classList.toggle('bad', !(parseDur(inp.value) > 0));
@@ -1188,7 +1612,6 @@ function field(s, p, key) {
 		inp.addEventListener('input', chk);
 	}
 	inp.addEventListener('input', () => { s[p.k] = inp.value; changed(false); });
-	if (p.kind === 'text') inp.addEventListener('focus', () => { lastText = inp; });
 	return inp;
 }
 
@@ -1197,7 +1620,7 @@ function updateDerivedRows(key, errs) {
 	for (const j of jointRefs[key]) j.span.textContent = jointText(j.s, j.isElse);
 	for (const r of rowRefs[key]) {
 		let t = r.s.type ? sendsText(r.s) : '';
-		if (r.s.type === 'wait') {
+		if (r.s.type === 'wait') { 
 			const secs = secsOf(r.s.time);
 			t = secs > 0 ? 'waits ' + secs + ' second' + (secs === 1 ? '' : 's') : '';
 		} else if (t) t = 'sends: ' + t;
@@ -1217,7 +1640,7 @@ function stepUp(root, list, i) {
 	if (i > 0) {
 		const prev = list[i - 1];
 		list.splice(i, 1);
-		if (prev.type === 'if') { const ls = lists(prev); ls[ls.length - 1].push(s); }
+		if (isBlock(prev)) { const ls = lists(prev); ls[ls.length - 1].push(s); }
 		else list.splice(i - 1, 0, s);
 		return true;
 	}
@@ -1233,7 +1656,7 @@ function stepDown(root, list, i) {
 	if (i < list.length - 1) {
 		const next = list[i + 1];
 		list.splice(i, 1);
-		if (next.type === 'if') next.branches[0].steps.unshift(s);
+		if (isBlock(next)) lists(next)[0].unshift(s);
 		else list.splice(i + 1, 0, s);
 		return true;
 	}
@@ -1270,20 +1693,28 @@ function moveBranch(key, s, k, dir) {
 function dropPos(r, above) {
 	if (r.kind === 'step') {
 		if (above) return { list: r.list, i: r.i };
-		return r.s.type === 'if' ? { list: r.s.branches[0].steps, i: 0 } : { list: r.list, i: r.i + 1 };
+		return isBlock(r.s) && !isFolded(r.s) ? { list: lists(r.s)[0], i: 0 } : { list: r.list, i: r.i + 1 };
 	}
 	const ls = lists(r.s);
 	if (r.kind === 'elif') return above ? { list: ls[r.k - 1], i: ls[r.k - 1].length } : { list: r.b.steps, i: 0 };
-	const lastBranch = r.s.branches[r.s.branches.length - 1].steps;
-	if (r.kind === 'else') return above ? { list: lastBranch, i: lastBranch.length } : { list: r.s.else, i: 0 };
+	if (r.kind === 'else') {
+		const lastBranch = r.s.branches[r.s.branches.length - 1].steps;
+		return above ? { list: lastBranch, i: lastBranch.length } : { list: r.s.else, i: 0 };
+	}
 	const last = ls[ls.length - 1];
 	return above ? { list: last, i: last.length } : { list: r.list, i: r.i + 1 };
 }
 
+
+
+let drag = null;
+function clearDragMarks() {
+	document.querySelectorAll('#steps .step, #onStop .step').forEach((r) => r.classList.remove('drop-above', 'drop-below', 'dragging'));
+	$('steps').classList.remove('drop-into');
+	$('onStop').classList.remove('drop-into');
+}
 function setupDrag(box) {
 	const key = box.id === 'steps' ? 'steps' : 'onStop';
-	let drag = null;
-	const rowsEls = () => [...box.querySelectorAll('.step')];
 	box.addEventListener('pointerdown', (e) => {
 		const g = e.target.closest('.grip');
 		const row = g && g.closest('.step');
@@ -1294,36 +1725,41 @@ function setupDrag(box) {
 		if (!row || !row.draggable) { e.preventDefault(); return; }
 		const ri = +row.dataset.r;
 		const r = flatRows[key][ri];
-		drag = { r, from: ri, to: r.last };
+		drag = { key, r, from: ri, to: r.last };
 		e.dataTransfer.effectAllowed = 'move';
 		e.dataTransfer.setData('text/plain', String(ri));
-		rowsEls().forEach((x) => { const j = +x.dataset.r; if (j >= drag.from && j <= drag.to) x.classList.add('dragging'); });
+		box.querySelectorAll('.step').forEach((x) => { const j = +x.dataset.r; if (j >= drag.from && j <= drag.to) x.classList.add('dragging'); });
 	});
-	const clearDrop = () => box.querySelectorAll('.step').forEach((r) => r.classList.remove('drop-above', 'drop-below'));
-	const clear = () => box.querySelectorAll('.step').forEach((r) => r.classList.remove('drop-above', 'drop-below', 'dragging'));
 	const above = (e, row) => e.clientY < row.getBoundingClientRect().top + row.offsetHeight / 2;
 	
+	
+	
 	const target = (e) => {
+		if (!drag) return null;
 		const row = e.target.closest('.step');
-		if (!drag || !row) return null;
+		if (!row) return { row: null, pos: { list: ed[key], i: ed[key].length } };
 		const ri = +row.dataset.r;
-		if (ri >= drag.from && ri <= drag.to) return null;
+		if (drag.key === key && ri >= drag.from && ri <= drag.to) return null;
 		const ab = above(e, row);
 		return { row, ab, pos: dropPos(flatRows[key][ri], ab) };
 	};
 	box.addEventListener('dragover', (e) => {
 		const t = target(e);
-		clearDrop();
+		document.querySelectorAll('#steps .step, #onStop .step').forEach((r) => r.classList.remove('drop-above', 'drop-below'));
+		$('steps').classList.remove('drop-into');
+		$('onStop').classList.remove('drop-into');
 		if (!t) return;
 		e.preventDefault();
-		t.row.classList.add(t.ab ? 'drop-above' : 'drop-below');
+		if (t.row) t.row.classList.add(t.ab ? 'drop-above' : 'drop-below');
+		else box.classList.add('drop-into');
 	});
+	box.addEventListener('dragleave', (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove('drop-into'); });
 	box.addEventListener('drop', (e) => {
 		e.preventDefault();
 		const t = target(e);
 		const d = drag;
 		drag = null;
-		clear();
+		clearDragMarks();
 		if (!t || !d) return;
 		const s = d.r.list.splice(d.r.i, 1)[0];
 		let ti = t.pos.i;
@@ -1333,8 +1769,8 @@ function setupDrag(box) {
 	});
 	box.addEventListener('dragend', () => {
 		drag = null;
-		clear();
-		box.querySelectorAll('.step').forEach((r) => { r.draggable = false; });
+		clearDragMarks();
+		document.querySelectorAll('#steps .step, #onStop .step').forEach((r) => { r.draggable = false; });
 	});
 	
 	box.addEventListener('mouseover', (e) => {
@@ -1349,38 +1785,37 @@ function setupDrag(box) {
 
 
 
-function whyDisabled(type, key) {
-	if (key === 'onStop') return STOP_TYPES.includes(type) ? '' : 'not for Stop';
-	if ((type === 'kick' || type === 'ban') && !ctx(ed).player) return 'needs On join or Player message';
+function whyDisabled(type) {
+	if ((type === 'kick' || type === 'ban') && !ctx(ed).player && !hasLoop(ed.steps)) return 'needs a For each, or On join or Player message';
 	return '';
 }
-function openMenu(key) {
-	const menu = key === 'steps' ? $('menu') : $('stopMenu');
-	const btn = key === 'steps' ? $('addBtn') : $('addStopBtn');
+
+function openMenu() {
+	const menu = $('menu');
 	if (!menu.hidden) { closeMenus(); return; }
 	closeMenus();
 	menu.textContent = '';
 	for (const g of GROUPS) {
-		const items = Object.entries(STEPS).filter(([t, d]) => d.group === g && (key === 'steps' || STOP_TYPES.includes(t)));
+		const items = Object.entries(STEPS).filter(([t, d]) => d.group === g);
 		if (!items.length) continue;
-		const grp = el('div', { class: 'grp' }, el('div', { class: 'gl', text: g }));
+		const grp = el('div', { class: 'grp ' + items[0][1].cat }, el('div', { class: 'gl', text: g }));
 		for (const [type, d] of items) {
-			const why = whyDisabled(type, key);
-			grp.append(el('button', { type: 'button', disabled: !!why, title: why || d.desc, onclick: () => addStep(key, type) }, d.label, el('small', { text: why || d.desc })));
+			const why = whyDisabled(type);
+			grp.append(el('button', { type: 'button', disabled: !!why, title: why || d.desc, onclick: () => addStep('steps', type) }, d.label, el('small', { text: why || d.desc })));
 		}
 		menu.append(grp);
 	}
 	menu.hidden = false;
-	btn.setAttribute('aria-expanded', 'true');
-	menu.scrollIntoView({ block: 'nearest' });
+	
+	const room = $('addBtn').getBoundingClientRect().top - $('editModal').querySelector('.box.fb').getBoundingClientRect().top - 12;
+	menu.style.maxHeight = Math.max(160, room) + 'px';
+	$('addBtn').setAttribute('aria-expanded', 'true');
 	const first = menu.querySelector('button:not(:disabled)');
 	if (first) first.focus();
 }
 function closeMenus() {
-	for (const [m, b] of [['menu', 'addBtn'], ['stopMenu', 'addStopBtn']]) {
-		$(m).hidden = true;
-		$(b).setAttribute('aria-expanded', 'false');
-	}
+	$('menu').hidden = true;
+	$('addBtn').setAttribute('aria-expanded', 'false');
 }
 
 function sameSubject(first) {
@@ -1389,6 +1824,7 @@ function sameSubject(first) {
 
 function syncIfs(list) {
 	for (const s of list) {
+		if (s.type === 'forEach') { syncIfs(s.steps); continue; }
 		if (s.type !== 'if') continue;
 		const first = s.branches[0];
 		s.branches.forEach((b, k) => {
@@ -1397,7 +1833,10 @@ function syncIfs(list) {
 		for (const l of lists(s)) syncIfs(l);
 	}
 }
-function newCond() {
+
+
+function newCond(loopOf) {
+	if (loopOf) return Object.assign(defaultCond(loopOf === 'message' ? 'message' : 'player_ping'), { steps: [] });
 	const c = ctx(ed);
 	return Object.assign(defaultCond(c.chat ? 'message' : c.player ? 'player_ping' : 'players_online'), { steps: [] });
 }
@@ -1406,8 +1845,25 @@ function addStep(key, type) {
 	if ((type === 'message' || type === 'playerList') && key === 'steps') s.to = ctx(ed).player ? 'player' : 'all';
 	if (type === 'playerList' && ed.trigger.type === 'chat') s.to = 'player';
 
-	if (type === 'if') { delete s.subject; delete s.op; delete s.value; s.branches = [newCond()]; s.else = null; }
-	ed[key].push(s);
+	
+	
+	
+	
+	const last = ed[key][ed[key].length - 1];
+	const intoLoop = key === 'steps' && !ctx(ed).player && last && last.type === 'forEach' &&
+		['kick', 'ban', 'if', 'message'].includes(type);
+	if (type === 'if') { delete s.subject; delete s.op; delete s.value; s.branches = [newCond(intoLoop ? last.of : null)]; s.else = null; }
+	if (type === 'forEach') s.steps = [];
+	if (intoLoop && type === 'message') s.to = 'player';
+	let into = ed[key];
+	if (intoLoop) {
+		into = last.steps;
+		while (type !== 'if' && into.length && isBlock(into[into.length - 1])) {
+			const ls = lists(into[into.length - 1]);
+			into = ls[ls.length - 1];
+		}
+	}
+	into.push(s);
 	closeMenus();
 	changed(true);
 	const target = rowRefs[key].find((r) => r.s === s);
@@ -1420,28 +1876,14 @@ function addStep(key, type) {
 document.addEventListener('click', (e) => { if (!e.target.closest('.addrow')) closeMenus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 
-function renderChips() {
-	const c = ctx(ed);
-	const box = $('chips');
-	box.textContent = '';
-	box.append('Insert:');
-	for (const t of TOKENS) {
-		if (t.need && !c[t.need]) continue;
-		box.append(el('button', {
-			type: 'button', title: t.title, text: t.tok,
-			onmousedown: (e) => e.preventDefault(),
-			onclick: () => {
-				let inp = lastText && document.body.contains(lastText) ? lastText : $('steps').querySelector('input.text');
-				if (!inp) return;
-				const a = inp.selectionStart ?? inp.value.length, b = inp.selectionEnd ?? inp.value.length;
-				inp.value = inp.value.slice(0, a) + t.tok + inp.value.slice(b);
-				inp.focus();
-				inp.setSelectionRange(a + t.tok.length, a + t.tok.length);
-				inp.dispatchEvent(new Event('input'));
-			}
-		}));
-	}
-}
+
+window.openValues = function () {
+	const body = $('valuesRows');
+	body.textContent = '';
+	for (const t of TOKENS.filter((x) => SHOW_COUNTERS || !x.counters)) body.append(el('tr', null, el('td', null, el('code', { text: t.tok })), el('td', { text: t.title })));
+	$('valuesModal').style.display = 'flex';
+};
+window.closeValues = function () { $('valuesModal').style.display = 'none'; };
 
 
 
@@ -1452,13 +1894,14 @@ function renderChips() {
 
 let ed = null;
 let edSaved = '';   
-let lastText = null;
 
 function toEditor(f) {
 	return {
-		id: f.id || 0, name: f.name || '', scheduleEnabled: !!f.scheduleEnabled,
-		trigger: { type: f.trigger || 'manual', cron: f.trigger === 'schedule' ? (f.schedule || '') : '0 6 * * *', delay: f.delay || '' },
-		steps: clone(f.steps || []), onStop: clone(f.onStop || [])
+		
+		id: typeof f.id === 'number' ? f.id : null, name: f.name || '', scheduleEnabled: !!f.scheduleEnabled,
+		trigger: { type: f.trigger || 'manual', cron: f.trigger === 'schedule' ? (f.schedule || '') : '', delay: f.delay || '' },
+		steps: clone(f.steps || []), onStop: clone(f.onStop || []),
+		counterThreshold: f.counterThreshold ? String(f.counterThreshold) : ''
 	};
 }
 function fromEditor() {
@@ -1466,7 +1909,8 @@ function fromEditor() {
 	return {
 		id: ed.id, name: ed.name, scheduleEnabled: ed.scheduleEnabled, trigger: t.type,
 		schedule: t.type === 'schedule' ? t.cron : '', delay: t.delay || '',
-		steps: ed.steps, onStop: t.type === 'schedule' || t.type === 'manual' ? ed.onStop : []
+		steps: ed.steps, onStop: t.type === 'schedule' || t.type === 'manual' ? ed.onStop : [],
+		counterThreshold: thresholdSet(ed.counterThreshold) ? +ed.counterThreshold : thresholdOk(ed.counterThreshold) ? 0 : -1
 	};
 }
 const edChanged = () => !!ed && JSON.stringify(fromEditor()) !== edSaved;
@@ -1475,6 +1919,7 @@ function openEditor(f, title) {
 	ed = toEditor(f);
 	edSaved = JSON.stringify(fromEditor());
 	$('edTitle').textContent = title;
+	$('edNum').textContent = ed.id === null ? '' : 'Flow #' + ed.id;
 	$('edMsg').textContent = '';
 	$('editModal').style.display = 'flex';
 	renderAll();
@@ -1508,7 +1953,7 @@ function renderTrigger() {
 	const seg = $('trigSeg');
 	seg.textContent = '';
 	
-	const locked = ed.id !== 0;
+	const locked = ed.id !== null;
 	for (const [id, label] of TRIGGERS) {
 		seg.append(el('button', {
 			type: 'button', 'aria-pressed': String(ed.trigger.type === id), text: label,
@@ -1516,7 +1961,7 @@ function renderTrigger() {
 			title: locked && ed.trigger.type !== id ? 'A saved flow\'s trigger can\'t be changed; make a new flow instead' : null,
 			onclick: () => {
 				if (ed.trigger.type === id) return;
-				ed.trigger = { type: id, cron: ed.trigger.cron || '0 6 * * *', delay: ed.trigger.delay };
+				ed.trigger = { type: id, cron: ed.trigger.cron || '', delay: ed.trigger.delay };
 				renderAll();
 			}
 		}));
@@ -1525,15 +1970,23 @@ function renderTrigger() {
 	box.textContent = '';
 	const t = ed.trigger;
 	if (t.type === 'schedule') {
-		const i = el('input', { value: t.cron || '', placeholder: '0 6 * * *', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Schedule (cron)' });
+		const i = el('input', { value: t.cron || '', placeholder: '* * * * *', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Schedule (cron)' });
 		i.addEventListener('input', () => { t.cron = i.value; queuePreview(); });
 		box.append(el('label', { class: 'f' }, 'Schedule (cron)', i));
 	}
-	const d = el('input', { class: 'dur', value: t.delay || '', placeholder: 'none, or e.g. 1m20s', title: 'Seconds, or h m s such as 1m20s', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Delay before step 1' });
+	const d = el('input', { class: 'dur', value: t.delay || '', placeholder: '1s, 30s, 1m30s, 1h', title: 'Time before step 1: seconds, or h m s such as 1m30s', autocomplete: 'off', spellcheck: 'false', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Delay' });
 	const check = () => d.classList.toggle('bad', d.value.trim() !== '' && parseDur(d.value) == null);
 	d.addEventListener('input', () => { t.delay = d.value; check(); queuePreview(); });
 	check();
-	box.append(el('label', { class: 'f' }, 'Delay before step 1 (optional)', d));
+	box.append(el('label', { class: 'f' }, 'Delay (optional)', d));
+	
+	if (SHOW_COUNTERS || String(ed.counterThreshold).trim()) {
+		const ct = el('input', { class: 'dur', value: ed.counterThreshold, inputmode: 'numeric', autocomplete: 'off', title: 'Optional: a whole number from 1 to 1000, used as {threshold}', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Counter threshold' });
+		const ctCheck = () => ct.classList.toggle('bad', !thresholdOk(ct.value));
+		ct.addEventListener('input', () => { ed.counterThreshold = ct.value; ctCheck(); changed(false); });
+		ctCheck();
+		box.append(el('label', { class: 'f', title: 'Each player\'s counter starts at 0 every run; If, Else if and Else can change it. Set a threshold to compare with {counter} >= {threshold}.' }, 'Counter threshold (optional)', ct));
+	}
 	$('stopSection').hidden = !(t.type === 'schedule' || t.type === 'manual');
 	updateTrigHint();
 }
@@ -1559,7 +2012,11 @@ async function updateTrigHint() {
 		return;
 	}
 	if (t.type === 'manual') {
-		h.textContent = 'Runs only when you press Run (or POST /api/flows/<id>/run).' + delayText + lenText;
+		h.textContent = 'Runs only when you press Run (or POST /api/flows/' + (ed.id === null ? '<id>' : ed.id) + '/run).' + delayText + lenText;
+		return;
+	}
+	if (!String(t.cron || '').trim()) {
+		h.textContent = 'Enter when it runs: minute hour day-of-month month day-of-week. * * * * * runs every minute.' + lenText;
 		return;
 	}
 	const sent = JSON.stringify([t.cron, t.delay]);
@@ -1585,13 +2042,12 @@ function changed(structural) {
 function renderAll() {
 	$('fName').value = ed.name;
 	renderTrigger();
-	renderChips();
 	renderSteps('steps');
 	renderSteps('onStop');
 }
 $('fName').addEventListener('input', (e) => { ed.name = e.target.value; });
-$('addBtn').addEventListener('click', () => openMenu('steps'));
-$('addStopBtn').addEventListener('click', () => openMenu('onStop'));
+$('addBtn').addEventListener('click', openMenu);
+$('valuesBtn').addEventListener('click', () => { closeMenus(); window.openValues(); });
 $('saveBtn').addEventListener('click', async () => {
 	const msg = $('edMsg');
 	msg.textContent = '';
@@ -1668,6 +2124,22 @@ function renderCmds() {
 		if (c.length) {
 			head.append(el('label', { class: 'opt', for: 'len-' + c.cmd }, 'Vote lasts', durInput('len-' + c.cmd, s.length, '5m', false, (v) => { s.length = v; })));
 		}
+		if (c.warn) {
+			const th = el('input', { class: 'dur', id: 'th-' + c.cmd, value: s.threshold, placeholder: '2', autocomplete: 'off', inputmode: 'numeric', title: 'A whole number, 1 or more' });
+			const chk = () => {
+				const ok = /^\d+$/.test(th.value.trim()) && +th.value >= 1 && +th.value <= 100;
+				th.classList.toggle('bad', !ok);
+				return ok;
+			};
+			th.addEventListener('input', () => { s.threshold = chk() ? +th.value : th.value; dirty(); });
+			chk();
+			head.append(el('label', { class: 'opt', for: th.id }, 'Warnings until', th));
+			const act = el('select', { id: 'act-' + c.cmd },
+				el('option', { value: 'kick', text: 'Kick' }), el('option', { value: 'ban', text: 'Ban' }));
+			act.value = s.action;
+			act.addEventListener('change', () => { s.action = act.value; dirty(); });
+			head.append(el('label', { class: 'opt', for: act.id }, act));
+		}
 		let annBox = null;
 		if (c.announce) {
 			annBox = el('input', { type: 'checkbox', checked: s.announce, id: 'ann-' + c.cmd });
@@ -1689,7 +2161,7 @@ function renderCmds() {
 			};
 			inp.addEventListener('input', () => { s.msgs[f.key] = inp.value; upd(); dirty(); });
 			upd();
-			if (f.key === 'announce' && annBox) {
+			if ((f.key === 'announce' || f.key === 'limit_announce') && annBox) {
 				const sync = () => { wrap.style.opacity = s.announce ? '' : '.45'; };
 				annBox.addEventListener('change', () => { s.announce = annBox.checked; sync(); dirty(); });
 				sync();

@@ -1,0 +1,1549 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DayZ Players</title>
+{{template "style" .}}
+<style>
+td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
+td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
+.offline-section { margin-top: 42px; }
+.top .icon-btn, .statusrow .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+.statusrow { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.statusrow .statusbar { margin-bottom: 0; }
+.statusrow button { margin-right: 0; }
+/* Settings and Console, stacked on the right: the same width, so they line up. */
+.hdrbtn { width: 104px; justify-content: center; box-sizing: border-box; }
+
+/* RCON Settings dialog. Empty fields use the docker-compose defaults, shown
+   as the greyed-out placeholder text. */
+.rcset input::placeholder { color: #666; }
+.rcset .row { display: flex; gap: 10px; }
+.rcset .row > div:first-child { flex: 1; }
+.rcset .row > div:last-child { width: 110px; }
+.rcset .now { font-size: 13px; margin: -4px 0 14px; }
+.rcset .now.on { color: #81c995; }
+.rcset .now.off { color: #f28b82; }
+.rcset .now b { font-weight: 600; }
+.rcset #rcsMsg { font-size: 13px; margin: 0 0 10px; min-height: 1em; white-space: pre-line; }
+.rcset #rcsMsg.ok { color: #81c995; }
+.rcset #rcsMsg.err { color: #f28b82; }
+.rcset .buttons { display: flex; gap: 8px; align-items: center; }
+.rcset .buttons .spacer { flex: 1; }
+td { white-space: nowrap; }
+
+/* Tables keep their column widths and scroll sideways on narrow screens. */
+.tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; } /* dark scrollbar */
+#onlineTable { min-width: 1040px; }
+#offlineTable { min-width: 1300px; }
+/* Ban Status | Reason fills the rest of the row; a long reason ends in "..."
+   and shows in full on hover. */
+td.ban-cell { text-overflow: ellipsis; }
+td.lastmsg { text-overflow: ellipsis; color: #ccc; }
+/* Online table: Ping takes the spare width, so the Actions column (just wide
+   enough for its four buttons) sits at the right edge of the page, with its
+   header and buttons on its left. */
+td.act button:last-child { margin-right: 0; }
+td.act-left button { margin-right: 0; }
+.ban-on { color: #f28b82; font-weight: 600; }
+.ban-off { color: #888; }
+
+/* The Kick/Ban dialog can open on top of the Details dialog. */
+#modal { z-index: 20; }
+
+/* Details dialog */
+.dlg.details { width: min(860px, 94vw); }
+.badge { font-size: 12px; border-radius: 3px; padding: 1px 6px; color: #ccc; background: #333; }
+.badge.online { color: #111; background: #81c995; }
+.badge.banned { color: #111; background: #f28b82; }
+/* Role badges: next to the name in the tables and in the Details header. */
+.badge.role-1 { color: #111; background: #fdd663; }
+.badge.role-2 { color: #111; background: #f28b82; }
+td .badge { margin-left: 6px; vertical-align: 1px; }
+
+/* Permissions tab */
+.roles { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 14px; }
+.role { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: start; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 12px 14px; cursor: pointer; }
+.role:hover { border-color: #555; }
+.role.sel { border-color: #8ab4f8; background: #1b2433; }
+.role input { width: auto; margin: 3px 0 0; accent-color: #8ab4f8; }
+.role .name { font-weight: 600; }
+.role .name .tagline { font-weight: 400; color: #aaa; font-size: 13px; margin-left: 6px; }
+.role .can { grid-column: 2; color: #bbb; font-size: 13px; line-height: 1.55; }
+.role .can code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #111; padding: 1px 4px; border-radius: 3px; }
+#permState { font-size: 13px; min-height: 1.4em; }
+#permState.saved { color: #81c995; }
+#permState.bad { color: #f28b82; }
+.ownernote { color: #888; font-size: 12.5px; margin-top: 14px; line-height: 1.5; }
+.dtabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid #444; }
+.dtabs button { margin: 0 0 -1px; padding: 7px 14px; font-size: 13px; color: #aaa; background: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; }
+.dtabs button:hover { color: #eee; }
+.dtabs button.active { color: #eee; background: #222; border-color: #444; border-bottom: 1px solid #222; }
+.dpanes { height: min(500px, 62vh); overflow-y: auto; padding-right: 4px; }
+.dpane { display: none; }
+.dpane.active { display: block; }
+.dpane .hint { color: #aaa; font-size: 13px; margin: 12px 0 8px; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0 18px; }
+.tile { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 12px; }
+.tile .k { font-size: 12px; color: #aaa; margin-bottom: 4px; }
+.tile .v { font-size: 16px; }
+.callout { border-radius: 6px; padding: 12px; font-size: 14px; line-height: 1.6; margin-top: 12px; }
+.callout.bad { background: #2a1716; border: 1px solid #5c2b29; }
+.callout.bad b { color: #f28b82; }
+.callout.warn { background: #2a2614; border: 1px solid #5c5224; }
+.callout.warn b { color: #fdd663; }
+.dt { table-layout: auto; }
+.dt th, .dt td { height: auto; padding: 7px 9px; font-size: 13px; }
+.linkbtn { background: none; border: none; padding: 0; margin: 0 8px 0 0; color: #fdd663; cursor: pointer; font-size: 13px; text-decoration: underline; }
+.dim { color: #888; }
+/* Fixed size: a long note scrolls inside the box instead of growing it. */
+#noteInput { margin: 0; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.4; height: 28em; resize: none; overflow-y: auto; }
+/* The Chat tab fills the panel: the log takes the room the message bar leaves. */
+.dpane.active[data-pane="chat"] { display: flex; flex-direction: column; height: 100%; }
+#detChat { flex: 1; min-height: 120px; margin-bottom: 10px; }
+#detChatInput:disabled { opacity: 0.5; }
+.notebar { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.notebar .count { font-size: 12px; color: #888; }
+.notebar .count.near { color: #fdd663; }
+.notebar .saved { font-size: 13px; color: #81c995; }
+.notebar .unsaved { font-size: 13px; color: #fdd663; }
+.notebar button { margin: 0 0 0 auto; }
+.dfoot { display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 12px; }
+.dfoot button { margin: 0; }
+@media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Console and Message dialogs: wider boxes on the shared .modal overlay. */
+.dlg { display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
+.dlg.console { width: min(920px, 94vw); }
+.dlg.chat { width: min(720px, 94vw); }
+.dlg-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dlg-head h2 { margin: 0; font-size: 20px; }
+.dlg-head .sub { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #aaa; }
+.dlg-head .close { margin: 0 0 0 auto; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #81c995; }
+.live.off { color: #f28b82; }
+.log { background: #111; border: 1px solid #333; border-radius: 4px; overflow-y: auto; padding: 10px 12px; box-sizing: border-box; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.65; }
+#consoleLog { height: min(380px, 55vh); }
+#chatLog { height: min(260px, 45vh); }
+.log .ln { display: flex; gap: 12px; white-space: pre-wrap; word-break: break-word; }
+.log .t { color: #888; flex: none; min-width: 64px; }
+.log .empty { color: #888; }
+/* One colour per kind of line. */
+.k-connect { color: #81c995; }
+.k-disconnect { color: #9aa0a6; }
+.k-guid { color: #777; }
+.k-kick, .k-error { color: #f28b82; }
+.k-chat, .k-in { color: #eee; }
+.k-admin { color: #fdd663; }
+.k-sent, .k-out { color: #8ab4f8; }
+.k-reply { color: #c8c8c8; }
+.k-other { color: #aaa; }
+.cmdrow { display: flex; gap: 8px; align-items: stretch; }
+.cmdrow input { flex: 1; min-width: 0; margin: 0; }
+.cmdrow button { margin: 0; padding: 6px 16px; }
+.cmdrow .prompt { display: flex; align-items: center; padding: 0 2px 0 4px; font-family: ui-monospace, Consolas, monospace; font-size: 14px; color: #8ab4f8; }
+#consoleInput { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.dlg-err { color: #f28b82; font-size: 13px; }
+.dlg-err:empty { display: none; }
+
+/* Steam Profile tab */
+.callout.good { background: #15241a; border: 1px solid #2b5c37; }
+.callout.good b { color: #81c995; }
+.steamhead { display: flex; align-items: center; gap: 14px; margin: 14px 0 4px; }
+.steamhead img { width: 64px; height: 64px; border-radius: 6px; border: 1px solid #333; flex: none; }
+.steamhead .who { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.steamhead .who a { font-size: 18px; color: #8ab4f8; text-decoration: none; overflow-wrap: anywhere; }
+.steamhead .who a:hover { text-decoration: underline; }
+.steamhead .sid { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #aaa; }
+.steamhead .state { font-size: 13px; color: #aaa; }
+.steamhead .state.on { color: #81c995; }
+.steamhead button { margin: 0 0 0 auto; flex: none; }
+.steamfriends { margin-top: 4px; font-size: 14px; line-height: 1.8; }
+.steamfriends b { font-weight: 600; margin-right: 6px; }
+</style>
+</head>
+<body>
+<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<!-- The status lines, with RCON Settings on the same row (right, above Console) -->
+<div class="statusrow">
+{{template "statusbar" .}}
+	<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+		Settings
+	</button>
+</div>
+<div class="top">
+	<h1>DayZ Players</h1>
+	<button type="button" class="icon-btn hdrbtn" onclick="openConsole()">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+		Console
+	</button>
+</div>
+<div class="tablewrap">
+<table id="onlineTable">
+	<colgroup>
+		<col style="width: 60px">
+		<col style="width: 190px">
+		<col style="width: 150px">
+		<col style="width: 300px">
+		<col style="width: 56px">
+		<col>
+		<col style="width: 290px">
+	</colgroup>
+	<thead>
+		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th>Actions</th></tr>
+	</thead>
+	<tbody id="players"></tbody>
+</table>
+</div>
+
+<div class="offline-section">
+	<h2>Offline Players</h2>
+	<div class="tablewrap">
+	<table id="offlineTable">
+		<colgroup>
+			<col style="width: 190px">
+			<col style="width: 150px">
+			<col style="width: 300px">
+			<col style="width: 160px">
+			<col style="width: 200px">
+			<col style="width: 90px">
+			<col>
+		</colgroup>
+		<thead>
+			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Actions</th><th>Ban Status | Reason</th></tr>
+		</thead>
+		<tbody id="offlinePlayers"></tbody>
+	</table>
+	</div>
+</div>
+
+<!-- Details dialog: everything ReCON has logged about one player -->
+<div id="detailsModal" class="modal">
+	<div class="box dlg details" role="dialog" aria-labelledby="detName">
+		<div class="dlg-head">
+			<h2 id="detName">Player</h2>
+			<span id="detBadge" class="badge"></span>
+			<span id="detRole" class="badge" hidden></span>
+			<span id="detGuid" class="sub"></span>
+		</div>
+		<div class="dtabs" id="detTabs">
+			<button type="button" data-tab="overview">Overview</button>
+			<button type="button" data-tab="sessions">Sessions</button>
+			<button type="button" data-tab="ips">IPs</button>
+			<button type="button" data-tab="steam">Steam Profile</button>
+			<button type="button" data-tab="chat">Chat</button>
+			<button type="button" data-tab="notes">Notes</button>
+			<button type="button" data-tab="permissions">Permissions</button>
+		</div>
+		<div class="dpanes">
+			<div class="dpane" data-pane="overview">
+				<div class="tiles" id="detTiles"></div>
+				<div id="detBanBox"></div>
+				<div id="detShared"></div>
+			</div>
+			<div class="dpane" data-pane="sessions">
+				<div class="hint" id="detSessHint"></div>
+				<table class="dt">
+					<thead><tr><th>Connected</th><th>Disconnected</th><th>Duration</th><th>IP</th></tr></thead>
+					<tbody id="detSessions"></tbody>
+				</table>
+			</div>
+			<div class="dpane" data-pane="ips">
+				<div class="hint">Every IP this player has connected from, and anyone else seen on the same IP.</div>
+				<table class="dt">
+					<thead><tr><th>IP</th><th>First used</th><th>Last used</th><th>Also used by</th></tr></thead>
+					<tbody id="detIPs"></tbody>
+				</table>
+			</div>
+			<div class="dpane" data-pane="steam">
+				<div id="detSteam"></div>
+			</div>
+			<div class="dpane" data-pane="chat">
+				<div class="hint" id="detChatHint"></div>
+				<div id="detChat" class="log" aria-live="polite"></div>
+				<form id="detChatForm" class="cmdrow" autocomplete="off">
+					<input id="detChatInput" type="text" aria-label="Private message">
+					<button type="submit">Send</button>
+				</form>
+			</div>
+			<div class="dpane" data-pane="notes">
+				<label for="noteInput" class="hint" style="display: block">Admin notes about this player. Only admins see these, never the player.</label>
+				<textarea id="noteInput" rows="20" maxlength="500" placeholder="e.g. Warned for KOS at the airfield on 10-12. Plays with Marrow."></textarea>
+				<div class="notebar">
+					<span id="noteCount" class="count">0 / 500</span>
+					<span id="noteStatus"></span>
+				</div>
+			</div>
+			<div class="dpane" data-pane="permissions">
+				<div class="hint">What this player can do with the chat commands in game. The role is stored with their GUID, so it stays when they change name. New players are Players. Clicking a role saves it.</div>
+				<div class="roles" id="roles" role="radiogroup" aria-label="Role"></div>
+				<div id="permState"></div>
+				<p class="ownernote">This page is the server owner: its Kick and Ban buttons work on everyone, including Admins.</p>
+			</div>
+		</div>
+		<div id="detErr" class="dlg-err"></div>
+		<div class="dfoot"><button type="button" id="detBan"></button><button type="button" onclick="closeDetails()">Close</button></div>
+	</div>
+</div>
+
+<!-- Kick / Ban dialog (online players and Details). Laid out like the Bans
+     page's Ban Player dialog, so banning looks the same everywhere. -->
+<div id="modal" class="modal">
+	<div class="box">
+		<h2 id="title"></h2>
+		<div id="durationWrap">
+			<label>Duration (minutes, 0 = permanent)</label>
+			<input id="minutes" type="number" min="0" step="1" value="0">
+		</div>
+		<label>Reason</label>
+		<input id="text" type="text" maxlength="200" placeholder="Short message shown to the player">
+		<div class="buttons">
+			<button onclick="closeModal()">Cancel</button>
+			<button id="submit"></button>
+		</div>
+	</div>
+</div>
+
+<!-- RCON Settings: override the docker-compose RCON settings -->
+<div id="rconSettingsModal" class="modal" onclick="if (event.target === this) closeRconSettings()">
+	<div class="box rcset" role="dialog" aria-labelledby="rcsTitle">
+		<h2 id="rcsTitle">RCON Settings</h2>
+		<p class="now" id="rcsNow"></p>
+		<div class="row">
+			<div><label for="rcsHost">Server IP</label><input id="rcsHost" type="text" autocomplete="off" spellcheck="false"></div>
+			<div><label for="rcsPort">Port</label><input id="rcsPort" type="text" inputmode="numeric" autocomplete="off"></div>
+		</div>
+		<label for="rcsPassword">RCON password</label>
+		<input id="rcsPassword" type="text" autocomplete="off" spellcheck="false">
+		<p id="rcsMsg"></p>
+		<div class="buttons">
+			<span class="spacer"></span>
+			<button type="button" onclick="closeRconSettings()">Cancel</button>
+			<button type="button" id="rcsConnect" onclick="connectRcon()">Connect</button>
+		</div>
+	</div>
+</div>
+
+<!-- RCON console: every server message plus every command ReCON sends -->
+<div id="consoleModal" class="modal">
+	<div class="box dlg console" role="dialog" aria-labelledby="consoleTitle">
+		<div class="dlg-head">
+			<h2 id="consoleTitle">RCON Console</h2>
+			<span id="consoleLive" class="live"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="4" fill="currentColor"></circle></svg><span>Live</span></span>
+			<button type="button" class="close" onclick="closeConsole()">Close</button>
+		</div>
+		<div id="consoleLog" class="log" aria-live="polite"></div>
+		<form id="consoleForm" class="cmdrow" autocomplete="off">
+			<label for="consoleInput" class="prompt">&gt;</label>
+			<input id="consoleInput" type="text" spellcheck="false" placeholder="RCON command, e.g. players or say -1 Hello">
+			<button type="submit">Send</button>
+		</form>
+		<div id="consoleErr" class="dlg-err"></div>
+	</div>
+</div>
+
+<!-- Message dialog: one player's chat and the private messages sent to them -->
+<div id="chatModal" class="modal">
+	<div class="box dlg chat" role="dialog" aria-labelledby="chatTitle">
+		<div class="dlg-head">
+			<h2 id="chatTitle">Message</h2>
+			<span id="chatSub" class="sub"></span>
+			<button type="button" class="close" onclick="closeChat()">Close</button>
+		</div>
+		<div id="chatLog" class="log" aria-live="polite"></div>
+		<form id="chatForm" class="cmdrow" autocomplete="off">
+			<input id="chatInput" type="text" aria-label="Private message">
+			<button type="submit">Send</button>
+		</form>
+		<div id="chatErr" class="dlg-err"></div>
+	</div>
+</div>
+<script>
+let current = null;
+let action = null;
+
+function esc(s) {
+	return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Roles for the chat commands, by number (Players page: Details, Permissions).
+const ROLE_NAMES = ['Player', 'Mod', 'Admin'];
+
+// roleBadge is the Mod or Admin badge shown after a name (nothing for Players).
+function roleBadge(role) {
+	return role > 0 ? ' <span class="badge role-' + role + '">' + ROLE_NAMES[role] + '</span>' : '';
+}
+
+async function api(url, opt = {}) { return fetch(url, opt); }
+
+async function refresh() {
+	try {
+		let r = await api('/api/players');
+		let d = await r.json();
+		if (!d.ok) { setStatusCount(''); return; } // the status bar shows why
+		// While the game server isn't answering, the online table says so and
+		// the offline list (from the database) still shows.
+		setStatusCount(d.connected ? d.count + ' player(s) online' : '');
+		document.getElementById('players').innerHTML = !d.connected ?
+			'<tr><td colspan="7" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
+			d.players.map(function(p) {
+			let n = esc(p.name);
+			let g = esc(p.guid);
+			return '<tr>' +
+				'<td>' + p.id + '</td>' +
+				'<td title="' + n + '">' + n + roleBadge(p.role) + '</td>' +
+				'<td class="mono">' + esc(p.ip) + '</td>' +
+				'<td class="mono">' + g + '</td>' +
+				'<td>' + p.ping + '</td>' +
+				lastMessageCell(p) +
+				'<td class="act">' +
+					'<button data-id="' + p.id + '" data-guid="' + g + '" data-action="message" data-name="' + n + '" onclick="handleActionClick(this)">Message</button>' +
+					'<button data-id="' + p.id + '" data-action="kick" data-name="' + n + '" onclick="handleActionClick(this)">Kick</button>' +
+					'<button data-id="' + p.id + '" data-action="ban" data-name="' + n + '" onclick="handleActionClick(this)">Ban</button>' +
+					'<button data-guid="' + g + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button>' +
+				'</td>' +
+			'</tr>';
+		}).join('');
+
+		// Render offline players returned by the database.
+		let bans = d.bans || {};
+		document.getElementById('offlinePlayers').innerHTML = (d.offlinePlayers || []).map(function(p) {
+			let ban = bans[String(p.guid).toLowerCase()];
+			let seconds = Math.max(0, Number(p.totalPlaytimeSeconds) || 0);
+			let days = Math.floor(seconds / 86400);
+			let hours = Math.floor((seconds % 86400) / 3600);
+			let minutes = Math.floor((seconds % 3600) / 60);
+			let playtime = (days ? days + 'd ' : '') + (hours ? hours + 'h ' : '') + minutes + 'm';
+
+			return '<tr>' +
+				'<td title="' + esc(p.name) + '">' + esc(p.name) + roleBadge(p.role) + '</td>' +
+				'<td class="mono">' + esc(p.ip) + '</td>' +
+				'<td class="mono">' + esc(p.guid) + '</td>' +
+				'<td>' + playtime + '</td>' +
+				'<td>' + fmtLastSeen(p.lastSeenUnix) + '</td>' +
+				'<td class="act-left"><button data-guid="' + esc(p.guid) + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button></td>' +
+				'<td class="ban-cell ' + (ban ? 'ban-on' : 'ban-off') + '" title="' + esc(banWithReason(ban)) + '">' + esc(banWithReason(ban)) + '</td>' +
+			'</tr>';
+		}).join('');
+	} catch(e) {
+		setStatusCount(''); // the status bar shows that ReCON can't be reached
+	}
+}
+
+// lastMessageCell is the Last Message column: the newest line the player
+// wrote in chat this session (messages sent to them don't count), with the
+// channel and time in the tooltip. Empty until they chat.
+function lastMessageCell(p) {
+	if (!p.lastMessage) return '<td class="lastmsg"></td>';
+	let tip = (p.lastMessageChannel ? '(' + p.lastMessageChannel + ') ' : '') + fmtLastSeen(p.lastMessageUnix) + ': ' + p.lastMessage;
+	return '<td class="lastmsg" title="' + esc(tip) + '">' + esc(p.lastMessage) + '</td>';
+}
+
+// fmtLastSeen formats Unix seconds as MM-DD-YYYY - HH:MM (24-hour) in the
+// viewer's local time zone. Returns a dash when there is no timestamp.
+function fmtLastSeen(unix) {
+	if (!unix || unix <= 0) return '—';
+	let d = new Date(unix * 1000);
+	let pad = function(n) { return String(n).padStart(2, '0'); };
+	return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + d.getFullYear() +
+		' - ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function handleActionClick(btn) {
+	let id = parseInt(btn.getAttribute('data-id'), 10);
+	let a = btn.getAttribute('data-action');
+	let name = btn.getAttribute('data-name');
+	if (a === 'message') {
+		openChat(id, btn.getAttribute('data-guid'), name);
+		return;
+	}
+	openModal(id, a, name);
+}
+
+// banText is a ban's status: "-", "Banned (Perm)", or "Banned (2d 4h left)"
+// for a timed ban ("Banned" if the time left isn't known yet).
+function banText(b) {
+	if (!b || !b.banned) return '-';
+	if (b.perm) return 'Banned (Perm)';
+	if (b.minutesLeft < 0) return 'Banned';
+	return 'Banned (' + fmtMinutesLeft(b.minutesLeft) + ' left)';
+}
+
+// banWithReason is the Ban Status | Reason column: the status, then
+// " - " and the reason when there is one.
+function banWithReason(b) {
+	let s = banText(b);
+	return b && b.banned && b.reason ? s + ' - ' + b.reason : s;
+}
+
+function fmtMinutesLeft(min) {
+	let d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+	if (d) return h ? d + 'd ' + h + 'h' : d + 'd';
+	if (h) return m ? h + 'h ' + m + 'm' : h + 'h';
+	return m ? m + 'm' : 'under 1m';
+}
+
+let banGuid = null; // set when the Ban dialog was opened from Details (bans by GUID)
+
+function openModal(id, a, name, guid) {
+	current = id;
+	action = a;
+	banGuid = guid || null;
+	let verb = a[0].toUpperCase() + a.slice(1);
+	document.getElementById('title').textContent = verb + ' ' + name;
+	document.getElementById('submit').textContent = verb;
+	document.getElementById('durationWrap').style.display = a === 'ban' ? 'block' : 'none';
+	document.getElementById('text').value = '';
+	document.getElementById('minutes').value = '0';
+	document.getElementById('modal').style.display = 'flex';
+}
+
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+document.getElementById('submit').onclick = async () => {
+	let body = { reason: document.getElementById('text').value, minutes: parseInt(document.getElementById('minutes').value, 10) };
+	if (action === 'ban' && (!Number.isInteger(body.minutes) || body.minutes < 0)) {
+		alert('Duration must be a whole number of minutes (0 = permanent).');
+		return;
+	}
+	// From the Details dialog a ban goes by GUID, so it works whether the
+	// player is online (they are kicked too) or offline.
+	let url = action === 'ban' && banGuid ?
+		'/api/bans/' + encodeURIComponent(banGuid) + '/ban' :
+		'/api/players/' + current + '/' + action;
+	let r = await api(url, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
+	});
+	let d = await r.json();
+	if (!d.ok) {
+		alert(d.error || d.guid_error || 'Action failed');
+		return;
+	}
+	closeModal();
+	if (action === 'ban' && d.online !== false && d.kicked === false) {
+		alert('Player was banned, but the kick was not confirmed.');
+	}
+	if (action === 'ban') await bansChanged();
+	refresh();
+};
+
+// bansChanged re-reads the ban list (which updates the ban status ReCON
+// shows) and redraws the Details dialog if it is open.
+async function bansChanged() {
+	try { await fetch('/api/bans', { cache: 'no-store' }); } catch (e) {}
+	if (det) loadDetails(det.guid);
+}
+
+// ---------------------------------------------------------------------------
+// Log lines shared by the Console and Message dialogs
+// ---------------------------------------------------------------------------
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+// logTime shows HH:MM:SS for today, MM-DD HH:MM for older lines.
+function logTime(iso) {
+	let d = new Date(iso);
+	if (isNaN(d)) return '';
+	if (d.toDateString() !== new Date().toDateString()) {
+		return pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+	}
+	return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+
+// chatTime is MM-DD HH:MM (24-hour), for the Details dialog's Chat tab.
+function chatTime(iso) {
+	let d = new Date(iso);
+	if (isNaN(d)) return '';
+	return pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
+// logLine builds one row: time (formatted by fmt, logTime by default), then
+// the text in its kind's colour. Text is set with textContent, so nothing
+// from the server is ever parsed as HTML.
+function logLine(time, kind, text, fmt) {
+	let row = document.createElement('div');
+	row.className = 'ln';
+	let t = document.createElement('span');
+	t.className = 't';
+	t.textContent = (fmt || logTime)(time);
+	let x = document.createElement('span');
+	x.className = 'k-' + (kind || 'other');
+	x.textContent = text;
+	row.append(t, x);
+	return row;
+}
+
+function emptyLine(text) {
+	let e = document.createElement('div');
+	e.className = 'empty';
+	e.textContent = text;
+	return e;
+}
+
+function nearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 40; }
+
+// ---------------------------------------------------------------------------
+// RCON console
+// ---------------------------------------------------------------------------
+
+let consoleLast = 0;      // seq of the newest line shown (GET /api/console?after=)
+let consoleTimer = null;
+let consoleBusy = false;
+let cmdHistory = [];      // commands sent from this page, newest last (Up/Down to recall)
+let cmdIndex = 0;
+
+async function pollConsole() {
+	if (consoleBusy) return;
+	consoleBusy = true;
+	let live = document.getElementById('consoleLive');
+	try {
+		let d = await (await fetch('/api/console?after=' + consoleLast, { cache: 'no-store' })).json();
+		if (d.ok) {
+			let log = document.getElementById('consoleLog');
+			let stick = nearBottom(log);
+			if (d.last < consoleLast) log.textContent = ''; // ReCON restarted: start over
+			if (d.events.length) {
+				let empty = log.querySelector('.empty');
+				if (empty) empty.remove();
+				for (let ev of d.events) {
+					log.appendChild(logLine(ev.time, ev.kind, ev.text));
+				}
+				while (log.childElementCount > 1000) log.firstElementChild.remove();
+			} else if (!log.childElementCount) {
+				log.appendChild(emptyLine('Waiting for messages from the server...'));
+			}
+			consoleLast = d.last;
+			if (stick) log.scrollTop = log.scrollHeight;
+		}
+		live.classList.remove('off');
+		live.lastElementChild.textContent = 'Live';
+	} catch (e) {
+		live.classList.add('off');
+		live.lastElementChild.textContent = 'Reconnecting...';
+	}
+	consoleBusy = false;
+}
+
+function openConsole() {
+	document.getElementById('consoleModal').style.display = 'flex';
+	let log = document.getElementById('consoleLog');
+	log.scrollTop = log.scrollHeight;
+	pollConsole();
+	clearInterval(consoleTimer);
+	consoleTimer = setInterval(pollConsole, 1000);
+	document.getElementById('consoleInput').focus();
+}
+
+function closeConsole() {
+	document.getElementById('consoleModal').style.display = 'none';
+	clearInterval(consoleTimer);
+	consoleTimer = null;
+}
+
+document.getElementById('consoleForm').onsubmit = async (e) => {
+	e.preventDefault();
+	let input = document.getElementById('consoleInput');
+	let err = document.getElementById('consoleErr');
+	let cmd = input.value.trim();
+	if (!cmd) return;
+	input.value = '';
+	err.textContent = '';
+	if (cmdHistory[cmdHistory.length - 1] !== cmd) cmdHistory.push(cmd);
+	cmdIndex = cmdHistory.length;
+	let log = document.getElementById('consoleLog');
+	log.scrollTop = log.scrollHeight; // follow the reply
+	try {
+		let r = await fetch('/api/console', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ command: cmd })
+		});
+		let d = await r.json();
+		if (!d.ok && r.status === 400) err.textContent = d.error || 'Command not sent';
+	} catch (e2) {
+		err.textContent = 'ReCON could not be reached; the command may not have been sent.';
+	}
+	pollConsole();
+};
+
+// Up/Down recall earlier commands, like a terminal.
+document.getElementById('consoleInput').addEventListener('keydown', (e) => {
+	if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+	if (!cmdHistory.length) return;
+	e.preventDefault();
+	cmdIndex = Math.max(0, Math.min(cmdHistory.length, cmdIndex + (e.key === 'ArrowUp' ? -1 : 1)));
+	e.target.value = cmdHistory[cmdIndex] || '';
+});
+
+// ---------------------------------------------------------------------------
+// Message dialog: one player's conversation
+// ---------------------------------------------------------------------------
+
+let chat = null;      // {id, guid, name} of the player the dialog is open for
+let chatTimer = null;
+let chatKey = '';     // what the log shows now, to skip redrawing an unchanged history
+
+async function loadChat() {
+	if (!chat) return;
+	let guid = chat.guid;
+	try {
+		let d = await (await fetch('/api/players/' + encodeURIComponent(guid) + '/chat', { cache: 'no-store' })).json();
+		if (!chat || chat.guid !== guid || !d.ok) return;
+		let msgs = d.messages || [];
+		let last = msgs[msgs.length - 1];
+		let key = msgs.length + '|' + (last ? last.time + last.line : '');
+		if (key === chatKey) return;
+		let log = document.getElementById('chatLog');
+		let stick = chatKey === '' || nearBottom(log);
+		chatKey = key;
+		log.textContent = '';
+		if (!msgs.length) {
+			log.appendChild(emptyLine('No chat from ' + chat.name + ' yet.'));
+		}
+		for (let m of msgs) {
+			log.appendChild(logLine(m.time, m.direction === 'out' ? 'out' : 'in', m.line));
+		}
+		if (stick) log.scrollTop = log.scrollHeight;
+	} catch (e) {
+		// keep showing what we have; the next poll tries again
+	}
+}
+
+function openChat(id, guid, name) {
+	chat = { id: id, guid: guid, name: name };
+	chatKey = '';
+	document.getElementById('chatTitle').textContent = 'Message ' + name;
+	document.getElementById('chatSub').textContent = 'Player #' + id;
+	document.getElementById('chatLog').textContent = '';
+	document.getElementById('chatErr').textContent = '';
+	let input = document.getElementById('chatInput');
+	input.value = '';
+	input.placeholder = 'Private message to ' + name;
+	document.getElementById('chatModal').style.display = 'flex';
+	loadChat();
+	clearInterval(chatTimer);
+	chatTimer = setInterval(loadChat, 2000);
+	input.focus();
+}
+
+function closeChat() {
+	document.getElementById('chatModal').style.display = 'none';
+	clearInterval(chatTimer);
+	chatTimer = null;
+	chat = null;
+}
+
+document.getElementById('chatForm').onsubmit = async (e) => {
+	e.preventDefault();
+	if (!chat) return;
+	let input = document.getElementById('chatInput');
+	let err = document.getElementById('chatErr');
+	let msg = input.value.trim();
+	if (!msg) return;
+	err.textContent = '';
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(chat.guid) + '/chat', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ message: msg })
+		});
+		let d = await r.json();
+		if (!d.ok) {
+			err.textContent = d.error || 'Message not sent';
+			return;
+		}
+		input.value = '';
+		let log = document.getElementById('chatLog');
+		log.scrollTop = log.scrollHeight;
+		loadChat();
+	} catch (e2) {
+		err.textContent = 'ReCON could not be reached; the message was not sent.';
+	}
+};
+
+// ---------------------------------------------------------------------------
+// Details dialog
+// ---------------------------------------------------------------------------
+
+let det = null;          // the details being shown (GET /api/players/<guid>/details)
+let detTab = 'overview'; // reopened on the last tab used
+let noteSaved = '';      // the note as stored, to tell saved from unsaved
+let detOpenGuid = null;  // GUID of the player the dialog is open for (set before det loads)
+
+function fmtStamp(unix) { return fmtLastSeen(unix); }
+
+// fmtDuration: 1h 48m, 46m, 2d 4h 17m.
+function fmtDuration(secs) {
+	secs = Math.max(0, Number(secs) || 0);
+	let d = Math.floor(secs / 86400), h = Math.floor((secs % 86400) / 3600), m = Math.floor((secs % 3600) / 60);
+	if (!d && !h && !m) return secs ? '<1m' : '0m';
+	let parts = [];
+	if (d) parts.push(d + 'd');
+	if (h) parts.push(h + 'h');
+	if (m) parts.push(m + 'm');
+	return parts.join(' ');
+}
+
+function fmtDay(unix) {
+	if (!unix) return '—';
+	let d = new Date(unix * 1000);
+	return pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + '-' + d.getFullYear();
+}
+
+function showDetTab(name) {
+	detTab = name;
+	document.querySelectorAll('#detTabs button').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === name));
+	document.querySelectorAll('#detailsModal .dpane').forEach(p => p.classList.toggle('active', p.getAttribute('data-pane') === name));
+	document.querySelector('#detailsModal .dpanes').scrollTop = 0;
+	if (name === 'chat') {
+		loadDetChat();
+		let ci = document.getElementById('detChatInput');
+		if (!ci.disabled) ci.focus();
+	}
+	if (name === 'notes') document.getElementById('noteInput').focus();
+	if (name === 'steam') loadDetSteam(false);
+}
+
+document.querySelectorAll('#detTabs button').forEach(b => b.addEventListener('click', () => showDetTab(b.getAttribute('data-tab'))));
+
+// noteChanged reports whether the note box differs from the stored note.
+function noteChanged() {
+	return !!det && document.getElementById('noteInput').value !== noteSaved;
+}
+
+async function openDetails(guid) {
+	// Opening another player (an IP link) saves this player's note first.
+	if (noteChanged() && !(await saveNote())) return;
+	det = null;
+	document.getElementById('detName').textContent = 'Loading...';
+	document.getElementById('detBadge').textContent = '';
+	document.getElementById('detBadge').className = 'badge';
+	document.getElementById('detGuid').textContent = guid;
+	document.getElementById('detBan').style.visibility = 'hidden';
+	document.getElementById('detErr').textContent = '';
+	document.getElementById('permState').textContent = '';
+	document.getElementById('detRole').hidden = true;
+	document.getElementById('roles').textContent = '';
+	['detTiles', 'detBanBox', 'detShared', 'detSessions', 'detIPs', 'detChat', 'detSteam'].forEach(id => document.getElementById(id).textContent = '');
+	detOpenGuid = guid;
+	steamFor = null;
+	document.getElementById('noteInput').value = '';
+	document.getElementById('detChatInput').value = '';
+	noteSaved = '';
+	updateNoteBar('');
+	document.getElementById('detailsModal').style.display = 'flex';
+	showDetTab(detTab === 'chat' || detTab === 'notes' ? 'overview' : detTab);
+	loadDetails(guid);
+}
+
+// closeDetails saves a changed note, then closes. If the save fails the
+// dialog stays open with the error, so the text isn't lost.
+let closing = false;
+async function closeDetails() {
+	if (closing) return;
+	closing = true;
+	try {
+		if (noteChanged() && !(await saveNote())) {
+			showDetTab('notes');
+			return;
+		}
+		document.getElementById('detailsModal').style.display = 'none';
+		det = null;
+		detOpenGuid = null;
+	} finally {
+		closing = false;
+	}
+}
+
+// Leaving or reloading the page with the dialog open still saves the note.
+window.addEventListener('pagehide', () => {
+	if (!noteChanged()) return;
+	let body = new Blob([JSON.stringify({ note: document.getElementById('noteInput').value })], { type: 'application/json' });
+	navigator.sendBeacon('/api/players/' + encodeURIComponent(det.guid) + '/note', body);
+});
+
+async function loadDetails(guid) {
+	let err = document.getElementById('detErr');
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(guid) + '/details', { cache: 'no-store' });
+		let d = await r.json();
+		if (!d.ok) { err.textContent = d.error || 'Could not load this player.'; return; }
+		let keepDraft = det && det.guid === guid && document.getElementById('noteInput').value !== noteSaved;
+		det = Object.assign(d.details, { guid: d.details.player.guid });
+		renderDetails(keepDraft);
+	} catch (e) {
+		err.textContent = 'ReCON could not be reached.';
+	}
+}
+
+function renderDetails(keepDraft) {
+	let p = det.player, ban = det.ban, s = det.sessions;
+	document.getElementById('detName').textContent = p.name;
+	let badge = document.getElementById('detBadge');
+	badge.className = 'badge' + (ban.banned ? ' banned' : p.online ? ' online' : '');
+	badge.textContent = ban.banned ? 'Banned' : p.online ? 'Online #' + p.id : 'Offline';
+	let banBtn = document.getElementById('detBan');
+	banBtn.textContent = ban.banned ? 'Unban' : 'Ban';
+	banBtn.style.visibility = 'visible';
+
+	// Overview
+	let tiles = [
+		['First seen', fmtStamp(p.firstSeen)],
+		['Last seen', p.online ? 'Online now' : fmtStamp(p.lastSeen)],
+		['Time on server', fmtDuration(p.playtimeSeconds)],
+		['Sessions', String(s.count + (p.online ? 1 : 0))],
+		['Average session', s.count ? fmtDuration(s.avgSeconds) : '—'],
+		['Last IP', p.lastIp || '—']
+	];
+	let tl = document.getElementById('detTiles');
+	tl.textContent = '';
+	tiles.forEach(function (t) {
+		let el = document.createElement('div');
+		el.className = 'tile';
+		let k = document.createElement('div'); k.className = 'k'; k.textContent = t[0];
+		let v = document.createElement('div'); v.className = 'v'; v.textContent = t[1];
+		el.append(k, v);
+		tl.append(el);
+	});
+	let bb = document.getElementById('detBanBox');
+	bb.textContent = '';
+	if (ban.banned) {
+		let box = document.createElement('div');
+		box.className = 'callout bad';
+		let b = document.createElement('b'); b.textContent = banText(ban);
+		box.append(b, document.createTextNode('. Reason: ' + (ban.reason || 'none recorded')));
+		bb.append(box);
+	}
+	let others = {};
+	det.ips.forEach(i => i.others.forEach(o => { others[o.guid] = o.name; }));
+	let sh = document.getElementById('detShared');
+	sh.textContent = '';
+	let ids = Object.keys(others);
+	if (ids.length) {
+		let box = document.createElement('div');
+		box.className = 'callout warn';
+		let b = document.createElement('b');
+		b.textContent = 'Shares an IP with ' + ids.length + ' other player' + (ids.length > 1 ? 's' : '') + ': ';
+		box.append(b);
+		ids.forEach(g => box.append(playerLink(g, others[g])));
+		box.append(document.createTextNode('See the IPs tab.'));
+		sh.append(box);
+	}
+
+	// Sessions
+	let total = s.count + (p.online ? 1 : 0);
+	document.getElementById('detSessHint').textContent = total ?
+		total + ' session' + (total > 1 ? 's' : '') + ', ' + fmtDuration(p.playtimeSeconds) + ' in total.' +
+		(s.recent.length < total ? ' Showing the newest ' + s.recent.length + '.' : '') :
+		'No sessions recorded yet.';
+	let tb = document.getElementById('detSessions');
+	tb.textContent = '';
+	s.recent.forEach(function (x) {
+		let tr = document.createElement('tr');
+		// A kick or ban is noted after the time; a plain disconnect shows just the time.
+		let left = x.current ? 'Online now' : fmtStamp(x.disconnected) +
+			(x.ended === 'kicked' || x.ended === 'banned' ? ' (' + x.ended + ')' : '');
+		[fmtStamp(x.connected), left, fmtDuration(x.seconds), x.ip].forEach(function (v, i) {
+			let td = document.createElement('td');
+			td.textContent = v;
+			if (i === 3) td.className = 'mono';
+			if (x.current && i === 1) td.style.color = '#81c995';
+			tr.append(td);
+		});
+		tb.append(tr);
+	});
+
+	// IPs
+	let ib = document.getElementById('detIPs');
+	ib.textContent = '';
+	det.ips.forEach(function (i) {
+		let tr = document.createElement('tr');
+		[i.ip, fmtDay(i.firstUsed), fmtDay(i.lastUsed)].forEach(function (v, n) {
+			let td = document.createElement('td');
+			td.textContent = v;
+			if (n === 0) td.className = 'mono';
+			tr.append(td);
+		});
+		let td = document.createElement('td');
+		if (i.others.length) i.others.forEach(o => td.append(playerLink(o.guid, o.name)));
+		else { td.className = 'dim'; td.textContent = 'No one else'; }
+		tr.append(td);
+		ib.append(tr);
+	});
+	if (!det.ips.length) {
+		let tr = document.createElement('tr');
+		let td = document.createElement('td');
+		td.colSpan = 4; td.className = 'dim'; td.textContent = 'No IPs recorded yet.';
+		tr.append(td);
+		ib.append(tr);
+	}
+
+	// Chat
+	document.getElementById('detChatHint').textContent = p.online ?
+		'Their chat and the private messages ReCON sent them. What you send here goes only to ' + p.name + '.' :
+		'Their chat and the private messages ReCON sent them. ' + p.name + ' is offline, so messages can’t be sent.';
+	let ci = document.getElementById('detChatInput');
+	ci.disabled = !p.online;
+	ci.placeholder = p.online ? 'Private message to ' + p.name : p.name + ' is offline';
+	ci.nextElementSibling.disabled = !p.online;
+	if (detTab === 'chat') loadDetChat();
+
+	// Permissions
+	renderRoleBadge();
+	renderRoles();
+
+	// Notes
+	noteSaved = det.note.text || '';
+	if (!keepDraft) document.getElementById('noteInput').value = noteSaved;
+	updateNoteBar('');
+}
+
+// ---------------------------------------------------------------------------
+// Permissions tab: the player's role for the chat commands
+// ---------------------------------------------------------------------------
+
+// What each role can do, shown under its name. [x] is shown as code.
+const ROLE_INFO = [
+	{ tag: 'normal user (default)', can: ['Can use ', ['!help'], ', ', ['!shout'], ', ', ['!whisper'], ', ', ['!players'], ', ', ['!vote'], ' and ', ['!code'], '.'] },
+	{ tag: 'moderator', can: ['Everything a Player can, plus ', ['!kick'], ' and ', ['!ban'], ' on Players. Gets every ', ['!code'], ' and every kick and ban notice.'] },
+	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['!kick'], ' and ', ['!ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] }
+];
+
+function renderRoleBadge() {
+	let b = document.getElementById('detRole');
+	let r = det ? det.player.role || 0 : 0;
+	b.hidden = r === 0;
+	b.className = 'badge role-' + r;
+	b.textContent = ROLE_NAMES[r];
+}
+
+function renderRoles() {
+	let box = document.getElementById('roles');
+	box.textContent = '';
+	if (!det) return;
+	let cur = det.player.role || 0;
+	ROLE_INFO.forEach(function (info, v) {
+		let input = document.createElement('input');
+		input.type = 'radio';
+		input.name = 'role';
+		input.value = String(v);
+		input.checked = cur === v;
+		input.setAttribute('aria-label', ROLE_NAMES[v]);
+		input.addEventListener('change', () => setRole(v));
+		let name = document.createElement('div');
+		name.className = 'name';
+		name.textContent = ROLE_NAMES[v];
+		let tag = document.createElement('span');
+		tag.className = 'tagline';
+		tag.textContent = info.tag;
+		name.append(tag);
+		let can = document.createElement('div');
+		can.className = 'can';
+		info.can.forEach(function (x) {
+			if (Array.isArray(x)) { let c = document.createElement('code'); c.textContent = x[0]; can.append(c); }
+			else can.append(document.createTextNode(x));
+		});
+		let label = document.createElement('label');
+		label.className = 'role' + (cur === v ? ' sel' : '');
+		label.append(input, name, can);
+		box.append(label);
+	});
+}
+
+// setRole saves a role as soon as it is clicked (POST /api/players/<guid>/role).
+async function setRole(v) {
+	if (!det) return;
+	let guid = det.guid, name = det.player.name;
+	let st = document.getElementById('permState');
+	st.className = '';
+	st.textContent = 'Saving...';
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(guid) + '/role', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ role: v })
+		});
+		let d = await r.json();
+		if (!d.ok) throw new Error(d.error || 'not saved');
+		if (det && det.guid === guid) det.player.role = d.role;
+		st.className = 'saved';
+		st.textContent = 'Saved: ' + name + ' is now ' + (v === 0 ? 'a Player' : v === 1 ? 'a Mod' : 'an Admin');
+		refresh();
+	} catch (e) {
+		st.className = 'bad';
+		st.textContent = 'Role not saved: ' + (e.message || 'ReCON could not be reached');
+	}
+	renderRoleBadge();
+	renderRoles();
+}
+
+// playerLink is another player's name as a link that opens their details.
+function playerLink(guid, name) {
+	let a = document.createElement('button');
+	a.type = 'button';
+	a.className = 'linkbtn';
+	a.textContent = name;
+	a.title = 'Open ' + name + '’s details';
+	a.onclick = () => openDetails(guid);
+	return a;
+}
+
+async function loadDetChat() {
+	if (!det) return;
+	let guid = det.guid;
+	let log = document.getElementById('detChat');
+	try {
+		let d = await (await fetch('/api/players/' + encodeURIComponent(guid) + '/chat', { cache: 'no-store' })).json();
+		if (!det || det.guid !== guid || !d.ok) return;
+		log.textContent = '';
+		let msgs = d.messages || [];
+		if (!msgs.length) log.append(emptyLine('No chat from ' + det.player.name + ' yet.'));
+		msgs.forEach(m => log.append(logLine(m.time, m.direction === 'out' ? 'out' : 'in', m.line, chatTime)));
+		log.scrollTop = log.scrollHeight;
+	} catch (e) {}
+}
+
+// The Chat tab's message line: sends `say <their number> <message>` through
+// POST /api/players/<guid>/chat, which looks their number up first.
+document.getElementById('detChatForm').onsubmit = async (e) => {
+	e.preventDefault();
+	if (!det || !det.player.online) return;
+	let input = document.getElementById('detChatInput');
+	let err = document.getElementById('detErr');
+	let msg = input.value.trim();
+	if (!msg) return;
+	err.textContent = '';
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(det.guid) + '/chat', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ message: msg })
+		});
+		let d = await r.json();
+		if (!d.ok) { err.textContent = d.error || 'Message not sent'; return; }
+		input.value = '';
+		loadDetChat();
+	} catch (e2) {
+		err.textContent = 'ReCON could not be reached; the message was not sent.';
+	}
+};
+
+function updateNoteBar(state) {
+	let v = document.getElementById('noteInput').value;
+	let count = document.getElementById('noteCount');
+	count.textContent = v.length + ' / 500';
+	count.className = 'count' + (v.length >= 450 ? ' near' : '');
+	let st = document.getElementById('noteStatus');
+	if (state === 'saving') { st.className = 'saved'; st.textContent = 'Saving...'; }
+	else if (v !== noteSaved) { st.className = 'unsaved'; st.textContent = 'Saves when you close'; }
+	else { st.className = ''; st.textContent = ''; }}
+
+document.getElementById('noteInput').addEventListener('input', () => updateNoteBar(''));
+
+// saveNote stores the note box for the open player. Returns false (with the
+// error shown) if it couldn't be saved.
+async function saveNote() {
+	if (!det) return true;
+	let text = document.getElementById('noteInput').value;
+	let err = document.getElementById('detErr');
+	err.textContent = '';
+	updateNoteBar('saving');
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(det.guid) + '/note', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ note: text })
+		});
+		let d = await r.json();
+		if (!d.ok) { err.textContent = 'Note not saved: ' + (d.error || 'unknown error'); updateNoteBar(''); return false; }
+		noteSaved = d.note;
+		document.getElementById('noteInput').value = d.note;
+		det.note.text = d.note;
+		updateNoteBar('');
+		return true;
+	} catch (e) {
+		err.textContent = 'ReCON could not be reached; the note was not saved.';
+		updateNoteBar('');
+		return false;
+	}
+}
+
+document.getElementById('detBan').onclick = async function () {
+	if (!det) return;
+	let p = det.player;
+	if (!det.ban.banned) {
+		openModal(p.online ? p.id : -1, 'ban', p.name, det.guid);
+		return;
+	}
+	if (!confirm('Unban ' + p.name + '?')) return;
+	let btn = this;
+	btn.disabled = true;
+	try {
+		let d = await (await fetch('/api/bans/' + encodeURIComponent(det.guid) + '/unban', { method: 'POST' })).json();
+		if (!d.ok) alert(d.error || 'Unban failed');
+	} catch (e) {
+		alert('ReCON could not be reached; the player was not unbanned.');
+	} finally {
+		btn.disabled = false;
+	}
+	await bansChanged();
+	refresh();
+};
+
+// ---------------------------------------------------------------------------
+// Details dialog: Steam Profile tab (GET /api/players/<guid>/steam)
+// ---------------------------------------------------------------------------
+
+let steamFor = null;       // GUID the tab shows (or is loading), so switching tabs doesn't refetch
+let steamPollTimer = null; // re-checks the tab while a SteamID search runs
+
+// loadDetSteam fills the tab for the open player. refresh asks ReCON to
+// fetch from Steam now instead of using its 30-minute copy; quiet keeps what
+// the tab shows until the answer arrives (the search progress polls).
+async function loadDetSteam(refresh, quiet) {
+	let guid = detOpenGuid;
+	if (!guid || (!refresh && steamFor === guid)) return;
+	steamFor = guid;
+	let box = document.getElementById('detSteam');
+	let btn = document.getElementById('steamRefresh');
+	if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
+	else if (!quiet) { box.textContent = ''; box.append(steamHint('Loading the Steam profile...')); }
+	let d = await steamCall('/api/players/' + encodeURIComponent(guid) + '/steam' + (refresh ? '?refresh=1' : ''), { cache: 'no-store' });
+	if (detOpenGuid !== guid) return; // another player was opened meanwhile
+	renderSteam(d);
+}
+
+// steamCall fetches one of the Steam tab's API calls. A reply that isn't
+// JSON (a "404 page not found" from a ReCON without the route, say) becomes
+// an error naming the HTTP status and the start of the reply, instead of
+// looking like ReCON is down.
+async function steamCall(url, opt) {
+	let r;
+	try {
+		r = await fetch(url, opt);
+	} catch (e) {
+		return { ok: false, error: 'ReCON could not be reached.' };
+	}
+	let text = '';
+	try { text = await r.text(); } catch (e) {}
+	try {
+		return JSON.parse(text);
+	} catch (e) {
+		return { ok: false, error: 'ReCON answered HTTP ' + r.status + (text.trim() ? ': ' + text.trim().slice(0, 120) : ' with an empty reply') +
+			(r.status === 404 ? '. This ReCON build is missing the Steam routes in web.go.' : '.') };
+	}
+}
+
+function steamHint(text) {
+	let h = document.createElement('div');
+	h.className = 'hint';
+	h.textContent = text;
+	return h;
+}
+
+// steamCallout is a coloured box: bold first part, plain rest.
+function steamCallout(kind, bold, rest) {
+	let box = document.createElement('div');
+	box.className = 'callout ' + kind;
+	let b = document.createElement('b');
+	b.textContent = bold;
+	box.append(b);
+	if (rest) box.append(document.createTextNode(' ' + rest));
+	return box;
+}
+
+// fmtAge: how long ago a Unix time was, as "8y 3m", "5m" or "12d".
+function fmtAge(unix) {
+	let days = Math.floor((Date.now() / 1000 - unix) / 86400);
+	if (days < 31) return Math.max(days, 0) + 'd';
+	let months = Math.floor(days / 30.44);
+	let y = Math.floor(months / 12), m = months % 12;
+	return y ? y + 'y ' + m + 'm' : m + 'm';
+}
+
+// fmtHours: playtime minutes as "1,234h" (or "45m" under an hour).
+function fmtHours(min) {
+	if (min < 60) return min + 'm';
+	return Math.round(min / 60).toLocaleString() + 'h';
+}
+
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+// renderSteamSearch is the tab for a player with no SteamID yet: the Search
+// Steam ID button, or the search's progress (re-checked every 2 seconds
+// while the tab is open, until the SteamID turns up).
+function renderSteamSearch(box, s) {
+	clearTimeout(steamPollTimer);
+	let guid = detOpenGuid;
+	let others = Math.max((s.searchingFor || 0) - 1, 0);
+	if (s.state === 'searching' || s.state === 'queued') {
+		let elapsed = s.startedUnix ? fmtDuration(Math.floor(Date.now() / 1000) - s.startedUnix) : '';
+		if (s.state === 'searching') {
+			box.append(steamCallout('warn', 'Searching for the SteamID: ' + (s.percent || 0).toFixed(1) + '% of Steam accounts checked' + (elapsed ? ' (' + elapsed + ')' : '') + '.',
+				'Running on ' + plural(s.cores || 1, 'CPU core') + ' at ' + (s.priority || 'medium') + ' priority. Older accounts turn up sooner; a full search can take a while. The profile shows here as soon as it is found, and you can close this dialog meanwhile.' +
+				(others ? ' This search is also looking for ' + plural(others, 'other player') + ' with no SteamID.' : '')));
+		} else {
+			box.append(steamCallout('warn', 'Waiting for the current search to finish.',
+				'Another SteamID search is running (' + (s.percent || 0).toFixed(1) + '% done); this player is searched for next.'));
+		}
+		steamPollTimer = setTimeout(() => {
+			if (detOpenGuid === guid && detTab === 'steam') { steamFor = null; loadDetSteam(false, true); }
+		}, 2000);
+		return;
+	}
+	if (s.state === 'notfound') {
+		box.append(steamCallout('bad', 'No Steam account matched this GUID.', 'Every Steam account ID was checked (finished ' + fmtStamp(s.finishedUnix) + ').'));
+	} else {
+		box.append(steamHint('ReCON doesn’t know this player’s SteamID yet. BattlEye only reports a GUID, which is a one-way hash of the SteamID, so finding it means checking Steam account IDs until one matches. That usually takes seconds for older accounts and longer for new ones.' +
+			(s.auto ? ' Automatic search is on, so ReCON looks the SteamID up when this player is next online, or you can search now.' : '')));
+	}
+	let btn = document.createElement('button');
+	btn.type = 'button';
+	btn.textContent = s.state === 'notfound' ? 'Search again' : 'Search Steam ID';
+	btn.onclick = () => startSteamSearch(btn);
+	let row = document.createElement('div');
+	row.style.marginTop = '12px';
+	row.append(btn);
+	box.append(row);
+}
+
+// startSteamSearch asks ReCON to find the open player's SteamID
+// (POST /api/players/<guid>/steam/search), then shows the progress.
+async function startSteamSearch(btn) {
+	let guid = detOpenGuid;
+	btn.disabled = true;
+	btn.textContent = 'Starting...';
+	let d = await steamCall('/api/players/' + encodeURIComponent(guid) + '/steam/search', { method: 'POST' });
+	if (detOpenGuid !== guid) return;
+	if (!d.ok && /already known/.test(d.error || '')) { steamFor = null; loadDetSteam(false); return; }
+	steamFor = guid;
+	renderSteam(d);
+}
+
+function renderSteam(d) {
+	let box = document.getElementById('detSteam');
+	box.textContent = '';
+	if (!d.ok) {
+		steamFor = null; // try again next time the tab is opened
+		box.append(steamCallout('bad', 'Could not load the Steam profile.', d.error || ''));
+		return;
+	}
+	if (d.pending) {
+		steamFor = null; // check again next time the tab is opened
+		renderSteamSearch(box, d.search || {});
+		return;
+	}
+	let p = d.profile;
+
+	// Header: avatar, name (links to the profile), SteamID, online status.
+	let head = document.createElement('div');
+	head.className = 'steamhead';
+	if (p && p.avatarUrl) {
+		let img = document.createElement('img');
+		img.src = p.avatarUrl;
+		img.alt = '';
+		img.referrerPolicy = 'no-referrer';
+		head.append(img);
+	}
+	let who = document.createElement('div');
+	who.className = 'who';
+	let a = document.createElement('a');
+	a.href = (p && p.profileUrl) || d.profileUrl;
+	a.target = '_blank';
+	a.rel = 'noopener noreferrer';
+	a.textContent = (p && p.personaName) || 'Open Steam profile';
+	let sid = document.createElement('span');
+	sid.className = 'sid';
+	sid.textContent = d.steamId;
+	who.append(a, sid);
+	if (p && p.found) {
+		let st = document.createElement('span');
+		st.className = 'state' + (p.inGame || p.status !== 'Offline' ? ' on' : '');
+		st.textContent = (p.inGame ? 'In game: ' + p.inGame : p.status) + ' · ' + (p.public ? 'Public profile' : 'Private profile');
+		who.append(st);
+	}
+	head.append(who);
+	if (d.enabled) {
+		let btn = document.createElement('button');
+		btn.type = 'button';
+		btn.id = 'steamRefresh';
+		btn.textContent = 'Refresh';
+		btn.onclick = () => loadDetSteam(true);
+		head.append(btn);
+	}
+	box.append(head);
+
+	if (!d.enabled) {
+		box.append(steamCallout('warn', 'Steam lookups are off.', 'Set STEAM_API_KEY (free at steamcommunity.com/dev/apikey) to show VAC and game bans, account age, Steam level, DayZ hours and friends.'));
+		return;
+	}
+	if (d.stale) box.append(steamCallout('warn', 'Showing the copy from ' + fmtStamp(p.fetchedUnix) + '.', 'Steam did not answer: ' + d.stale));
+	if (!p.found) {
+		box.append(steamCallout('warn', 'Steam has no account with this SteamID.', 'It may have been deleted.'));
+		return;
+	}
+
+	// Bans.
+	let bans = [];
+	if (p.vacBans) bans.push(plural(p.vacBans, 'VAC ban'));
+	if (p.gameBans) bans.push(plural(p.gameBans, 'game ban'));
+	if (bans.length) {
+		box.append(steamCallout('bad', bans.join(', ') + ' on record.', 'Last ban ' +
+			(p.daysSinceLastBan ? plural(p.daysSinceLastBan, 'day') + ' ago' : 'today') +
+			'. VAC and game bans can come from any Steam game, not only DayZ.'));
+	} else {
+		box.append(steamCallout('good', 'No VAC or game bans on record.', ''));
+	}
+	if (p.communityBanned) box.append(steamCallout('warn', 'Banned from the Steam Community.', ''));
+	if (p.economyBan === 'banned') box.append(steamCallout('warn', 'Trade banned on Steam.', ''));
+	else if (p.economyBan === 'probation') box.append(steamCallout('warn', 'On Steam trade probation.', ''));
+	if (p.dayzOwned === false) {
+		box.append(steamCallout('warn', 'DayZ is not in their Steam library.', 'Their game list is public and DayZ is missing, so they may be playing on a Family Sharing copy that belongs to someone else.'));
+	}
+
+	// Tiles.
+	let dayz = p.dayzOwned == null ? 'Hidden' : p.dayzOwned ? fmtHours(p.dayzMinutes) : 'Not owned';
+	let dayz2 = p.dayzOwned == null ? 'Hidden' : p.dayzOwned ? (p.dayz2WeeksMinutes ? fmtHours(p.dayz2WeeksMinutes) : 'None') : '—';
+	let dayzLast = p.dayzOwned == null ? 'Hidden' : p.dayzLastPlayedUnix ? fmtStamp(p.dayzLastPlayedUnix) : '—';
+	let lastOnline = p.inGame || p.status !== 'Offline' ? 'Online now' : p.lastOnlineUnix ? fmtStamp(p.lastOnlineUnix) : 'Hidden';
+	let tiles = [
+		['Account created', p.createdUnix ? fmtDay(p.createdUnix) + ' (' + fmtAge(p.createdUnix) + ')' : 'Hidden'],
+		['Steam level', p.level == null ? 'Hidden' : String(p.level)],
+		['Country', p.countryCode || (p.public ? 'Not set' : 'Hidden')],
+		['DayZ on Steam', dayz],
+		['DayZ, last 2 weeks', dayz2],
+		['Last online on Steam', lastOnline],
+		['Games owned', p.gamesOwned == null ? 'Hidden' : p.gamesOwned.toLocaleString()],
+		['Steam friends', p.friends == null ? 'Hidden' : p.friends.toLocaleString()],
+		['DayZ last played', dayzLast]
+	];
+	let tl = document.createElement('div');
+	tl.className = 'tiles';
+	tiles.forEach(function (t) {
+		let el = document.createElement('div');
+		el.className = 'tile';
+		let k = document.createElement('div'); k.className = 'k'; k.textContent = t[0];
+		let v = document.createElement('div'); v.className = 'v'; v.textContent = t[1];
+		el.append(k, v);
+		tl.append(el);
+	});
+	box.append(tl);
+
+	// Steam friends who have played here (matched by the SteamIDs ReCON has found).
+	let here = d.friendsHere || [];
+	if (here.length) {
+		let f = document.createElement('div');
+		f.className = 'steamfriends';
+		let b = document.createElement('b');
+		b.textContent = plural(here.length, 'Steam friend') + ' who played here:';
+		f.append(b);
+		here.forEach(o => f.append(playerLink(o.guid, o.name)));
+		box.append(f);
+	} else if (p.friends != null) {
+		box.append(steamHint('None of their Steam friends have played on this server (among players whose SteamID ReCON knows).'));
+	} else {
+		box.append(steamHint('Their friends list is private, so friends on this server can’t be shown.'));
+	}
+
+	box.append(steamHint('Fetched from Steam ' + fmtStamp(p.fetchedUnix) + '. ReCON keeps each profile for 30 minutes; Refresh fetches it again. Private profiles hide the account age, last online, country, games and friends.'));
+}
+
+// ---------------------------------------------------------------------------
+// RCON Settings dialog (GET/POST /api/rcon-settings)
+// ---------------------------------------------------------------------------
+
+function rcsMsg(text, cls) {
+	let m = document.getElementById('rcsMsg');
+	m.textContent = text;
+	m.className = cls || '';
+}
+
+// openRconSettings shows the saved overrides in the fields; the defaults
+// from docker-compose.yaml, the password included, are the greyed-out
+// placeholders.
+async function openRconSettings() {
+	rcsMsg('');
+	document.getElementById('rcsNow').textContent = '';
+	document.getElementById('rconSettingsModal').style.display = 'flex';
+	let d;
+	try { d = await (await fetch('/api/rcon-settings', { cache: 'no-store' })).json(); }
+	catch (e) { rcsMsg('ReCON could not be reached.', 'err'); return; }
+	if (!d.ok) { rcsMsg(d.error || 'Could not read the settings.', 'err'); return; }
+	let host = document.getElementById('rcsHost'), port = document.getElementById('rcsPort'), pw = document.getElementById('rcsPassword');
+	host.value = d.settings.host || '';
+	port.value = d.settings.port || '';
+	pw.value = d.settings.password || '';
+	host.placeholder = d.defaults.host;
+	port.placeholder = d.defaults.port;
+	pw.placeholder = d.defaults.password || 'No default password set';
+	showRconNow(d.address, d.rcon === 'connected');
+	host.focus();
+}
+
+// showRconNow is the line under the title: the server ReCON connects to, and
+// whether it is answering (green) or not (red).
+function showRconNow(address, connected) {
+	let now = document.getElementById('rcsNow');
+	let b = document.createElement('b');
+	b.textContent = address;
+	now.className = 'now ' + (connected ? 'on' : 'off');
+	now.textContent = connected ? 'Connected to ' : 'Can\'t reach ';
+	now.append(b);
+}
+
+function closeRconSettings() { document.getElementById('rconSettingsModal').style.display = 'none'; }
+
+// connectRcon logs in with the fields: one attempt per press (a new
+// handshake, even if nothing changed). Empty fields use the docker-compose
+// defaults. The settings are saved only if the server accepts the login.
+async function connectRcon() {
+	let btn = document.getElementById('rcsConnect');
+	if (btn.disabled) return; // an attempt is already waiting for its answer
+	btn.disabled = true;
+	rcsMsg('Connecting...');
+	let d;
+	try {
+		d = await (await fetch('/api/rcon-settings', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				host: document.getElementById('rcsHost').value,
+				port: document.getElementById('rcsPort').value,
+				password: document.getElementById('rcsPassword').value
+			})
+		})).json();
+	} catch (e) {
+		d = { ok: false, error: 'ReCON could not be reached; nothing was changed.' };
+	} finally {
+		btn.disabled = false;
+	}
+	if (!d.ok) { rcsMsg(d.error || 'Connect failed.', 'err'); return; }
+	rcsMsg('Saved.', 'ok');
+	showRconNow(d.address, true);
+	refresh();
+}
+
+document.getElementById('rconSettingsModal').addEventListener('keydown', (e) => {
+	if (e.key === 'Enter' && e.target.tagName === 'INPUT') connectRcon();
+});
+
+// Escape closes whichever dialog is on top.
+document.addEventListener('keydown', (e) => {
+	if (e.key !== 'Escape') return;
+	if (document.getElementById('modal').style.display === 'flex') closeModal();
+	else if (document.getElementById('rconSettingsModal').style.display === 'flex') closeRconSettings();
+	else if (document.getElementById('chatModal').style.display === 'flex') closeChat();
+	else if (document.getElementById('consoleModal').style.display === 'flex') closeConsole();
+	else if (document.getElementById('detailsModal').style.display === 'flex') closeDetails();
+});
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+{{template "reorder" .}}
+</body>
+</html>

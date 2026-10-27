@@ -1,4 +1,4 @@
-module recon
+module github.com/MowMdown/ReCON
 
 go 1.22
 

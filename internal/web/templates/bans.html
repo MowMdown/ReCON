@@ -1,0 +1,323 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DayZ Server Bans</title>
+{{template "style" .}}
+<style>
+td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
+select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; background: #111; color: #eee; border: 1px solid #555; }
+/* One row under the title: Import and Export on the left, Ban Player on the right (as the Flows page) */
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
+.toolbar .banbtns { display: flex; flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+.toolbar .right { margin-left: auto; flex: none; }
+.toolbar .right button { margin-right: 0; }
+.box.importbox.wide { width: min(720px, 95vw); }
+.importbox .pick .guid { font-family: monospace; color: #aaa; font-size: 12px; }
+.importbox label.pick.locked { opacity: .5; cursor: not-allowed; }
+.importbox label.pick.locked:hover { background: none; }
+</style>
+</head>
+<body>
+<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+{{template "statusbar" .}}
+<div class="top">
+	<h1>Server Bans</h1>
+</div>
+<div class="toolbar">
+	<div class="banbtns">
+		<button onclick="document.getElementById('banFile').click()" title="Add permanent bans from a bans.json file">Import</button>
+		<button onclick="exportBans()" title="Save permanent bans to bans.json">Export</button>
+		<input type="file" id="banFile" accept=".json,application/json" style="display:none" onchange="importBans(this)">
+	</div>
+	<div class="right"><button onclick="openBan()">Ban Player</button></div>
+</div>
+<table>
+	<colgroup>
+		<col style="width: 60px">
+		<col style="width: 190px">
+		<col style="width: 300px">
+		<col style="width: 130px">
+		<col>
+		<col style="width: 120px">
+	</colgroup>
+	<thead>
+		<tr><th>#</th><th>Player</th><th>GUID</th><th>Time left</th><th>Reason</th><th>Actions</th></tr>
+	</thead>
+	<tbody id="bans"></tbody>
+</table>
+
+<div id="banModal" class="modal" onclick="if (event.target === this) closeBan()">
+	<div class="box">
+		<h2>Ban Player</h2>
+		<label>Player</label>
+		<select id="banPlayer"></select>
+		<label>Duration (minutes, 0 = permanent)</label>
+		<input id="banMinutes" type="number" min="0" step="1" value="0">
+		<label>Reason</label>
+		<input id="banReason" type="text" maxlength="200" placeholder="Short message shown to the player">
+		<div class="buttons">
+			<button onclick="closeBan()">Cancel</button>
+			<button id="banSubmit">Ban</button>
+		</div>
+	</div>
+</div>
+<!-- Export / Import: permanent bans, each with a checkbox -->
+<div id="pickModal" class="modal" onclick="if (event.target === this) closePick()">
+	<div class="box importbox wide" role="dialog" aria-labelledby="pickTitle">
+		<h2 id="pickTitle"></h2>
+		<p class="intro" id="pickIntro"></p>
+		<label class="pick all"><input type="checkbox" id="pickAll" onchange="pickSelectAll(this.checked)"><span class="nm">Select all</span></label>
+		<div class="importlist" id="pickList"></div>
+		<div class="buttons">
+			<button type="button" onclick="closePick()">Cancel</button>
+			<button type="button" id="pickGo"></button>
+		</div>
+	</div>
+</div>
+<script>
+let banned = {}; // GUIDs on the current ban list, so the picker can skip them
+let permBans = []; // the permanent bans on the current list, for Export
+
+function esc(s) {
+	return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fmtMinutes(b) {
+	if (b.perm) return 'Permanent';
+	let m = parseInt(b.minutes, 10);
+	if (isNaN(m)) return esc(b.minutes);
+	let d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60);
+	m = m % 60;
+	return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm';
+}
+
+async function refresh() {
+	try {
+		let r = await fetch('/api/bans');
+		let d = await r.json();
+		if (!d.ok) { setStatusCount(''); return; } // the status bar shows why
+		setStatusCount(d.count + ' ban(s)');
+		banned = {};
+		d.bans.forEach(function(b) { banned[b.guid] = true; });
+		permBans = d.bans.filter(function(b) { return b.perm; });
+		document.getElementById('bans').innerHTML = d.bans.map(function(b) {
+			let n = esc(b.name);
+			return '<tr>' +
+				'<td>' + (b.index >= 0 ? b.index : '-') + '</td>' +
+				'<td title="' + n + '">' + n + '</td>' +
+				'<td class="mono">' + esc(b.guid) + '</td>' +
+				'<td>' + fmtMinutes(b) + '</td>' +
+				'<td title="' + esc(b.reason) + '">' + esc(b.reason) + '</td>' +
+				'<td><button data-guid="' + esc(b.guid) + '" data-name="' + n + '" onclick="unban(this)">Unban</button></td>' +
+			'</tr>';
+		}).join('');
+	} catch(e) {
+		setStatusCount(''); // the status bar shows that ReCON can't be reached
+	}
+}
+
+async function unban(btn) {
+	let guid = btn.getAttribute('data-guid');
+	let name = btn.getAttribute('data-name');
+	if (!confirm('Unban ' + name + '?')) return;
+	btn.disabled = true;
+	try {
+		let r = await fetch('/api/bans/' + encodeURIComponent(guid) + '/unban', { method: 'POST' });
+		let d = await r.json();
+		if (!d.ok) alert(d.error || 'Unban failed');
+	} catch(e) {
+		alert('Request failed');
+	}
+	refresh();
+}
+
+async function openBan() {
+	let sel = document.getElementById('banPlayer');
+	sel.innerHTML = '<option value="">Loading players...</option>';
+	document.getElementById('banMinutes').value = '0';
+	document.getElementById('banReason').value = '';
+	document.getElementById('banModal').style.display = 'flex';
+	try {
+		let r = await fetch('/api/players/all');
+		let d = await r.json();
+		if (!d.ok) throw new Error(d.error);
+		let list = d.players.filter(function(p) { return !banned[String(p.guid).toLowerCase()]; });
+		if (!list.length) {
+			sel.innerHTML = '<option value="">No players left to ban</option>';
+			return;
+		}
+		sel.innerHTML = '<option value="">Select a player...</option>' + list.map(function(p) {
+			return '<option value="' + esc(p.guid) + '">' + esc(p.name) + (p.offline ? '' : ' (online)') +
+				' — ' + esc(String(p.guid).slice(0, 8)) + '</option>';
+		}).join('');
+	} catch(e) {
+		sel.innerHTML = '<option value="">Could not load players</option>';
+	}
+}
+
+function closeBan() { document.getElementById('banModal').style.display = 'none'; }
+
+document.getElementById('banSubmit').onclick = async function() {
+	let btn = this;
+	let guid = document.getElementById('banPlayer').value;
+	let minutes = parseInt(document.getElementById('banMinutes').value, 10);
+	if (!guid) { alert('Select a player first.'); return; }
+	if (!Number.isInteger(minutes) || minutes < 0) {
+		alert('Duration must be a whole number of minutes (0 = permanent).');
+		return;
+	}
+	btn.disabled = true;
+	try {
+		let r = await fetch('/api/bans/' + encodeURIComponent(guid) + '/ban', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ reason: document.getElementById('banReason').value, minutes: minutes })
+		});
+		let d = await r.json();
+		if (!d.ok) {
+			alert(d.error || d.guid_error || 'Ban failed');
+			return;
+		}
+		closeBan();
+		if (d.online && !d.kicked) alert('Player was banned, but the kick was not confirmed.');
+	} catch(e) {
+		alert('Request failed');
+	} finally {
+		btn.disabled = false;
+		refresh();
+	}
+};
+
+// Export and Import share one dialog: a list of permanent bans, each with a
+// checkbox. pick is what the open dialog is doing.
+let pick = { verb: '', rows: [], go: null };
+
+// openPick fills the dialog, one row per ban: "[ ] Name - GUID   why not".
+// rows: {guid, name, reason, note, checked, locked}; a locked row (one that
+// can't be exported or imported, note says why) is greyed out and can't be
+// ticked.
+function openPick(title, intro, verb, rows, go) {
+	pick = { verb: verb, rows: rows, go: go };
+	document.getElementById('pickTitle').textContent = title;
+	document.getElementById('pickIntro').textContent = intro;
+	let list = document.getElementById('pickList');
+	list.textContent = '';
+	rows.forEach(function(r, i) {
+		let row = document.createElement('label');
+		row.className = 'pick' + (r.locked ? ' locked' : '');
+		let box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = !!r.checked && !r.locked;
+		box.disabled = !!r.locked;
+		box.setAttribute('data-i', i);
+		box.onchange = updatePicks;
+		let span = function(cls, text, title) {
+			let e = document.createElement('span');
+			e.className = cls;
+			e.textContent = text;
+			if (title) e.title = title;
+			return e;
+		};
+		let nm = span('nm', (r.name || 'Unknown') + ' - ', (r.name || 'Unknown') + (r.reason ? ' (' + r.reason + ')' : ''));
+		nm.append(span('guid', r.guid || '(no GUID)'));
+		row.append(box, nm);
+		if (r.note) row.append(span('taken', r.note));
+		list.append(row);
+	});
+	updatePicks();
+	document.getElementById('pickGo').onclick = function() {
+		let chosen = pickBoxes().filter(function(b) { return b.checked; }).map(function(b) { return pick.rows[+b.getAttribute('data-i')]; });
+		if (chosen.length) pick.go(chosen);
+	};
+	document.getElementById('pickModal').style.display = 'flex';
+}
+
+function pickBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#pickList input[type=checkbox]:not(:disabled)')); }
+
+function pickSelectAll(on) {
+	pickBoxes().forEach(function(b) { b.checked = on; });
+	updatePicks();
+}
+
+// updatePicks keeps Select all and the button in step with the checkboxes.
+function updatePicks() {
+	let boxes = pickBoxes(), n = boxes.filter(function(b) { return b.checked; }).length;
+	let all = document.getElementById('pickAll');
+	all.checked = n > 0 && n === boxes.length;
+	all.indeterminate = n > 0 && n < boxes.length;
+	all.disabled = boxes.length === 0;
+	let go = document.getElementById('pickGo');
+	go.disabled = n === 0;
+	go.textContent = n ? pick.verb + ' ' + n + ' ban' + (n === 1 ? '' : 's') : pick.verb;
+}
+
+function closePick() { document.getElementById('pickModal').style.display = 'none'; }
+
+// Export: every permanent ban, all ticked; saves the ticked ones to bans.json.
+function exportBans() {
+	if (!permBans.length) { alert('There are no permanent bans to export.'); return; }
+	let rows = permBans.map(function(b) {
+		let r = { guid: b.guid, name: b.name, reason: b.reason, checked: true };
+		if (!/^[0-9a-f]{32}$/.test(String(b.guid))) { r.locked = true; r.note = 'not a valid GUID'; }
+		return r;
+	});
+	openPick('Export bans', 'Permanent bans only. The picked ones are saved to bans.json, to import on another server.', 'Export', rows, function(chosen) {
+		closePick();
+		downloadFile('/api/bans/export?guids=' + chosen.map(function(r) { return r.guid; }).join(','));
+	});
+}
+
+// downloadFile saves what url serves (an export) as a file.
+function downloadFile(url) { location.href = url; }
+
+// Import: reads a bans.json and lists its bans, all ticked except ones
+// already banned here; the ticked ones become permanent bans.
+async function importBans(input) {
+	let file = input.files[0];
+	input.value = '';
+	if (!file) return;
+	let data;
+	try { data = JSON.parse(await file.text()); } catch(e) { alert('That file is not valid JSON.'); return; }
+	if (!data || !Array.isArray(data.bans) || !data.bans.length) { alert('No bans in that file.'); return; }
+	let rows = data.bans.map(function(b) {
+		let guid = String((b && b.guid) || '').trim().toLowerCase();
+		let r = { guid: guid, name: b && b.name, reason: b && b.reason, ip: b && b.ip, steamId: b && b.steamId, checked: true };
+		if (!/^[0-9a-f]{32}$/.test(guid)) { r.locked = true; r.note = 'not a valid GUID'; }
+		else if (permBans.some(function(p) { return p.guid === guid; })) { r.locked = true; r.note = 'already banned'; }
+		return r;
+	});
+	openPick('Import bans', file.name + ': ' + rows.length + ' ban(s). The picked ones become permanent bans here; anyone online among them is kicked.', 'Import', rows, async function(chosen) {
+		let go = document.getElementById('pickGo');
+		go.disabled = true;
+		let d;
+		try {
+			let r = await fetch('/api/bans/import', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ bans: chosen.map(function(r) { return { guid: r.guid, name: r.name || '', reason: r.reason || '', ip: r.ip || '', steamId: r.steamId || '' }; }) })
+			});
+			d = await r.json();
+		} catch(e) { d = { ok: false, error: 'ReCON could not be reached; nothing was imported.' }; }
+		closePick();
+		if (!d.ok) { alert(d.error || 'Import failed'); return; }
+		let msg = 'Imported ' + d.added + ' permanent ban(s).';
+		if (d.added) msg += d.onServer ? ' They are on the server\'s ban list now.' : ' The server isn\'t answering: they go on its ban list when ReCON next connects.';
+		if (d.kicked) msg += '\n' + d.kicked + ' of them were online and were kicked.';
+		if (d.skipped && d.skipped.length) msg += '\n\nSkipped:\n' + d.skipped.join('\n');
+		alert(msg);
+		refresh();
+	});
+}
+
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape' && document.getElementById('pickModal').style.display === 'flex') closePick();
+});
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+{{template "reorder" .}}
+</body>
+</html>

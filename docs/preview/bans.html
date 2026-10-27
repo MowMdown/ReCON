@@ -37,19 +37,45 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .st.connected { color: #81c995; }
 .st.retrying { color: #fdd663; }
 .st.unavailable { color: #f28b82; }
+.statusbar .retry { color: #777; font-size: 12px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+ 
+.box.importbox { width: min(560px, 95vw); max-height: 88vh; display: flex; flex-direction: column; box-sizing: border-box; }
+.importbox h2 { margin: 0 0 6px; }
+.importbox .intro { margin: 0 0 12px; font-size: 13px; color: #aaa; }
+.importbox input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; flex: none; }
+.importbox label.pick { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #333; cursor: pointer; }
+.importbox label.pick:hover { background: #2a2a2a; }
+.importbox label.all { border-bottom: 1px solid #555; font-weight: 600; }
+.importlist { overflow-y: auto; min-height: 0; flex: 1; }
+.importbox .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
+.importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
+.importbox .buttons { margin-top: 12px; flex: none; }
 </style>
 <style>
 td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
 select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; background: #111; color: #eee; border: 1px solid #555; }
+ 
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
+.toolbar .banbtns { display: flex; flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+.toolbar .right { margin-left: auto; flex: none; }
+.toolbar .right button { margin-right: 0; }
+.box.importbox.wide { width: min(720px, 95vw); }
+.importbox .pick .guid { font-family: monospace; color: #aaa; font-size: 12px; }
+.importbox label.pick.locked { opacity: .5; cursor: not-allowed; }
+.importbox label.pick.locked:hover { background: none; }
 </style>
 </head>
 <body>
-<nav><a href="players.html">Players</a><a class="active" href="bans.html">Server Bans</a><a href="flows.html">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <div class="statusbar">
-	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b></span>
+	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
 </div>
 <script>
+
+
+
 
 
 
@@ -64,39 +90,63 @@ var setStatusCount;
 	var fails = 0;
 	var text = { connected: 'Connected', retrying: 'Retrying ...', unavailable: 'Unavailable' };
 	var state = {}, count = {};
+	var retryAt = 0; 
 	function show(id, s) {
 		if (s) state[id] = s;
 		var el = document.getElementById(id);
 		if (!state[id]) return;
-		el.textContent = (text[state[id]] || state[id]) +
-			(state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
-		el.className = 'st ' + state[id];
+		var label = text[state[id]] || state[id];
+		var cls = state[id];
+		if (id === 'rconStatus' && state[id] !== 'connected') {
+			
+			label = 'Unavailable - Retrying...';
+			cls = 'unavailable';
+		}
+		el.textContent = label + (state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
+		el.className = 'st ' + cls;
 	}
-	setStatusCount = function (which, t) {
-		var id = which === 'rcon' ? 'rconStatus' : 'webStatus';
-		count[id] = t;
-		show(id);
+	
+	function tickRetry() {
+		var el = document.getElementById('rconRetry');
+		if (state.rconStatus === 'connected' || !retryAt) { el.textContent = ''; return; }
+		var s = Math.ceil((retryAt - Date.now()) / 1000);
+		el.textContent = s > 0 ? 'next try in ' + (s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's') : 'trying now...';
+	}
+	setStatusCount = function (t) {
+		count.webStatus = t;
+		show('webStatus');
 	};
 	async function check() {
 		try {
 			var d = await (await fetch('/api/status', { cache: 'no-store' })).json();
 			fails = 0;
+			retryAt = typeof d.retryInMs === 'number' ? Date.now() + d.retryInMs : 0;
 			show('webStatus', 'connected');
 			show('rconStatus', d.rcon);
 		} catch (e) {
 			fails++;
+			retryAt = 0;
 			var state = fails >= 3 ? 'unavailable' : 'retrying';
 			show('webStatus', state);
 			show('rconStatus', state);
 		}
+		tickRetry();
 	}
 	check();
-	setInterval(check,  5000 );
+	setInterval(check, 5000);
+	setInterval(tickRetry, 1000);
 })();
 </script>
 <div class="top">
 	<h1>Server Bans</h1>
-	<button onclick="openBan()">Ban Player</button>
+</div>
+<div class="toolbar">
+	<div class="banbtns">
+		<button onclick="document.getElementById('banFile').click()" title="Add permanent bans from a bans.json file">Import</button>
+		<button onclick="exportBans()" title="Save permanent bans to bans.json">Export</button>
+		<input type="file" id="banFile" accept=".json,application/json" style="display:none" onchange="importBans(this)">
+	</div>
+	<div class="right"><button onclick="openBan()">Ban Player</button></div>
 </div>
 <table>
 	<colgroup>
@@ -128,8 +178,22 @@ var setStatusCount;
 		</div>
 	</div>
 </div>
+
+<div id="pickModal" class="modal" onclick="if (event.target === this) closePick()">
+	<div class="box importbox wide" role="dialog" aria-labelledby="pickTitle">
+		<h2 id="pickTitle"></h2>
+		<p class="intro" id="pickIntro"></p>
+		<label class="pick all"><input type="checkbox" id="pickAll" onchange="pickSelectAll(this.checked)"><span class="nm">Select all</span></label>
+		<div class="importlist" id="pickList"></div>
+		<div class="buttons">
+			<button type="button" onclick="closePick()">Cancel</button>
+			<button type="button" id="pickGo"></button>
+		</div>
+	</div>
+</div>
 <script>
 let banned = {}; 
+let permBans = []; 
 
 function esc(s) {
 	return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -148,14 +212,15 @@ async function refresh() {
 	try {
 		let r = await fetch('/api/bans');
 		let d = await r.json();
-		if (!d.ok) { setStatusCount('rcon', ''); return; } 
-		setStatusCount('rcon', d.count + ' ban(s)');
+		if (!d.ok) { setStatusCount(''); return; } 
+		setStatusCount(d.count + ' ban(s)');
 		banned = {};
 		d.bans.forEach(function(b) { banned[b.guid] = true; });
+		permBans = d.bans.filter(function(b) { return b.perm; });
 		document.getElementById('bans').innerHTML = d.bans.map(function(b) {
 			let n = esc(b.name);
 			return '<tr>' +
-				'<td>' + b.index + '</td>' +
+				'<td>' + (b.index >= 0 ? b.index : '-') + '</td>' +
 				'<td title="' + n + '">' + n + '</td>' +
 				'<td class="mono">' + esc(b.guid) + '</td>' +
 				'<td>' + fmtMinutes(b) + '</td>' +
@@ -164,7 +229,7 @@ async function refresh() {
 			'</tr>';
 		}).join('');
 	} catch(e) {
-		setStatusCount('rcon', ''); 
+		setStatusCount(''); 
 	}
 }
 
@@ -240,8 +305,133 @@ document.getElementById('banSubmit').onclick = async function() {
 	}
 };
 
+
+
+let pick = { verb: '', rows: [], go: null };
+
+
+
+
+
+function openPick(title, intro, verb, rows, go) {
+	pick = { verb: verb, rows: rows, go: go };
+	document.getElementById('pickTitle').textContent = title;
+	document.getElementById('pickIntro').textContent = intro;
+	let list = document.getElementById('pickList');
+	list.textContent = '';
+	rows.forEach(function(r, i) {
+		let row = document.createElement('label');
+		row.className = 'pick' + (r.locked ? ' locked' : '');
+		let box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = !!r.checked && !r.locked;
+		box.disabled = !!r.locked;
+		box.setAttribute('data-i', i);
+		box.onchange = updatePicks;
+		let span = function(cls, text, title) {
+			let e = document.createElement('span');
+			e.className = cls;
+			e.textContent = text;
+			if (title) e.title = title;
+			return e;
+		};
+		let nm = span('nm', (r.name || 'Unknown') + ' - ', (r.name || 'Unknown') + (r.reason ? ' (' + r.reason + ')' : ''));
+		nm.append(span('guid', r.guid || '(no GUID)'));
+		row.append(box, nm);
+		if (r.note) row.append(span('taken', r.note));
+		list.append(row);
+	});
+	updatePicks();
+	document.getElementById('pickGo').onclick = function() {
+		let chosen = pickBoxes().filter(function(b) { return b.checked; }).map(function(b) { return pick.rows[+b.getAttribute('data-i')]; });
+		if (chosen.length) pick.go(chosen);
+	};
+	document.getElementById('pickModal').style.display = 'flex';
+}
+
+function pickBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#pickList input[type=checkbox]:not(:disabled)')); }
+
+function pickSelectAll(on) {
+	pickBoxes().forEach(function(b) { b.checked = on; });
+	updatePicks();
+}
+
+
+function updatePicks() {
+	let boxes = pickBoxes(), n = boxes.filter(function(b) { return b.checked; }).length;
+	let all = document.getElementById('pickAll');
+	all.checked = n > 0 && n === boxes.length;
+	all.indeterminate = n > 0 && n < boxes.length;
+	all.disabled = boxes.length === 0;
+	let go = document.getElementById('pickGo');
+	go.disabled = n === 0;
+	go.textContent = n ? pick.verb + ' ' + n + ' ban' + (n === 1 ? '' : 's') : pick.verb;
+}
+
+function closePick() { document.getElementById('pickModal').style.display = 'none'; }
+
+
+function exportBans() {
+	if (!permBans.length) { alert('There are no permanent bans to export.'); return; }
+	let rows = permBans.map(function(b) {
+		let r = { guid: b.guid, name: b.name, reason: b.reason, checked: true };
+		if (!/^[0-9a-f]{32}$/.test(String(b.guid))) { r.locked = true; r.note = 'not a valid GUID'; }
+		return r;
+	});
+	openPick('Export bans', 'Permanent bans only. The picked ones are saved to bans.json, to import on another server.', 'Export', rows, function(chosen) {
+		closePick();
+		downloadFile('/api/bans/export?guids=' + chosen.map(function(r) { return r.guid; }).join(','));
+	});
+}
+
+
+function downloadFile(url) { location.href = url; }
+
+
+
+async function importBans(input) {
+	let file = input.files[0];
+	input.value = '';
+	if (!file) return;
+	let data;
+	try { data = JSON.parse(await file.text()); } catch(e) { alert('That file is not valid JSON.'); return; }
+	if (!data || !Array.isArray(data.bans) || !data.bans.length) { alert('No bans in that file.'); return; }
+	let rows = data.bans.map(function(b) {
+		let guid = String((b && b.guid) || '').trim().toLowerCase();
+		let r = { guid: guid, name: b && b.name, reason: b && b.reason, ip: b && b.ip, steamId: b && b.steamId, checked: true };
+		if (!/^[0-9a-f]{32}$/.test(guid)) { r.locked = true; r.note = 'not a valid GUID'; }
+		else if (permBans.some(function(p) { return p.guid === guid; })) { r.locked = true; r.note = 'already banned'; }
+		return r;
+	});
+	openPick('Import bans', file.name + ': ' + rows.length + ' ban(s). The picked ones become permanent bans here; anyone online among them is kicked.', 'Import', rows, async function(chosen) {
+		let go = document.getElementById('pickGo');
+		go.disabled = true;
+		let d;
+		try {
+			let r = await fetch('/api/bans/import', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ bans: chosen.map(function(r) { return { guid: r.guid, name: r.name || '', reason: r.reason || '', ip: r.ip || '', steamId: r.steamId || '' }; }) })
+			});
+			d = await r.json();
+		} catch(e) { d = { ok: false, error: 'ReCON could not be reached; nothing was imported.' }; }
+		closePick();
+		if (!d.ok) { alert(d.error || 'Import failed'); return; }
+		let msg = 'Imported ' + d.added + ' permanent ban(s).';
+		if (d.added) msg += d.onServer ? ' They are on the server\'s ban list now.' : ' The server isn\'t answering: they go on its ban list when ReCON next connects.';
+		if (d.kicked) msg += '\n' + d.kicked + ' of them were online and were kicked.';
+		if (d.skipped && d.skipped.length) msg += '\n\nSkipped:\n' + d.skipped.join('\n');
+		alert(msg);
+		refresh();
+	});
+}
+
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape' && document.getElementById('pickModal').style.display === 'flex') closePick();
+});
+
 refresh();
-setInterval(refresh,  10000 );
+setInterval(refresh, 10000);
 </script>
 <script>
 
