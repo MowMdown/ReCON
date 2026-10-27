@@ -38,10 +38,12 @@ import (
 // tracker doesn't know is opened.
 //
 // Server restarts: when the server stops answering, every session is closed
-// at the time it last answered (serverWentDown) but remembered. A player who
-// comes back from the same IP within restartGrace of ReCON's next login
-// keeps the same session, with the time the server was down not counted
-// (ResumePlayerSession). Back from another IP, they get a new session.
+// at the time it last answered (serverWentDown) but remembered, and so are
+// the players who left in the restartLookback before it (a #shutdown or a
+// restart flow's Kick everyone disconnects everyone first), unless banned. A
+// player who comes back from the same IP within restartGrace of ReCON's
+// next login keeps the same session, with the time they were away not
+// counted (ResumePlayerSession). Back from another IP, they get a new session.
 // ============================================================================
 
 // trackedPlayer is one player on the server, by their player number.
@@ -59,7 +61,8 @@ type trackedPlayer struct {
 	kickedAt    time.Time  // set by a kick line; the session ends as kicked (or banned)
 	chats       []lastChat // what they wrote in chat this session, oldest first (up to maxSessionChats)
 	joining     bool       // seen connecting: join flows start once they have loaded in
-	historyID   int64      // after serverWentDown: the session's history row, for ResumePlayerSession
+	historyID   int64      // after the session closed: its history row, for ResumePlayerSession
+	closedAt    time.Time  // when the session closed (tracker.recent)
 	warnings    int        // !warning count this session (warnPlayer)
 }
 
@@ -90,16 +93,23 @@ var tracker = struct {
 	known bool // a poll has listed who is online since the server last answered
 
 	// Server restarts (serverWentDown): who was online when it stopped
-	// answering, by GUID, when that was, and until when they may come back
-	// to the same session (restartGrace after the next login).
+	// answering or left just before (by GUID), when that was, and until when
+	// they may come back to the same session (restartGrace after the next
+	// login). recent is who left lately and wasn't banned, by GUID, for that.
 	away       map[string]*trackedPlayer
+	recent     map[string]*trackedPlayer
 	downAt     time.Time
 	graceUntil time.Time
-}{byID: map[int]*trackedPlayer{}, ended: map[string]time.Time{}, away: map[string]*trackedPlayer{}}
+}{byID: map[int]*trackedPlayer{}, ended: map[string]time.Time{}, away: map[string]*trackedPlayer{}, recent: map[string]*trackedPlayer{}}
 
 // restartGrace is how long after ReCON logs in again following an outage
 // a player may reconnect and keep the session they had before it.
 var restartGrace = 5 * time.Minute
+
+// restartLookback is how long before the server stops answering a player
+// may have left and still keep their session after the restart: #shutdown,
+// and a restart flow's Kick everyone, disconnect everyone just before.
+var restartLookback = 2 * time.Minute
 
 // startPlayerTracker feeds every server message to the tracker for as long
 // as ReCON runs.
@@ -280,6 +290,17 @@ func closeTrackedSession(t *trackedPlayer, at time.Time) {
 	}
 	t.historyID = id
 	tracker.ended[t.guid] = at
+	// Remembered for a while in case the server is going down (a #shutdown
+	// disconnects everyone first): see serverWentDown.
+	for g, r := range tracker.recent {
+		if at.Sub(r.closedAt) > restartLookback {
+			delete(tracker.recent, g)
+		}
+	}
+	if id != 0 && ended != endBanned {
+		t.closedAt = at
+		tracker.recent[t.guid] = t
+	}
 }
 
 // playersPolledTracker reconciles the tracker with a `players` poll that
@@ -417,20 +438,23 @@ func sessionChatsAfter(after int64) []sessionChat {
 
 // serverWentDown closes every open session when the game server stops answering
 // (the server watch's 3rd miss in a row), at `at`, when it last answered. The
-// players are remembered in tracker.away so those who come back soon after
-// it does keep the same session (openTrackedSession).
+// players are remembered in tracker.away, with those who left (not banned)
+// in the restartLookback before, so those who come back soon after it does
+// keep the same session (openTrackedSession).
 func serverWentDown(at time.Time) {
 	tracker.Lock()
 	defer tracker.Unlock()
 	tracker.away = map[string]*trackedPlayer{}
 	tracker.downAt, tracker.graceUntil, tracker.known = at, time.Time{}, false
 	for _, t := range tracker.byID {
-		opened := t.opened
 		closeTrackedSession(t, at)
-		if opened && t.historyID != 0 {
-			tracker.away[t.guid] = t
+	}
+	for g, t := range tracker.recent {
+		if !t.closedAt.Before(at.Add(-restartLookback)) {
+			tracker.away[g] = t
 		}
 	}
+	tracker.recent = map[string]*trackedPlayer{}
 }
 
 // serverLoggedIn is called on every login of the web session (rcon.go).

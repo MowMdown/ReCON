@@ -158,7 +158,7 @@ Details works for online and offline players. It has these tabs:
 | Tab           | Shows |
 | ------------- | ----- |
 | Overview      | First and last seen, total time, sessions, average session, last IP, ban status, and a warning when the player shares an IP with anyone else |
-| Sessions      | Each visit: connected, disconnected (noted when they were kicked or banned), duration and IP. A player back from the same IP within 5 minutes of ReCON logging in again after a server restart keeps the same session; the time the server was down doesn't count. Back from another IP, they get a new session |
+| Sessions      | Each visit: connected, disconnected (noted when they were kicked or banned), duration and IP. A player back from the same IP within 5 minutes of ReCON logging in again after a server restart keeps the same session, including players the restart itself disconnected (a `#shutdown` or Kick everyone in the 2 minutes before), unless they were banned; the time they were away doesn't count. Back from another IP, they get a new session |
 | IPs           | Every IP they used, and anyone else seen on the same IP. Names are links to that player's details |
 | Steam Profile | Their Steam account (see [Steam profiles](#6-steam-profiles)) |
 | Chat          | Their chat history. While they're online you can message them from here |
