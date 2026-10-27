@@ -90,7 +90,7 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /api/flows/{id}/delete", withFlow(handleFlowDelete))
 	mux.HandleFunc("POST /api/flows/preview", handleFlowPreview)  // {trigger, schedule, delay}
 	mux.HandleFunc("POST /api/flows/reorder", handleFlowReorder)  // {ids: [...]}
-	mux.HandleFunc("GET /api/flows/export", handleFlowExport)     // download flows.json
+	mux.HandleFunc("GET /api/flows/export", handleFlowExport)     // download flows.json; optional ?ids=0,3,5
 	mux.HandleFunc("POST /api/flows/import", handleFlowImport)    // {flows: [...]}
 	mux.HandleFunc("POST /api/flows/command", handleQuickCommand) // {command: lock|unlock|shutdown|kickall}
 

@@ -152,16 +152,32 @@ type flowFile struct {
 	Flows []flowFileEntry `json:"flows"`
 }
 
-// handleFlowExport serves every flow, in list order, as a downloadable
-// flows.json. Enabled/disabled state is not exported.
+// handleFlowExport serves the flows, in list order, as a downloadable
+// flows.json: every flow, or with ?ids=0,3,5 (the Export dialog's ticked
+// flows) only those. Enabled/disabled state is not exported.
 func handleFlowExport(w http.ResponseWriter, r *http.Request) {
-	flows, err := flows.List()
+	var want map[int64]bool // nil: every flow
+	if ids := strings.TrimSpace(r.URL.Query().Get("ids")); ids != "" {
+		want = map[int64]bool{}
+		for _, s := range strings.Split(ids, ",") {
+			id, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+			if err != nil || id < 0 {
+				fail(w, http.StatusBadRequest, "ids: a comma-separated list of flow numbers")
+				return
+			}
+			want[id] = true
+		}
+	}
+	list, err := flows.List()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := flowFile{Flows: make([]flowFileEntry, 0, len(flows))}
-	for _, f := range flows {
+	out := flowFile{Flows: make([]flowFileEntry, 0, len(list))}
+	for _, f := range list {
+		if want != nil && !want[f.ID] {
+			continue
+		}
 		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Trigger: f.Trigger, Schedule: f.Schedule,
 			Delay: f.Delay, Steps: f.Steps, OnStop: f.OnStop, CounterThreshold: f.CounterThreshold})
 	}

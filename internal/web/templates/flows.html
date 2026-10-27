@@ -337,6 +337,19 @@ button:disabled { opacity: 0.4; cursor: default; }
 		</div>
 	</div>
 </div>
+<!-- Export: every flow, each with a checkbox -->
+<div id="exportModal" class="modal" onclick="if (event.target === this) closeExport()">
+	<div class="box importbox" role="dialog" aria-labelledby="exportTitle">
+		<h2 id="exportTitle">Export flows</h2>
+		<p class="intro">Picked flows are saved to flows.json, in list order. Whether a flow is enabled is not saved.</p>
+		<label class="pick all"><input type="checkbox" id="exportAll" onchange="exportSelectAll(this.checked)"><span class="nm">Select all</span></label>
+		<div class="importlist" id="exportList"></div>
+		<div class="buttons">
+			<button type="button" onclick="closeExport()">Cancel</button>
+			<button type="button" id="exportGo" onclick="exportChosen()">Export</button>
+		</div>
+	</div>
+</div>
 <div id="valuesModal" class="modal" onclick="if (event.target === this) closeValues()">
 	<div class="box helpbox valuesbox" role="dialog" aria-labelledby="valuesTitle">
 		<h2 id="valuesTitle">Values</h2>
@@ -725,7 +738,61 @@ async function sendQuick(cmd) {
 	refresh();
 }
 
-function exportFlows() { location.href = '/api/flows/export'; }
+// Export: a list of every flow, each with a checkbox (all ticked to start
+// with), so only the ones picked go into flows.json.
+function exportFlows() {
+	if (!flows.length) { showMessage('Export', 'There are no flows to export yet.'); return; }
+	let list = document.getElementById('exportList');
+	list.textContent = '';
+	flows.forEach(function(f) {
+		let row = document.createElement('label');
+		row.className = 'pick';
+		let box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = true;
+		box.setAttribute('data-id', f.id);
+		box.onchange = updateExportPicks;
+		let nm = document.createElement('span');
+		nm.className = 'nm';
+		nm.textContent = f.name;
+		nm.title = f.name;
+		let info = document.createElement('span');
+		info.className = 'info';
+		info.textContent = importSummary(f);
+		row.append(box, nm, info);
+		list.append(row);
+	});
+	updateExportPicks();
+	document.getElementById('exportModal').style.display = 'flex';
+}
+
+function exportBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#exportList input[type=checkbox]')); }
+
+function exportSelectAll(on) {
+	exportBoxes().forEach(function(b) { b.checked = on; });
+	updateExportPicks();
+}
+
+// updateExportPicks keeps Select all and the Export button in step with the
+// checkboxes, as updateImportPicks does for Import.
+function updateExportPicks() {
+	let boxes = exportBoxes(), n = boxes.filter(function(b) { return b.checked; }).length;
+	let all = document.getElementById('exportAll');
+	all.checked = n > 0 && n === boxes.length;
+	all.indeterminate = n > 0 && n < boxes.length;
+	let go = document.getElementById('exportGo');
+	go.disabled = n === 0;
+	go.textContent = n ? 'Export ' + n + ' flow' + (n === 1 ? '' : 's') : 'Export';
+}
+
+function closeExport() { document.getElementById('exportModal').style.display = 'none'; }
+
+function exportChosen() {
+	let ids = exportBoxes().filter(function(b) { return b.checked; }).map(function(b) { return b.getAttribute('data-id'); });
+	if (!ids.length) return;
+	closeExport();
+	location.href = '/api/flows/export?ids=' + ids.join(',');
+}
 
 // Import: reading the file opens a list of its flows, each with a checkbox,
 // so only the ones picked are imported (all are picked to start with).
@@ -858,6 +925,7 @@ document.addEventListener('keydown', function(e) {
 	if (document.getElementById('confirmModal').style.display === 'flex') closeConfirm();
 	else if (document.getElementById('valuesModal').style.display === 'flex') closeValues();
 	else if (document.getElementById('importModal').style.display === 'flex') closeImport();
+	else if (document.getElementById('exportModal').style.display === 'flex') closeExport();
 	else if (document.getElementById('srvModal').style.display === 'flex') closeServerCmds();
 	else if (document.getElementById('helpModal').style.display === 'flex') closeHelp();
 	else if (cmdsOpen()) document.getElementById('cmdCancel').click();

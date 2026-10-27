@@ -227,3 +227,38 @@ func TestPageAPIKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestFlowExportPicks checks that Export saves every flow, or with ?ids=
+// only the picked ones, in list order.
+func TestFlowExportPicks(t *testing.T) {
+	testDB(t)
+	if err := flows.Init(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"A", "B", "C"} {
+		if _, err := flows.Save(flows.Flow{Name: name, Trigger: "manual", Steps: []flows.Step{{Type: "message", To: "all", Text: "hi"}}}, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	export := func(query string) (int, []string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/flows/export"+query, nil))
+		var f flowFile
+		json.Unmarshal(rec.Body.Bytes(), &f)
+		var names []string
+		for _, e := range f.Flows {
+			names = append(names, e.Name)
+		}
+		return rec.Code, names
+	}
+	if code, names := export(""); code != 200 || strings.Join(names, ",") != "A,B,C" {
+		t.Fatalf("export all = %d %v", code, names)
+	}
+	if code, names := export("?ids=2,0"); code != 200 || strings.Join(names, ",") != "A,C" {
+		t.Fatalf("export ids=2,0 = %d %v, want A,C in list order", code, names)
+	}
+	if code, _ := export("?ids=x"); code != http.StatusBadRequest {
+		t.Fatalf("bad ids: %d", code)
+	}
+}

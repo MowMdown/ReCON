@@ -201,7 +201,7 @@ A flow is a list of steps ReCON runs for you: send a message, wait, lock the ser
 | Delete           | Deletes the flow (stop it first). This is the only action that asks first |
 | New flow         | Creates a flow |
 | Help             | The full guide: steps, placeholders, If / Else, triggers, cron and chat commands |
-| Export / Import  | Download every flow as `flows.json`, or add flows from a file: Import lists the file's flows with a checkbox each (and **Select all**), and only the ticked ones are added, at the bottom, disabled |
+| Export / Import  | Save flows to `flows.json`, or add flows from a file. Both list the flows with a checkbox each (and **Select all**): Export starts with every flow ticked and saves only the ticked ones; Import adds only the ticked ones, at the bottom, disabled |
 | Chat commands    | The [chat command settings](#5-chat-commands-and-roles) |
 
 Drag rows to reorder the list. Each flow's latest run log is shown under the table: every message sent, every If decision, and how the run ended.
@@ -513,7 +513,7 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 | POST | `/api/flows/<id>/enable` | | Turn the trigger on |
 | POST | `/api/flows/<id>/disable` | | Turn the trigger off |
 | POST | `/api/flows/<id>/delete` | | Delete a flow |
-| GET  | `/api/flows/export` | | Download `flows.json` |
+| GET  | `/api/flows/export` | optional `?ids=0,3,5` | Download `flows.json`: every flow, or only those numbers |
 | POST | `/api/flows/import` | `{"flows": [...]}` | Add flows from an export |
 | POST | `/api/flows/command` | `{"command": "lock"}` | `lock`, `unlock`, `shutdown` or `kickall` |
 | GET  | `/api/chat-commands` | | Chat command settings and defaults |
