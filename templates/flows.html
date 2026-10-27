@@ -134,7 +134,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .grip { display: inline-flex; width: 15px; height: 15px; padding: 2px 4px; color: var(--faint); user-select: none; }
 .grip.handle { cursor: grab; }
 /* Folding an If or For each: the ▾ / ▸ before its name, and the note on a folded one. */
-.fb .fold { background: none; border: 0; padding: 0 2px; margin: 0; width: 16px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.fb .fold { background: none; border: 0; padding: 0 2px; margin: 0; width: 24px; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
 .fb .fold:hover { color: var(--fg); }
 .folded { color: var(--muted); font-size: 12.5px; padding-left: 4px; }
 .folded.bad { color: var(--err); }
@@ -1228,15 +1228,15 @@ const ifId = (s) => { if (!ifIds.has(s)) ifIds.set(s, ++ifSeq); return ifIds.get
 // For viewing only: not saved, and every block is open when the editor opens.
 let collapsed = new WeakSet();
 const isFolded = (s) => isBlock(s) && collapsed.has(s);
-// How many steps are inside a block, and how many of those (or of its
-// conditions) have a red note, for a folded block's first row.
-function insideCount(s, errs) {
-	let steps = 0, bad = 0;
-	if (s.type === 'if') for (const b of s.branches) if (errs.has(b)) bad++;
+// How many steps are inside a block, and the numbers of those with a red
+// note (an Else if's note counts as its If's), for a folded block's first row.
+function insideCount(s, errs, nums) {
+	let steps = 0;
+	const bad = [];
 	for (const l of lists(s)) for (const x of l) {
 		steps++;
-		if (errs.has(x)) bad++;
-		if (isBlock(x)) { const c = insideCount(x, errs); steps += c.steps; bad += c.bad; }
+		if (errs.has(x) || (x.type === 'if' && x.branches.some((b) => errs.has(b)))) bad.push(nums.get(x));
+		if (isBlock(x)) { const c = insideCount(x, errs, nums); steps += c.steps; bad.push(...c.bad); }
 	}
 	return { steps, bad };
 }
@@ -1308,9 +1308,9 @@ function renderSteps(key) {
 			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
 			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop) || ''); // null when hidden: append would write "null"
 			if (isFolded(s)) {
-				const c = insideCount(s, errs);
-				sentence.append(el('span', { class: 'folded' + (c.bad ? ' bad' : ''),
-					text: c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' + (c.bad ? ', ' + c.bad + ' need' + (c.bad === 1 ? 's' : '') + ' fixing' : '') }));
+				const c = insideCount(s, errs, nums);
+				sentence.append(el('span', { class: 'folded' + (c.bad.length ? ' bad' : ''),
+					text: c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' + (c.bad.length ? ', error: step' + (c.bad.length === 1 ? ' ' : 's ') + c.bad.join(', ') : '') }));
 			}
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
