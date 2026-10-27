@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -32,7 +33,7 @@ func testDB(t *testing.T) *Database {
 	t.Cleanup(func() { db.Close() })
 	globalDatabase = db
 	tracker.byID, tracker.ended = map[int]*trackedPlayer{}, map[string]time.Time{}
-	tracker.away, tracker.known = map[string]*trackedPlayer{}, false
+	tracker.away, tracker.recent, tracker.known = map[string]*trackedPlayer{}, map[string]*trackedPlayer{}, false
 	tracker.downAt, tracker.graceUntil = time.Time{}, time.Time{}
 	return db
 }
@@ -1846,5 +1847,88 @@ func TestStopEndsWhenStopped(t *testing.T) {
 	defer mu.Unlock()
 	if fmt.Sprint(sent) != fmt.Sprint([]string{"#unlock"}) {
 		t.Fatalf("sent %q; the Lock after the Wait should not go out", sent)
+	}
+}
+
+// TestShutdownKeepsSession replays a #shutdown: BattlEye disconnects the
+// player just before the server stops answering, they rejoin after the
+// restart, and they keep one session with the minute away not counted. A
+// player banned just before, and one who left long before, start over.
+func TestShutdownKeepsSession(t *testing.T) {
+	db := testDB(t)
+	const bannedGUID = "0000000000000000000000000000bad1"
+	t0 := time.Date(2026, 10, 26, 21, 45, 31, 0, time.UTC)
+	line("Player #0 MowMdown (10.0.1.51:56583) connected", t0)
+	line("Player #0 MowMdown - BE GUID: "+testGUID, t0)
+	line("Player #1 Early (2.2.2.2:2304) connected", t0)
+	line("Player #1 Early - BE GUID: "+testGUID2, t0)
+	line("Player #2 Cheater (3.3.3.3:2304) connected", t0)
+	line("Player #2 Cheater - BE GUID: "+bannedGUID, t0)
+
+	line("Player #1 Early disconnected", t0.Add(10*time.Minute)) // long before the restart
+	shutdown := time.Date(2026, 10, 26, 22, 3, 3, 0, time.UTC)
+	if err := db.RecordPlayerBan(bannedGUID, "Cheater", "3.3.3.3", "cheating", true, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	line("Player #2 Cheater (-) has been kicked by BattlEye: Admin Ban (cheating)", shutdown.Add(-30*time.Second))
+	line("Player #2 Cheater disconnected", shutdown.Add(-30*time.Second))
+	line("Player #0 MowMdown disconnected", shutdown.Add(2*time.Second))
+	serverWentDown(shutdown) // the last answer, before BattlEye's disconnect line
+	login := time.Date(2026, 10, 26, 22, 4, 29, 0, time.UTC)
+	serverLoggedIn(login)
+	back := time.Date(2026, 10, 26, 22, 4, 33, 0, time.UTC)
+	line("Player #0 MowMdown (10.0.1.51:44046) connected", back)
+	line("Player #0 MowMdown - BE GUID: "+testGUID, back)
+	line("Player #4 Early (2.2.2.2:2304) connected", back)
+	line("Player #4 Early - BE GUID: "+testGUID2, back)
+	line("Player #5 Cheater (3.3.3.3:2304) connected", back)
+	line("Player #5 Cheater - BE GUID: "+bannedGUID, back)
+
+	if h := history(t, db, testGUID); len(h) != 0 {
+		t.Fatalf("MowMdown's session wasn't carried over: history %+v", h)
+	}
+	if h := history(t, db, testGUID2); len(h) != 1 {
+		t.Fatalf("a player who left long before the restart was carried over: %+v", h)
+	}
+	if h := history(t, db, bannedGUID); len(h) != 1 {
+		t.Fatalf("a banned player was carried over: %+v", h)
+	}
+	line("Player #0 MowMdown disconnected", time.Date(2026, 10, 26, 22, 5, 51, 0, time.UTC))
+	h := history(t, db, testGUID)
+	// 21:45:31 to 22:05:51, less the 88s away (22:03:05 to 22:04:33).
+	if len(h) != 1 || !h[0].connected.Equal(t0) || h[0].duration != 20*60+20-88 {
+		t.Fatalf("session = %+v, want one from 21:45:31 lasting %ds", h, 20*60+20-88)
+	}
+}
+
+// TestKickAllRestartKeepsSessions: a restart flow's Kick everyone kicks
+// each player (BattlEye's kick line, then the disconnect) shortly before
+// #shutdown; players back after the restart keep their sessions.
+func TestKickAllRestartKeepsSessions(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Date(2026, 10, 26, 21, 0, 0, 0, time.UTC)
+	players := []struct{ id, name, guid, ip string }{{"0", "Alpha", testGUID, "1.1.1.1"}, {"1", "Bravo", testGUID2, "2.2.2.2"}}
+	for _, p := range players {
+		line("Player #"+p.id+" "+p.name+" ("+p.ip+":2304) connected", t0)
+		line("Player #"+p.id+" "+p.name+" - BE GUID: "+p.guid, t0)
+	}
+	kickall := t0.Add(time.Hour)
+	for _, p := range players {
+		line("Player #"+p.id+" "+p.name+" ("+p.guid+") has been kicked by BattlEye: Admin Kick (Server restarting)", kickall)
+		line("Player #"+p.id+" "+p.name+" disconnected", kickall)
+	}
+	down := kickall.Add(30 * time.Second) // Wait 30s, then #shutdown
+	serverWentDown(down)
+	serverLoggedIn(down.Add(90 * time.Second))
+	back := down.Add(2 * time.Minute)
+	for i, p := range players {
+		id := strconv.Itoa(i + 5)
+		line("Player #"+id+" "+p.name+" ("+p.ip+":2304) connected", back)
+		line("Player #"+id+" "+p.name+" - BE GUID: "+p.guid, back)
+	}
+	for _, p := range players {
+		if h := history(t, db, p.guid); len(h) != 0 || countRows(t, db, "active_sessions") != 2 {
+			t.Fatalf("%s wasn't carried over after Kick everyone: history %+v", p.name, h)
+		}
 	}
 }

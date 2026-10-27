@@ -91,7 +91,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 /* Flow editor. Inputs here are inline, not the full-width form fields the
    other dialogs use. */
-.box.fb { width: min(1000px, 96vw); max-height: 92vh; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; overflow: hidden; }
+.box.fb { width: min(1500px, 96vw); min-height: min(525px, 92vh); max-height: 92vh; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; overflow: hidden; }
 .fb-head { display: flex; align-items: center; gap: 12px; }
 .fb-head h2 { margin: 0; flex: 1; }
 .fb-head h2 .fnum { margin-left: 10px; font-size: 13px; font-weight: 400; color: #777; font-family: var(--mono); }
@@ -128,7 +128,17 @@ button:disabled { opacity: 0.4; cursor: default; }
 .step.joint { padding: 4px 8px; background: #1c1922; border-style: dashed; border-color: #3d3350; }
 .step.joint .num { visibility: hidden; }
 .step.hl { border-color: var(--c-logic); }
-.grip { cursor: grab; color: var(--faint); padding: 2px 4px; user-select: none; font-size: 15px; line-height: 1; }
+/* The drag handle: 3 x 3 dots drawn in CSS, so they look the same in every
+   font (the ⋮⋮ character spread out in some). Joint rows keep an empty one
+   so their columns line up. */
+.grip { display: inline-flex; width: 15px; height: 15px; padding: 2px 4px; color: var(--faint); user-select: none; }
+.grip.handle { cursor: grab; }
+/* Folding an If or For each: the ▾ / ▸ before its name, and the note on a folded one. */
+.fb .fold { background: none; border: 0; padding: 0 2px; margin: 0; width: 24px; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.fb .fold:hover { color: var(--fg); }
+.folded { color: var(--muted); font-size: 12.5px; padding-left: 4px; }
+.folded.bad { color: var(--err); }
+.grip.handle::before { content: ""; width: 15px; height: 15px; background: radial-gradient(circle, currentColor 1.4px, transparent 1.7px) 0 0 / 5px 5px; }
 .num { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
 .body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
@@ -360,7 +370,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<ul>
 				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and pick a trigger.</li>
 				<li>Press <b>+ Add step</b> (bottom left) to add steps. Fill in each row; anything missing is shown in red under the row. <b>Values</b> lists the placeholders you can type into a step.</li>
-				<li>Move a step with its arrows, or drag it by the <b>⋮⋮</b> handle. Moving an If moves everything inside it.</li>
+				<li>Move a step with its arrows, or drag it by the dotted handle on its left. Moving an If moves everything inside it.</li>
 				<li>Save. Schedule, On join and Player message flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
 			</ul>
 			<h3>Times</h3>
@@ -401,7 +411,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 				</tbody>
 			</table>
 			<h3>When stopped</h3>
-			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its <b>⋮⋮</b> into When stopped, and back.</p>
+			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its dotted handle into When stopped, and back.</p>
 		</div>
 
 		<div class="helppane" data-pane="conditions">
@@ -608,10 +618,11 @@ async function refresh() {
 				'<td>' + esc(next) + '</td>' +
 				'<td class="actions">' + buttons + '</td></tr>';
 		}).join('');
+		// Run logs show the newest line first.
 		document.getElementById('runs').innerHTML = flows.filter(function(f) { return runs[f.id]; }).map(function(f) {
 			let x = runs[f.id];
 			return '<div class="run"><b>' + esc(f.name) + '</b> - ' + statusCell(x) +
-				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
+				'<pre class="log">' + esc((x.log || []).slice().reverse().join('\n')) + '</pre></div>';
 		}).join('');
 	} catch(e) {
 		setStatusCount(''); // the status bar shows that ReCON can't be reached
@@ -1213,13 +1224,33 @@ const ifIds = new WeakMap();
 let ifSeq = 0;
 const ifId = (s) => { if (!ifIds.has(s)) ifIds.set(s, ++ifSeq); return ifIds.get(s); };
 
+// Blocks (If, For each) folded up in the editor: only their first row shows.
+// For viewing only: not saved, and every block is open when the editor opens.
+let collapsed = new WeakSet();
+const isFolded = (s) => isBlock(s) && collapsed.has(s);
+// How many steps are inside a block, and the numbers of those with a red
+// note (an Else if's note counts as its If's), for a folded block's first row.
+function insideCount(s, errs, nums) {
+	let steps = 0;
+	const bad = [];
+	for (const l of lists(s)) for (const x of l) {
+		steps++;
+		if (errs.has(x) || (x.type === 'if' && x.branches.some((b) => errs.has(b)))) bad.push(nums.get(x));
+		if (isBlock(x)) { const c = insideCount(x, errs, nums); steps += c.steps; bad.push(...c.bad); }
+	}
+	return { steps, bad };
+}
+
 // One row per step, plus an Else row and an End if row drawn for each If.
-// Every row knows the list and index of the step it belongs to.
+// Every row knows the list and index of the step it belongs to. A folded
+// block is just its first row.
 function flatten(list, depth = 0, out = [], inLoop = false) {
 	list.forEach((s, i) => {
 		const start = out.length;
 		out.push({ kind: 'step', s, list, i, depth, inLoop });
-		if (s.type === 'if') {
+		if (isFolded(s)) {
+			// nothing more: the rows inside are hidden
+		} else if (s.type === 'if') {
 			s.branches.forEach((b, k) => {
 				if (k) out.push({ kind: 'elif', s, b, k, list, i, depth, inLoop });
 				flatten(b.steps, depth + 1, out, inLoop);
@@ -1267,9 +1298,20 @@ function renderSteps(key) {
 		if (r.kind === 'step') {
 			const def = STEPS[s.type];
 			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
+			if (isBlock(s)) {
+				const folded = collapsed.has(s);
+				sentence.prepend(el('button', { type: 'button', class: 'fold', 'aria-expanded': String(!folded),
+					title: folded ? 'Show the steps inside' : 'Hide the steps inside', 'aria-label': (folded ? 'Expand' : 'Collapse') + ' step ' + n,
+					onclick: () => { if (folded) collapsed.delete(s); else collapsed.add(s); changed(true); }, text: folded ? '▸' : '▾' }));
+			}
 			const obj = s.type === 'if' ? s.branches[0] : s;
 			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
 			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop) || ''); // null when hidden: append would write "null"
+			if (isFolded(s)) {
+				const c = insideCount(s, errs, nums);
+				sentence.append(el('span', { class: 'folded' + (c.bad.length ? ' bad' : ''),
+					text: c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' + (c.bad.length ? ', error: step' + (c.bad.length === 1 ? ' ' : 's ') + c.bad.join(', ') : '') }));
+			}
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
 			const atTop = r.list === list && r.i === 0;
@@ -1277,7 +1319,7 @@ function renderSteps(key) {
 			const blockName = s.type === 'if' ? 'If' : 'For each';
 			const what = isBlock(s) ? blockName + ' block on step ' + n : 'step ' + n;
 			row = el('div', { class: 'step', 'data-r': ri, 'data-if': isBlock(s) ? ifId(s) : null, style },
-				el('span', { class: 'grip', title: isBlock(s) ? 'Drag to move the whole ' + blockName + ' block' : 'Drag to move', 'aria-hidden': 'true', text: '⋮⋮' }),
+				el('span', { class: 'grip handle', title: isBlock(s) ? 'Drag to move the whole ' + blockName + ' block' : 'Drag to move', 'aria-hidden': 'true' }),
 				el('span', { class: 'num', text: String(n) }),
 				el('div', { class: 'body' }, sentence, sends, err),
 				el('div', { class: 'tools' },
@@ -1474,7 +1516,7 @@ function moveBranch(key, s, k, dir) {
 function dropPos(r, above) {
 	if (r.kind === 'step') {
 		if (above) return { list: r.list, i: r.i };
-		return isBlock(r.s) ? { list: lists(r.s)[0], i: 0 } : { list: r.list, i: r.i + 1 };
+		return isBlock(r.s) && !isFolded(r.s) ? { list: lists(r.s)[0], i: 0 } : { list: r.list, i: r.i + 1 };
 	}
 	const ls = lists(r.s);
 	if (r.kind === 'elif') return above ? { list: ls[r.k - 1], i: ls[r.k - 1].length } : { list: r.b.steps, i: 0 };
@@ -1587,6 +1629,9 @@ function openMenu() {
 		menu.append(grp);
 	}
 	menu.hidden = false;
+	// It opens upward: never taller than the room above + Add step (it scrolls).
+	const room = $('addBtn').getBoundingClientRect().top - $('editModal').querySelector('.box.fb').getBoundingClientRect().top - 12;
+	menu.style.maxHeight = Math.max(160, room) + 'px';
 	$('addBtn').setAttribute('aria-expanded', 'true');
 	const first = menu.querySelector('button:not(:disabled)');
 	if (first) first.focus();
