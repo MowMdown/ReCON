@@ -37,12 +37,46 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .st.connected { color: #81c995; }
 .st.retrying { color: #fdd663; }
 .st.unavailable { color: #f28b82; }
+.statusbar .retry { color: #777; font-size: 12px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+ 
+.box.importbox { width: min(560px, 95vw); max-height: 88vh; display: flex; flex-direction: column; box-sizing: border-box; }
+.importbox h2 { margin: 0 0 6px; }
+.importbox .intro { margin: 0 0 12px; font-size: 13px; color: #aaa; }
+.importbox input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; flex: none; }
+.importbox label.pick { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #333; cursor: pointer; }
+.importbox label.pick:hover { background: #2a2a2a; }
+.importbox label.all { border-bottom: 1px solid #555; font-weight: 600; }
+.importlist { overflow-y: auto; min-height: 0; flex: 1; }
+.importbox .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
+.importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
+.importbox .buttons { margin-top: 12px; flex: none; }
 </style>
 <style>
 td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
 .offline-section { margin-top: 42px; }
-.top .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+.top .icon-btn, .statusrow .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+.statusrow { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.statusrow .statusbar { margin-bottom: 0; }
+.statusrow button { margin-right: 0; }
+ 
+.hdrbtn { width: 104px; justify-content: center; box-sizing: border-box; }
+
+ 
+.rcset input::placeholder { color: #666; }
+.rcset .row { display: flex; gap: 10px; }
+.rcset .row > div:first-child { flex: 1; }
+.rcset .row > div:last-child { width: 110px; }
+.rcset .now { font-size: 13px; margin: -4px 0 14px; }
+.rcset .now.on { color: #81c995; }
+.rcset .now.off { color: #f28b82; }
+.rcset .now b { font-weight: 600; }
+.rcset #rcsMsg { font-size: 13px; margin: 0 0 10px; min-height: 1em; white-space: pre-line; }
+.rcset #rcsMsg.ok { color: #81c995; }
+.rcset #rcsMsg.err { color: #f28b82; }
+.rcset .buttons { display: flex; gap: 8px; align-items: center; }
+.rcset .buttons .spacer { flex: 1; }
 td { white-space: nowrap; }
 
  
@@ -51,6 +85,7 @@ td { white-space: nowrap; }
 #offlineTable { min-width: 1300px; }
  
 td.ban-cell { text-overflow: ellipsis; }
+td.lastmsg { text-overflow: ellipsis; color: #ccc; }
  
 td.act button:last-child { margin-right: 0; }
 td.act-left button { margin-right: 0; }
@@ -107,7 +142,9 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 .dim { color: #888; }
  
 #noteInput { margin: 0; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.4; height: 28em; resize: none; overflow-y: auto; }
-#detChat { height: min(300px, 38vh); margin-bottom: 10px; }
+ 
+.dpane.active[data-pane="chat"] { display: flex; flex-direction: column; height: 100%; }
+#detChat { flex: 1; min-height: 120px; margin-bottom: 10px; }
 #detChatInput:disabled { opacity: 0.5; }
 .notebar { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .notebar .count { font-size: 12px; color: #888; }
@@ -170,12 +207,17 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 </style>
 </head>
 <body>
-<nav><a class="active" href="players.html">Players</a><a href="bans.html">Server Bans</a><a href="flows.html">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+
+<div class="statusrow">
 <div class="statusbar">
-	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b></span>
+	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
 </div>
 <script>
+
+
+
 
 
 
@@ -190,39 +232,61 @@ var setStatusCount;
 	var fails = 0;
 	var text = { connected: 'Connected', retrying: 'Retrying ...', unavailable: 'Unavailable' };
 	var state = {}, count = {};
+	var retryAt = 0; 
 	function show(id, s) {
 		if (s) state[id] = s;
 		var el = document.getElementById(id);
 		if (!state[id]) return;
-		el.textContent = (text[state[id]] || state[id]) +
-			(state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
-		el.className = 'st ' + state[id];
+		var label = text[state[id]] || state[id];
+		var cls = state[id];
+		if (id === 'rconStatus' && state[id] !== 'connected') {
+			
+			label = 'Unavailable - Retrying...';
+			cls = 'unavailable';
+		}
+		el.textContent = label + (state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
+		el.className = 'st ' + cls;
 	}
-	setStatusCount = function (which, t) {
-		var id = which === 'rcon' ? 'rconStatus' : 'webStatus';
-		count[id] = t;
-		show(id);
+	
+	function tickRetry() {
+		var el = document.getElementById('rconRetry');
+		if (state.rconStatus === 'connected' || !retryAt) { el.textContent = ''; return; }
+		var s = Math.ceil((retryAt - Date.now()) / 1000);
+		el.textContent = s > 0 ? 'next try in ' + (s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's') : 'trying now...';
+	}
+	setStatusCount = function (t) {
+		count.webStatus = t;
+		show('webStatus');
 	};
 	async function check() {
 		try {
 			var d = await (await fetch('/api/status', { cache: 'no-store' })).json();
 			fails = 0;
+			retryAt = typeof d.retryInMs === 'number' ? Date.now() + d.retryInMs : 0;
 			show('webStatus', 'connected');
 			show('rconStatus', d.rcon);
 		} catch (e) {
 			fails++;
+			retryAt = 0;
 			var state = fails >= 3 ? 'unavailable' : 'retrying';
 			show('webStatus', state);
 			show('rconStatus', state);
 		}
+		tickRetry();
 	}
 	check();
-	setInterval(check,  5000 );
+	setInterval(check, 5000);
+	setInterval(tickRetry, 1000);
 })();
 </script>
+	<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+		Settings
+	</button>
+</div>
 <div class="top">
 	<h1>DayZ Players</h1>
-	<button type="button" class="icon-btn" onclick="openConsole()">
+	<button type="button" class="icon-btn hdrbtn" onclick="openConsole()">
 		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
 		Console
 	</button>
@@ -234,11 +298,12 @@ var setStatusCount;
 		<col style="width: 190px">
 		<col style="width: 150px">
 		<col style="width: 300px">
+		<col style="width: 56px">
 		<col>
 		<col style="width: 290px">
 	</colgroup>
 	<thead>
-		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Actions</th></tr>
+		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th>Actions</th></tr>
 	</thead>
 	<tbody id="players"></tbody>
 </table>
@@ -339,14 +404,34 @@ var setStatusCount;
 	<div class="box">
 		<h2 id="title"></h2>
 		<div id="durationWrap">
-			<label>Duration (minutes)</label>
-			<input id="minutes" type="number" min="0" step="1">
+			<label>Duration (minutes, 0 = permanent)</label>
+			<input id="minutes" type="number" min="0" step="1" value="0">
 		</div>
-		<label id="textLabel"></label>
-		<textarea id="text" rows="4"></textarea>
+		<label>Reason</label>
+		<input id="text" type="text" maxlength="200" placeholder="Short message shown to the player">
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
-			<button id="submit">Submit</button>
+			<button id="submit"></button>
+		</div>
+	</div>
+</div>
+
+
+<div id="rconSettingsModal" class="modal" onclick="if (event.target === this) closeRconSettings()">
+	<div class="box rcset" role="dialog" aria-labelledby="rcsTitle">
+		<h2 id="rcsTitle">RCON Settings</h2>
+		<p class="now" id="rcsNow"></p>
+		<div class="row">
+			<div><label for="rcsHost">Server IP</label><input id="rcsHost" type="text" autocomplete="off" spellcheck="false"></div>
+			<div><label for="rcsPort">Port</label><input id="rcsPort" type="text" inputmode="numeric" autocomplete="off"></div>
+		</div>
+		<label for="rcsPassword">RCON password</label>
+		<input id="rcsPassword" type="text" autocomplete="off" spellcheck="false">
+		<p id="rcsMsg"></p>
+		<div class="buttons">
+			<span class="spacer"></span>
+			<button type="button" onclick="closeRconSettings()">Cancel</button>
+			<button type="button" id="rcsConnect" onclick="connectRcon()">Connect</button>
 		</div>
 	</div>
 </div>
@@ -407,12 +492,12 @@ async function refresh() {
 	try {
 		let r = await api('/api/players');
 		let d = await r.json();
-		if (!d.ok) { setStatusCount('rcon', ''); return; } 
+		if (!d.ok) { setStatusCount(''); return; } 
 		
 		
-		setStatusCount('rcon', d.connected ? d.count + ' player(s) online' : '');
+		setStatusCount(d.connected ? d.count + ' player(s) online' : '');
 		document.getElementById('players').innerHTML = !d.connected ?
-			'<tr><td colspan="6" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
+			'<tr><td colspan="7" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
 			d.players.map(function(p) {
 			let n = esc(p.name);
 			let g = esc(p.guid);
@@ -422,6 +507,7 @@ async function refresh() {
 				'<td class="mono">' + esc(p.ip) + '</td>' +
 				'<td class="mono">' + g + '</td>' +
 				'<td>' + p.ping + '</td>' +
+				lastMessageCell(p) +
 				'<td class="act">' +
 					'<button data-id="' + p.id + '" data-guid="' + g + '" data-action="message" data-name="' + n + '" onclick="handleActionClick(this)">Message</button>' +
 					'<button data-id="' + p.id + '" data-action="kick" data-name="' + n + '" onclick="handleActionClick(this)">Kick</button>' +
@@ -452,8 +538,17 @@ async function refresh() {
 			'</tr>';
 		}).join('');
 	} catch(e) {
-		setStatusCount('rcon', ''); 
+		setStatusCount(''); 
 	}
+}
+
+
+
+
+function lastMessageCell(p) {
+	if (!p.lastMessage) return '<td class="lastmsg"></td>';
+	let tip = (p.lastMessageChannel ? '(' + p.lastMessageChannel + ') ' : '') + fmtLastSeen(p.lastMessageUnix) + ': ' + p.lastMessage;
+	return '<td class="lastmsg" title="' + esc(tip) + '">' + esc(p.lastMessage) + '</td>';
 }
 
 
@@ -506,11 +601,12 @@ function openModal(id, a, name, guid) {
 	current = id;
 	action = a;
 	banGuid = guid || null;
-	document.getElementById('title').textContent = a[0].toUpperCase() + a.slice(1) + ' ' + name;
+	let verb = a[0].toUpperCase() + a.slice(1);
+	document.getElementById('title').textContent = verb + ' ' + name;
+	document.getElementById('submit').textContent = verb;
 	document.getElementById('durationWrap').style.display = a === 'ban' ? 'block' : 'none';
-	document.getElementById('textLabel').textContent = 'Reason';
 	document.getElementById('text').value = '';
-	document.getElementById('minutes').value = '';
+	document.getElementById('minutes').value = '0';
 	document.getElementById('modal').style.display = 'flex';
 }
 
@@ -958,7 +1054,10 @@ function renderDetails(keepDraft) {
 	tb.textContent = '';
 	s.recent.forEach(function (x) {
 		let tr = document.createElement('tr');
-		[fmtStamp(x.connected), x.current ? 'Online now' : fmtStamp(x.disconnected), fmtDuration(x.seconds), x.ip].forEach(function (v, i) {
+		
+		let left = x.current ? 'Online now' : fmtStamp(x.disconnected) +
+			(x.ended === 'kicked' || x.ended === 'banned' ? ' (' + x.ended + ')' : '');
+		[fmtStamp(x.connected), left, fmtDuration(x.seconds), x.ip].forEach(function (v, i) {
 			let td = document.createElement('td');
 			td.textContent = v;
 			if (i === 3) td.className = 'mono';
@@ -1464,16 +1563,96 @@ function renderSteam(d) {
 }
 
 
+
+
+
+function rcsMsg(text, cls) {
+	let m = document.getElementById('rcsMsg');
+	m.textContent = text;
+	m.className = cls || '';
+}
+
+
+
+
+async function openRconSettings() {
+	rcsMsg('');
+	document.getElementById('rcsNow').textContent = '';
+	document.getElementById('rconSettingsModal').style.display = 'flex';
+	let d;
+	try { d = await (await fetch('/api/rcon-settings', { cache: 'no-store' })).json(); }
+	catch (e) { rcsMsg('ReCON could not be reached.', 'err'); return; }
+	if (!d.ok) { rcsMsg(d.error || 'Could not read the settings.', 'err'); return; }
+	let host = document.getElementById('rcsHost'), port = document.getElementById('rcsPort'), pw = document.getElementById('rcsPassword');
+	host.value = d.settings.host || '';
+	port.value = d.settings.port || '';
+	pw.value = d.settings.password || '';
+	host.placeholder = d.defaults.host;
+	port.placeholder = d.defaults.port;
+	pw.placeholder = d.defaults.password || 'No default password set';
+	showRconNow(d.address, d.rcon === 'connected');
+	host.focus();
+}
+
+
+
+function showRconNow(address, connected) {
+	let now = document.getElementById('rcsNow');
+	let b = document.createElement('b');
+	b.textContent = address;
+	now.className = 'now ' + (connected ? 'on' : 'off');
+	now.textContent = connected ? 'Connected to ' : 'Can\'t reach ';
+	now.append(b);
+}
+
+function closeRconSettings() { document.getElementById('rconSettingsModal').style.display = 'none'; }
+
+
+
+
+async function connectRcon() {
+	let btn = document.getElementById('rcsConnect');
+	if (btn.disabled) return; 
+	btn.disabled = true;
+	rcsMsg('Connecting...');
+	let d;
+	try {
+		d = await (await fetch('/api/rcon-settings', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				host: document.getElementById('rcsHost').value,
+				port: document.getElementById('rcsPort').value,
+				password: document.getElementById('rcsPassword').value
+			})
+		})).json();
+	} catch (e) {
+		d = { ok: false, error: 'ReCON could not be reached; nothing was changed.' };
+	} finally {
+		btn.disabled = false;
+	}
+	if (!d.ok) { rcsMsg(d.error || 'Connect failed.', 'err'); return; }
+	rcsMsg('Saved.', 'ok');
+	showRconNow(d.address, true);
+	refresh();
+}
+
+document.getElementById('rconSettingsModal').addEventListener('keydown', (e) => {
+	if (e.key === 'Enter' && e.target.tagName === 'INPUT') connectRcon();
+});
+
+
 document.addEventListener('keydown', (e) => {
 	if (e.key !== 'Escape') return;
 	if (document.getElementById('modal').style.display === 'flex') closeModal();
+	else if (document.getElementById('rconSettingsModal').style.display === 'flex') closeRconSettings();
 	else if (document.getElementById('chatModal').style.display === 'flex') closeChat();
 	else if (document.getElementById('consoleModal').style.display === 'flex') closeConsole();
 	else if (document.getElementById('detailsModal').style.display === 'flex') closeDetails();
 });
 
 refresh();
-setInterval(refresh,  5000 );
+setInterval(refresh, 5000);
 </script>
 <script>
 

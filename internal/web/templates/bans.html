@@ -259,9 +259,12 @@ function exportBans() {
 	});
 	openPick('Export bans', 'Permanent bans only. The picked ones are saved to bans.json, to import on another server.', 'Export', rows, function(chosen) {
 		closePick();
-		location.href = '/api/bans/export?guids=' + chosen.map(function(r) { return r.guid; }).join(',');
+		downloadFile('/api/bans/export?guids=' + chosen.map(function(r) { return r.guid; }).join(','));
 	});
 }
+
+// downloadFile saves what url serves (an export) as a file.
+function downloadFile(url) { location.href = url; }
 
 // Import: reads a bans.json and lists its bans, all ticked except ones
 // already banned here; the ticked ones become permanent bans.

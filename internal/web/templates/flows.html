@@ -778,8 +778,11 @@ function exportChosen() {
 	let ids = exportBoxes().filter(function(b) { return b.checked; }).map(function(b) { return b.getAttribute('data-id'); });
 	if (!ids.length) return;
 	closeExport();
-	location.href = '/api/flows/export?ids=' + ids.join(',');
+	downloadFile('/api/flows/export?ids=' + ids.join(','));
 }
+
+// downloadFile saves what url serves (an export) as a file.
+function downloadFile(url) { location.href = url; }
 
 // Import: reading the file opens a list of its flows, each with a checkbox,
 // so only the ones picked are imported (all are picked to start with).

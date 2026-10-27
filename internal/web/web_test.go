@@ -1,11 +1,15 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -293,5 +297,69 @@ func TestBanTransferRoutes(t *testing.T) {
 	}
 	if code, _ := call(http.MethodPost, "/api/bans/import", `{"bans": []}`); code != http.StatusBadRequest {
 		t.Fatalf("empty import: %d", code)
+	}
+}
+
+// previewCrons are the schedules the preview can describe in words: the
+// example flows' and a few common ones.
+var previewCrons = []string{"*/20 * * * *", "0 */6 * * *", "0 0,6,12,18 * * *", "0 5 * * 1-5", "0 5/6 * * *", "0 6 * * *", "30 4 * * 1,4", "55 23,5,11,17 * * *"}
+
+// TestPreview rebuilds docs/preview, the static preview pages, from the real
+// templates, so they never drift from the app. It only runs when asked:
+//
+//	RECON_PREVIEW=1 go test -run TestPreview ./internal/web
+//
+// It writes players.html, bans.html and flows.html (each loading data.js and
+// preview.js, the stand-in for the API) and data.js (the chat commands, the
+// example flows and the cron descriptions, from the Go code).
+func TestPreview(t *testing.T) {
+	if os.Getenv("RECON_PREVIEW") != "1" {
+		t.Skip("set RECON_PREVIEW=1 to rebuild docs/preview")
+	}
+	dir := filepath.Join("..", "..", "docs", "preview")
+	pages := map[string]*template.Template{"players.html": playersPage, "bans.html": bansPage, "flows.html": flowsPage}
+	for name, page := range pages {
+		var b bytes.Buffer
+		if err := page.Execute(&b, nil); err != nil {
+			t.Fatal(err)
+		}
+		html := strings.Replace(b.String(), "<head>\n", "<head>\n<script src=\"data.js\"></script>\n<script src=\"preview.js\"></script>\n", 1)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(html), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	testDB(t)
+	if err := flows.Init(); err != nil {
+		t.Fatal(err)
+	}
+	crons := map[string]string{}
+	for _, c := range previewCrons {
+		rec := httptest.NewRecorder()
+		buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/flows/preview",
+			strings.NewReader(`{"trigger": "schedule", "schedule": "`+c+`"}`)))
+		var out struct{ Description string }
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Description == "" {
+			t.Fatalf("describing %q: %s", c, rec.Body.String())
+		}
+		crons[c] = out.Description
+	}
+	examples, err := os.ReadFile(filepath.Join("..", "..", "examples", "flows.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(map[string]any{
+		"commands": flows.ChatCommandDefs,
+		"crons":    crons,
+		"defaults": flows.DefaultChatSettings(),
+		"examples": json.RawMessage(examples),
+	}, "", "\t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := "// Written by TestPreview (RECON_PREVIEW=1 go test -run TestPreview ./internal/web). Don't edit.\n" +
+		"window.RECON_PREVIEW_DATA = " + string(data) + ";\n"
+	if err := os.WriteFile(filepath.Join(dir, "data.js"), []byte(js), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

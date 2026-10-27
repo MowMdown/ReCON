@@ -1,10 +1,10 @@
 // ReCON preview: a stand-in for ReCON's /api/* routes, so the pages in this
 // folder run straight from GitHub Pages or a downloaded copy. Everything is
 // sample data kept in memory; nothing is sent anywhere, and reloading a page
-// starts it over. Rebuilt with: RECON_PREVIEW=1 go test -run TestPreview .
+// starts it over. Rebuilt with: RECON_PREVIEW=1 go test -run TestPreview ./internal/web
 (function () {
 	'use strict';
-	var GEN = window.RECON_PREVIEW_DATA; // data.js, written by preview_test.go
+	var GEN = window.RECON_PREVIEW_DATA; // data.js, written by TestPreview (internal/web)
 
 	var NOW = Math.floor(Date.now() / 1000);
 	var MIN = 60, HOUR = 3600, DAY = 86400;
@@ -464,7 +464,7 @@
 		['GET', /^\/api\/bans$/, function () {
 			var list = bans.map(function (b, i) {
 				var p = byGuid(b.guid);
-				return { index: i, guid: b.guid, name: p ? p.name : 'Unknown', minutes: b.minutes, perm: b.perm, reason: b.reason };
+				return { index: i, guid: b.guid, name: p ? p.name : (b.name || 'Unknown'), minutes: b.minutes, perm: b.perm, reason: b.reason };
 			});
 			return json({ ok: true, connected: true, bans: list, count: list.length });
 		}],
@@ -473,6 +473,34 @@
 			if (!p) return fail(404, 'unknown player (this GUID has never been seen on the server)');
 			if (b.minutes < 0) return fail(400, 'minutes must be 0 or greater');
 			return ban(p, String(b.reason || '').trim(), b.minutes || 0);
+		}],
+		['GET', /^\/api\/bans\/export$/, function (m, o, url) {
+			var q = new URL(url, location.href).searchParams.get('guids');
+			var want = q ? q.split(',') : null;
+			return json({ bans: bans.filter(function (b) { return b.perm && (!want || want.indexOf(b.guid) >= 0); }).map(function (b) {
+				var p = byGuid(b.guid), e = { guid: b.guid, name: p ? p.name : (b.name || 'Unknown') };
+				if (p && p.ip) e.ip = p.ip;
+				e.reason = b.reason;
+				if (p && p.steamId) e.steamId = p.steamId;
+				return e;
+			}) });
+		}],
+		['POST', /^\/api\/bans\/import$/, function (m, o) {
+			var list = body(o).bans || [], res = { ok: true, added: 0, skipped: [], onServer: true, kicked: 0 };
+			if (!list.length) return fail(400, 'no bans in file');
+			list.forEach(function (e) {
+				var g = String(e.guid || '').trim().toLowerCase(), name = String(e.name || '').trim() || 'Unknown';
+				var label = name + ' (' + g.slice(0, 8) + ')';
+				if (!/^[0-9a-f]{32}$/.test(g)) { res.skipped.push(label + ': not a BattlEye GUID'); return; }
+				if (bans.some(function (b) { return b.guid === g && b.perm; })) { res.skipped.push(label + ': already banned permanently'); return; }
+				var reason = String(e.reason || '').trim() || 'Imported ban';
+				bans = bans.filter(function (b) { return b.guid !== g; });
+				bans.push({ guid: g, name: name, perm: true, minutes: 'perm', reason: reason });
+				res.added++;
+				var p = byGuid(g);
+				if (p && p.isOnline) { kick(p, reason); res.kicked++; }
+			});
+			return json(res);
 		}],
 		['POST', /^\/api\/bans\/([0-9a-f]{32})\/unban$/, function (m) {
 			var n = bans.length;
@@ -536,6 +564,18 @@
 			flows.sort(function (a, b) { return ids.indexOf(a.id) - ids.indexOf(b.id); });
 			return json({ ok: true });
 		}],
+		['GET', /^\/api\/flows\/export$/, function (m, o, url) {
+			var q = new URL(url, location.href).searchParams.get('ids');
+			var want = q ? q.split(',').map(Number) : null;
+			return json({ flows: flows.filter(function (f) { return !want || want.indexOf(f.id) >= 0; }).map(function (f) {
+				var e = { name: f.name, trigger: f.trigger };
+				if (f.schedule) e.schedule = f.schedule;
+				if (f.delay) e.delay = f.delay;
+				e.steps = f.steps;
+				if (f.onStop.length) e.onStop = f.onStop;
+				return e;
+			}) });
+		}],
 		['POST', /^\/api\/flows\/import$/, function (m, o) {
 			var b = body(o), added = 0;
 			if (!b.flows || !b.flows.length) return fail(400, 'no flows in file');
@@ -586,20 +626,16 @@
 
 	// Pages call these in ways that would leave the preview.
 	window.addEventListener('DOMContentLoaded', function () {
-		if (typeof window.exportFlows === 'function') {
-			window.exportFlows = function () {
-				var out = { flows: flows.map(function (f) {
-					var e = { name: f.name, trigger: f.trigger };
-					if (f.schedule) e.schedule = f.schedule;
-					if (f.delay) e.delay = f.delay;
-					e.steps = f.steps;
-					if (f.onStop.length) e.onStop = f.onStop;
-					return e;
-				}) };
-				var a = document.createElement('a');
-				a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2) + '\n'], { type: 'application/json' }));
-				a.download = 'flows.json';
-				document.body.appendChild(a); a.click(); a.remove();
+		// Exports would leave the page: build the file here instead.
+		if (typeof window.downloadFile === 'function') {
+			window.downloadFile = function (url) {
+				var name = /\/api\/bans\//.test(url) ? 'bans.json' : 'flows.json';
+				window.fetch(url).then(function (r) { return r.json(); }).then(function (out) {
+					var a = document.createElement('a');
+					a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2) + '\n'], { type: 'application/json' }));
+					a.download = name;
+					document.body.appendChild(a); a.click(); a.remove();
+				});
 			};
 		}
 		var css = document.createElement('style');

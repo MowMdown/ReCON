@@ -574,7 +574,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 The preview pages are generated from the real templates, so they never drift from the app:
 
 ```bash
-RECON_PREVIEW=1 go test -run TestPreview .
+RECON_PREVIEW=1 go test -run TestPreview ./internal/web
 ```
 
 This rewrites `docs/preview/players.html`, `bans.html`, `flows.html` and `data.js`. The sample players, bans and flows, and the stand-in for the API, are in `docs/preview/preview.js`. A plain `go test` skips this test.
