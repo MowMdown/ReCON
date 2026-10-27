@@ -612,21 +612,22 @@ async function refresh() {
 		let runsHtml = flows.filter(function(f) { return runs[f.id]; }).map(function(f) {
 			let x = runs[f.id];
 			return '<div class="run" data-id="' + f.id + '"><b>' + esc(f.name) + '</b> - ' + statusCell(x) +
-				'<pre class="log">' + esc((x.log || []).join('\n')) + '</pre></div>';
+				'<pre class="log">' + esc((x.log || []).slice().reverse().join('\n')) + '</pre></div>';
 		}).join('');
-		// Rebuild the run logs only when they changed, and keep where each one
-		// was scrolled to (at the bottom, it follows new lines).
+		// Run logs show the newest line first. They're rebuilt only when they
+		// changed, and each keeps where it was scrolled to, so older lines
+		// further down can be read between refreshes.
 		if (runsHtml !== runsBox.dataset.html) {
 			let kept = {};
 			runsBox.querySelectorAll('.run').forEach(function(el) {
 				let pre = el.querySelector('pre.log');
-				kept[el.dataset.id] = { top: pre.scrollTop, bottom: pre.scrollHeight - pre.scrollTop - pre.clientHeight < 4 };
+				kept[el.dataset.id] = pre.scrollTop;
 			});
 			runsBox.innerHTML = runsHtml;
 			runsBox.dataset.html = runsHtml;
 			runsBox.querySelectorAll('.run').forEach(function(el) {
-				let k = kept[el.dataset.id], pre = el.querySelector('pre.log');
-				if (k) pre.scrollTop = k.bottom ? pre.scrollHeight : k.top;
+				let k = kept[el.dataset.id];
+				if (k) el.querySelector('pre.log').scrollTop = k;
 			});
 		}
 	} catch(e) {
