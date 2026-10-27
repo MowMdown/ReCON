@@ -88,6 +88,11 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .tablewrap { overflow-x: auto; }
 #flowsTable { min-width: 1310px; }
  
+#flowsTable th:first-child, #flowsTable td:first-child,
+#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; z-index: 1; background: #111; }
+#flowsTable th:first-child, #flowsTable td:first-child { left: 0; }
+#flowsTable th:last-child, #flowsTable td:last-child { right: 0; }
+ 
 #quickMsg { position: absolute; right: 0; bottom: 100%; z-index: 1; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
 .run { margin-top: 24px; }
 #confirmText { white-space: pre-line; }
