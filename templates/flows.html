@@ -133,6 +133,11 @@ button:disabled { opacity: 0.4; cursor: default; }
    so their columns line up. */
 .grip { display: inline-flex; width: 15px; height: 15px; padding: 2px 4px; color: var(--faint); user-select: none; }
 .grip.handle { cursor: grab; }
+/* Folding an If or For each: the ▾ / ▸ before its name, and the note on a folded one. */
+.fb .fold { background: none; border: 0; padding: 0 2px; margin: 0; width: 16px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.fb .fold:hover { color: var(--fg); }
+.folded { color: var(--muted); font-size: 12.5px; padding-left: 4px; }
+.folded.bad { color: var(--err); }
 .grip.handle::before { content: ""; width: 15px; height: 15px; background: radial-gradient(circle, currentColor 1.4px, transparent 1.7px) 0 0 / 5px 5px; }
 .num { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
 .body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -1219,13 +1224,33 @@ const ifIds = new WeakMap();
 let ifSeq = 0;
 const ifId = (s) => { if (!ifIds.has(s)) ifIds.set(s, ++ifSeq); return ifIds.get(s); };
 
+// Blocks (If, For each) folded up in the editor: only their first row shows.
+// For viewing only: not saved, and every block is open when the editor opens.
+let collapsed = new WeakSet();
+const isFolded = (s) => isBlock(s) && collapsed.has(s);
+// How many steps are inside a block, and how many of those (or of its
+// conditions) have a red note, for a folded block's first row.
+function insideCount(s, errs) {
+	let steps = 0, bad = 0;
+	if (s.type === 'if') for (const b of s.branches) if (errs.has(b)) bad++;
+	for (const l of lists(s)) for (const x of l) {
+		steps++;
+		if (errs.has(x)) bad++;
+		if (isBlock(x)) { const c = insideCount(x, errs); steps += c.steps; bad += c.bad; }
+	}
+	return { steps, bad };
+}
+
 // One row per step, plus an Else row and an End if row drawn for each If.
-// Every row knows the list and index of the step it belongs to.
+// Every row knows the list and index of the step it belongs to. A folded
+// block is just its first row.
 function flatten(list, depth = 0, out = [], inLoop = false) {
 	list.forEach((s, i) => {
 		const start = out.length;
 		out.push({ kind: 'step', s, list, i, depth, inLoop });
-		if (s.type === 'if') {
+		if (isFolded(s)) {
+			// nothing more: the rows inside are hidden
+		} else if (s.type === 'if') {
 			s.branches.forEach((b, k) => {
 				if (k) out.push({ kind: 'elif', s, b, k, list, i, depth, inLoop });
 				flatten(b.steps, depth + 1, out, inLoop);
@@ -1273,9 +1298,20 @@ function renderSteps(key) {
 		if (r.kind === 'step') {
 			const def = STEPS[s.type];
 			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
+			if (isBlock(s)) {
+				const folded = collapsed.has(s);
+				sentence.prepend(el('button', { type: 'button', class: 'fold', 'aria-expanded': String(!folded),
+					title: folded ? 'Show the steps inside' : 'Hide the steps inside', 'aria-label': (folded ? 'Expand' : 'Collapse') + ' step ' + n,
+					onclick: () => { if (folded) collapsed.delete(s); else collapsed.add(s); changed(true); }, text: folded ? '▸' : '▾' }));
+			}
 			const obj = s.type === 'if' ? s.branches[0] : s;
 			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
 			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop) || ''); // null when hidden: append would write "null"
+			if (isFolded(s)) {
+				const c = insideCount(s, errs);
+				sentence.append(el('span', { class: 'folded' + (c.bad ? ' bad' : ''),
+					text: c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' + (c.bad ? ', ' + c.bad + ' need' + (c.bad === 1 ? 's' : '') + ' fixing' : '') }));
+			}
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
 			const atTop = r.list === list && r.i === 0;
@@ -1480,7 +1516,7 @@ function moveBranch(key, s, k, dir) {
 function dropPos(r, above) {
 	if (r.kind === 'step') {
 		if (above) return { list: r.list, i: r.i };
-		return isBlock(r.s) ? { list: lists(r.s)[0], i: 0 } : { list: r.list, i: r.i + 1 };
+		return isBlock(r.s) && !isFolded(r.s) ? { list: lists(r.s)[0], i: 0 } : { list: r.list, i: r.i + 1 };
 	}
 	const ls = lists(r.s);
 	if (r.kind === 'elif') return above ? { list: ls[r.k - 1], i: ls[r.k - 1].length } : { list: r.b.steps, i: 0 };
