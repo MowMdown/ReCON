@@ -1736,7 +1736,6 @@ function fromEditor() {
 		counterThreshold: thresholdSet(ed.counterThreshold) ? +ed.counterThreshold : thresholdOk(ed.counterThreshold) ? 0 : -1
 	};
 }
-const hasStopSteps = () => ed.trigger.type === 'schedule' || ed.trigger.type === 'manual';
 const edChanged = () => !!ed && JSON.stringify(fromEditor()) !== edSaved;
 
 function openEditor(f, title) {
@@ -1811,9 +1810,7 @@ function renderTrigger() {
 		ctCheck();
 		box.append(el('label', { class: 'f', title: 'Each player\'s counter starts at 0 every run; If, Else if and Else can change it. Set a threshold to compare with {counter} >= {threshold}.' }, 'Counter threshold (optional)', ct));
 	}
-	// Only Schedule and Manual flows have When stopped steps. The others keep
-	// its space, invisible, so every trigger's editor is as tall as Schedule's.
-	$('stopSection').style.visibility = hasStopSteps() ? '' : 'hidden';
+	$('stopSection').hidden = !(t.type === 'schedule' || t.type === 'manual');
 	updateTrigHint();
 }
 function queuePreview() {
@@ -1881,7 +1878,7 @@ $('saveBtn').addEventListener('click', async () => {
 	const bad = validate(ed, ed.steps).first;
 	if (bad != null) { msg.textContent = 'Fix step ' + bad + ' first (shown in red).'; return; }
 	const badStop = validate(ed, ed.onStop).first;
-	if (badStop != null && hasStopSteps()) { msg.textContent = 'Fix When stopped step ' + badStop + ' first.'; return; }
+	if (badStop != null && !$('stopSection').hidden) { msg.textContent = 'Fix When stopped step ' + badStop + ' first.'; return; }
 	let d;
 	try { d = await post('/api/flows', fromEditor()); } catch (e) { msg.textContent = 'ReCON could not be reached; the flow was not saved.'; return; }
 	if (!d.ok) { msg.textContent = d.error || 'Save failed'; return; }
