@@ -540,19 +540,26 @@ Any tool with a "POST to a URI" action can call these routes. For example: URI `
 
 ## 9. Development
 
-ReCON is a single Go program with no dependencies besides the SQLite driver.
+ReCON is a single Go program with no dependencies besides the SQLite driver. It follows the standard Go layout: the program in `cmd/recon`, its packages under `internal/`.
 
-| File | Contents |
+```bash
+go build -o recon ./cmd/recon   # build
+go test ./...                   # test every package
+```
+
+| Path | Contents |
 | ---- | -------- |
-| `main.go` | Startup, configuration and the command-line tool |
-| `rcon.go` | The BattlEye RCON protocol, the web session, the server watch (polls and heartbeat), and the console log |
-| `web.go` | HTTP routes, the JSON API and page rendering |
-| `db.go` | SQLite storage, the ban list sync and the chat recorder |
-| `players.go` | Who is online and their sessions, from the console log; keeps a session across a server restart for players back from the same IP within 5 minutes |
-| `flows.go` | Flows (steps, conditions, runner) and the chat commands |
-| `flows_schedule.go`, `flows_join.go`, `flows_message.go`, `flows_manual.go` | One file per flow trigger |
-| `steam.go` | SteamID lookups and Steam profiles |
-| `templates/` | The HTML pages, embedded into the binary at build time |
+| `cmd/recon/` | Startup (wiring the packages together) and the command-line tool |
+| `internal/battleye/` | The BattlEye RCON protocol: packets, login, sessions, parsing server messages and replies, kickall |
+| `internal/rcon/` | ReCON's web session (shared by the pages, flows and polls), RCON settings, the console log and the connection status |
+| `internal/watch/` | The server watch: polls, the heartbeat and logins after a shutdown or restart |
+| `internal/players/` | Who is online and their sessions, from the console log; keeps a session across a server restart for players back from the same IP within 5 minutes; chat history |
+| `internal/bans/` | Keeping the ban list in step with BattlEye's, and placing bans |
+| `internal/flows/` | Flows (steps, conditions, runner, one file per trigger) and the chat commands |
+| `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
+| `internal/store/` | The SQLite database: every SQL statement |
+| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages, embedded into the binary at build time |
+| `internal/battleye/betest/`, `internal/store/storetest/` | Test helpers: a fake BattlEye server and a temporary database |
 | `examples/flows.json` | Example flows to import |
 | `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |
 | `docs/preview/` | The static preview pages |
