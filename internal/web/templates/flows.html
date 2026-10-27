@@ -13,12 +13,15 @@
 	--mono: ui-monospace, Consolas, monospace;
 }
 [hidden] { display: none !important; }
-/* One row: the flow buttons on the left, Commands at the right. It never
-   folds: once Commands would come closer than the gap to the flow buttons,
-   the row scrolls sideways instead (as the flow list does). */
+/* One row: the flow buttons on the left, Commands fixed at the right. It
+   never folds: once the flow buttons would come closer than the gap to
+   Commands, they scroll sideways in their own space, with the scrollbar under
+   New flow to Chat commands only, and Commands stays put. */
 .toolbarwrap { position: relative; margin: 0 0 16px; }
-.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; overflow-x: auto; }
-.toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: none; }
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow-x: auto; }
+.toolbar .flowbtns button { flex: none; }
+.toolbar .flowbtns, .tablewrap { scrollbar-color: #555 #1b1b1b; } /* dark scrollbars */
 .quick { display: flex; align-items: center; gap: 6px; margin-left: auto; position: relative; flex: none; }
 .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
 

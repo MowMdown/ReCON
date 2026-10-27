@@ -62,8 +62,10 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 [hidden] { display: none !important; }
  
 .toolbarwrap { position: relative; margin: 0 0 16px; }
-.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; overflow-x: auto; }
-.toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: none; }
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow-x: auto; }
+.toolbar .flowbtns button { flex: none; }
+.toolbar .flowbtns, .tablewrap { scrollbar-color: #555 #1b1b1b; }  
 .quick { display: flex; align-items: center; gap: 6px; margin-left: auto; position: relative; flex: none; }
 .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
 
