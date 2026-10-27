@@ -40,9 +40,11 @@
 .srvlist .ic.power { color: var(--err); background: #2e1c1c; }
 .srvbox .buttons { margin-top: 14px; }
 .quick button { margin-right: 0; }
-/* The flow list keeps its columns readable: on a narrow window it scrolls sideways (as the Players tables do) */
+/* The flow list: the Flow column takes the spare width and shrinks with the
+   window down to 340px; narrower than that, the list scrolls sideways (as
+   the Players tables do). 1310px = Flow 340 + the fixed columns 970. */
 .tablewrap { overflow-x: auto; }
-#flowsTable { min-width: 1300px; }
+#flowsTable { min-width: 1310px; }
 /* A command's result ("#lock sent"), just above the Commands button. Placed
    outside the row's flow, so it doesn't push the buttons around. */
 #quickMsg { position: absolute; right: 0; bottom: 100%; z-index: 1; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
@@ -233,9 +235,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 <div class="tablewrap">
 <table id="flowsTable">
 	<colgroup>
-		<col style="width: 340px">
-		<col style="width: 170px">
 		<col>
+		<col style="width: 170px">
+		<col style="width: 130px">
 		<col style="width: 190px">
 		<col style="width: 190px">
 		<col style="width: 290px">
