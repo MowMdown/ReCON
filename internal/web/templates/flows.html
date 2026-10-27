@@ -41,16 +41,13 @@
 .srvbox .buttons { margin-top: 14px; }
 .quick button { margin-right: 0; }
 /* The flow list: the Flow column takes the spare width and shrinks with the
-   window down to 340px; narrower than that, Trigger to Next run scroll
-   sideways between Flow and Actions, which stay put. 1310px = Flow 340 +
-   the fixed columns 970. */
+   window down to 340px; narrower than that, Flow to Next run scroll
+   sideways under Actions, which stays put. 1310px = Flow 340 + the fixed
+   columns 970. */
 .tablewrap { overflow-x: auto; }
 #flowsTable { min-width: 1310px; }
-/* Flow and Actions stay in view: the columns between them scroll underneath. */
-#flowsTable th:first-child, #flowsTable td:first-child,
-#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; z-index: 1; background: #111; }
-#flowsTable th:first-child, #flowsTable td:first-child { left: 0; }
-#flowsTable th:last-child, #flowsTable td:last-child { right: 0; }
+/* Actions stays in view: the other columns scroll underneath it. */
+#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; right: 0; z-index: 1; background: #111; }
 /* A command's result ("#lock sent"), just above the Commands button. Placed
    outside the row's flow, so it doesn't push the buttons around. */
 #quickMsg { position: absolute; right: 0; bottom: 100%; z-index: 1; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
