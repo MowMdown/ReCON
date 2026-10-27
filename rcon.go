@@ -211,19 +211,40 @@ type persistentConnection struct {
 	once        sync.Once     // makes close() idempotent
 	err         error         // the error that killed the reader (valid once done is closed)
 	seen        []byte        // recent server-message seqs; only readServerPackets() touches it
+	onMessage   func(string)  // called with each new server message (may be nil)
+}
+
+// dialOptions is how dialRconAddress logs in and what the session does with
+// server messages.
+type dialOptions struct {
+	src       string        // label for log lines ("web", "cli")
+	tries     int           // login packets to send before giving up
+	replyWait time.Duration // how long to wait for each login reply
+	keepalive bool          // send an empty command every keepaliveEvery
+	onMessage func(string)  // called with each new server message (may be nil)
 }
 
 // dialPersistentConnection connects to the current target (currentRconTarget), logs in,
 // and starts the background reader (and the keepalive heartbeat when
 // enableKeepalive is true). The web session (webSource) sends one
-// login and waits 3s; the CLI and console try 3 times, 1s apart.
+// login and waits 3s, and puts server messages in the console log; the CLI
+// and console try 3 times, 1s apart.
 func dialPersistentConnection(src string, enableKeepalive bool) (*persistentConnection, error) {
 	address, password := currentRconTarget()
-	return dialRconAddress(address, password, src, enableKeepalive)
+	return dialRconAddress(address, password, connectOptions(src, enableKeepalive))
 }
 
-// dialRconAddress is dialPersistentConnection for a given endpoint and password.
-func dialRconAddress(address, password, src string, enableKeepalive bool) (*persistentConnection, error) {
+// connectOptions are the dialOptions for a session labelled src.
+func connectOptions(src string, keepalive bool) dialOptions {
+	if src == webSource {
+		return dialOptions{src: src, tries: 1, replyWait: reloginReplyWait, keepalive: keepalive, onMessage: handleServerMessage}
+	}
+	return dialOptions{src: src, tries: 3, replyWait: time.Second, keepalive: keepalive}
+}
+
+// dialRconAddress connects to address, logs in with password and starts the
+// background reader, as opt says.
+func dialRconAddress(address, password string, opt dialOptions) (*persistentConnection, error) {
 	if password == "" {
 		return nil, errNoPassword
 	}
@@ -231,11 +252,7 @@ func dialRconAddress(address, password, src string, enableKeepalive bool) (*pers
 	if err != nil {
 		return nil, err
 	}
-	tries, wait := 3, time.Second
-	if src == webSource {
-		tries, wait = 1, reloginReplyWait
-	}
-	if err := loginWithPassword(conn, make([]byte, 4096), password, tries, wait); err != nil {
+	if err := loginWithPassword(conn, make([]byte, 4096), password, opt.tries, opt.replyWait); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -243,16 +260,17 @@ func dialRconAddress(address, password, src string, enableKeepalive bool) (*pers
 	_ = conn.SetReadDeadline(time.Time{})
 
 	l := &persistentConnection{
-		src:      src,
-		conn:     conn,
-		password: password,
-		replies:  make(chan []byte, 32),
-		logins:   make(chan byte, 4),
-		done:     make(chan struct{}),
-		stop:     make(chan struct{}),
+		src:       opt.src,
+		conn:      conn,
+		password:  password,
+		replies:   make(chan []byte, 32),
+		logins:    make(chan byte, 4),
+		done:      make(chan struct{}),
+		stop:      make(chan struct{}),
+		onMessage: opt.onMessage,
 	}
 	go l.readServerPackets()
-	if enableKeepalive {
+	if opt.keepalive {
 		go l.keepSessionAlive()
 	}
 	return l, nil
@@ -330,7 +348,7 @@ func (l *persistentConnection) readServerPackets() {
 			if l.seenBefore(p[0]) {
 				continue // a resend of a message already handled
 			}
-			handleServerMessage(l.src, string(p[1:]))
+			l.serverMessage(string(p[1:]))
 		case 1:
 			// Non-blocking so a slow consumer can't stall the reader.
 			select {
@@ -413,15 +431,15 @@ func (l *persistentConnection) reloginSameSocket() error {
 // isResponsive probes the session with an empty command and reports whether
 // the server acknowledged it within 2 seconds.
 func (l *persistentConnection) isResponsive() bool {
-	_, acked, err := l.run("", 2*time.Second)
+	_, acked, err := l.Run("", 2*time.Second)
 	return err == nil && acked
 }
 
-// run executes a command and logs it to the container log as [cli] (empty
+// Run executes a command and logs it to the container log as [cli] (empty
 // probes aren't logged). The CLI and its console (-i) use it; the web
 // session logs in runWebCommand instead. It satisfies the commandRunner
 // interface.
-func (l *persistentConnection) run(command string, wait time.Duration) (string, bool, error) {
+func (l *persistentConnection) Run(command string, wait time.Duration) (string, bool, error) {
 	out, acked, err := l.runRawCommand(command, wait)
 	if command != "" {
 		logSentCommand(l.src, "", command, acked, err)
@@ -570,7 +588,7 @@ func loginWebSession() error {
 func reconnectWebSession(address, password string) error {
 	webConnection.Lock()
 	defer webConnection.Unlock()
-	s, err := dialRconAddress(address, password, webSource, false)
+	s, err := dialRconAddress(address, password, connectOptions(webSource, false))
 	if err != nil {
 		return err
 	}
@@ -636,8 +654,28 @@ func unlockAfterLogin(s *persistentConnection) {
 	out, acked, err := s.runRawCommand("#unlock", 2*time.Second)
 	logSentCommand(webSource, loginSource, "#unlock", acked, err)
 	logCommandResult(loginSource, out, acked, err)
-	serverLoggedIn(time.Now()) // players.go
 	loginPollDue.Store(true)
+	now := time.Now()
+	loginHooks.Lock()
+	hooks := loginHooks.fns
+	loginHooks.Unlock()
+	for _, fn := range hooks {
+		fn(now)
+	}
+}
+
+// loginHooks is what runs after every login of the web session (onWebLogin).
+var loginHooks struct {
+	sync.Mutex
+	fns []func(time.Time)
+}
+
+// onWebLogin adds fn to what runs, with the login time, after every login
+// of the web session.
+func onWebLogin(fn func(time.Time)) {
+	loginHooks.Lock()
+	loginHooks.fns = append(loginHooks.fns, fn)
+	loginHooks.Unlock()
 }
 
 // ---------------------------------------------------------------------------
@@ -801,8 +839,7 @@ func pollPlayersNow() bool {
 	if err != nil || !acked {
 		return false
 	}
-	joined := playersPolledTracker(parsePlayersReply(out), sentAt)
-	startJoinFlows(joined) // flows_join.go
+	playersJoined(playersPolledTracker(parsePlayersReply(out), sentAt))
 	if anyoneInLobby() {
 		wakeLobbyWatcher() // someone was already loading (players.go)
 	}
@@ -901,7 +938,7 @@ func runWebAttempts(command string, wait time.Duration, maxAttempts int, logAs s
 // `players` reads around them are polls and aren't.
 type webRunner struct{ logAs string }
 
-func (r webRunner) run(command string, wait time.Duration) (string, bool, error) {
+func (r webRunner) Run(command string, wait time.Duration) (string, bool, error) {
 	if command == "players" {
 		return runWebCommand(command, wait, false, "")
 	}
@@ -1020,13 +1057,21 @@ func parseServerMessage(text string, at time.Time) ServerEvent {
 	return ev
 }
 
-// handleServerMessage is called by readServerPackets() once per new server message.
-func handleServerMessage(src, text string) {
+// serverMessage is called by readServerPackets() once per new server
+// message: it logs it and hands it to onMessage.
+func (l *persistentConnection) serverMessage(text string) {
 	text = strings.TrimRight(text, "\r\n ")
 	if text == "" {
 		return
 	}
-	log.Printf("[%s] < %s", src, text)
+	log.Printf("[%s] < %s", l.src, text)
+	if l.onMessage != nil {
+		l.onMessage(text)
+	}
+}
+
+// handleServerMessage puts a web session's server message in the console log.
+func handleServerMessage(text string) {
 	serverEvents.publish(parseServerMessage(text, time.Now()))
 }
 
@@ -1370,7 +1415,7 @@ func (rep *kickReport) summary(reason string) string {
 // commandRunner is what kickAllPlayers needs: a persistentConnection (CLI,
 // console) or webRunner (server mode).
 type commandRunner interface {
-	run(command string, wait time.Duration) (string, bool, error)
+	Run(command string, wait time.Duration) (string, bool, error)
 }
 
 // kickAllPlayers kicks every connected player and nothing else (#lock,
@@ -1382,7 +1427,7 @@ type commandRunner interface {
 // a failed verification are reported in the report.
 func kickAllPlayers(s commandRunner, reason string) (*kickReport, error) {
 	reason = cleanReason(reason)
-	out, _, err := s.run("players", 3*time.Second)
+	out, _, err := s.Run("players", 3*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -1392,7 +1437,7 @@ func kickAllPlayers(s commandRunner, reason string) (*kickReport, error) {
 	}
 	for _, id := range rep.Order {
 		cmd := strings.TrimSpace(fmt.Sprintf("kick %d %s", id, reason))
-		if _, acked, err := s.run(cmd, time.Second); err != nil {
+		if _, acked, err := s.Run(cmd, time.Second); err != nil {
 			return nil, err
 		} else if !acked {
 			rep.Unacked = append(rep.Unacked, id)
@@ -1400,7 +1445,7 @@ func kickAllPlayers(s commandRunner, reason string) (*kickReport, error) {
 	}
 	if len(rep.Order) > 0 {
 		time.Sleep(500 * time.Millisecond) // let the server process the kicks
-		if out, _, err := s.run("players", 3*time.Second); err == nil {
+		if out, _, err := s.Run("players", 3*time.Second); err == nil {
 			rep.Remaining = playerIDs(out)
 		}
 	}

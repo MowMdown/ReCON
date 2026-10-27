@@ -864,7 +864,7 @@ func TestRconSettingsPage(t *testing.T) {
 }
 
 func TestNoPasswordDoesNotDial(t *testing.T) {
-	if _, err := dialRconAddress("127.0.0.1:1", "", webSource, false); err != errNoPassword {
+	if _, err := dialRconAddress("127.0.0.1:1", "", connectOptions(webSource, false)); err != errNoPassword {
 		t.Fatalf("err = %v, want errNoPassword", err)
 	}
 }
@@ -917,7 +917,7 @@ func testFlow(name string) Flow {
 
 func flowIDs(t *testing.T) []int64 {
 	t.Helper()
-	flows, err := globalDatabase.ListStoredFlows()
+	flows, err := listFlows()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -972,7 +972,7 @@ func TestFlowNumbersReuseFreedOnes(t *testing.T) {
 		t.Fatalf("next flow got #%d, want #4", id)
 	}
 	// Flow 0 is an ordinary flow: it can be edited.
-	f, err := db.GetStoredFlow(0)
+	f, err := getFlow(0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -980,7 +980,7 @@ func TestFlowNumbersReuseFreedOnes(t *testing.T) {
 	if id, err := validateAndSaveFlow(f, false); err != nil || id != 0 {
 		t.Fatalf("editing #0: id %d, %v", id, err)
 	}
-	if f, _ := db.GetStoredFlow(0); f.Name != "renamed" {
+	if f, _ := getFlow(0); f.Name != "renamed" {
 		t.Fatalf("flow #0 = %q", f.Name)
 	}
 }
@@ -1012,7 +1012,7 @@ func TestFlowsTableLosesAutoincrement(t *testing.T) {
 	if got := fmt.Sprint(flowIDs(t)); got != "[5 7]" {
 		t.Fatalf("flows after the move: %s", got)
 	}
-	if f, err := db.GetStoredFlow(5); err != nil || f.Name != "MOTD" || !f.ScheduleEnabled || f.Trigger != triggerSchedule || len(f.Steps) != 1 {
+	if f, err := getFlow(5); err != nil || f.Name != "MOTD" || !f.ScheduleEnabled || f.Trigger != triggerSchedule || len(f.Steps) != 1 {
 		t.Fatalf("flow #5 = %+v, %v", f, err)
 	}
 	// New flows take the free numbers from 0.
@@ -1051,7 +1051,7 @@ func TestFlowAPIUsesMissingIDForNew(t *testing.T) {
 	if got := fmt.Sprint(flowIDs(t)); got != "[0 1]" {
 		t.Fatalf("flows: %s", got)
 	}
-	if f, _ := db.GetStoredFlow(0); f.Name != "First (renamed)" {
+	if f, _ := getFlow(0); f.Name != "First (renamed)" {
 		t.Fatalf("flow #0 = %q", f.Name)
 	}
 	// Flow 0 is reachable through the per-flow routes.
@@ -1788,21 +1788,21 @@ func TestFlowCounterThresholdStored(t *testing.T) {
 	if err := db.EnsureFlowsTable(); err != nil {
 		t.Fatal(err)
 	}
-	if f, err := db.GetStoredFlow(0); err != nil || f.CounterThreshold != 0 {
+	if f, err := getFlow(0); err != nil || f.CounterThreshold != 0 {
 		t.Fatalf("old flow: threshold %d, err %v; want none", f.CounterThreshold, err)
 	}
 	id, err := validateAndSaveFlow(Flow{Name: "four", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}, CounterThreshold: 4}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f, _ := db.GetStoredFlow(id); f.CounterThreshold != 4 {
+	if f, _ := getFlow(id); f.CounterThreshold != 4 {
 		t.Fatalf("saved threshold %d, want 4", f.CounterThreshold)
 	}
 	id, err = validateAndSaveFlow(Flow{Name: "unsent", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f, _ := db.GetStoredFlow(id); f.CounterThreshold != 0 {
+	if f, _ := getFlow(id); f.CounterThreshold != 0 {
 		t.Fatalf("threshold not sent: %d, want none", f.CounterThreshold)
 	}
 }

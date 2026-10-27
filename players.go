@@ -111,14 +111,36 @@ var restartGrace = 5 * time.Minute
 // and a restart flow's Kick everyone, disconnect everyone just before.
 var restartLookback = 2 * time.Minute
 
+// What the tracker tells the rest of ReCON (set at startup, may be nil):
+// players who have finished joining (the join flows), and every session it
+// opens (the SteamID lookup).
+var (
+	onPlayersJoined func([]Player)
+	onSessionOpened func(guid, name string)
+)
+
+// setTrackerHooks sets what the tracker calls when players finish joining
+// and when it opens a session.
+func setTrackerHooks(joined func([]Player), opened func(guid, name string)) {
+	onPlayersJoined, onSessionOpened = joined, opened
+}
+
+// playersJoined hands players who have finished joining to onPlayersJoined.
+func playersJoined(joined []Player) {
+	if len(joined) > 0 && onPlayersJoined != nil {
+		onPlayersJoined(joined)
+	}
+}
+
 // startPlayerTracker feeds every server message to the tracker for as long
-// as ReCON runs.
+// as ReCON runs, and starts the restart grace on every login.
 func startPlayerTracker() {
+	onWebLogin(serverLoggedIn)
 	events, _ := serverEvents.subscribe(256)
 	go func() {
 		for ev := range events {
 			if p, ok := trackServerEvent(ev); ok {
-				startJoinFlows([]Player{p}) // flows_join.go
+				playersJoined([]Player{p})
 			}
 			if ev.Kind == eventConnect {
 				wakeLobbyWatcher()
@@ -266,7 +288,9 @@ func openTrackedSession(t *trackedPlayer, at time.Time) {
 		return
 	}
 	t.opened = true
-	steamPlayerJoined(t.guid, t.name) // STEAM_SEARCH_MODE=auto (steam.go)
+	if onSessionOpened != nil {
+		onSessionOpened(t.guid, t.name)
+	}
 }
 
 // closeTrackedSession ends a player's session at `at` and forgets them. Caller

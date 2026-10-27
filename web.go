@@ -1012,7 +1012,7 @@ func withFlow(h func(http.ResponseWriter, *http.Request, Flow)) http.HandlerFunc
 			fail(w, http.StatusNotFound, "invalid flow id")
 			return
 		}
-		f, err := globalDatabase.GetStoredFlow(id)
+		f, err := getFlow(id)
 		if errors.Is(err, sql.ErrNoRows) {
 			fail(w, http.StatusNotFound, "flow not found")
 			return
@@ -1109,7 +1109,7 @@ type flowFile struct {
 // handleFlowExport serves every flow, in list order, as a downloadable
 // flows.json. Enabled/disabled state is not exported.
 func handleFlowExport(w http.ResponseWriter, r *http.Request) {
-	flows, err := globalDatabase.ListStoredFlows()
+	flows, err := listFlows()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1141,7 +1141,7 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "no flows in file")
 		return
 	}
-	existing, err := globalDatabase.ListStoredFlows()
+	existing, err := listFlows()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return

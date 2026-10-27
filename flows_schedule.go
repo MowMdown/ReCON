@@ -354,7 +354,7 @@ func startFlowScheduler() {
 // come.
 func runDueSchedules(now time.Time) time.Time {
 	wake := now.Add(scheduleIdleWait)
-	flows, err := globalDatabase.ListStoredFlows()
+	flows, err := listFlows()
 	if err != nil {
 		log.Printf("scheduler: %v", err)
 		return now.Add(time.Minute)

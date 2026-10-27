@@ -1245,6 +1245,36 @@ func flowFromRow(f *Flow, script, cancel string) {
 	f.Steps, f.OnStop = normalizeFlowSteps(f.Steps), normalizeFlowSteps(f.OnStop)
 }
 
+// flowFromRecord turns a flows row into a Flow (see flowFromRow).
+func flowFromRecord(r flowRecord) Flow {
+	f := Flow{ID: r.ID, Name: r.Name, Delay: r.Delay, Schedule: r.Schedule,
+		ScheduleEnabled: r.Enabled, CounterThreshold: r.CounterThreshold}
+	flowFromRow(&f, r.Script, r.Cancel)
+	return f
+}
+
+// listFlows returns every stored flow in display order.
+func listFlows() ([]Flow, error) {
+	rows, err := globalDatabase.ListStoredFlows()
+	if err != nil {
+		return nil, err
+	}
+	flows := make([]Flow, len(rows))
+	for i, r := range rows {
+		flows[i] = flowFromRecord(r)
+	}
+	return flows, nil
+}
+
+// getFlow returns one stored flow, or sql.ErrNoRows.
+func getFlow(id int64) (Flow, error) {
+	r, err := globalDatabase.GetStoredFlow(id)
+	if err != nil {
+		return Flow{}, err
+	}
+	return flowFromRecord(r), nil
+}
+
 // stepsJSON is how steps are stored.
 func stepsJSON(list []Step) string {
 	b, _ := json.Marshal(normalizeFlowSteps(list))
@@ -1331,7 +1361,7 @@ func initStoredFlows() error {
 	if err := globalDatabase.EnsureFlowsTable(); err != nil {
 		return err
 	}
-	flows, err := globalDatabase.ListStoredFlows()
+	flows, err := listFlows()
 	if err != nil {
 		return err
 	}
@@ -1345,7 +1375,7 @@ func initStoredFlows() error {
 
 // flowsWithNextRun lists every flow and fills NextRun and LastRun for the page.
 func flowsWithNextRun() ([]Flow, error) {
-	flows, err := globalDatabase.ListStoredFlows()
+	flows, err := listFlows()
 	if err != nil {
 		return nil, err
 	}
@@ -1404,7 +1434,7 @@ func validateAndSaveFlow(f Flow, isNew bool) (int64, error) {
 	f.Trigger = trig
 	var old Flow
 	if !isNew {
-		if old, err = globalDatabase.GetStoredFlow(f.ID); err != nil {
+		if old, err = getFlow(f.ID); err != nil {
 			return 0, errors.New("this flow no longer exists; reload the page")
 		}
 		if old.Trigger != f.Trigger {
@@ -1420,7 +1450,8 @@ func validateAndSaveFlow(f Flow, isNew bool) (int64, error) {
 	}
 	f.Schedule = storedScheduleText(f)
 	f.ScheduleEnabled = !isNew && f.Trigger != triggerManual && old.ScheduleEnabled
-	id, err := globalDatabase.SaveStoredFlow(f, isNew, stepsJSON(f.Steps), stepsJSON(f.OnStop))
+	id, err := globalDatabase.SaveStoredFlow(flowRecord{ID: f.ID, Name: f.Name, Script: stepsJSON(f.Steps), Cancel: stepsJSON(f.OnStop),
+		Delay: f.Delay, Schedule: f.Schedule, Enabled: f.ScheduleEnabled, CounterThreshold: f.CounterThreshold}, isNew)
 	if err != nil {
 		return 0, errors.New("could not save (is the name already used?)")
 	}
@@ -1721,7 +1752,7 @@ func lookupPlayerRole(guid string) int {
 // startPlayerFlows runs every enabled flow with the given trigger once for
 // the player, after each flow's delay.
 func startPlayerFlows(trigger, source string, p *flowPlayer) {
-	flows, err := globalDatabase.ListStoredFlows()
+	flows, err := listFlows()
 	if err != nil {
 		log.Printf("%s flows: %v", trigger, err)
 		return

@@ -166,8 +166,9 @@ func main() {
 	startChatWatcher()   // chat commands and Player message flows (flows_message.go)
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
-	startDatabaseSync() // sessions and chat history from the console log (db.go)
-	startServerWatch()  // keeps RCON logged in, polls players and bans (rcon.go)
+	setTrackerHooks(startJoinFlows, steamPlayerJoined) // join flows, SteamID lookups (players.go)
+	startDatabaseSync()                                // sessions and chat history from the console log (db.go)
+	startServerWatch()                                 // keeps RCON logged in, polls players and bans (rcon.go)
 	log.Printf("listening on %s -> RCON %s", addr, address)
 	log.Fatal(runWebServer(addr)) // web.go
 }
@@ -198,7 +199,7 @@ func runCommandLine(args []string) {
 		rep, err := kickAllPlayers(l, strings.Join(args[1:], " "))
 		ok = printKickReport(rep, err)
 	} else {
-		out, acked, err := l.run(strings.Join(args, " "), 2*time.Second)
+		out, acked, err := l.Run(strings.Join(args, " "), 2*time.Second)
 		ok = printCommandResult(out, acked, err)
 	}
 	l.close()
@@ -264,7 +265,7 @@ func runInteractiveConsole() {
 			acked = err == nil
 		} else {
 			var out string
-			out, acked, err = l.run(line, 2*time.Second)
+			out, acked, err = l.Run(line, 2*time.Second)
 			printCommandResult(out, acked, err)
 		}
 		// A failed or unacknowledged command may mean the session silently

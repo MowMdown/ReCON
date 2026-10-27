@@ -1332,50 +1332,59 @@ func (db *Database) EnsureFlowsTable() error {
 	return tx.Commit()
 }
 
-// ListStoredFlows returns every flow in display order, read with flowFromRow.
-func (db *Database) ListStoredFlows() ([]Flow, error) {
-	rows, err := db.Query("SELECT id, name, script, cancel, timer, schedule, schedule_enabled, counter_threshold FROM flows ORDER BY position, id")
+// flowRecord is one row of the flows table. Script and Cancel are the steps
+// and When stopped steps as JSON; Schedule is "manual", "on-join",
+// "on-chat" or a cron expression; Delay is the time before step 1 as typed.
+type flowRecord struct {
+	ID               int64
+	Name             string
+	Script, Cancel   string
+	Delay            string
+	Schedule         string
+	Enabled          bool
+	CounterThreshold int
+}
+
+// flowColumns and scanFlow read one flows row.
+const flowColumns = "id, name, script, cancel, timer, schedule, schedule_enabled, counter_threshold"
+
+func scanFlow(sc interface{ Scan(...any) error }) (flowRecord, error) {
+	var r flowRecord
+	var en int
+	err := sc.Scan(&r.ID, &r.Name, &r.Script, &r.Cancel, &r.Delay, &r.Schedule, &en, &r.CounterThreshold)
+	r.Enabled = en != 0
+	return r, err
+}
+
+// ListStoredFlows returns every flow in display order.
+func (db *Database) ListStoredFlows() ([]flowRecord, error) {
+	rows, err := db.Query("SELECT " + flowColumns + " FROM flows ORDER BY position, id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	flows := []Flow{}
+	out := []flowRecord{}
 	for rows.Next() {
-		var f Flow
-		var script, cancel string
-		var en int
-		if err := rows.Scan(&f.ID, &f.Name, &script, &cancel, &f.Delay, &f.Schedule, &en, &f.CounterThreshold); err != nil {
+		r, err := scanFlow(rows)
+		if err != nil {
 			return nil, err
 		}
-		f.ScheduleEnabled = en != 0
-		flowFromRow(&f, script, cancel)
-		flows = append(flows, f)
+		out = append(out, r)
 	}
-	return flows, rows.Err()
+	return out, rows.Err()
 }
 
 // GetStoredFlow returns one flow, or sql.ErrNoRows.
-func (db *Database) GetStoredFlow(id int64) (Flow, error) {
-	var f Flow
-	var script, cancel string
-	var en int
-	err := db.QueryRow("SELECT id, name, script, cancel, timer, schedule, schedule_enabled, counter_threshold FROM flows WHERE id = ?", id).
-		Scan(&f.ID, &f.Name, &script, &cancel, &f.Delay, &f.Schedule, &en, &f.CounterThreshold)
-	if err != nil {
-		return f, err
-	}
-	f.ScheduleEnabled = en != 0
-	flowFromRow(&f, script, cancel)
-	return f, nil
+func (db *Database) GetStoredFlow(id int64) (flowRecord, error) {
+	return scanFlow(db.QueryRow("SELECT "+flowColumns+" FROM flows WHERE id = ?", id))
 }
 
 // SaveStoredFlow inserts a new flow (isNew; placed last, with the lowest free
-// number from 0) or updates flow f.ID. f.Schedule must already be in stored
-// form ("manual", "on-join", "on-chat" or cron); script and cancel are the
-// steps as JSON. Updating a missing ID returns sql.ErrNoRows.
-func (db *Database) SaveStoredFlow(f Flow, isNew bool, script, cancel string) (int64, error) {
+// number from 0) or updates flow r.ID. Updating a missing ID returns
+// sql.ErrNoRows.
+func (db *Database) SaveStoredFlow(r flowRecord, isNew bool) (int64, error) {
 	en := 0
-	if f.ScheduleEnabled {
+	if r.Enabled {
 		en = 1
 	}
 	if isNew {
@@ -1391,21 +1400,21 @@ func (db *Database) SaveStoredFlow(f Flow, isNew bool, script, cancel string) (i
 				(SELECT COALESCE(MAX(position), 0) + 1 FROM flows),
 				?
 			)`,
-			f.Name, script, cancel, f.Delay, f.Schedule, en, f.CounterThreshold)
+			r.Name, r.Script, r.Cancel, r.Delay, r.Schedule, en, r.CounterThreshold)
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
 	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, schedule = ?, schedule_enabled = ?, counter_threshold = ? WHERE id = ?",
-		f.Name, script, cancel, f.Delay, f.Schedule, en, f.CounterThreshold, f.ID)
+		r.Name, r.Script, r.Cancel, r.Delay, r.Schedule, en, r.CounterThreshold, r.ID)
 	if err != nil {
 		return 0, err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return 0, sql.ErrNoRows
 	}
-	return f.ID, nil
+	return r.ID, nil
 }
 
 // SetFlowScheduleEnabled turns a flow's trigger (schedule or join) on or off.
