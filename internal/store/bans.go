@@ -315,3 +315,56 @@ func longerBan(a, b battleye.Ban) bool {
 	bm, _ := strconv.Atoi(b.Minutes)
 	return am > bm
 }
+
+// PermanentBan is a permanent ban with everything ReCON knows about it: what
+// Export saves and Import reads (bans.json).
+type PermanentBan struct {
+	GUID    string `json:"guid"`
+	Name    string `json:"name"`
+	IP      string `json:"ip,omitempty"`
+	Reason  string `json:"reason"`
+	SteamID string `json:"steamId,omitempty"`
+}
+
+// PermanentBans returns every permanent ban, in BattlEye's list order (bans
+// not in BattlEye's list yet go last).
+func (db *Database) PermanentBans() ([]PermanentBan, error) {
+	rows, err := db.Query(`SELECT lower(guid), player_name, ip, reason, COALESCE(steam_id, '') FROM bans
+		ORDER BY be_index < 0, be_index, player_name COLLATE NOCASE`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []PermanentBan{}
+	for rows.Next() {
+		var b PermanentBan
+		if err := rows.Scan(&b.GUID, &b.Name, &b.IP, &b.Reason, &b.SteamID); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// AddPermanentBan records an imported permanent ban. A GUID that is already
+// banned permanently is left as it is and added is false; one with a timed
+// ban becomes permanent. The SteamID is kept when given, else copied from
+// players when known.
+func (db *Database) AddPermanentBan(b PermanentBan) (added bool, err error) {
+	g := strings.ToLower(b.GUID)
+	res, err := db.Exec(`
+		INSERT INTO bans (guid, player_name, ip, reason, perm, steam_id)
+		VALUES (?, ?, ?, ?, 1, COALESCE(NULLIF(?, ''), (SELECT NULLIF(steam_id, '') FROM players WHERE lower(guid) = ?)))
+		ON CONFLICT(guid) DO NOTHING`,
+		g, b.Name, b.IP, b.Reason, b.SteamID, g)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, nil
+	}
+	db.timed.Lock()
+	delete(db.timed.m, g)
+	db.timed.Unlock()
+	return true, nil
+}

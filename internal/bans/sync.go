@@ -43,11 +43,20 @@ func SyncWithServer() error {
 	for _, b := range readd {
 		cmd := strings.TrimSpace(fmt.Sprintf("addBan %s 0 %s", b.GUID, battleye.CleanReason(b.Reason)))
 		_, acked, err := rcon.Run(cmd, 1500*time.Millisecond, false, "bans")
+		what := "re-adding permanent ban"
+		if importedPending[b.GUID] {
+			what = "adding imported ban"
+		}
 		if err != nil || !acked {
-			log.Printf("bans: re-adding permanent ban %s failed (acked=%v err=%v)", b.GUID, acked, err)
+			log.Printf("bans: %s %s failed (acked=%v err=%v)", what, b.GUID, acked, err)
 			continue
 		}
-		log.Printf("bans: re-added permanent ban %s (missing from BattlEye's list)", b.GUID)
+		if importedPending[b.GUID] {
+			log.Printf("bans: added imported ban %s to BattlEye's list", b.GUID)
+			delete(importedPending, b.GUID)
+		} else {
+			log.Printf("bans: re-added permanent ban %s (missing from BattlEye's list)", b.GUID)
+		}
 		added++
 	}
 	if added > 0 {

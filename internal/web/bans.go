@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -141,4 +142,50 @@ func handlePlayerUnban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "be_removed": removed > 0, "db_removed": true, "removed": removed, "saved": saved})
+}
+
+// handleBansExport serves GET /api/bans/export: the permanent bans as a
+// downloadable bans.json, every one or, with ?guids=a,b (the Export dialog's
+// ticked bans), only those.
+func handleBansExport(w http.ResponseWriter, r *http.Request) {
+	var want map[string]bool // nil: every permanent ban
+	if q := strings.TrimSpace(r.URL.Query().Get("guids")); q != "" {
+		want = map[string]bool{}
+		for _, g := range strings.Split(q, ",") {
+			g = strings.ToLower(strings.TrimSpace(g))
+			if !battleye.GUIDPattern.MatchString(g) {
+				fail(w, http.StatusBadRequest, "guids: a comma-separated list of BattlEye GUIDs")
+				return
+			}
+			want[g] = true
+		}
+	}
+	f, err := bans.Export(want)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="bans.json"`)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	enc.Encode(f)
+}
+
+// handleBansImport serves POST /api/bans/import with a bans.json body (the
+// Import dialog sends only the ticked bans): each one not already banned
+// permanently becomes a permanent ban here (bans.Import).
+func handleBansImport(w http.ResponseWriter, r *http.Request) {
+	var f bans.File
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&f); err != nil {
+		fail(w, http.StatusBadRequest, "not a valid bans file: "+err.Error())
+		return
+	}
+	if len(f.Bans) == 0 {
+		fail(w, http.StatusBadRequest, "no bans in file")
+		return
+	}
+	res := bans.Import(f)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "added": res.Added, "skipped": res.Skipped, "onServer": res.OnServer, "kicked": res.Kicked})
 }

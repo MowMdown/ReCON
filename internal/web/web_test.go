@@ -262,3 +262,36 @@ func TestFlowExportPicks(t *testing.T) {
 		t.Fatalf("bad ids: %d", code)
 	}
 }
+
+// TestBanTransferRoutes checks the ban export and import routes: the
+// export file holds only permanent bans (or the picked ones), and import
+// rejects a file with no bans.
+func TestBanTransferRoutes(t *testing.T) {
+	db := testDB(t)
+	resetWeb(t)
+	rcon.SetTarget("127.0.0.1:1", "")
+	if err := db.RecordPlayerBan(test.GUID1, "Cheater", "1.1.1.1", "aimbot", true, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordPlayerBan(test.GUID2, "Spammer", "2.2.2.2", "spam", false, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	call := func(method, path, body string) (int, string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rec.Code, rec.Body.String()
+	}
+	if code, body := call(http.MethodGet, "/api/bans/export", ""); code != 200 || !strings.Contains(body, test.GUID1) || strings.Contains(body, test.GUID2) {
+		t.Fatalf("export = %d %s, want only the permanent ban", code, body)
+	}
+	if code, body := call(http.MethodGet, "/api/bans/export?guids="+test.GUID2, ""); code != 200 || strings.Contains(body, test.GUID1) {
+		t.Fatalf("export of a timed-ban GUID = %d %s", code, body)
+	}
+	if code, _ := call(http.MethodGet, "/api/bans/export?guids=nope", ""); code != http.StatusBadRequest {
+		t.Fatalf("bad guids: %d", code)
+	}
+	if code, _ := call(http.MethodPost, "/api/bans/import", `{"bans": []}`); code != http.StatusBadRequest {
+		t.Fatalf("empty import: %d", code)
+	}
+}

@@ -179,6 +179,8 @@ The list follows the server's ban list: ReCON reads it when it logs in to RCON (
 
 **Ban Player** (top right) bans anyone who has ever played on the server, online or not. Pick them by name (online players are marked, and the start of the GUID tells apart players with the same name), enter a reason (the player sees it), and leave the duration at **0 for permanent** or enter minutes. An online player is kicked straight away.
 
+**Export** and **Import** move **permanent** bans between servers as a `bans.json` file; timed bans stay with the server that placed them. Both list the bans as *Name - GUID* with a checkbox each (and **Select all**). Export starts with every permanent ban ticked and saves the ticked ones. Import reads a file and ticks every ban in it except ones it can't add, which are greyed out with the reason (*already banned*, *not a valid GUID*); the ticked ones become permanent bans here, go on the server's ban list (when the server isn't answering, as soon as ReCON next connects), and anyone online among them is kicked. A ban with no name or reason in the file is added as *Unknown* / *Imported ban*.
+
 ![Server Bans](docs/screenshots/bans.png)
 
 ### Flows: `/flows`
@@ -492,6 +494,8 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 | GET  | `/api/bans` | | The GUID bans |
 | POST | `/api/bans/<guid>/ban` | `{"reason": "...", "minutes": 0}` (optional) | Ban any player ReCON has seen, online or not. Online players are kicked too |
 | POST | `/api/bans/<guid>/unban` | | Remove every ban for that GUID |
+| GET  | `/api/bans/export` | optional `?guids=a,b` | Download the permanent bans as `bans.json`: every one, or only those GUIDs |
+| POST | `/api/bans/import` | a `bans.json` file: `{"bans": [{"guid", "name", "reason", "ip", "steamId"}]}` | Add those bans as permanent bans. Returns `added`, `skipped` (with reasons), `onServer` and `kicked` |
 
 ### Console
 

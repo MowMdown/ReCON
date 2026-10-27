@@ -78,6 +78,8 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/bans", handleBansJSON)                  // list GUID bans (from the DB, kept in step with BattlEye)
 	mux.HandleFunc("POST /api/bans/{guid}/ban", handleBanGUID)       // ban a known player, online or not
 	mux.HandleFunc("POST /api/bans/{guid}/unban", handlePlayerUnban) // remove every entry for a GUID
+	mux.HandleFunc("GET /api/bans/export", handleBansExport)         // download the permanent bans as bans.json; optional ?guids=a,b
+	mux.HandleFunc("POST /api/bans/import", handleBansImport)        // add permanent bans from a bans.json body
 
 	// Flows.
 	mux.HandleFunc("GET /flows", servePageHandler(flowsPage))

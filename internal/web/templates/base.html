@@ -32,6 +32,19 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .st.retrying { color: #fdd663; }
 .st.unavailable { color: #f28b82; }
 .statusbar .retry { color: #777; font-size: 12px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+/* Pick dialogs (Import and Export on the Flows and Server Bans pages): a list with a checkbox each */
+.box.importbox { width: min(560px, 95vw); max-height: 88vh; display: flex; flex-direction: column; box-sizing: border-box; }
+.importbox h2 { margin: 0 0 6px; }
+.importbox .intro { margin: 0 0 12px; font-size: 13px; color: #aaa; }
+.importbox input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; flex: none; }
+.importbox label.pick { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #333; cursor: pointer; }
+.importbox label.pick:hover { background: #2a2a2a; }
+.importbox label.all { border-bottom: 1px solid #555; font-weight: 600; }
+.importlist { overflow-y: auto; min-height: 0; flex: 1; }
+.importbox .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
+.importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
+.importbox .buttons { margin-top: 12px; flex: none; }
 </style>{{end}}
 
 {{define "statusbar"}}<div class="statusbar">
