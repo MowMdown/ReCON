@@ -13,10 +13,12 @@
 	--mono: ui-monospace, Consolas, monospace;
 }
 [hidden] { display: none !important; }
-/* Commands stays at the top right; on a very narrow window only the flow
-   buttons on the left fold onto a second line. */
-.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
-.toolbar .flowbtns { display: flex; flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+/* One row: the flow buttons on the left, Commands at the right. It never
+   folds: once Commands would come closer than the gap to the flow buttons,
+   the row scrolls sideways instead (as the flow list does). */
+.toolbarwrap { position: relative; margin: 0 0 16px; }
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; overflow-x: auto; }
+.toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: none; }
 .quick { display: flex; align-items: center; gap: 6px; margin-left: auto; position: relative; flex: none; }
 .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -40,7 +42,7 @@
 #flowsTable { min-width: 1300px; }
 /* A command's result ("#lock sent"), just above the Commands button. Placed
    outside the row's flow, so it doesn't push the buttons around. */
-#quickMsg { position: absolute; right: 0; bottom: 100%; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
+#quickMsg { position: absolute; right: 0; bottom: 100%; z-index: 1; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
 .run { margin-top: 24px; }
 #confirmText { white-space: pre-line; }
 .sub { color: #aaa; font-size: 12px; }
@@ -216,12 +218,14 @@ button:disabled { opacity: 0.4; cursor: default; }
 	<h1>Flows</h1>
 </div>
 <!-- One row: the flow buttons on the left, the server quick buttons on the right -->
+<div class="toolbarwrap">
+<span id="quickMsg"></span>
 <div class="toolbar">
 	<div class="flowbtns"><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><button onclick="openCmds()">Chat commands</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></div>
 	<div class="quick">
-		<span id="quickMsg"></span>
 		<button type="button" class="icon-btn" onclick="openServerCmds()" title="#lock, #unlock, #shutdown, kickall"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg> Commands</button>
 	</div>
+</div>
 </div>
 <div class="tablewrap">
 <table id="flowsTable">
