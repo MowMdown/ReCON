@@ -128,7 +128,12 @@ button:disabled { opacity: 0.4; cursor: default; }
 .step.joint { padding: 4px 8px; background: #1c1922; border-style: dashed; border-color: #3d3350; }
 .step.joint .num { visibility: hidden; }
 .step.hl { border-color: var(--c-logic); }
-.grip { cursor: grab; color: var(--faint); padding: 2px 4px; user-select: none; font-size: 15px; line-height: 1; }
+/* The drag handle: 3 x 3 dots drawn in CSS, so they look the same in every
+   font (the ⋮⋮ character spread out in some). Joint rows keep an empty one
+   so their columns line up. */
+.grip { display: inline-flex; width: 15px; height: 15px; padding: 2px 4px; color: var(--faint); user-select: none; }
+.grip.handle { cursor: grab; }
+.grip.handle::before { content: ""; width: 15px; height: 15px; background: radial-gradient(circle, currentColor 1.4px, transparent 1.7px) 0 0 / 5px 5px; }
 .num { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
 .body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
@@ -360,7 +365,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 			<ul>
 				<li>Press <b>New flow</b>, give it a name (up to 48 characters) and pick a trigger.</li>
 				<li>Press <b>+ Add step</b> (bottom left) to add steps. Fill in each row; anything missing is shown in red under the row. <b>Values</b> lists the placeholders you can type into a step.</li>
-				<li>Move a step with its arrows, or drag it by the <b>⋮⋮</b> handle. Moving an If moves everything inside it.</li>
+				<li>Move a step with its arrows, or drag it by the dotted handle on its left. Moving an If moves everything inside it.</li>
 				<li>Save. Schedule, On join and Player message flows start <b>disabled</b>: press <b>Enable</b> when you are ready.</li>
 			</ul>
 			<h3>Times</h3>
@@ -401,7 +406,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 				</tbody>
 			</table>
 			<h3>When stopped</h3>
-			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its <b>⋮⋮</b> into When stopped, and back.</p>
+			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its dotted handle into When stopped, and back.</p>
 		</div>
 
 		<div class="helppane" data-pane="conditions">
@@ -1278,7 +1283,7 @@ function renderSteps(key) {
 			const blockName = s.type === 'if' ? 'If' : 'For each';
 			const what = isBlock(s) ? blockName + ' block on step ' + n : 'step ' + n;
 			row = el('div', { class: 'step', 'data-r': ri, 'data-if': isBlock(s) ? ifId(s) : null, style },
-				el('span', { class: 'grip', title: isBlock(s) ? 'Drag to move the whole ' + blockName + ' block' : 'Drag to move', 'aria-hidden': 'true', text: '⋮⋮' }),
+				el('span', { class: 'grip handle', title: isBlock(s) ? 'Drag to move the whole ' + blockName + ' block' : 'Drag to move', 'aria-hidden': 'true' }),
 				el('span', { class: 'num', text: String(n) }),
 				el('div', { class: 'body' }, sentence, sends, err),
 				el('div', { class: 'tools' },
