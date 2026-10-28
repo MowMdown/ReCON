@@ -1,7 +1,7 @@
 (function(){
-var KEY='rc-theme',T=[['default','Default'],['terminal','Terminal'],['nocturne','Tokyo Night']],cur='nocturne',root=document.documentElement;
+var KEY='rc-theme',T=[['default','Default'],['terminal','Terminal'],['nocturne','Tokyo Night']],cur='default',root=document.documentElement;
 try{cur=localStorage.getItem(KEY)||cur}catch(e){}
-if(!T.some(function(t){return t[0]===cur}))cur='nocturne';
+if(!T.some(function(t){return t[0]===cur}))cur='default';
 function add(tag,attrs){var e=document.createElement(tag);for(var k in attrs)e[k]=attrs[k];document.head.append(e);return e}
 add('link',{rel:'stylesheet',href:'assets/recon-theme-nocturne.css'});
 add('link',{rel:'stylesheet',href:'assets/recon-theme-terminal.css'});
