@@ -58,6 +58,7 @@ td.act button:last-child { margin-right: 0; }
 td.act-left button { margin-right: 0; }
 .ban-on { color: #f28b82; font-weight: 600; }
 .ban-off { color: #888; }
+#onlineMsg { margin: 4px 0 0; font-size: 14px; }
 
 /* The Kick/Ban dialog can open on top of the Details dialog. */
 #modal { z-index: 20; }
@@ -210,6 +211,7 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 	<tbody id="players"></tbody>
 </table>
 </div>
+<p id="onlineMsg" class="ban-off" hidden>The game server isn't answering, so online players can't be shown. Everyone ReCON has seen is listed under Offline Players.</p>
 
 <div class="offline-section">
 	<h2>Offline Players</h2>
@@ -396,11 +398,11 @@ async function refresh() {
 		let r = await api('/api/players');
 		let d = await r.json();
 		if (!d.ok) { setStatusCount(''); return; } // the status bar shows why
-		// While the game server isn't answering, the online table says so and
-		// the offline list (from the database) still shows.
+		// While the game server isn't answering, the online table is empty with
+		// a note under it, and the offline list (from the database) still shows.
 		setStatusCount(d.connected ? d.count + ' player(s) online' : '');
-		document.getElementById('players').innerHTML = !d.connected ?
-			'<tr><td colspan="7" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
+		document.getElementById('onlineMsg').hidden = d.connected;
+		document.getElementById('players').innerHTML = !d.connected ? '' :
 			d.players.map(function(p) {
 			let n = esc(p.name);
 			let g = esc(p.guid);

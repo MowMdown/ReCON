@@ -96,6 +96,7 @@ td.act button:last-child { margin-right: 0; }
 td.act-left button { margin-right: 0; }
 .ban-on { color: #f28b82; font-weight: 600; }
 .ban-off { color: #888; }
+#onlineMsg { margin: 4px 0 0; font-size: 14px; }
 
  
 #modal { z-index: 20; }
@@ -316,6 +317,7 @@ var setStatusCount;
 	<tbody id="players"></tbody>
 </table>
 </div>
+<p id="onlineMsg" class="ban-off" hidden>The game server isn't answering, so online players can't be shown. Everyone ReCON has seen is listed under Offline Players.</p>
 
 <div class="offline-section">
 	<h2>Offline Players</h2>
@@ -504,8 +506,8 @@ async function refresh() {
 		
 		
 		setStatusCount(d.connected ? d.count + ' player(s) online' : '');
-		document.getElementById('players').innerHTML = !d.connected ?
-			'<tr><td colspan="7" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
+		document.getElementById('onlineMsg').hidden = d.connected;
+		document.getElementById('players').innerHTML = !d.connected ? '' :
 			d.players.map(function(p) {
 			let n = esc(p.name);
 			let g = esc(p.guid);
