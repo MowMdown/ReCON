@@ -21,6 +21,17 @@ th[draggable="true"] { cursor: grab; user-select: none; }
 th.dragging { opacity: 0.4; }
 th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
 th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+/* Tables keep their column widths and scroll sideways on narrow screens. In
+   a .pin table the Actions column (.act) stays in view on the right while the
+   other columns scroll underneath it, only while it's the last column
+   (columns can be dragged into another order). Its buttons sit against the
+   right edge, so in a font that draws them narrower the spare width falls
+   on their left. There is room below for scrollbars drawn over the content
+   (macOS), and no bounce at the ends, which would drag Actions along. */
+.tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; }
+.tablewrap.pin { padding-bottom: 12px; overscroll-behavior-x: none; }
+.tablewrap.pin tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
+td.act button:last-child { margin-right: 0; }
 .statusbar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; font-size: 13px; color: #aaa; }
 /* Every page's title row: the title, plus any buttons on the right. Same
    spacing on every page: no title margins, 16px below the row. */
@@ -46,6 +57,14 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 .importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
 .importbox .buttons { margin-top: 12px; flex: none; }
 </style>{{end}}
+
+{{define "theme"}}{{/* The theme (assets/): Nocturne tokens applied to the pages, Phosphor icons on
+   the buttons, and a theme picker (Default, Terminal, Tokyo Night) in the nav.
+   It comes after each page's own <style> so it overrides it. */}}<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/recon-theme.css">
+<script src="assets/recon-theme-switch.js"></script>
+<script src="assets/recon-icons.js" defer></script>{{end}}
 
 {{define "statusbar"}}<div class="statusbar">
 	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>

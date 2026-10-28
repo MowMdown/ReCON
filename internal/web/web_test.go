@@ -307,8 +307,9 @@ var previewCrons = []string{"*/20 * * * *", "0 */6 * * *", "0 0,6,12,18 * * *", 
 //	RECON_PREVIEW=1 go test -run TestPreview ./internal/web
 //
 // It writes players.html, bans.html and flows.html (each loading data.js and
-// preview.js, the stand-in for the API) and data.js (the chat commands, the
-// example flows and the cron descriptions, from the Go code).
+// preview.js, the stand-in for the API), data.js (the chat commands, the
+// example flows and the cron descriptions, from the Go code) and assets/ (the
+// theme, as the app serves it).
 func TestPreview(t *testing.T) {
 	if os.Getenv("RECON_PREVIEW") != "1" {
 		t.Skip("set RECON_PREVIEW=1 to rebuild docs/preview")
@@ -322,6 +323,25 @@ func TestPreview(t *testing.T) {
 		}
 		html := strings.Replace(b.String(), "<head>\n", "<head>\n<script src=\"data.js\"></script>\n<script src=\"preview.js\"></script>\n", 1)
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(html), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "assets")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	assets, err := assetFiles.ReadDir("assets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range assets {
+		data, err := assetFiles.ReadFile("assets/" + a.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "assets", a.Name()), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

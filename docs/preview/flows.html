@@ -28,6 +28,11 @@ th[draggable="true"] { cursor: grab; user-select: none; }
 th.dragging { opacity: 0.4; }
 th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
 th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+ 
+.tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; }
+.tablewrap.pin { padding-bottom: 12px; overscroll-behavior-x: none; }
+.tablewrap.pin tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
+td.act button:last-child { margin-right: 0; }
 .statusbar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; font-size: 13px; color: #aaa; }
  
 .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -259,6 +264,12 @@ button:disabled { opacity: 0.4; cursor: default; }
 .cmdfoot .spacer { flex: 1; }
 .cmdfoot button { margin: 0; }
 </style>
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/recon-theme.css">
+<script src="assets/recon-theme-switch.js"></script>
+<script src="assets/recon-icons.js" defer></script>
+<script src="assets/recon-tweaks.js" defer></script>
 </head>
 <body>
 <nav><a href="/players">Players</a><a href="/bans">Server Bans</a><a class="active" href="/flows">Flows</a></nav>
@@ -352,7 +363,7 @@ var setStatusCount;
 		<col style="width: 130px">
 		<col style="width: 190px">
 		<col style="width: 190px">
-		<col style="width: 260px">
+		<col style="width: 330px">
 	</colgroup>
 	<thead>
 		<tr><th>Flow</th><th>Trigger</th><th>Status</th><th>Last run</th><th>Next run</th><th>Actions</th></tr>
@@ -428,10 +439,10 @@ var setStatusCount;
 	<div class="box srvbox" role="dialog" aria-labelledby="srvTitle">
 		<h2 id="srvTitle">Commands</h2>
 		<div class="srvlist">
-			<button type="button" onclick="serverCmd('lock')"><span class="ic lock"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span><span><b>Lock server</b><small>#lock: no new players can join</small></span></button>
-			<button type="button" onclick="serverCmd('unlock')"><span class="ic unlock"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg></span><span><b>Unlock server</b><small>#unlock: players can join again</small></span></button>
-			<button type="button" onclick="serverCmd('kickall')"><span class="ic kick"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="18" y1="8" x2="23" y2="13"></line><line x1="23" y1="8" x2="18" y2="13"></line></svg></span><span><b>Kick everyone</b><small>kickall: kicks every connected player</small></span></button>
-			<button type="button" onclick="serverCmd('shutdown')"><span class="ic power"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg></span><span><b>Shut down server</b><small>#shutdown: stops the server now</small></span></button>
+			<button type="button" onclick="serverCmd('lock')"><span class="ic lock"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span><span><b>Lock server</b><small>Sends server #lock</small></span></button>
+			<button type="button" onclick="serverCmd('unlock')"><span class="ic unlock"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg></span><span><b>Unlock server</b><small>Sends server #unlock</small></span></button>
+			<button type="button" onclick="serverCmd('kickall')"><span class="ic kick"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="18" y1="8" x2="23" y2="13"></line><line x1="23" y1="8" x2="18" y2="13"></line></svg></span><span><b>Kick everyone</b><small>Kicks all connected players</small></span></button>
+			<button type="button" onclick="serverCmd('shutdown')"><span class="ic power"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg></span><span><b>Shut down server</b><small>Sends server #shutdown</small></span></button>
 		</div>
 		<div class="buttons"><button type="button" onclick="closeServerCmds()">Close</button></div>
 	</div>
@@ -1217,27 +1228,27 @@ function parseDur(v) {
 const BAN_LEN = [['0', 'permanently'], ['60', 'for 1 hour'], ['1440', 'for 1 day'], ['10080', 'for 7 days'], ['43200', 'for 30 days']];
 
 const STEPS = {
-	message:    { label: 'Message', cat: 'msg', group: 'Messages', desc: 'say -1 or say <number>',
+	message:    { label: 'Message', cat: 'msg', group: 'Messages', desc: 'Send message',
 		parts: ['to', { k: 'to', kind: 'select', opts: 'to' }, { k: 'text', kind: 'text', ph: 'Message text' }], def: { to: 'all', text: '' } },
-	playerList: { label: 'Player list', cat: 'msg', group: 'Messages', desc: 'Names of everyone online',
+	playerList: { label: 'Player List', cat: 'msg', group: 'Messages', desc: 'Lists all online players',
 		parts: ['send the online players to', { k: 'to', kind: 'select', opts: 'to' }], def: { to: 'player' } },
-	wait:       { label: 'Wait', cat: 'time', group: 'Timing', desc: 'Pause before the next step',
+	wait:       { label: 'Wait', cat: 'time', group: 'Timing', desc: 'Add pause between steps',
 		parts: [{ k: 'time', kind: 'dur', ph: '1m20s' }], def: { time: '10s' } },
-	lock:       { label: 'Lock server', cat: 'server', group: 'Server', desc: '#lock: no new joins', parts: [], def: {} },
-	unlock:     { label: 'Unlock server', cat: 'server', group: 'Server', desc: '#unlock', parts: [], def: {} },
-	shutdown:   { label: 'Shut down server', cat: 'server', group: 'Server', desc: '#shutdown', parts: [], def: {} },
-	kick:       { label: 'Kick', cat: 'player', group: 'Players', desc: 'Kick the player',
+	lock:       { label: 'Lock server', cat: 'server', group: 'Server', desc: 'Locks Server', parts: [], def: {} },
+	unlock:     { label: 'Unlock server', cat: 'server', group: 'Server', desc: 'Unlocks Server', parts: [], def: {} },
+	shutdown:   { label: 'Shutdown', cat: 'server', group: 'Server', desc: 'Restarts Server', parts: [], def: {} },
+	kick:       { label: 'Kick', cat: 'player', group: 'Players', desc: 'Kicks targeted player',
 		parts: [{ k: 'who', kind: 'select', opts: 'who' }, 'reason', { k: 'reason', kind: 'text', ph: 'Reason shown to them' }], def: { who: 'player', reason: '' } },
-	ban:        { label: 'Ban', cat: 'player', group: 'Players', desc: 'Ban by GUID, then kick',
+	ban:        { label: 'Ban', cat: 'player', group: 'Players', desc: 'Bans targeted player',
 		parts: [{ k: 'who', kind: 'select', opts: 'who' }, { k: 'len', kind: 'select', opts: BAN_LEN }, 'reason', { k: 'reason', kind: 'text', ph: 'Reason' }], def: { who: 'player', len: '0', reason: '' } },
-	kickAll:    { label: 'Kick everyone', cat: 'player', group: 'Players', desc: 'kickall',
+	kickAll:    { label: 'Kick All', cat: 'player', group: 'Players', desc: 'Kicks all players',
 		parts: ['reason', { k: 'reason', kind: 'text', ph: 'Server restart' }], def: { reason: 'Server restart' } },
-	if:         { label: 'If', cat: 'logic', group: 'Logic', desc: 'Run steps only when… (comes with its End if)',
+	if:         { label: 'If', cat: 'logic', group: 'Logic', desc: 'Runs step(s) "if" condition is met',
 		parts: [{ k: 'subject', kind: 'select', opts: 'subjects' }, { k: 'op', kind: 'select', opts: 'ops' }, { k: 'value', kind: 'val' }], def: { subject: 'player_ping', op: 'ge', value: '500' } },
-	forEach:    { label: 'For each', cat: 'logic', group: 'Logic', desc: 'Run steps once per player online, or per new chat message (comes with its End for each)',
+	forEach:    { label: 'For Each', cat: 'logic', group: 'Logic', desc: 'Runs steps "for each" player/message condition',
 		parts: [{ k: 'of', kind: 'select', opts: [['player', 'player'], ['message', 'message']] }], def: { of: 'player' } },
-	stop:       { label: 'Stop flow', cat: 'logic', group: 'Logic', desc: 'End the run here', parts: ['end the run here'], def: {} },
-	command:    { label: 'RCON command', cat: 'adv', group: 'Advanced', desc: 'Any command, placeholders allowed',
+	stop:       { label: 'Stop Flow', cat: 'logic', group: 'Logic', desc: 'End the run here', parts: ['end the run here'], def: {} },
+	command:    { label: 'RCON Command', cat: 'adv', group: 'Advanced', desc: 'Sends RCON Commands',
 		parts: [{ k: 'cmd', kind: 'text', ph: 'kick {player_id} Example', mono: true }], def: { cmd: '' } }
 };
 const GROUPS = ['Messages', 'Timing', 'Server', 'Players', 'Logic', 'Advanced'];
@@ -1793,7 +1804,7 @@ function setupDrag(box) {
 
 
 function whyDisabled(type) {
-	if ((type === 'kick' || type === 'ban') && !ctx(ed).player && !hasLoop(ed.steps)) return 'needs a For each, or On join or Player message';
+	if ((type === 'kick' || type === 'ban') && !ctx(ed).player && !hasLoop(ed.steps)) return 'Requires: For Each, On Join, Player Message flow type';
 	return '';
 }
 

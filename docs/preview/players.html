@@ -28,6 +28,11 @@ th[draggable="true"] { cursor: grab; user-select: none; }
 th.dragging { opacity: 0.4; }
 th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
 th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+ 
+.tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; }
+.tablewrap.pin { padding-bottom: 12px; overscroll-behavior-x: none; }
+.tablewrap.pin tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
+td.act button:last-child { margin-right: 0; }
 .statusbar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; font-size: 13px; color: #aaa; }
  
 .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -81,19 +86,11 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 td { white-space: nowrap; }
 
  
-.tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; }  
- 
-#onlineTable { min-width: 1230px; }
- 
-.tablewrap.online { padding-bottom: 12px; overscroll-behavior-x: none; }
-#onlineTable tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
-#offlineTable { min-width: 1300px; }
+#onlineTable { min-width: 1940px; }
+#offlineTable { min-width: 1920px; }
  
 td.ban-cell { text-overflow: ellipsis; }
 td.lastmsg { text-overflow: ellipsis; color: #ccc; }
- 
-td.act button:last-child { margin-right: 0; }
-td.act-left button { margin-right: 0; }
 .ban-on { color: #f28b82; font-weight: 600; }
 .ban-off { color: #888; }
 #onlineMsg { margin: 4px 0 0; font-size: 14px; }
@@ -211,6 +208,11 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 .steamfriends { margin-top: 4px; font-size: 14px; line-height: 1.8; }
 .steamfriends b { font-weight: 600; margin-right: 6px; }
 </style>
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/recon-theme.css">
+<script src="assets/recon-theme-switch.js"></script>
+<script src="assets/recon-icons.js" defer></script>
 </head>
 <body>
 <nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
@@ -300,16 +302,16 @@ var setStatusCount;
 		</button>
 	</div>
 </div>
-<div class="tablewrap online">
+<div class="tablewrap pin">
 <table id="onlineTable">
 	<colgroup>
 		<col style="width: 60px">
 		<col style="width: 190px">
 		<col style="width: 150px">
 		<col style="width: 300px">
-		<col style="width: 56px">
+		<col style="width: 160px">
 		<col>
-		<col style="width: 274px">
+		<col style="width: 300px">
 	</colgroup>
 	<thead>
 		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th class="act">Actions</th></tr>
@@ -321,19 +323,19 @@ var setStatusCount;
 
 <div class="offline-section">
 	<h2>Offline Players</h2>
-	<div class="tablewrap">
+	<div class="tablewrap pin">
 	<table id="offlineTable">
 		<colgroup>
-			<col style="width: 190px">
+			<col style="width: 250px">
 			<col style="width: 150px">
 			<col style="width: 300px">
 			<col style="width: 160px">
 			<col style="width: 200px">
-			<col style="width: 90px">
 			<col>
+			<col style="width: 120px">
 		</colgroup>
 		<thead>
-			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Actions</th><th>Ban Status | Reason</th></tr>
+			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Ban Status | Reason</th><th class="act">Actions</th></tr>
 		</thead>
 		<tbody id="offlinePlayers"></tbody>
 	</table>
@@ -543,8 +545,8 @@ async function refresh() {
 				'<td class="mono">' + esc(p.guid) + '</td>' +
 				'<td>' + playtime + '</td>' +
 				'<td>' + fmtLastSeen(p.lastSeenUnix) + '</td>' +
-				'<td class="act-left"><button data-guid="' + esc(p.guid) + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button></td>' +
 				'<td class="ban-cell ' + (ban ? 'ban-on' : 'ban-off') + '" title="' + esc(banWithReason(ban)) + '">' + esc(banWithReason(ban)) + '</td>' +
+				'<td class="act"><button data-guid="' + esc(p.guid) + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button></td>' +
 			'</tr>';
 		}).join('');
 	} catch(e) {

@@ -1,0 +1,47 @@
+/* Terminal theme — activates with <html data-theme="terminal">. Overrides Nocturne tokens; load after recon-theme.css */
+html[data-theme="terminal"] {
+  --font-body: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
+  --font-heading: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
+  --color-bg: oklch(0.15 0.006 150);
+  --color-surface: oklch(0.2 0.01 150);
+  --color-text: oklch(0.92 0.03 150);
+  --color-divider: oklch(0.34 0.025 150);
+  --color-accent: oklch(0.91 0.1 150);
+  --color-accent-400: oklch(0.96 0.07 150);
+  --color-neutral-200: oklch(0.88 0.025 150);
+  --color-neutral-300: oklch(0.8 0.03 150);
+  --color-neutral-400: oklch(0.7 0.03 150);
+  --color-neutral-500: oklch(0.6 0.028 150);
+  --color-neutral-600: oklch(0.48 0.025 150);
+  --color-neutral-700: oklch(0.38 0.02 150);
+  --color-neutral-800: oklch(0.28 0.015 150);
+  --color-neutral-900: oklch(0.21 0.01 150);
+  --radius-sm: 1px; --radius-md: 2px; --radius-lg: 3px;
+  --shadow-sm: 0 0 0 1px var(--color-divider); --shadow-md: 0 0 0 1px var(--color-divider); --shadow-lg: 0 0 0 1px var(--color-accent), 0 0 24px oklch(0.91 0.1 150 / .14);
+  --rc-ok: oklch(0.88 0.12 150); --rc-warn: oklch(0.85 0.11 85); --rc-err: oklch(0.72 0.15 25);
+  --c-player: oklch(0.82 0.11 85); --c-server: oklch(0.72 0.15 25); --c-time: oklch(0.85 0.11 85); --c-logic: oklch(0.82 0.08 200);
+}
+html[data-theme="terminal"] body { font-size: 13px; letter-spacing: 0; text-shadow: 0 0 4px oklch(0.91 0.1 150 / .08); }
+html[data-theme="terminal"] body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100; background: repeating-linear-gradient(to bottom, transparent 0 3px, oklch(0 0 0 / .05) 3px 4px); }
+html[data-theme="terminal"] h1, html[data-theme="terminal"] h2 { font-weight: 500; text-transform: uppercase; letter-spacing: .06em; }
+html[data-theme="terminal"] h1::before, html[data-theme="terminal"] h2::before { content: "> "; color: var(--color-accent); }
+html[data-theme="terminal"] nav { background: none; border-bottom: 1px dashed var(--color-divider); }
+html[data-theme="terminal"] nav a.active { text-shadow: 0 0 8px var(--color-accent); }
+html[data-theme="terminal"] nav a.active::before { content: "["; } html[data-theme="terminal"] nav a.active::after { content: "]"; }
+html[data-theme="terminal"] button { border-color: var(--color-neutral-600); }
+html[data-theme="terminal"] button:hover { border-color: var(--color-accent); color: var(--color-accent); background: oklch(0.91 0.1 150 / .08); }
+html[data-theme="terminal"] button.rc-primary { box-shadow: 0 0 10px oklch(0.91 0.1 150 / .16) inset; }
+html[data-theme="terminal"] button.rc-danger:hover { color: var(--rc-err); }
+html[data-theme="terminal"] th { letter-spacing: .12em; color: var(--color-accent); border-bottom: 1px solid var(--color-divider) !important; }
+html[data-theme="terminal"] th, html[data-theme="terminal"] td { border-bottom: 1px dashed oklch(0.91 0.1 150 / .12) !important; }
+html[data-theme="terminal"] tbody tr:hover { background: oklch(0.91 0.1 150 / .06); }
+html[data-theme="terminal"] .box, html[data-theme="terminal"] .dlg, html[data-theme="terminal"] .menu { border: 1px solid var(--color-accent) !important; }
+html[data-theme="terminal"] .modal { background: oklch(0.1 0.01 150 / .8) !important; backdrop-filter: none; }
+html[data-theme="terminal"] input, html[data-theme="terminal"] textarea, html[data-theme="terminal"] select { caret-color: var(--color-accent); border-color: var(--color-neutral-700) !important; }
+html[data-theme="terminal"] input:focus-visible, html[data-theme="terminal"] textarea:focus-visible, html[data-theme="terminal"] select:focus-visible { box-shadow: 0 0 0 1px var(--color-accent), 0 0 10px oklch(0.91 0.1 150 / .22); }
+html[data-theme="terminal"] .badge { border: 1px solid currentColor; background: none !important; }
+html[data-theme="terminal"] .statusbar b.st::before { border-radius: 0; }
+html[data-theme="terminal"] ::selection { background: var(--color-accent); color: var(--color-bg); }
+html[data-theme="terminal"] .dtabs button.active, html[data-theme="terminal"] .tabs button.active { background: oklch(0.91 0.1 150 / .08) !important; }
+html[data-theme="terminal"] td.act button, html[data-theme="terminal"] td.actions button { font-size: 12px; }
+html[data-theme="terminal"] #onlineTable td.act button { padding: 0 8px; }

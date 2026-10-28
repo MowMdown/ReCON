@@ -1,0 +1,24 @@
+/* Nocturne structure on the Tokyo Night palette */
+html[data-theme="nocturne"] {
+  --color-bg: #1a1b26;
+  --color-surface: #24283b;
+  --color-text: #c0caf5;
+  --color-divider: #3b4261;
+  --color-accent: #7aa2f7;
+  --color-accent-400: #89b4fa;
+  --color-neutral-200: #c0caf5;
+  --color-neutral-300: #a9b1d6;
+  --color-neutral-400: #787c99;
+  --color-neutral-500: #565f89;
+  --color-neutral-600: #414868;
+  --color-neutral-700: #3b4261;
+  --color-neutral-800: #292e42;
+  --color-neutral-900: #1f2335;
+  --rc-ok: #9ece6a; --rc-warn: #e0af68; --rc-err: #f7768e;
+  --c-msg: #7aa2f7; --c-time: #e0af68; --c-server: #f7768e; --c-player: #ff9e64; --c-logic: #bb9af7; --c-adv: #565f89;
+}
+html[data-theme="nocturne"] ::selection { background: #283457; color: #c0caf5; }
+html[data-theme="nocturne"] .statusbar b.st::before { box-shadow: 0 0 8px currentColor; }
+html[data-theme="nocturne"] .srvlist button { background: #24283b !important; border-color: #3b4261 !important; }
+html[data-theme="nocturne"] .srvlist button:hover, html[data-theme="nocturne"] .srvlist button:focus-visible { background: #2f3454 !important; border-color: #7aa2f7 !important; }
+html[data-theme="nocturne"] .srvlist .ic { background: #1f2335 !important; }
