@@ -86,8 +86,8 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 td { white-space: nowrap; }
 
  
-#onlineTable { min-width: 1230px; }
-#offlineTable { min-width: 1284px; }
+#onlineTable { min-width: 1940px; }
+#offlineTable { min-width: 1920px; }
  
 td.ban-cell { text-overflow: ellipsis; }
 td.lastmsg { text-overflow: ellipsis; color: #ccc; }
@@ -208,6 +208,11 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 .steamfriends { margin-top: 4px; font-size: 14px; line-height: 1.8; }
 .steamfriends b { font-weight: 600; margin-right: 6px; }
 </style>
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/recon-theme.css">
+<script src="assets/recon-theme-switch.js"></script>
+<script src="assets/recon-icons.js" defer></script>
 </head>
 <body>
 <nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
@@ -304,9 +309,9 @@ var setStatusCount;
 		<col style="width: 190px">
 		<col style="width: 150px">
 		<col style="width: 300px">
-		<col style="width: 56px">
+		<col style="width: 160px">
 		<col>
-		<col style="width: 274px">
+		<col style="width: 300px">
 	</colgroup>
 	<thead>
 		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th class="act">Actions</th></tr>
@@ -321,13 +326,13 @@ var setStatusCount;
 	<div class="tablewrap pin">
 	<table id="offlineTable">
 		<colgroup>
-			<col style="width: 190px">
+			<col style="width: 250px">
 			<col style="width: 150px">
 			<col style="width: 300px">
 			<col style="width: 160px">
 			<col style="width: 200px">
 			<col>
-			<col style="width: 84px">
+			<col style="width: 120px">
 		</colgroup>
 		<thead>
 			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Ban Status | Reason</th><th class="act">Actions</th></tr>

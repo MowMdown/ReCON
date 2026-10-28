@@ -60,7 +60,7 @@ td.act button:last-child { margin-right: 0; }
 <style>
 td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
  
-#bansTable { min-width: 962px; }
+#bansTable { min-width: 1540px; }
 select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; background: #111; color: #eee; border: 1px solid #555; }
  
 .toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
@@ -72,6 +72,11 @@ select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; 
 .importbox label.pick.locked { opacity: .5; cursor: not-allowed; }
 .importbox label.pick.locked:hover { background: none; }
 </style>
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/recon-theme.css">
+<script src="assets/recon-theme-switch.js"></script>
+<script src="assets/recon-icons.js" defer></script>
 </head>
 <body>
 <nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
@@ -163,7 +168,7 @@ var setStatusCount;
 		<col style="width: 300px">
 		<col style="width: 130px">
 		<col>
-		<col style="width: 82px">
+		<col style="width: 120px">
 	</colgroup>
 	<thead>
 		<tr><th>#</th><th>Player</th><th>GUID</th><th>Time left</th><th>Reason</th><th class="act">Actions</th></tr>

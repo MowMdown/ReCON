@@ -35,11 +35,9 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 td { white-space: nowrap; }
 
 /* Both tables scroll sideways with Actions pinned on the right (.pin, see
-   base.html). The minimums keep at least 200px for the column that takes the
-   spare width: online 1230px = the fixed columns 1030 + Last Message;
-   offline 1284px = the fixed columns 1084 + Ban Status | Reason. */
-#onlineTable { min-width: 1230px; }
-#offlineTable { min-width: 1284px; }
+   base.html) once the window is narrower than their minimum width. */
+#onlineTable { min-width: 1940px; }
+#offlineTable { min-width: 1920px; }
 /* Ban Status | Reason fills the rest of the row; a long reason ends in "..."
    and shows in full on hover. */
 td.ban-cell { text-overflow: ellipsis; }
@@ -161,6 +159,7 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 .steamfriends { margin-top: 4px; font-size: 14px; line-height: 1.8; }
 .steamfriends b { font-weight: 600; margin-right: 6px; }
 </style>
+{{template "theme" .}}
 </head>
 <body>
 <nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
@@ -189,9 +188,9 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 		<col style="width: 190px">
 		<col style="width: 150px">
 		<col style="width: 300px">
-		<col style="width: 56px">
+		<col style="width: 160px">
 		<col>
-		<col style="width: 274px">
+		<col style="width: 300px">
 	</colgroup>
 	<thead>
 		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th class="act">Actions</th></tr>
@@ -206,13 +205,13 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 	<div class="tablewrap pin">
 	<table id="offlineTable">
 		<colgroup>
-			<col style="width: 190px">
+			<col style="width: 250px">
 			<col style="width: 150px">
 			<col style="width: 300px">
 			<col style="width: 160px">
 			<col style="width: 200px">
 			<col>
-			<col style="width: 84px">
+			<col style="width: 120px">
 		</colgroup>
 		<thead>
 			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Ban Status | Reason</th><th class="act">Actions</th></tr>

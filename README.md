@@ -132,6 +132,8 @@ Every page shows two status lines at the top:
 
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
 
+The picker at the top right sets the look: **Tokyo Night** (the default), **Terminal** (green monospace) or **Default** (the plain original). Your browser remembers the choice. The themes take their icons ([Phosphor](https://phosphoricons.com)) and fonts (Inter, JetBrains Mono) from unpkg.com and Google Fonts, so the browser needs internet access for them; without it the pages still work, with fallback fonts and no icons. The Flows page also has **Tweaks**, to adjust the height and padding of the flow list's buttons.
+
 ### Players: `/players`
 
 The top table lists the players online now (refreshed every 5 seconds). ReCON follows who connects and disconnects from the server's own messages, and also asks the server for the player list every 5 seconds, for up-to-date pings and anyone whose disconnect it missed. Mods and Admins have a badge after their name. **Last Message** shows the newest thing each player has written in chat since they connected (hover for the channel, time and full text). It's empty until they chat; messages sent to them aren't shown there, only in their chat history.
@@ -559,7 +561,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
 | `internal/store/` | The SQLite database: every SQL statement |
-| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages, embedded into the binary at build time |
+| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |
 | `examples/flows.json` | Example flows to import |
 | `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |
@@ -574,7 +576,7 @@ The preview pages are generated from the real templates, so they never drift fro
 RECON_PREVIEW=1 go test -run TestPreview ./internal/web
 ```
 
-This rewrites `docs/preview/players.html`, `bans.html`, `flows.html` and `data.js`. The sample players, bans and flows, and the stand-in for the API, are in `docs/preview/preview.js`. A plain `go test` skips this test.
+This rewrites `docs/preview/players.html`, `bans.html`, `flows.html`, `data.js` and `assets/`. The sample players, bans and flows, and the stand-in for the API, are in `docs/preview/preview.js`. A plain `go test` skips this test.
 
 ## License
 
