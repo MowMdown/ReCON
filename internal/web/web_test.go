@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -329,21 +330,21 @@ func TestPreview(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(dir, "assets")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	assets, err := assetFiles.ReadDir("assets")
+	err := fs.WalkDir(assetFiles, "assets", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dir, path), 0o755)
+		}
+		data, err := assetFiles.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, path), data, 0o644)
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	for _, a := range assets {
-		data, err := assetFiles.ReadFile("assets/" + a.Name())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "assets", a.Name()), data, 0o644); err != nil {
-			t.Fatal(err)
-		}
 	}
 
 	testDB(t)
