@@ -448,7 +448,7 @@
 
 		['GET', /^\/api\/console$/, function (m, o, url) {
 			var after = parseInt(new URL(url, location.href).searchParams.get('after'), 10) || 0;
-			return json({ ok: true, events: events.filter(function (e) { return e.seq > after; }), last: seq });
+			return json({ ok: true, events: events.filter(function (e) { return e.seq > after; }), last: seq, connected: true });
 		}],
 		['POST', /^\/api\/console$/, function (m, o) {
 			var cmd = String(body(o).command || '').trim();

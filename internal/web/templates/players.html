@@ -9,10 +9,11 @@
 td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
 .offline-section { margin-top: 42px; }
-.top .icon-btn, .statusrow .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
-.statusrow { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
-.statusrow .statusbar { margin-bottom: 0; }
-.statusrow button { margin-right: 0; }
+.toolbar .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+/* Under the title, like the Bans page: Settings on the left, Console on the right. */
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
+.toolbar .right { margin-left: auto; flex: none; }
+.toolbar button { margin-right: 0; }
 /* Settings and Console, stacked on the right: the same width, so they line up. */
 .hdrbtn { width: 104px; justify-content: center; box-sizing: border-box; }
 
@@ -35,7 +36,16 @@ td { white-space: nowrap; }
 
 /* Tables keep their column widths and scroll sideways on narrow screens. */
 .tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; } /* dark scrollbar */
-#onlineTable { min-width: 1040px; }
+/* 1230px = the fixed columns 1030 + at least 200 for Last Message. */
+#onlineTable { min-width: 1230px; }
+/* Online players: Actions stays in view on the right while the other columns
+   scroll underneath it (only while it's the last column; columns can be
+   dragged into another order). Its buttons sit against the right edge, so in
+   a font that draws them narrower the spare width falls before Message. The
+   table has room below it for scrollbars drawn over the content (macOS), and
+   no bounce at the ends, which would drag Actions along. */
+.tablewrap.online { padding-bottom: 12px; overscroll-behavior-x: none; }
+#onlineTable tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
 #offlineTable { min-width: 1300px; }
 /* Ban Status | Reason fills the rest of the row; a long reason ends in "..."
    and shows in full on hover. */
@@ -48,6 +58,7 @@ td.act button:last-child { margin-right: 0; }
 td.act-left button { margin-right: 0; }
 .ban-on { color: #f28b82; font-weight: 600; }
 .ban-off { color: #888; }
+#onlineMsg { margin: 4px 0 0; font-size: 14px; }
 
 /* The Kick/Ban dialog can open on top of the Details dialog. */
 #modal { z-index: 20; }
@@ -165,22 +176,25 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 </head>
 <body>
 <nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
-<!-- The status lines, with RCON Settings on the same row (right, above Console) -->
-<div class="statusrow">
 {{template "statusbar" .}}
-	<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
-		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-		Settings
-	</button>
-</div>
 <div class="top">
 	<h1>DayZ Players</h1>
-	<button type="button" class="icon-btn hdrbtn" onclick="openConsole()">
-		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-		Console
-	</button>
 </div>
-<div class="tablewrap">
+<div class="toolbar">
+	<div>
+		<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+			Settings
+		</button>
+	</div>
+	<div class="right">
+		<button type="button" class="icon-btn hdrbtn" onclick="openConsole()">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+			Console
+		</button>
+	</div>
+</div>
+<div class="tablewrap online">
 <table id="onlineTable">
 	<colgroup>
 		<col style="width: 60px">
@@ -189,14 +203,15 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 		<col style="width: 300px">
 		<col style="width: 56px">
 		<col>
-		<col style="width: 290px">
+		<col style="width: 274px">
 	</colgroup>
 	<thead>
-		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th>Actions</th></tr>
+		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th class="act">Actions</th></tr>
 	</thead>
 	<tbody id="players"></tbody>
 </table>
 </div>
+<p id="onlineMsg" class="ban-off" hidden>The game server isn't answering, so online players can't be shown. Everyone ReCON has seen is listed under Offline Players.</p>
 
 <div class="offline-section">
 	<h2>Offline Players</h2>
@@ -383,11 +398,11 @@ async function refresh() {
 		let r = await api('/api/players');
 		let d = await r.json();
 		if (!d.ok) { setStatusCount(''); return; } // the status bar shows why
-		// While the game server isn't answering, the online table says so and
-		// the offline list (from the database) still shows.
+		// While the game server isn't answering, the online table is empty with
+		// a note under it, and the offline list (from the database) still shows.
 		setStatusCount(d.connected ? d.count + ' player(s) online' : '');
-		document.getElementById('players').innerHTML = !d.connected ?
-			'<tr><td colspan="7" class="ban-off">The game server isn\'t answering, so online players can\'t be shown. Everyone ReCON has seen is listed under Offline Players.</td></tr>' :
+		document.getElementById('onlineMsg').hidden = d.connected;
+		document.getElementById('players').innerHTML = !d.connected ? '' :
 			d.players.map(function(p) {
 			let n = esc(p.name);
 			let g = esc(p.guid);
@@ -619,8 +634,9 @@ async function pollConsole() {
 			consoleLast = d.last;
 			if (stick) log.scrollTop = log.scrollHeight;
 		}
-		live.classList.remove('off');
-		live.lastElementChild.textContent = 'Live';
+		// Green Live while the game server answers, red Offline while it doesn't.
+		live.classList.toggle('off', d.connected === false);
+		live.lastElementChild.textContent = d.connected === false ? 'Offline' : 'Live';
 	} catch (e) {
 		live.classList.add('off');
 		live.lastElementChild.textContent = 'Reconnecting...';
