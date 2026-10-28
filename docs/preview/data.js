@@ -1,4 +1,4 @@
-// Written by preview_test.go (RECON_PREVIEW=1 go test -run TestPreview .). Don't edit.
+// Written by TestPreview (RECON_PREVIEW=1 go test -run TestPreview ./internal/web). Don't edit.
 window.RECON_PREVIEW_DATA = {
 	"commands": [
 		{
@@ -7,6 +7,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"announce": false,
 			"length": false,
+			"warn": false,
 			"help": "!help lists the commands. !help !\u003ccommand\u003e explains one.",
 			"fields": [
 				{
@@ -25,6 +26,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "10s",
 			"announce": false,
 			"length": false,
+			"warn": false,
 			"help": "!shout \u003cmessage\u003e sends your message to everyone on the server.",
 			"fields": [
 				{
@@ -44,6 +46,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"announce": false,
 			"length": false,
+			"warn": false,
 			"help": "!whisper \u003cplayer number\u003e \u003cmessage\u003e sends a private message to that player.",
 			"fields": [
 				{
@@ -63,6 +66,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "10s",
 			"announce": false,
 			"length": false,
+			"warn": false,
 			"help": "!players lists everyone online with their player number, for !whisper.",
 			"fields": [
 				{
@@ -82,6 +86,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "10m",
 			"announce": false,
 			"length": true,
+			"warn": false,
 			"help": "!vote \u003cquestion\u003e starts a server-wide vote on the topic you choose. Everyone answers with !vote y or !vote n.",
 			"fields": [
 				{
@@ -112,6 +117,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"announce": false,
 			"length": false,
+			"warn": false,
 			"help": "!code sends your player code to the admins and mods online, so they can find you.",
 			"fields": [
 				{
@@ -132,7 +138,8 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"announce": true,
 			"length": false,
-			"help": "!kick \u003ccode\u003e \u003creason\u003e kicks the player with that code. Ask them to type !code first.",
+			"warn": false,
+			"help": "!kick \u003ccode or player number\u003e \u003creason\u003e kicks that player. Their code comes from !code, their number from !players.",
 			"fields": [
 				{
 					"key": "staff",
@@ -161,7 +168,8 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"announce": true,
 			"length": false,
-			"help": "!ban \u003ccode\u003e \u003creason\u003e permanently bans the player with that code (the last 6 characters of their GUID). Ask them to type !code first.",
+			"warn": false,
+			"help": "!ban \u003ccode or player number\u003e \u003creason\u003e permanently bans that player. Their code (the last 6 characters of their GUID) comes from !code, their number from !players.",
 			"fields": [
 				{
 					"key": "staff",
@@ -180,6 +188,74 @@ window.RECON_PREVIEW_DATA = {
 					"ph": [
 						"target_name",
 						"reason"
+					]
+				}
+			]
+		},
+		{
+			"cmd": "warning",
+			"staff": true,
+			"cool": "0",
+			"announce": true,
+			"length": false,
+			"warn": true,
+			"help": "!warning \u003ccode or player number\u003e \u003creason\u003e warns that player. Enough warnings in one visit and they are kicked or banned.",
+			"fields": [
+				{
+					"key": "player",
+					"label": "Warning (to the player)",
+					"def": "Warning {warnings}/{warn_count} from {player_name}: {reason}",
+					"ph": [
+						"target_name",
+						"player_name",
+						"reason",
+						"warnings",
+						"warn_count"
+					]
+				},
+				{
+					"key": "staff",
+					"label": "Notice (to each mod and admin online, always)",
+					"def": "{target_name} was warned by {player_name} ({warnings}/{warn_count}): {reason}",
+					"ph": [
+						"target_name",
+						"player_name",
+						"reason",
+						"warnings",
+						"warn_count"
+					]
+				},
+				{
+					"key": "announce",
+					"label": "Announcement (to everyone, when Announce is on)",
+					"def": "{target_name} has been warned: {reason}",
+					"ph": [
+						"target_name",
+						"reason",
+						"warnings",
+						"warn_count"
+					]
+				},
+				{
+					"key": "limit_staff",
+					"label": "At the threshold: notice (to each mod and admin online, always)",
+					"def": "{target_name} reached {warn_count} warnings and has been {action}: {reason}",
+					"ph": [
+						"target_name",
+						"player_name",
+						"reason",
+						"warn_count",
+						"action"
+					]
+				},
+				{
+					"key": "limit_announce",
+					"label": "At the threshold: announcement (to everyone, when Announce is on)",
+					"def": "{target_name} has been {action}",
+					"ph": [
+						"target_name",
+						"reason",
+						"action"
 					]
 				}
 			]
@@ -251,6 +327,20 @@ window.RECON_PREVIEW_DATA = {
 				"start": "({player_name}) {topic}? Yes or No? Type !vote y or !vote n"
 			}
 		},
+		"warning": {
+			"on": true,
+			"cool": "0",
+			"announce": true,
+			"threshold": 2,
+			"action": "ban",
+			"msgs": {
+				"announce": "{target_name} has been warned: {reason}",
+				"limit_announce": "{target_name} has been {action}",
+				"limit_staff": "{target_name} reached {warn_count} warnings and has been {action}: {reason}",
+				"player": "Warning {warnings}/{warn_count} from {player_name}: {reason}",
+				"staff": "{target_name} was warned by {player_name} ({warnings}/{warn_count}): {reason}"
+			}
+		},
 		"whisper": {
 			"on": true,
 			"cool": "0",
@@ -286,7 +376,7 @@ window.RECON_PREVIEW_DATA = {
 							{
 								"type": "message",
 								"to": "player",
-								"text": "Welcome {player_name} to our DayZ server!"
+								"text": "Welcome {player_name} to this DayZ server!"
 							}
 						]
 					}
@@ -302,10 +392,6 @@ window.RECON_PREVIEW_DATA = {
 						"type": "message",
 						"to": "all",
 						"text": "Admins are active, please play respectfully."
-					},
-					{
-						"type": "wait",
-						"time": "2s"
 					},
 					{
 						"type": "message",
@@ -379,7 +465,7 @@ window.RECON_PREVIEW_DATA = {
 					{
 						"type": "message",
 						"to": "all",
-						"text": "Server is going to restart in \u003c 2 minutes, you will be kicked."
+						"text": "Server is going to restart, you will be kicked in \u003c 2 minutes."
 					},
 					{
 						"type": "wait",
@@ -405,6 +491,29 @@ window.RECON_PREVIEW_DATA = {
 					},
 					{
 						"type": "unlock"
+					}
+				]
+			},
+			{
+				"name": "!restart",
+				"trigger": "chat",
+				"steps": [
+					{
+						"type": "if",
+						"branches": [
+							{
+								"subject": "message",
+								"op": "exact",
+								"value": "!restarts",
+								"steps": [
+									{
+										"type": "message",
+										"to": "player",
+										"text": "Server restarts at 00:00, 06:00, 12:00, 18:00 EST"
+									}
+								]
+							}
+						]
 					}
 				]
 			}

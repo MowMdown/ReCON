@@ -25,7 +25,7 @@
             {
               "type": "message",
               "to": "player",
-              "text": "Welcome {player_name} to our DayZ server!"
+              "text": "Welcome {player_name} to this DayZ server!"
             }
           ]
         }
@@ -41,10 +41,6 @@
           "type": "message",
           "to": "all",
           "text": "Admins are active, please play respectfully."
-        },
-        {
-          "type": "wait",
-          "time": "2s"
         },
         {
           "type": "message",
@@ -118,7 +114,7 @@
         {
           "type": "message",
           "to": "all",
-          "text": "Server is going to restart in < 2 minutes, you will be kicked."
+          "text": "Server is going to restart, you will be kicked in < 2 minutes."
         },
         {
           "type": "wait",
@@ -144,6 +140,29 @@
         },
         {
           "type": "unlock"
+        }
+      ]
+    },
+    {
+      "name": "!restart",
+      "trigger": "chat",
+      "steps": [
+        {
+          "type": "if",
+          "branches": [
+            {
+              "subject": "message",
+              "op": "exact",
+              "value": "!restarts",
+              "steps": [
+                {
+                  "type": "message",
+                  "to": "player",
+                  "text": "Server restarts at 00:00, 06:00, 12:00, 18:00 EST"
+                }
+              ]
+            }
+          ]
         }
       ]
     }

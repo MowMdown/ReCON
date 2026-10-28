@@ -13,10 +13,18 @@
 	--mono: ui-monospace, Consolas, monospace;
 }
 [hidden] { display: none !important; }
-/* Commands stays at the top right; on a very narrow window only the flow
-   buttons on the left fold onto a second line. */
-.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
-.toolbar .flowbtns { display: flex; flex-wrap: wrap; row-gap: 6px; min-width: 0; }
+/* One row: the flow buttons on the left, Commands fixed at the right. It
+   never folds: once the flow buttons would come closer than the gap to
+   Commands, they scroll sideways in their own space, with the scrollbar under
+   New flow to Chat commands only, and Commands stays put. */
+.toolbarwrap { position: relative; margin: 0 0 16px; }
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.toolbar .flowbtns { display: flex; flex-wrap: nowrap; flex: 0 1 auto; min-width: 0; overflow-x: auto; }
+.toolbar .flowbtns button { flex: none; }
+/* Room under the buttons for scrollbars drawn over the content (macOS), so
+   the scrollbar shows below the buttons rather than over them. */
+.toolbar .flowbtns { padding-bottom: 12px; }
+.toolbar .flowbtns, .tablewrap { scrollbar-color: #555 #1b1b1b; } /* dark scrollbars */
 .quick { display: flex; align-items: center; gap: 6px; margin-left: auto; position: relative; flex: none; }
 .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -35,14 +43,29 @@
 .srvlist .ic.power { color: var(--err); background: #2e1c1c; }
 .srvbox .buttons { margin-top: 14px; }
 .quick button { margin-right: 0; }
+/* The flow list: the Flow column takes the spare width and shrinks with the
+   window down to 340px; narrower than that, Flow to Next run scroll
+   sideways under Actions, which stays put. 1280px = Flow 340 + the fixed
+   columns 940. */
+.tablewrap { overflow-x: auto; overscroll-behavior-x: none; } /* no bounce: it would drag Actions along */
+/* Room under the table for scrollbars drawn over the content (macOS), so
+   the last row's Actions doesn't cover the scrollbar. */
+.tablewrap { padding-bottom: 12px; }
+#flowsTable { min-width: 1280px; }
+/* Actions stays in view: the other columns scroll underneath it. */
+#flowsTable th:last-child, #flowsTable td:last-child { position: sticky; right: 0; background: #111; }
 /* A command's result ("#lock sent"), just above the Commands button. Placed
    outside the row's flow, so it doesn't push the buttons around. */
-#quickMsg { position: absolute; right: 0; bottom: 100%; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
+#quickMsg { position: absolute; right: 0; bottom: 100%; z-index: 1; margin-bottom: 4px; color: #aaa; font-size: 12px; white-space: nowrap; }
 .run { margin-top: 24px; }
 #confirmText { white-space: pre-line; }
 .sub { color: #aaa; font-size: 12px; }
 pre.log { background: #1a1a1a; padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; max-height: 320px; overflow-y: auto; }
 td.actions { white-space: nowrap; }
+/* Buttons sit against the right edge, so in a font that draws them narrower
+   the spare width falls before Disable, not after Delete. */
+#flowsTable th:last-child, td.actions { text-align: right; }
+td.actions button:last-child { margin-right: 0; }
 /* Flow names are capped at 48 characters, which fits the 340px column in
    normal mixed case; anything wider (all caps) ends in an ellipsis. */
 #flows td:first-child { white-space: nowrap; text-overflow: ellipsis; }
@@ -54,19 +77,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 .modal { z-index: 10; padding: 12px; box-sizing: border-box; }
 #confirmModal { z-index: 30; }
 
-/* Import dialog: pick which flows in the file to import */
-.box.importbox { width: min(560px, 95vw); max-height: 88vh; display: flex; flex-direction: column; box-sizing: border-box; }
-.importbox h2 { margin: 0 0 6px; }
-.importbox .intro { margin: 0 0 12px; font-size: 13px; color: #aaa; }
-.importbox input[type=checkbox] { width: auto; margin: 0; accent-color: #8ab4f8; flex: none; }
-.importbox label.pick { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid #333; cursor: pointer; }
-.importbox label.pick:hover { background: #2a2a2a; }
-.importbox label.all { border-bottom: 1px solid #555; font-weight: 600; }
-.importlist { overflow-y: auto; min-height: 0; flex: 1; }
-.importbox .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
-.importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
-.importbox .buttons { margin-top: 12px; flex: none; }
 
 /* Help dialog */
 .box.helpbox { width: min(860px, 95vw); height: min(680px, 88vh); display: flex; flex-direction: column; box-sizing: border-box; }
@@ -226,27 +236,31 @@ button:disabled { opacity: 0.4; cursor: default; }
 	<h1>Flows</h1>
 </div>
 <!-- One row: the flow buttons on the left, the server quick buttons on the right -->
+<div class="toolbarwrap">
+<span id="quickMsg"></span>
 <div class="toolbar">
 	<div class="flowbtns"><button onclick="newFlow()">New flow</button><button onclick="openHelp()">Help</button><button onclick="exportFlows()">Export</button><button onclick="document.getElementById('importFile').click()">Import</button><button onclick="openCmds()">Chat commands</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importFlows(this)"></div>
 	<div class="quick">
-		<span id="quickMsg"></span>
 		<button type="button" class="icon-btn" onclick="openServerCmds()" title="#lock, #unlock, #shutdown, kickall"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg> Commands</button>
 	</div>
 </div>
-<table>
+</div>
+<div class="tablewrap">
+<table id="flowsTable">
 	<colgroup>
-		<col style="width: 340px">
-		<col style="width: 170px">
 		<col>
+		<col style="width: 170px">
+		<col style="width: 130px">
 		<col style="width: 190px">
 		<col style="width: 190px">
-		<col style="width: 290px">
+		<col style="width: 260px">
 	</colgroup>
 	<thead>
 		<tr><th>Flow</th><th>Trigger</th><th>Status</th><th>Last run</th><th>Next run</th><th>Actions</th></tr>
 	</thead>
 	<tbody id="flows"></tbody>
 </table>
+</div>
 <div id="runs"></div>
 
 <!-- Flow editor -->
@@ -334,6 +348,19 @@ button:disabled { opacity: 0.4; cursor: default; }
 		<div class="buttons">
 			<button type="button" onclick="closeImport()">Cancel</button>
 			<button type="button" id="importGo" onclick="importChosen()">Import</button>
+		</div>
+	</div>
+</div>
+<!-- Export: every flow, each with a checkbox -->
+<div id="exportModal" class="modal" onclick="if (event.target === this) closeExport()">
+	<div class="box importbox" role="dialog" aria-labelledby="exportTitle">
+		<h2 id="exportTitle">Export flows</h2>
+		<p class="intro">Picked flows are saved to flows.json, in list order. Whether a flow is enabled is not saved.</p>
+		<label class="pick all"><input type="checkbox" id="exportAll" onchange="exportSelectAll(this.checked)"><span class="nm">Select all</span></label>
+		<div class="importlist" id="exportList"></div>
+		<div class="buttons">
+			<button type="button" onclick="closeExport()">Cancel</button>
+			<button type="button" id="exportGo" onclick="exportChosen()">Export</button>
 		</div>
 	</div>
 </div>
@@ -725,7 +752,64 @@ async function sendQuick(cmd) {
 	refresh();
 }
 
-function exportFlows() { location.href = '/api/flows/export'; }
+// Export: a list of every flow, each with a checkbox (all ticked to start
+// with), so only the ones picked go into flows.json.
+function exportFlows() {
+	if (!flows.length) { showMessage('Export', 'There are no flows to export yet.'); return; }
+	let list = document.getElementById('exportList');
+	list.textContent = '';
+	flows.forEach(function(f) {
+		let row = document.createElement('label');
+		row.className = 'pick';
+		let box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = true;
+		box.setAttribute('data-id', f.id);
+		box.onchange = updateExportPicks;
+		let nm = document.createElement('span');
+		nm.className = 'nm';
+		nm.textContent = f.name;
+		nm.title = f.name;
+		let info = document.createElement('span');
+		info.className = 'info';
+		info.textContent = importSummary(f);
+		row.append(box, nm, info);
+		list.append(row);
+	});
+	updateExportPicks();
+	document.getElementById('exportModal').style.display = 'flex';
+}
+
+function exportBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#exportList input[type=checkbox]')); }
+
+function exportSelectAll(on) {
+	exportBoxes().forEach(function(b) { b.checked = on; });
+	updateExportPicks();
+}
+
+// updateExportPicks keeps Select all and the Export button in step with the
+// checkboxes, as updateImportPicks does for Import.
+function updateExportPicks() {
+	let boxes = exportBoxes(), n = boxes.filter(function(b) { return b.checked; }).length;
+	let all = document.getElementById('exportAll');
+	all.checked = n > 0 && n === boxes.length;
+	all.indeterminate = n > 0 && n < boxes.length;
+	let go = document.getElementById('exportGo');
+	go.disabled = n === 0;
+	go.textContent = n ? 'Export ' + n + ' flow' + (n === 1 ? '' : 's') : 'Export';
+}
+
+function closeExport() { document.getElementById('exportModal').style.display = 'none'; }
+
+function exportChosen() {
+	let ids = exportBoxes().filter(function(b) { return b.checked; }).map(function(b) { return b.getAttribute('data-id'); });
+	if (!ids.length) return;
+	closeExport();
+	downloadFile('/api/flows/export?ids=' + ids.join(','));
+}
+
+// downloadFile saves what url serves (an export) as a file.
+function downloadFile(url) { location.href = url; }
 
 // Import: reading the file opens a list of its flows, each with a checkbox,
 // so only the ones picked are imported (all are picked to start with).
@@ -858,6 +942,7 @@ document.addEventListener('keydown', function(e) {
 	if (document.getElementById('confirmModal').style.display === 'flex') closeConfirm();
 	else if (document.getElementById('valuesModal').style.display === 'flex') closeValues();
 	else if (document.getElementById('importModal').style.display === 'flex') closeImport();
+	else if (document.getElementById('exportModal').style.display === 'flex') closeExport();
 	else if (document.getElementById('srvModal').style.display === 'flex') closeServerCmds();
 	else if (document.getElementById('helpModal').style.display === 'flex') closeHelp();
 	else if (cmdsOpen()) document.getElementById('cmdCancel').click();

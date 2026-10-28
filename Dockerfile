@@ -5,15 +5,16 @@ WORKDIR /src
 
 COPY go.mod ./
 COPY go.sum* ./
-COPY *.go ./
 
-# HTML pages, embedded into the binary by //go:embed in web.go
-COPY templates ./templates
+# The program (cmd/recon) and its packages (internal/), including the HTML
+# pages embedded by //go:embed in internal/web
+COPY cmd ./cmd
+COPY internal ./internal
 
 RUN go mod tidy
 
 RUN CGO_ENABLED=0 GOOS=linux \
-    go build -ldflags="-s -w" -o /recon .
+    go build -ldflags="-s -w" -o /recon ./cmd/recon
 
 
 # --- Stage 2: Runtime ---
