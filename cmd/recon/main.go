@@ -16,14 +16,11 @@ import (
 	"log"
 	"os"
 
-	"github.com/MowMdown/ReCON/internal/bans"
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
-	"github.com/MowMdown/ReCON/internal/players"
-	"github.com/MowMdown/ReCON/internal/rcon"
+	"github.com/MowMdown/ReCON/internal/game"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
-	"github.com/MowMdown/ReCON/internal/watch"
 	"github.com/MowMdown/ReCON/internal/web"
 )
 
@@ -40,7 +37,7 @@ func environmentOrDefault(key, def string) string {
 //  1. Opens the player database (DB_PATH, default /data/players.db) and
 //     hands it to every package that uses it.
 //  2. Works out where the game server's RCON is: the environment's
-//     RCON_HOST, RCON_PORT and RCON_PASSWORD (rcon.Settings).
+//     RCON_HOST, RCON_PORT and RCON_PASSWORD (game.Settings).
 //  3. If command-line args were given, runs CLI mode and returns.
 //  4. Otherwise runs as a server: clears stale sessions, prepares the flows
 //     table, starts the player tracker, the chat recorder, the flow
@@ -50,14 +47,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
-	bans.SetDatabase(db)
+	game.SetDatabase(db)
 	flows.SetDatabase(db)
-	players.SetDatabase(db)
 	steam.SetDatabase(db)
 	web.SetDatabase(db)
 
-	address, password := rcon.Settings{}.Effective()
-	rcon.SetTarget(address, password)
+	address, password := game.Settings{}.Effective()
+	game.SetTarget(address, password)
 
 	// CLI mode: `prog kickall ...`, `prog -i`, `prog players`, etc.
 	if len(os.Args) > 1 {
@@ -85,11 +81,11 @@ func main() {
 
 	// The player tracker hands players who finished joining to the join
 	// flows, and every new session to the SteamID lookup.
-	players.SetHooks(flows.StartJoinFlows, steam.PlayerJoined)
-	players.StartChatRecorder() // chat history from the console log
-	players.StartTracker()      // sessions from the console log
-	bans.RefreshExpiry()        // when the next timed ban runs out
-	watch.Start()               // keeps RCON logged in, polls players and bans
+	game.SetPlayerHooks(flows.StartJoinFlows, steam.PlayerJoined)
+	game.StartChatRecorder() // chat history from the console log
+	game.StartTracker()      // sessions from the console log
+	game.RefreshBanExpiry()  // when the next timed ban runs out
+	game.StartWatch()        // keeps RCON logged in, polls players and bans
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	log.Printf("listening on %s -> RCON %s", addr, address)

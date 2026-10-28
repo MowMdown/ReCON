@@ -12,8 +12,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/MowMdown/ReCON/internal/battleye"
-	"github.com/MowMdown/ReCON/internal/players"
-	"github.com/MowMdown/ReCON/internal/rcon"
+	"github.com/MowMdown/ReCON/internal/game"
 )
 
 // chatCommandDef is one built-in chat command as the settings dialog shows
@@ -283,7 +282,7 @@ var chatSay = func(to battleye.Player, everyone bool, text string) bool {
 	if everyone {
 		cmd = "say -1 " + text
 	}
-	_, acked, err := rcon.Run(cmd, 2*time.Second, false, "chat")
+	_, acked, err := game.Run(cmd, 2*time.Second, false, "chat")
 	if err == nil && acked && !everyone {
 		recordSentMessage(to.GUID, cmd)
 	}
@@ -292,7 +291,7 @@ var chatSay = func(to battleye.Player, everyone bool, text string) bool {
 
 // chatKick kicks a player for !kick. Tests replace it.
 var chatKick = func(p battleye.Player, reason string) bool {
-	_, acked, err := rcon.Run(fmt.Sprintf("kick %d %s", p.ID, reason), 2*time.Second, false, "chat")
+	_, acked, err := game.Run(fmt.Sprintf("kick %d %s", p.ID, reason), 2*time.Second, false, "chat")
 	return err == nil && acked
 }
 
@@ -312,7 +311,7 @@ var codeRe = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
 
 // onlineNow is a copy of the latest player list.
 func onlineNow() []battleye.Player {
-	players, _ := players.Online()
+	players, _ := game.OnlinePlayers()
 	return players
 }
 
@@ -415,7 +414,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 		if err != nil || id == p.ID {
 			return
 		}
-		target, ok := players.ByID(id)
+		target, ok := game.PlayerByID(id)
 		if !ok {
 			return
 		}
@@ -443,7 +442,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 				if i > 0 {
 					time.Sleep(playersLinePause)
 				}
-				asker, ok := players.ByGUID(p.GUID) // their number now; stop if they left
+				asker, ok := game.PlayerByGUID(p.GUID) // their number now; stop if they left
 				if !ok {
 					return
 				}
@@ -558,7 +557,7 @@ func findChatTarget(arg string, offline bool) (t battleye.Player, online, ok boo
 	if err != nil || id < 0 {
 		return battleye.Player{}, false, false
 	}
-	t, online = players.ByID(id)
+	t, online = game.PlayerByID(id)
 	return t, online, online
 }
 
@@ -632,7 +631,7 @@ func runWarningCommand(p battleye.Player, role int, set chatSetting, args []stri
 	if reason == "" {
 		reason = "No reason given"
 	}
-	count, reached, ok := players.Warn(t.GUID, set.Threshold)
+	count, reached, ok := game.WarnPlayer(t.GUID, set.Threshold)
 	if !ok {
 		return
 	}
@@ -655,7 +654,7 @@ func runWarningCommand(p battleye.Player, role int, set chatSetting, args []stri
 	action := set.Action
 	go func() {
 		time.Sleep(warningActionDelay)
-		cur, online := players.ByGUID(t.GUID) // their number now
+		cur, online := game.PlayerByGUID(t.GUID) // their number now
 		done := "kicked"
 		if action == "kick" {
 			if !online {

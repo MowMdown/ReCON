@@ -1,6 +1,6 @@
 # RCON login after a server shutdown or restart
 
-How ReCON's web session (`internal/rcon`, driven by `internal/watch`) notices the game server has gone away and
+How ReCON's web session (`internal/game`: `session.go`, driven by the server watch in the same file) notices the game server has gone away and
 logs in again when it comes back. Everything here is done by the **server
 watch**, which runs one round every 5 seconds, starting when ReCON starts.
 
@@ -74,11 +74,11 @@ one.
 
 | Setting | Value | In the code |
 |---|---|---|
-| Round (`players` poll while answering) | 5s | `pollEvery` (`internal/watch`) |
-| Heartbeat (and the only login) | 30s | `heartbeatEvery` (`internal/watch`) |
-| Wait for a heartbeat's answer | 2s | `heartbeatWait` (`internal/watch`) |
-| Wait for a `players` reply | 3s | `PollWait` (`internal/players`) |
+| Round (`players` poll while answering) | 5s | `pollEvery` (`internal/game`) |
+| Heartbeat (and the only login) | 30s | `heartbeatEvery` (`internal/game`) |
+| Wait for a heartbeat's answer | 2s | `heartbeatWait` (`internal/game`) |
+| Wait for a `players` reply | 3s | `PlayersPollWait` (`internal/game`) |
 | Wait for a login reply | 3s | `ReloginReplyWait` (`internal/battleye`) |
-| Misses before **Unavailable** | 3 | `DownAfterMisses` (`internal/rcon`) |
-| No new login after an accepted one | 60s | `ReloginSettle` (`internal/rcon`) |
-| Restart grace (players keep their session) | 5 min | `restartGrace` (`internal/players`) |
+| Misses before **Unavailable** | 3 | `DownAfterMisses` (`internal/game`) |
+| No new login after an accepted one | 60s | `ReloginSettle` (`internal/game`) |
+| Restart grace (players keep their session) | 5 min | `restartGrace` (`internal/game`) |

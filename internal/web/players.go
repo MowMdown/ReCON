@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -11,18 +12,17 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/MowMdown/ReCON/internal/bans"
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
-	"github.com/MowMdown/ReCON/internal/players"
-	"github.com/MowMdown/ReCON/internal/rcon"
+	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 )
 
 // readLivePlayers reads the connected players (retrying read). ok is false when
 // RCON can't be reached; the 503 has already been written in that case.
 func readLivePlayers(w http.ResponseWriter) ([]battleye.Player, bool) {
-	out, acked, err := rcon.Run("players", 3*time.Second, true, "")
+	out, acked, err := game.Run("players", 3*time.Second, true, "")
 	if err != nil || !acked {
 		isRconUnavailable(w, "RCON unavailable")
 		return nil, false
@@ -49,8 +49,8 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// The Last Message column: the newest line each online player wrote
-	// this session, kept in memory by the player tracker (online.go).
-	last := players.LastChatPerPlayer()
+	// this session, kept in memory by the player tracker (game/players.go).
+	last := game.LastChatPerPlayer()
 	for i := range online {
 		if c, ok := last[online[i].ID]; ok && strings.EqualFold(c.GUID, online[i].GUID) {
 			online[i].LastMessage, online[i].LastMessageChannel, online[i].LastMessageUnix = c.Chat.Text, c.Chat.Channel, c.Chat.At.Unix()
@@ -62,7 +62,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		"players":        online,
 		"count":          len(online),
 		"offlinePlayers": offlinePlayers,
-		"bans":           bans.AllStatuses(),
+		"bans":           game.BanStatuses(),
 	})
 }
 
@@ -72,17 +72,17 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 // answered, it polls once itself. ok is false while the server isn't
 // answering.
 func onlinePlayersForPage() ([]battleye.Player, bool) {
-	if rcon.Status() == "unavailable" {
+	if game.Status() == "unavailable" {
 		return []battleye.Player{}, false
 	}
-	online, known := players.Online()
+	online, known := game.OnlinePlayers()
 	if known {
 		return online, true
 	}
-	if !players.PollNow() {
+	if !game.PollPlayers() {
 		return []battleye.Player{}, false
 	}
-	online, _ = players.Online()
+	online, _ = game.OnlinePlayers()
 	return online, true
 }
 
@@ -131,7 +131,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "message is required")
 			return
 		}
-		_, acked, err := rcon.Run(fmt.Sprintf("say %d %s", id, msg), 2*time.Second, false, "web")
+		_, acked, err := game.Run(fmt.Sprintf("say %d %s", id, msg), 2*time.Second, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -162,7 +162,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if action == "kick" {
-		_, acked, err := rcon.Run(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
+		_, acked, err := game.Run(fmt.Sprintf("kick %d %s", p.ID, req.Reason), 1500*time.Millisecond, false, "web")
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())
 			return
@@ -180,7 +180,7 @@ func handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 
 // banOnlinePlayer bans player p from the pages and writes the JSON response.
 func banOnlinePlayer(w http.ResponseWriter, p battleye.Player, online bool, req actionRequest) {
-	res := bans.BanGUID(p, online, req.Minutes, req.Reason, "web")
+	res := game.BanGUID(p, online, req.Minutes, req.Reason, "web")
 	writeJSON(w, res.Code, res)
 }
 
@@ -220,11 +220,11 @@ func handlePlayerDetails(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if p, on := players.ByGUID(guid); on {
+	if p, on := game.PlayerByGUID(guid); on {
 		d.Player.Online, d.Player.ID = true, p.ID
 		d.Player.Name = battleye.BareName(p.Name)
 	}
-	d.Ban = bans.StatusOf(guid)
+	d.Ban = game.BanStatusOf(guid)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "details": d})
 }
 
@@ -350,7 +350,7 @@ func handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd := fmt.Sprintf("say %d %s", p.ID, msg)
-	_, acked, err := rcon.Run(cmd, 2*time.Second, false, "web")
+	_, acked, err := game.Run(cmd, 2*time.Second, false, "web")
 	if err != nil {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
@@ -363,4 +363,96 @@ func handleChatSend(w http.ResponseWriter, r *http.Request) {
 		log.Printf("chat: store: %v", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handlePlayerSteam serves GET /api/players/{guid}/steam[?refresh=1]:
+//
+//	{ok, enabled, steamId, pending}                 always (steamId "" and pending true until it's found)
+//	{..., search: {state, percent, ...}}            while pending (steam.SearchStatus)
+//	{..., profileUrl}                               once the SteamID is known
+//	{..., profile, friendsHere: [{guid, name}]}     when STEAM_API_KEY is set
+//	{..., stale: "<error>"}                         Steam failed; profile is the last copy
+func handlePlayerSteam(w http.ResponseWriter, r *http.Request) {
+	guid, ok := playerGUID(w, r)
+	if !ok {
+		return
+	}
+	steamID, known, err := database.SteamIDByGUID(guid)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if !known {
+		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
+		return
+	}
+	resp := map[string]any{"ok": true, "enabled": steam.APIKey != "", "steamId": steamID, "pending": steamID == ""}
+	if steamID == "" {
+		resp["search"] = steam.SearchStatus(guid)
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	id, valid := steam.ParseID64(steamID)
+	if !valid {
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("the stored steam_id %q is not a SteamID64", steamID))
+		return
+	}
+	if steam.BattlEyeGUID(id) != guid {
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("the stored steam_id %s belongs to a different GUID (%s)", steamID, steam.BattlEyeGUID(id)))
+		return
+	}
+	resp["profileUrl"] = "https://steamcommunity.com/profiles/" + steamID
+	if steam.APIKey == "" {
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	p, err := steam.ProfileFor(ctx, steamID, r.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		log.Printf("steam: %s: %v", steamID, err)
+		if p == nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		resp["stale"] = err.Error()
+	}
+	resp["profile"] = p
+	here, err := database.PlayersBySteamIDs(p.FriendIDs)
+	if err != nil {
+		log.Printf("steam: friends of %s on this server: %v", steamID, err)
+		here = []store.SharedPlayer{}
+	}
+	resp["friendsHere"] = here
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleSteamSearch serves POST /api/players/{guid}/steam/search: starts
+// looking for the player's SteamID (see steam.StartSearch) and answers like
+// GET /api/players/{guid}/steam, so the page can show the progress. A player
+// who already has a SteamID gets 409.
+func handleSteamSearch(w http.ResponseWriter, r *http.Request) {
+	guid, ok := playerGUID(w, r)
+	if !ok {
+		return
+	}
+	steamID, known, err := database.SteamIDByGUID(guid)
+	switch {
+	case err != nil:
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	case !known:
+		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
+		return
+	case steamID != "":
+		fail(w, http.StatusConflict, "this player's SteamID is already known")
+		return
+	}
+	if err := steam.StartSearch(guid); err != nil {
+		log.Printf("steam: starting a search for %s: %v", guid, err)
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": steam.APIKey != "", "steamId": "",
+		"pending": true, "search": steam.SearchStatus(guid)})
 }

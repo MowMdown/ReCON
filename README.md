@@ -555,11 +555,8 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | ---- | -------- |
 | `cmd/recon/` | Startup (wiring the packages together) and the command-line tool |
 | `internal/battleye/` | The BattlEye RCON protocol: packets, login, sessions, parsing server messages and replies, kickall |
-| `internal/rcon/` | ReCON's web session (shared by the pages, flows and polls), RCON settings, the console log and the connection status |
-| `internal/watch/` | The server watch: polls, the heartbeat and logins after a shutdown or restart |
-| `internal/players/` | Who is online and their sessions, from the console log; keeps a session across a server restart for players back from the same IP within 5 minutes; chat history |
-| `internal/bans/` | Keeping the ban list in step with BattlEye's, and placing bans |
-| `internal/flows/` | Flows (steps, conditions, runner, one file per trigger) and the chat commands |
+| `internal/game/` | The live game server and what ReCON mirrors from it: the web session, RCON settings, the console log and the server watch (`session.go`); who is online and their sessions, kept across a server restart for players back from the same IP within 5 minutes, and chat history (`players.go`); the ban list kept in step with BattlEye's, placing bans, export/import (`bans.go`) |
+| `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
 | `internal/store/` | The SQLite database: every SQL statement |
 | `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages, embedded into the binary at build time |

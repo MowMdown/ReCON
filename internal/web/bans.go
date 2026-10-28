@@ -10,14 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MowMdown/ReCON/internal/bans"
 	"github.com/MowMdown/ReCON/internal/battleye"
-	"github.com/MowMdown/ReCON/internal/rcon"
+	"github.com/MowMdown/ReCON/internal/game"
 )
 
 // handleBansJSON serves GET /api/bans: every ban, the permanent ones from
 // the bans table and the timed ones from memory. The server watch keeps both in
-// step with BattlEye (bans.SyncWithServer), and ban and unban update them
+// step with BattlEye (game.SyncWithServer), and ban and unban update them
 // straight away, so the page never waits on RCON.
 // "connected" is false while the game server isn't answering.
 func handleBansJSON(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +25,7 @@ func handleBansJSON(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": rcon.Status() == "connected", "bans": list, "count": len(list)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "connected": game.Status() == "connected", "bans": list, "count": len(list)})
 }
 
 // guidParam returns the {guid} path value, lower-cased. ok is false (and a
@@ -91,19 +90,19 @@ func handleBanGUID(w http.ResponseWriter, r *http.Request) {
 // the first entry for the GUID, removeBan <index>, until the GUID is gone
 // (safety cap: 20). Then `writeBans` (best effort, reported as "saved") and
 // the DB row is deleted, which is the only way a permanent ban leaves the
-// database (bans.SyncWithServer puts back any permanent ban BattlEye loses). Partial
+// database (game.SyncWithServer puts back any permanent ban BattlEye loses). Partial
 // states are reported via be_removed/db_removed.
 func handlePlayerUnban(w http.ResponseWriter, r *http.Request) {
 	guid, ok := guidParam(w, r)
 	if !ok {
 		return
 	}
-	bans.ListLock.Lock()
-	defer bans.ListLock.Unlock()
+	game.BanListLock.Lock()
+	defer game.BanListLock.Unlock()
 
 	removed := 0
 	for ; removed < 20; removed++ {
-		bans, err := bans.ReadServerList()
+		bans, err := game.ReadBanList()
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "removed": removed, "error": err.Error()})
 			return
@@ -118,7 +117,7 @@ func handlePlayerUnban(w http.ResponseWriter, r *http.Request) {
 		if idx < 0 {
 			break // GUID no longer listed: done
 		}
-		_, acked, err := rcon.Run(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false, "web")
+		_, acked, err := game.Run(fmt.Sprintf("removeBan %d", idx), 1500*time.Millisecond, false, "web")
 		if err == nil && !acked {
 			err = errors.New("removeBan was not acknowledged")
 		}
@@ -132,10 +131,10 @@ func handlePlayerUnban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, saved, _ := rcon.Run("writeBans", 1500*time.Millisecond, false, "web") // persist bans.txt, best effort
+	_, saved, _ := game.Run("writeBans", 1500*time.Millisecond, false, "web") // persist bans.txt, best effort
 
 	err := database.DeletePlayerBan(guid)
-	bans.RefreshExpiry()
+	game.RefreshBanExpiry()
 	if err != nil {
 		log.Printf("error deleting ban from DB: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "be_removed": true, "db_removed": false, "error": "unbanned in BattlEye but database update failed"})
@@ -160,7 +159,7 @@ func handleBansExport(w http.ResponseWriter, r *http.Request) {
 			want[g] = true
 		}
 	}
-	f, err := bans.Export(want)
+	f, err := game.ExportBans(want)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -175,9 +174,9 @@ func handleBansExport(w http.ResponseWriter, r *http.Request) {
 
 // handleBansImport serves POST /api/bans/import with a bans.json body (the
 // Import dialog sends only the ticked bans): each one not already banned
-// permanently becomes a permanent ban here (bans.Import).
+// permanently becomes a permanent ban here (game.Import).
 func handleBansImport(w http.ResponseWriter, r *http.Request) {
-	var f bans.File
+	var f game.BanFile
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&f); err != nil {
 		fail(w, http.StatusBadRequest, "not a valid bans file: "+err.Error())
 		return
@@ -186,6 +185,6 @@ func handleBansImport(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "no bans in file")
 		return
 	}
-	res := bans.Import(f)
+	res := game.ImportBans(f)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "added": res.Added, "skipped": res.Skipped, "onServer": res.OnServer, "kicked": res.Kicked})
 }

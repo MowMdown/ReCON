@@ -1,13 +1,13 @@
-package players
+package game
 
 import (
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/MowMdown/ReCON/internal/battleye"
-	"github.com/MowMdown/ReCON/internal/rcon"
 	"github.com/MowMdown/ReCON/internal/store"
 )
 
@@ -44,7 +44,7 @@ type lastChat struct {
 	Text    string    // what they typed, without the "(Global) Name: " prefix
 	Channel string    // Global, Side, Direct, Vehicle, ...
 	At      time.Time // when it was sent
-	Seq     int64     // the server event's number (rcon.Events), increasing
+	Seq     int64     // the server event's number (Events), increasing
 }
 
 // tracker is every player the server has told us about. ended remembers when
@@ -84,9 +84,9 @@ var (
 	onSessionOpened func(guid, name string)
 )
 
-// SetHooks sets what the tracker calls when players finish joining
+// SetPlayerHooks sets what the tracker calls when players finish joining
 // and when it opens a session.
-func SetHooks(joined func([]battleye.Player), opened func(guid, name string)) {
+func SetPlayerHooks(joined func([]battleye.Player), opened func(guid, name string)) {
 	onPlayersJoined, onSessionOpened = joined, opened
 }
 
@@ -100,8 +100,8 @@ func playersJoined(joined []battleye.Player) {
 // StartTracker feeds every server message to the tracker for as long
 // as ReCON runs, and starts the restart grace on every login.
 func StartTracker() {
-	rcon.OnLogin(serverLoggedIn)
-	events, _ := rcon.Events.Subscribe(256)
+	onLogin(serverLoggedIn)
+	events, _ := Events.Subscribe(256)
 	go func() {
 		for ev := range events {
 			if p, ok := Track(ev); ok {
@@ -338,7 +338,7 @@ func ServerWentDown(at time.Time) {
 	tracker.recent = map[string]*trackedPlayer{}
 }
 
-// serverLoggedIn is called on every login of the web session (rcon.OnLogin).
+// serverLoggedIn is called on every login of the web session (OnLogin).
 // After an outage, it starts the restartGrace in which players who come
 // back keep their session.
 func serverLoggedIn(at time.Time) {
@@ -360,11 +360,11 @@ func ForgetAway(now time.Time) {
 	}
 }
 
-// Warn adds a !warning to an online player's count for this session
+// WarnPlayer adds a !warning to an online player's count for this session
 // (it goes when they leave). When the count reaches threshold it starts
 // again at 0 and reached is true, so two warnings at once can't both act.
 // ok is false if they aren't online.
-func Warn(guid string, threshold int) (count int, reached, ok bool) {
+func WarnPlayer(guid string, threshold int) (count int, reached, ok bool) {
 	tracker.Lock()
 	defer tracker.Unlock()
 	for _, t := range tracker.byID {
@@ -380,12 +380,225 @@ func Warn(guid string, threshold int) (count int, reached, ok bool) {
 	return 0, false, false
 }
 
-// Reset forgets every tracked and remembered player, as when ReCON starts.
+// ResetTracker forgets every tracked and remembered player, as when ReCON starts.
 // The database is left as it is.
-func Reset() {
+func ResetTracker() {
 	tracker.Lock()
 	defer tracker.Unlock()
 	tracker.byID, tracker.ended = map[int]*trackedPlayer{}, map[string]time.Time{}
 	tracker.away, tracker.recent, tracker.known = map[string]*trackedPlayer{}, map[string]*trackedPlayer{}, false
 	tracker.downAt, tracker.graceUntil = time.Time{}, time.Time{}
+}
+
+var PlayersPollWait = 3 * time.Second
+
+// PollPlayers reads `players` (not logged) and hands the list to the
+// tracker (who is online, sessions) and the join flows of players who
+// just finished loading (SetHooks). It reports whether the
+// server answered.
+func PollPlayers() bool {
+	sentAt := time.Now()
+	out, acked, err := Run("players", PlayersPollWait, false, "")
+	if err != nil || !acked {
+		return false
+	}
+	playersJoined(ApplyPoll(battleye.ParsePlayersReply(out), sentAt))
+	if anyoneInLobby() {
+		wakeLobbyWatcher() // someone was already loading
+	}
+	return true
+}
+
+// lobbyPollEvery is how often `players` is polled while someone is loading,
+// so join flows start soon after "(Lobby)" leaves their name.
+var lobbyPollEvery = 3 * time.Second
+
+// lobbyWake starts watchLobbyPlayers when someone connects.
+var lobbyWake = make(chan struct{}, 1)
+
+// wakeLobbyWatcher tells watchLobbyPlayers someone may be loading.
+func wakeLobbyWatcher() {
+	select {
+	case lobbyWake <- struct{}{}:
+	default: // already told
+	}
+}
+
+// watchLobbyPlayers polls `players` every lobbyPollEvery for as long as
+// anyone is still loading, then sleeps until the next connect.
+func watchLobbyPlayers() {
+	for range lobbyWake {
+		for anyoneInLobby() {
+			time.Sleep(lobbyPollEvery)
+			if anyoneInLobby() && Status() != "unavailable" {
+				PollPlayers()
+			}
+		}
+	}
+}
+
+// anyoneInLobby reports whether a tracked player is still loading.
+func anyoneInLobby() bool {
+	tracker.Lock()
+	defer tracker.Unlock()
+	for _, t := range tracker.byID {
+		if t.lobby {
+			return true
+		}
+	}
+	return false
+}
+
+// OnlinePlayers is who is online, by player number, as the console log and
+// the last poll tell it: the Name has " (Lobby)" while they load and Ping is
+// from the last poll. known is false until a poll has listed who is on since
+// the server last answered.
+func OnlinePlayers() (players []battleye.Player, known bool) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	players = make([]battleye.Player, 0, len(tracker.byID))
+	for _, t := range tracker.byID {
+		name := t.name
+		if t.lobby {
+			name += " " + battleye.LobbySuffix
+		}
+		players = append(players, battleye.Player{ID: t.id, IP: t.ip, Port: t.port, Ping: t.ping, GUID: t.guid, Name: name})
+	}
+	sort.Slice(players, func(a, b int) bool { return players[a].ID < players[b].ID })
+	return players, tracker.known
+}
+
+// onlineByName, ByID and ByGUID look a player up in the online
+// list (Online), so they never send a command of their own.
+func onlineByName(name string) (battleye.Player, bool) {
+	return onlineWhere(func(p battleye.Player) bool { return battleye.BareName(p.Name) == name })
+}
+
+// PlayerByUniqueName finds who wrote a chat line for the chat commands and
+// Player message flows: the one online player with exactly that name. ok is
+// false when nobody, or more than one player, has it.
+func PlayerByUniqueName(name string) (battleye.Player, bool) {
+	players, _ := OnlinePlayers()
+	var found battleye.Player
+	n := 0
+	for _, p := range players {
+		if battleye.BareName(p.Name) == name {
+			found, n = p, n+1
+		}
+	}
+	return found, n == 1
+}
+
+func PlayerByID(id int) (battleye.Player, bool) {
+	return onlineWhere(func(p battleye.Player) bool { return p.ID == id })
+}
+
+func PlayerByGUID(guid string) (battleye.Player, bool) {
+	return onlineWhere(func(p battleye.Player) bool { return strings.EqualFold(p.GUID, guid) })
+}
+
+func onlineWhere(match func(battleye.Player) bool) (battleye.Player, bool) {
+	players, _ := OnlinePlayers()
+	for _, p := range players {
+		if match(p) {
+			return p, true
+		}
+	}
+	return battleye.Player{}, false
+}
+
+// guidForChat finds who wrote a chat line: an online player with that name,
+// else the last player seen with it (someone who chatted and left before the
+// next poll). "" when nobody matches.
+func guidForChat(name string) string {
+	if p, ok := onlineByName(name); ok && p.GUID != "" {
+		return p.GUID
+	}
+	guid, err := database.GUIDByName(name)
+	if err != nil {
+		log.Printf("chat: looking up %q: %v", name, err)
+	}
+	return guid
+}
+
+// StartChatRecorder files every incoming chat line (Events)
+// under its writer's GUID for as long as ReCON runs. A line from a name no
+// player has had is logged and left out of the history (it still shows in
+// the console).
+func StartChatRecorder() {
+	events, _ := Events.Subscribe(256)
+	go func() {
+		for ev := range events {
+			if ev.Kind != battleye.EventChat {
+				continue
+			}
+			guid := guidForChat(ev.Name)
+			if guid == "" {
+				log.Printf("chat: no player named %q, line not kept in a history: %s", ev.Name, ev.Text)
+				continue
+			}
+			if err := database.AddChatMessage(ev.Time, guid, store.ChatIn, ev.Text); err != nil {
+				log.Printf("chat: store: %v", err)
+			}
+		}
+	}()
+}
+
+// onlineChat is an online player's last chat line, with their GUID so the
+// caller can check the player number still belongs to the same player.
+type onlineChat struct {
+	GUID string
+	Chat lastChat
+}
+
+// LastChatPerPlayer returns the last chat line of every player online who has
+// written one this session, by player number.
+func LastChatPerPlayer() map[int]onlineChat {
+	tracker.Lock()
+	defer tracker.Unlock()
+	out := map[int]onlineChat{}
+	for id, t := range tracker.byID {
+		if n := len(t.chats); n > 0 {
+			out[id] = onlineChat{t.guid, t.chats[n-1]}
+		}
+	}
+	return out
+}
+
+// LatestChatOf is the newest line a player online (by GUID) wrote this session.
+func LatestChatOf(guid string) (lastChat, bool) {
+	tracker.Lock()
+	defer tracker.Unlock()
+	for _, t := range tracker.byID {
+		if t.guid != "" && strings.EqualFold(t.guid, guid) && len(t.chats) > 0 {
+			return t.chats[len(t.chats)-1], true
+		}
+	}
+	return lastChat{}, false
+}
+
+// sessionChat is one chat line and who (by GUID) wrote it.
+type sessionChat struct {
+	GUID string
+	Chat lastChat
+}
+
+// ChatsAfter returns every chat line players online wrote this session with
+// a Seq greater than after, oldest first.
+func ChatsAfter(after int64) []sessionChat {
+	tracker.Lock()
+	defer tracker.Unlock()
+	var out []sessionChat
+	for _, t := range tracker.byID {
+		if t.guid == "" {
+			continue
+		}
+		for _, c := range t.chats {
+			if c.Seq > after {
+				out = append(out, sessionChat{t.guid, c})
+			}
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Chat.Seq < out[b].Chat.Seq })
+	return out
 }

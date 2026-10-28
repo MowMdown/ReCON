@@ -14,10 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MowMdown/ReCON/internal/bans"
 	"github.com/MowMdown/ReCON/internal/flows"
-	"github.com/MowMdown/ReCON/internal/players"
-	"github.com/MowMdown/ReCON/internal/rcon"
+	"github.com/MowMdown/ReCON/internal/game"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 	"github.com/MowMdown/ReCON/internal/test"
@@ -30,21 +28,20 @@ func testDB(t *testing.T) *store.Database {
 	db := test.OpenDB(t)
 	SetDatabase(db)
 	flows.SetDatabase(db)
-	players.SetDatabase(db)
-	bans.SetDatabase(db)
+	game.SetDatabase(db)
 	steam.SetDatabase(db)
-	players.Reset()
+	game.ResetTracker()
 	return db
 }
 
 // resetWeb starts a test with no web session, and closes it and restores
 // the RCON target after the test.
 func resetWeb(t *testing.T) {
-	oldAddr, oldPass := rcon.Target()
-	rcon.CloseSession()
+	oldAddr, oldPass := game.Target()
+	game.CloseSession()
 	t.Cleanup(func() {
-		rcon.SetTarget(oldAddr, oldPass)
-		rcon.CloseSession()
+		game.SetTarget(oldAddr, oldPass)
+		game.CloseSession()
 	})
 }
 
@@ -109,7 +106,7 @@ func TestRconSettingsPage(t *testing.T) {
 	if code, _ := call(http.MethodPost, `{"host": "`+host+`", "port": "`+port+`", "password": "wrong"}`); code != http.StatusBadGateway {
 		t.Fatalf("wrong password: %d", code)
 	}
-	if s := rcon.CurrentOverrides(); s != (rcon.Settings{}) {
+	if s := game.CurrentOverrides(); s != (game.Settings{}) {
 		t.Fatalf("kept after a failed connect: %+v", s)
 	}
 
@@ -117,10 +114,10 @@ func TestRconSettingsPage(t *testing.T) {
 	if code, got := call(http.MethodPost, `{"host": " `+host+` ", "port": "`+port+`", "password": "secret"}`); code != 200 || got["ok"] != true {
 		t.Fatalf("connect = %d %v", code, got)
 	}
-	if s := rcon.CurrentOverrides(); s.Host != host || s.Port != port || s.Password != "secret" {
+	if s := game.CurrentOverrides(); s.Host != host || s.Port != port || s.Password != "secret" {
 		t.Fatalf("kept = %+v", s)
 	}
-	if addr, pass := rcon.Target(); addr != net.JoinHostPort(host, port) || pass != "secret" {
+	if addr, pass := game.Target(); addr != net.JoinHostPort(host, port) || pass != "secret" {
 		t.Fatalf("target = %s %q", addr, pass)
 	}
 	if _, ok, _ := database.GetStoredSetting("rcon"); ok {
@@ -128,25 +125,25 @@ func TestRconSettingsPage(t *testing.T) {
 	}
 
 	// Empty fields use the defaults.
-	if addr, pass := (rcon.Settings{Port: "1234"}).Effective(); addr != "10.9.9.9:1234" || pass != "compose-password" {
+	if addr, pass := (game.Settings{Port: "1234"}).Effective(); addr != "10.9.9.9:1234" || pass != "compose-password" {
 		t.Fatalf("defaults = %s %q", addr, pass)
 	}
 }
 
 func TestStatusReportsNextRetry(t *testing.T) {
 	resetWeb(t)
-	oldNext, oldFails, oldPolled := rcon.NextPoll.Load(), rcon.Fails.Load(), rcon.Polled.Load()
+	oldNext, oldFails, oldPolled := game.NextPoll.Load(), game.Fails.Load(), game.Polled.Load()
 	t.Cleanup(func() {
-		rcon.NextPoll.Store(oldNext)
-		rcon.Fails.Store(oldFails)
-		rcon.Polled.Store(oldPolled)
+		game.NextPoll.Store(oldNext)
+		game.Fails.Store(oldFails)
+		game.Polled.Store(oldPolled)
 	})
-	rcon.Polled.Store(true)
+	game.Polled.Store(true)
 	now := time.Now()
 
 	// Down, with the next heartbeat 20s from now (see the watch's tests).
-	rcon.Fails.Store(rcon.DownAfterMisses)
-	rcon.NextPoll.Store(now.Add(20 * time.Second).UnixMilli())
+	game.Fails.Store(game.DownAfterMisses)
+	game.NextPoll.Store(now.Add(20 * time.Second).UnixMilli())
 
 	status := func() map[string]any {
 		rec := httptest.NewRecorder()
@@ -158,7 +155,7 @@ func TestStatusReportsNextRetry(t *testing.T) {
 	if ms, ok := status()["retryInMs"].(float64); !ok || ms < 19000 || ms > 20100 {
 		t.Fatalf("retryInMs = %v while unavailable", status()["retryInMs"])
 	}
-	rcon.Fails.Store(0)
+	game.Fails.Store(0)
 	if _, ok := status()["retryInMs"]; ok {
 		t.Fatal("retryInMs sent while connected")
 	}
@@ -273,7 +270,7 @@ func TestFlowExportPicks(t *testing.T) {
 func TestBanTransferRoutes(t *testing.T) {
 	db := testDB(t)
 	resetWeb(t)
-	rcon.SetTarget("127.0.0.1:1", "")
+	game.SetTarget("127.0.0.1:1", "")
 	if err := db.RecordPlayerBan(test.GUID1, "Cheater", "1.1.1.1", "aimbot", true, time.Time{}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,12 +1,16 @@
 package flows
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/MowMdown/ReCON/internal/battleye"
+	"github.com/MowMdown/ReCON/internal/game"
 )
 
 type cronExpr struct {
@@ -396,4 +400,80 @@ func minTime(a, b time.Time) time.Time {
 		return b
 	}
 	return a
+}
+
+// StartJoinFlows runs the join flows for each player who just joined.
+func StartJoinFlows(joined []battleye.Player) {
+	for _, p := range joined {
+		startPlayerFlows(triggerJoin, sourceJoin, &flowPlayer{Player: p, role: lookupPlayerRole(p.GUID)})
+	}
+}
+
+// StartChatWatcher reacts to every chat line for as long as ReCON runs:
+// built-in chat commands first, then the Player message flows.
+//
+// The sender is found by exact name among the players online (without the
+// "(Lobby)" tag). If nobody online has that name, or more than one player
+// does, the line is ignored; what they may do comes from their GUID's role.
+func StartChatWatcher() {
+	events, _ := game.Events.Subscribe(256)
+	go func() {
+		for ev := range events {
+			if ev.Kind == battleye.EventChat {
+				handleChatLine(ev.Name, ev.Message)
+			}
+		}
+	}()
+}
+
+func handleChatLine(name, message string) {
+	p, ok := game.PlayerByUniqueName(name)
+	if !ok || p.GUID == "" {
+		return
+	}
+	role := lookupPlayerRole(p.GUID)
+	handleChatCommand(p, role, message)
+	startPlayerFlows(triggerChat, sourceChat, &flowPlayer{Player: p, role: role, message: strings.TrimSpace(message)})
+}
+
+// StartNow starts a run now (the Run button). minutes > 0 replaces the
+// flow's delay for this run. Join and chat flows run for a player, so Run
+// can't start them.
+func StartNow(f Flow, minutes int) error {
+	if err := checkFlowDefinition(f); err != nil {
+		return err
+	}
+	switch f.Trigger {
+	case triggerJoin:
+		return errors.New("this flow runs for each player who joins, so Run can't start it")
+	case triggerChat:
+		return errors.New("this flow runs for each player message, so Run can't start it")
+	}
+	delay, _ := flowDelaySeconds(f)
+	if minutes > 0 {
+		delay = minutes * 60
+	}
+	return launchFlowRun(f, time.Now().Add(time.Duration(delay)*time.Second), sourceManual, nil)
+}
+
+// Stop cancels the active run of a flow (the Stop button). The run
+// then runs its When stopped steps; pressing Stop again while they run ends
+// them too.
+func Stop(id int64) error {
+	flowRuns.Lock()
+	run := flowRuns.byFlow[id]
+	active := run != nil && run.active
+	var stopCancel context.CancelFunc
+	if active {
+		stopCancel = run.stopCancel
+	}
+	flowRuns.Unlock()
+	if !active {
+		return errFlowNotRunning
+	}
+	run.cancel()
+	if stopCancel != nil {
+		stopCancel()
+	}
+	return nil
 }

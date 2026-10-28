@@ -1,8 +1,10 @@
-package players
+package game
 
 import (
 	"database/sql"
+	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,18 +13,342 @@ import (
 	"github.com/MowMdown/ReCON/internal/test"
 )
 
-// line feeds one server message to the tracker as if it arrived at `at`.
-// line feeds one server message to the tracker as if it arrived at `at`.
-func line(text string, at time.Time) { Track(battleye.ParseServerMessage(text, at)) }
+func TestEventHubKeepsNewest(t *testing.T) {
+	h := &eventHub{subs: map[chan battleye.ServerEvent]struct{}{}}
+	total := 3*consoleLogLimit + 7
+	for i := 0; i < total; i++ {
+		h.Publish(battleye.ServerEvent{Kind: battleye.EventOther})
+	}
+	ev := h.recentEvents()
+	if len(ev) != consoleLogLimit {
+		t.Fatalf("kept %d events, want %d", len(ev), consoleLogLimit)
+	}
+	if last := ev[len(ev)-1].Seq; last != int64(total) {
+		t.Fatalf("newest Seq = %d", last)
+	}
+	if first := ev[0].Seq; first != int64(total-consoleLogLimit+1) {
+		t.Fatalf("oldest Seq = %d", first)
+	}
+	// after() finds its place by bisection; a limit keeps the newest.
+	if got := h.after(int64(total - 3)); len(got) != 3 || got[0].Seq != int64(total-2) {
+		t.Fatalf("after(total-3) = %d events starting at %d", len(got), got[0].Seq)
+	}
+	got, last := h.AfterWithLast(0, 10)
+	if len(got) != 10 || got[9].Seq != int64(total) || last != int64(total) {
+		t.Fatalf("afterWithLast(0, 10) = %d events, last %d", len(got), last)
+	}
+}
 
-// testDB opens a fresh database for this package and resets the tracker.
+// resetWeb starts a test with no web session and no wait before the
+// next login, and closes it and restores the RCON target after the test.
+func resetWeb(t *testing.T) {
+	oldAddr, oldPass := Target()
+	CloseSession()
+	t.Cleanup(func() {
+		SetTarget(oldAddr, oldPass)
+		CloseSession()
+	})
+}
+
+func TestReconnectWebOnlySwitchesOnSuccess(t *testing.T) {
+	resetWeb(t)
+	a, b := test.NewServer(t), test.NewServer(t)
+	a.SetPassword("apw")
+	b.SetPassword("bpw")
+	addrA, addrB := a.Addr(), b.Addr()
+	SetTarget(addrA, "apw")
+	if err := Login(); err != nil {
+		t.Fatal(err)
+	}
+	old, err := liveWebSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wrong password for B: nothing changes.
+	if err := Reconnect(addrB, "nope"); err == nil {
+		t.Fatal("a rejected login was accepted")
+	}
+	if addr, _ := Target(); addr != addrA {
+		t.Fatalf("target moved to %s after a failed connect", addr)
+	}
+	if c, _ := liveWebSession(); c != old || old.IsClosed() {
+		t.Fatal("the working session was replaced or closed after a failed connect")
+	}
+
+	// Right password: B becomes the session and the target; A's session closes.
+	if err := Reconnect(addrB, "bpw"); err != nil {
+		t.Fatal(err)
+	}
+	if addr, pass := Target(); addr != addrB || pass != "bpw" {
+		t.Fatalf("target = %s %q", addr, pass)
+	}
+	if c, _ := liveWebSession(); c == old {
+		t.Fatal("still on the old session")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !old.IsClosed() {
+		t.Fatal("the old session was left open")
+	}
+	if _, unlocks := b.Counts(); unlocks != 1 {
+		t.Fatalf("B got %d #unlock(s), want 1", unlocks)
+	}
+
+	// Connecting again to the same place does a fresh handshake.
+	before, _ := b.Counts()
+	if err := Reconnect(addrB, "bpw"); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := b.Counts(); after != before+1 {
+		t.Fatalf("reconnecting sent %d login(s), want 1", after-before)
+	}
+}
+
+func TestNoPasswordDoesNotDial(t *testing.T) {
+	if _, err := battleye.Dial("127.0.0.1:1", "", connectOptions(webSource, false)); err != battleye.ErrNoPassword {
+		t.Fatalf("err = %v, want errNoPassword", err)
+	}
+}
+
+// TestConnectTriesOnce checks that RCON Settings' Connect sends one login per
+// press, even to a server that doesn't answer, and changes nothing.
+func TestConnectTriesOnce(t *testing.T) {
+	resetWeb(t)
+	oldWait := battleye.ReloginReplyWait
+	t.Cleanup(func() { battleye.ReloginReplyWait = oldWait })
+	battleye.ReloginReplyWait = 50 * time.Millisecond
+	f := test.NewServer(t)
+	f.SetSilent(true)
+	SetTarget("127.0.0.1:1", "pw")
+	for press := 1; press <= 3; press++ {
+		if err := Reconnect(f.Addr(), "pw"); err == nil {
+			t.Fatal("connected to a server that doesn't answer")
+		}
+		time.Sleep(20 * time.Millisecond)
+		if logins, _ := f.Counts(); logins != press {
+			t.Fatalf("after %d press(es): %d login packets, want %d", press, logins, press)
+		}
+	}
+	if addr, _ := Target(); addr != "127.0.0.1:1" {
+		t.Fatalf("target changed to %s", addr)
+	}
+}
+
+// TestSentCommandsGoInConsoleLog checks the master console log: a command
+// sent for someone goes in once with who sent it, followed by an error when
+// the server doesn't answer; polls and heartbeats don't go in at all; a new
+// login logs its #unlock and asks for a players and bans poll.
+func TestSentCommandsGoInConsoleLog(t *testing.T) {
+	resetWeb(t)
+	f := test.NewServer(t)
+	SetTarget(f.Addr(), "pw")
+	loginPollDue.Store(false)
+	t.Cleanup(func() { loginPollDue.Store(false) })
+
+	start := Events.LastSeq()
+	if err := Login(); err != nil {
+		t.Fatal(err)
+	}
+	if !loginPollDue.Load() {
+		t.Fatal("a new login didn't ask for a poll")
+	}
+	Run("players", time.Second, false, "")
+	Run("say -1 hello", time.Second, false, FlowSource("Greeter"))
+	f.SetSilent(true)
+	Run("kick 3 bye", 300*time.Millisecond, false, "web")
+
+	var got []string
+	for _, ev := range Events.after(start) {
+		got = append(got, ev.Kind+"|"+ev.Text+"|"+ev.Source)
+	}
+	want := []string{
+		"sent|> #unlock|login",
+		`sent|> say -1 hello|flow "Greeter"`,
+		"sent|> kick 3 bye|web",
+		"error|(no acknowledgement from server)|web",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("console log:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// testDB opens a fresh database and resets the player tracker.
 func testDB(t *testing.T) *store.Database {
 	t.Helper()
 	db := test.OpenDB(t)
 	SetDatabase(db)
-	Reset()
+	ResetTracker()
 	return db
 }
+
+// TestOneLoginPerHeartbeat checks that a server which isn't answering gets
+// at most one login packet per heartbeat (each queued packet becomes another
+// "RCon admin logged in" when the server catches up), that commands never
+// log in, and that an accepted login is followed by exactly one #unlock and
+// no new login while it settles.
+func TestOneLoginPerHeartbeat(t *testing.T) {
+	testDB(t)
+	resetWeb(t)
+	f := test.NewServer(t)
+	SetTarget(f.Addr(), "pw")
+	oldBeat, oldPoll, oldReply, oldSettle := heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, ReloginSettle
+	t.Cleanup(func() {
+		heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, ReloginSettle = oldBeat, oldPoll, oldReply, oldSettle
+		Fails.Store(0)
+		loginPollDue.Store(false)
+	})
+	heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait = 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond
+	Fails.Store(0)
+
+	// Nothing is logged in yet: commands fail without logging in.
+	f.SetSilent(true)
+	for i := 0; i < 5; i++ {
+		if _, _, err := Run("players", 10*time.Millisecond, false, ""); !errors.Is(err, ErrNotLoggedIn) {
+			t.Fatalf("err = %v, want ErrNotLoggedIn", err)
+		}
+	}
+	if l, _ := f.Counts(); l != 0 {
+		t.Fatalf("commands sent %d login(s)", l)
+	}
+
+	var w serverWatch
+	t0 := time.Now()
+	logins := func() int { l, _ := f.Counts(); return l }
+	// A minute of rounds against a silent server: one login per heartbeat
+	// (new sockets while none is accepted).
+	for i := 0; i <= 12; i++ {
+		w.check(t0.Add(time.Duration(i) * pollEvery))
+	}
+	if l := logins(); l != 3 {
+		t.Fatalf("%d login packets in a minute of rounds; want 3 (one per heartbeat)", l)
+	}
+	if Status() != "unavailable" {
+		t.Fatalf("status %s", Status())
+	}
+
+	// The server takes logins but doesn't answer commands yet (it's starting
+	// up): one login, one #unlock, and no new login while it settles.
+	f.SetSilent(false)
+	f.SetMute(true)
+	for i := 6; i <= 12; i++ {
+		w.check(t0.Add(time.Duration(i) * heartbeatEvery / 2))
+	}
+	if l, u := f.Counts(); l != 4 || u != 1 {
+		t.Fatalf("while settling: %d login(s), %d #unlock(s); want 4 and 1", l, u)
+	}
+	// Once it has settled, a heartbeat logs in again on the same socket.
+	ReloginSettle = 0
+	w.check(t0.Add(7 * heartbeatEvery))
+	if l, u := f.Counts(); l != 5 || u != 2 {
+		t.Fatalf("after settling: %d login(s), %d #unlock(s); want 5 and 2", l, u)
+	}
+	// It answers: connected, and no more logins.
+	f.SetMute(false)
+	w.check(t0.Add(8 * heartbeatEvery))
+	if Status() != "connected" {
+		t.Fatalf("status %s after an answered heartbeat", Status())
+	}
+	if l := logins(); l != 5 {
+		t.Fatalf("%d login(s) once answering, want 5", l)
+	}
+}
+
+// TestServerWatch checks the server watch: `players` every round and the
+// heartbeat every heartbeatEvery while the server answers, the ban list
+// after a login; three unanswered rounds mark the server down without
+// logging in; while it's down only the heartbeat checks it.
+func TestServerWatch(t *testing.T) {
+	testDB(t)
+	resetWeb(t)
+	f := test.NewServer(t)
+	SetTarget(f.Addr(), "pw")
+	oldBeat, oldPoll, oldReply := heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait
+	t.Cleanup(func() {
+		heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait = oldBeat, oldPoll, oldReply
+		Fails.Store(0)
+		loginPollDue.Store(false)
+	})
+	heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait = 100*time.Millisecond, 100*time.Millisecond, 50*time.Millisecond
+	Fails.Store(0)
+
+	sent := func() (beats, players, bans int) {
+		for _, c := range f.Commands() {
+			switch c {
+			case "players":
+				players++
+			case "bans":
+				bans++
+			}
+		}
+		return f.Beats(), players, bans
+	}
+	want := func(when string, beats, players, bans int) {
+		t.Helper()
+		if b, p, n := sent(); b != beats || p != players || n != bans {
+			t.Fatalf("%s: %d heartbeats, %d players, %d bans; want %d, %d, %d", when, b, p, n, beats, players, bans)
+		}
+	}
+	var w serverWatch
+	t0 := time.Now()
+	w.check(t0) // logs in: heartbeat, players, and the ban list after the login
+	want("first round", 1, 1, 1)
+	w.check(t0.Add(pollEvery))
+	want("second round", 1, 2, 1)
+	w.check(t0.Add(heartbeatEvery))
+	want("a heartbeat later", 2, 3, 1)
+
+	f.SetSilent(true)
+	logins, _ := f.Counts()
+	for i := 1; i <= DownAfterMisses; i++ {
+		w.check(t0.Add(heartbeatEvery + time.Duration(i)*pollEvery))
+	}
+	if Fails.Load() != DownAfterMisses || Status() != "unavailable" {
+		t.Fatalf("fails = %d, status %s", Fails.Load(), Status())
+	}
+	if l, _ := f.Counts(); l != logins {
+		t.Fatalf("%d login(s) between heartbeats, want 0", l-logins)
+	}
+	want("three missed polls", 2, 6, 1)
+	w.check(t0.Add(heartbeatEvery + 4*pollEvery))
+	want("a round while down", 2, 6, 1) // no poll, no heartbeat yet
+
+	f.SetSilent(false)
+	w.check(t0.Add(2 * heartbeatEvery)) // the heartbeat finds it back
+	if Status() != "connected" {
+		t.Fatalf("status %s after an answered heartbeat", Status())
+	}
+	want("back", 3, 6, 1)
+	w.check(t0.Add(2*heartbeatEvery + pollEvery))
+	want("polling again", 3, 7, 1)
+}
+
+// TestNextCheckFollowsRounds checks the retry countdown the status bar shows:
+// the next round while the server answers or has missed one or two checks,
+// and the next heartbeat once it is down.
+func TestNextCheckFollowsRounds(t *testing.T) {
+	oldNext, oldFails := NextPoll.Load(), Fails.Load()
+	t.Cleanup(func() {
+		NextPoll.Store(oldNext)
+		Fails.Store(oldFails)
+	})
+	now := time.Now()
+	Fails.Store(1)
+	w := serverWatch{lastHeartbeat: now.Add(-10 * time.Second)}
+	w.storeNextCheck(now)
+	if d := NextCheck().Sub(now); d < 4900*time.Millisecond || d > 5100*time.Millisecond {
+		t.Fatalf("next check in %v, want the next round (5s)", d)
+	}
+	// Down: only the heartbeat tries, 30s after the last one (20s from now).
+	Fails.Store(DownAfterMisses)
+	w.storeNextCheck(now)
+	if d := NextCheck().Sub(now); d < 19900*time.Millisecond || d > 20100*time.Millisecond {
+		t.Fatalf("next check in %v, want the next heartbeat (20s)", d)
+	}
+}
+
+// line feeds one server message to the tracker as if it arrived at `at`.
+// line feeds one server message to the tracker as if it arrived at `at`.
+func line(text string, at time.Time) { Track(battleye.ParseServerMessage(text, at)) }
 
 func TestTrackerSessionFromServerMessages(t *testing.T) {
 	db := testDB(t)
@@ -237,7 +563,7 @@ func TestLobbyWatching(t *testing.T) {
 	if anyoneInLobby() {
 		t.Fatal("still loading after (Lobby) left the name")
 	}
-	if p, known := Online(); !known || len(p) != 1 || p[0].Name != "New" {
+	if p, known := OnlinePlayers(); !known || len(p) != 1 || p[0].Name != "New" {
 		t.Fatalf("listOnlinePlayers = %+v %v", p, known)
 	}
 }
@@ -350,5 +676,83 @@ func TestKickAllRestartKeepsSessions(t *testing.T) {
 		if h := test.History(t, db, p.guid); len(h) != 0 || test.CountRows(t, db, "active_sessions") != 2 {
 			t.Fatalf("%s wasn't carried over after Kick everyone: history %+v", p.name, h)
 		}
+	}
+}
+
+const timedGUID = "cccccccccccccccccccccccccccccccc"
+
+// banTestDB opens a fresh database for this package with one permanent ban
+// (test.GUID1) and one timed ban (timedGUID), and no RCON server to talk to.
+func banTestDB(t *testing.T) *store.Database {
+	t.Helper()
+	db := test.OpenDB(t)
+	SetDatabase(db)
+	oldAddr, oldPass := Target()
+	CloseSession()
+	t.Cleanup(func() { SetTarget(oldAddr, oldPass); CloseSession() })
+	SetTarget("127.0.0.1:1", "")
+	if err := db.RecordPlayerBan(test.GUID1, "Cheater", "1.1.1.1", "aimbot", true, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordPlayerBan(timedGUID, "Spammer", "2.2.2.2", "spam", false, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+// TestImportPermanentBans checks Import's rules: a GUID already banned
+// permanently and a malformed one are skipped with a reason, a timed ban
+// becomes permanent, missing names and reasons get defaults, and with the
+// server not answering the bans wait for the next login.
+func TestImportPermanentBans(t *testing.T) {
+	db := banTestDB(t)
+	res := ImportBans(BanFile{Bans: []store.PermanentBan{
+		{GUID: test.GUID1, Name: "Cheater", Reason: "aimbot"},
+		{GUID: strings.ToUpper(test.GUID2), Name: "", Reason: ""},
+		{GUID: "not-a-guid", Name: "Broken"},
+		{GUID: timedGUID, Name: "Spammer", Reason: "spam again", SteamID: "76561198000000001"},
+	}})
+	if res.Added != 2 || res.OnServer || res.Kicked != 0 {
+		t.Fatalf("result = %+v, want 2 added, not on the server yet", res)
+	}
+	want := []string{"Cheater (01234567): already banned permanently", "Broken (not-a-gu): not a BattlEye GUID"}
+	if strings.Join(res.Skipped, "|") != strings.Join(want, "|") {
+		t.Fatalf("skipped = %q, want %q", res.Skipped, want)
+	}
+	if st, _ := db.GetBanState(test.GUID2); !st.Banned || !st.Perm || st.Reason != importReason {
+		t.Fatalf("imported ban with no reason = %+v", st)
+	}
+	if st, _ := db.GetBanState(timedGUID); !st.Banned || !st.Perm || st.Reason != "spam again" {
+		t.Fatalf("timed ban after import = %+v, want permanent", st)
+	}
+	f, err := ExportBans(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]string{}
+	for _, b := range f.Bans {
+		names[b.GUID] = b.Name + "/" + b.SteamID
+	}
+	if len(f.Bans) != 3 || names[test.GUID2] != "Unknown/" || names[timedGUID] != "Spammer/76561198000000001" {
+		t.Fatalf("export after import = %+v", f.Bans)
+	}
+	if !importedPending[test.GUID2] || !importedPending[timedGUID] {
+		t.Fatalf("imported bans not waiting for the server: %v", importedPending)
+	}
+}
+
+// TestExportOnlyPermanent checks that Export leaves timed bans out and,
+// given GUIDs, keeps only those.
+func TestExportOnlyPermanent(t *testing.T) {
+	banTestDB(t)
+	f, err := ExportBans(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Bans) != 1 || f.Bans[0].GUID != test.GUID1 || f.Bans[0].Reason != "aimbot" || f.Bans[0].IP != "1.1.1.1" {
+		t.Fatalf("export = %+v, want only the permanent ban", f.Bans)
+	}
+	if f, _ := ExportBans(map[string]bool{test.GUID2: true}); len(f.Bans) != 0 {
+		t.Fatalf("export of a GUID with no permanent ban = %+v", f.Bans)
 	}
 }
