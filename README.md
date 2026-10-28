@@ -132,7 +132,7 @@ Every page shows two status lines at the top:
 
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
 
-The picker at the top right sets the look: **Tokyo Night** (the default), **Terminal** (green monospace) or **Default** (the plain original). Your browser remembers the choice. The themes take their icons ([Phosphor](https://phosphoricons.com)) and fonts (Inter, JetBrains Mono) from unpkg.com and Google Fonts, so the browser needs internet access for them; without it the pages still work, with fallback fonts and no icons. The Flows page also has **Tweaks**, to adjust the height and padding of the flow list's buttons.
+The picker at the top right sets the look: **Tokyo Night** (the default), **Terminal** (green monospace) or **Default** (the plain original). Your browser remembers the choice. The icons ([Phosphor](https://phosphoricons.com), MIT) are built into ReCON, so they work without internet. The fonts (Inter, JetBrains Mono) come from Google Fonts; without internet the pages use the system's fonts instead. The Flows page also has **Tweaks**, to adjust the height and padding of the flow list's buttons.
 
 ### Players: `/players`
 
