@@ -36,7 +36,16 @@ td { white-space: nowrap; }
 
 /* Tables keep their column widths and scroll sideways on narrow screens. */
 .tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; } /* dark scrollbar */
-#onlineTable { min-width: 1040px; }
+/* 1230px = the fixed columns 1030 + at least 200 for Last Message. */
+#onlineTable { min-width: 1230px; }
+/* Online players: Actions stays in view on the right while the other columns
+   scroll underneath it (only while it's the last column; columns can be
+   dragged into another order). Its buttons sit against the right edge, so in
+   a font that draws them narrower the spare width falls before Message. The
+   table has room below it for scrollbars drawn over the content (macOS), and
+   no bounce at the ends, which would drag Actions along. */
+.tablewrap.online { padding-bottom: 12px; overscroll-behavior-x: none; }
+#onlineTable tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
 #offlineTable { min-width: 1300px; }
 /* Ban Status | Reason fills the rest of the row; a long reason ends in "..."
    and shows in full on hover. */
@@ -184,7 +193,7 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 		</button>
 	</div>
 </div>
-<div class="tablewrap">
+<div class="tablewrap online">
 <table id="onlineTable">
 	<colgroup>
 		<col style="width: 60px">
@@ -193,10 +202,10 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 		<col style="width: 300px">
 		<col style="width: 56px">
 		<col>
-		<col style="width: 290px">
+		<col style="width: 274px">
 	</colgroup>
 	<thead>
-		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th>Actions</th></tr>
+		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th class="act">Actions</th></tr>
 	</thead>
 	<tbody id="players"></tbody>
 </table>
