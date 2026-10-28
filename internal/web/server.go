@@ -378,11 +378,12 @@ const consoleShownLines = 1000
 
 // handleConsoleEvents serves GET /api/console?after=N: the events newer than
 // N (at most consoleShownLines, the newest), plus "last" to send as after=
-// next time. The page polls it while the console is open.
+// next time, and "connected": whether the game server is answering (Live or
+// Offline on the page). The page polls it while the console is open.
 func handleConsoleEvents(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	events, last := game.Events.AfterWithLast(after, consoleShownLines)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "events": events, "last": last})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "events": events, "last": last, "connected": game.Status() == "connected"})
 }
 
 // consoleSayRe matches a private message typed in the console (say 3 hi),

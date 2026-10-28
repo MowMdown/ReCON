@@ -56,10 +56,11 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
 .offline-section { margin-top: 42px; }
-.top .icon-btn, .statusrow .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
-.statusrow { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
-.statusrow .statusbar { margin-bottom: 0; }
-.statusrow button { margin-right: 0; }
+.toolbar .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+ 
+.toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
+.toolbar .right { margin-left: auto; flex: none; }
+.toolbar button { margin-right: 0; }
  
 .hdrbtn { width: 104px; justify-content: center; box-sizing: border-box; }
 
@@ -208,8 +209,6 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 </head>
 <body>
 <nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
-
-<div class="statusrow">
 <div class="statusbar">
 	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
@@ -279,17 +278,22 @@ var setStatusCount;
 	setInterval(tickRetry, 1000);
 })();
 </script>
-	<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
-		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-		Settings
-	</button>
-</div>
 <div class="top">
 	<h1>DayZ Players</h1>
-	<button type="button" class="icon-btn hdrbtn" onclick="openConsole()">
-		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-		Console
-	</button>
+</div>
+<div class="toolbar">
+	<div>
+		<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+			Settings
+		</button>
+	</div>
+	<div class="right">
+		<button type="button" class="icon-btn hdrbtn" onclick="openConsole()">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+			Console
+		</button>
+	</div>
 </div>
 <div class="tablewrap">
 <table id="onlineTable">
@@ -729,8 +733,9 @@ async function pollConsole() {
 			consoleLast = d.last;
 			if (stick) log.scrollTop = log.scrollHeight;
 		}
-		live.classList.remove('off');
-		live.lastElementChild.textContent = 'Live';
+		
+		live.classList.toggle('off', d.connected === false);
+		live.lastElementChild.textContent = d.connected === false ? 'Offline' : 'Live';
 	} catch (e) {
 		live.classList.add('off');
 		live.lastElementChild.textContent = 'Reconnecting...';
