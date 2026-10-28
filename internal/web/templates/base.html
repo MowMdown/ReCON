@@ -21,6 +21,17 @@ th[draggable="true"] { cursor: grab; user-select: none; }
 th.dragging { opacity: 0.4; }
 th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
 th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+/* Tables keep their column widths and scroll sideways on narrow screens. In
+   a .pin table the Actions column (.act) stays in view on the right while the
+   other columns scroll underneath it, only while it's the last column
+   (columns can be dragged into another order). Its buttons sit against the
+   right edge, so in a font that draws them narrower the spare width falls
+   on their left. There is room below for scrollbars drawn over the content
+   (macOS), and no bounce at the ends, which would drag Actions along. */
+.tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; }
+.tablewrap.pin { padding-bottom: 12px; overscroll-behavior-x: none; }
+.tablewrap.pin tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
+td.act button:last-child { margin-right: 0; }
 .statusbar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; font-size: 13px; color: #aaa; }
 /* Every page's title row: the title, plus any buttons on the right. Same
    spacing on every page: no title margins, 16px below the row. */

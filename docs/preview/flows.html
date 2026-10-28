@@ -28,6 +28,11 @@ th[draggable="true"] { cursor: grab; user-select: none; }
 th.dragging { opacity: 0.4; }
 th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
 th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+ 
+.tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; }
+.tablewrap.pin { padding-bottom: 12px; overscroll-behavior-x: none; }
+.tablewrap.pin tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
+td.act button:last-child { margin-right: 0; }
 .statusbar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; font-size: 13px; color: #aaa; }
  
 .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
