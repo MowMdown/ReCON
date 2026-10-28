@@ -10,10 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MowMdown/ReCON/internal/bans"
 	"github.com/MowMdown/ReCON/internal/battleye"
-	"github.com/MowMdown/ReCON/internal/players"
-	"github.com/MowMdown/ReCON/internal/rcon"
+	"github.com/MowMdown/ReCON/internal/game"
 	"github.com/MowMdown/ReCON/internal/store"
 	"github.com/MowMdown/ReCON/internal/test"
 )
@@ -24,16 +22,15 @@ func testDB(t *testing.T) *store.Database {
 	t.Helper()
 	db := test.OpenDB(t)
 	SetDatabase(db)
-	players.SetDatabase(db)
-	bans.SetDatabase(db)
-	players.Reset()
+	game.SetDatabase(db)
+	game.ResetTracker()
 	return db
 }
 
 // setOnline puts players in the tracker as if the console log and a poll
 // had told it about them (no database writes).
 func setOnline(online ...battleye.Player) {
-	players.Reset()
+	game.ResetTracker()
 	now := time.Now()
 	for _, p := range online {
 		name := battleye.BareName(p.Name)
@@ -42,11 +39,11 @@ func setOnline(online ...battleye.Player) {
 			track(fmt.Sprintf("Player #%d %s - BE GUID: %s", p.ID, name, p.GUID), now)
 		}
 	}
-	players.ApplyPoll(online, now.Add(time.Millisecond))
+	game.ApplyPoll(online, now.Add(time.Millisecond))
 }
 
 // track feeds one server message to the player tracker as if it arrived at `at`.
-func track(text string, at time.Time) { players.Track(battleye.ParseServerMessage(text, at)) }
+func track(text string, at time.Time) { game.Track(battleye.ParseServerMessage(text, at)) }
 
 func TestEvalCond(t *testing.T) {
 	cases := []struct {
@@ -304,9 +301,9 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 	// gets a real Seq, then to the tracker.
 	chat := func(text string) {
 		ev := battleye.ParseServerMessage(text, t0)
-		rcon.Events.Publish(ev)
-		ev.Seq = rcon.Events.LastSeq()
-		players.Track(ev)
+		game.Events.Publish(ev)
+		ev.Seq = game.Events.LastSeq()
+		game.Track(ev)
 	}
 	const flowID = 42
 	t.Cleanup(func() { forEachMarks.Lock(); delete(forEachMarks.byFlow, flowID); forEachMarks.Unlock() })
@@ -360,7 +357,7 @@ func TestForEachConsidersOnlyChatSinceLastRun(t *testing.T) {
 
 	// A player's lines go when they leave.
 	track("Player #3 Survivor disconnected", t0.Add(time.Hour))
-	if _, ok := players.LatestChatOf(test.GUID1); ok {
+	if _, ok := game.LatestChatOf(test.GUID1); ok {
 		t.Fatal("a player who left still has session lines")
 	}
 }
@@ -451,11 +448,11 @@ func TestWarningCommand(t *testing.T) {
 		mu.Unlock()
 		return true
 	}
-	banStep = func(p battleye.Player, online bool, minutes int, reason, logAs string) bans.Result {
+	banStep = func(p battleye.Player, online bool, minutes int, reason, logAs string) game.BanResult {
 		mu.Lock()
 		banned = append(banned, fmt.Sprintf("%s %d %s", p.GUID, minutes, reason))
 		mu.Unlock()
-		return bans.Result{OK: true}
+		return game.BanResult{OK: true}
 	}
 	warningActionDelay = 10 * time.Millisecond
 	settings := DefaultChatSettings()

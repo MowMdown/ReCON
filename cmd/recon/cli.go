@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/MowMdown/ReCON/internal/battleye"
-	"github.com/MowMdown/ReCON/internal/rcon"
+	"github.com/MowMdown/ReCON/internal/game"
 )
 
 // runCommandLine handles command-line arguments (anything after the program name):
@@ -23,7 +23,7 @@ func runCommandLine(args []string) {
 		runInteractiveConsole()
 		return
 	}
-	l, err := rcon.Dial("cli", false)
+	l, err := game.Dial("cli", false)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -66,7 +66,7 @@ func runInteractiveConsole() {
 			l.Close()
 			l = nil
 		}
-		nl, err := rcon.Dial("cli", true)
+		nl, err := game.Dial("cli", true)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return false
