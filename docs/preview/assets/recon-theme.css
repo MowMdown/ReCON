@@ -90,7 +90,11 @@ a { color: var(--color-accent); } a:hover { color: var(--color-accent-400); }
 
 body { margin: 24px !important; }
 #onlineTable tr > .act:last-child { background: var(--color-bg) !important; }
-#onlineTable col:last-child { width: 340px !important; }
+/* Actions columns: the pages size them for the plain buttons (the Default
+   theme); the themed buttons, with an icon each, need more room. */
+#onlineTable col.act { width: 340px !important; }
+#offlineTable col.act, #bansTable col.act { width: 120px !important; }
+#flowsTable col.act { width: 330px !important; }
 td.act, td.act-left { white-space: nowrap; }
 td.act button { margin-right: 4px !important; }
 
