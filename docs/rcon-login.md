@@ -88,7 +88,7 @@ flowchart TD
 | +5s, +10s | Down, port closed | `players` polls fail (the port refuses them and the socket closes): misses 1 and 2, status **Retrying**. |
 | +15s | Down | Miss 3: status **Unavailable**. Sessions still open are closed at the time the server last answered; those players are remembered for the restart grace. |
 | Every 5s | Port closed | The heartbeat's one login is refused at once; nothing is left behind. |
-| First heartbeat with the port open | BattlEye still starting | One login, no answer within 3s: the socket is kept and the login is pending. Status **Unavailable - Waiting for the server...**, no countdown. Later heartbeats send only an empty command. |
+| First heartbeat with the port open | BattlEye still starting | One login, no answer within 3s: the socket is kept and the login is pending. Status **Connecting - Waiting for the server...** in yellow, no countdown. Later heartbeats send only an empty command. |
 | When BattlEye is up | Answers the login | Login accepted: `> #unlock` in the console, the 5-minute restart grace starts, `players` is read at once: status **Connected**, the ban list is read, polls every 5s resume. |
 | Within 5 minutes | Players reconnecting | A player back **from the same IP** keeps the session they had; the time the server was down isn't counted. From a new IP, they get a new session. |
 

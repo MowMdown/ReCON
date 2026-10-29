@@ -74,9 +74,9 @@ td.act button:last-child { margin-right: 0; }
 // Status bar shown on every page. RCON is the game server as ReCON's
 // 5-second player check last saw it (GET /api/status): Connected, or
 // "Unavailable - Retrying..." with a grey countdown to ReCON's next try
-// (ReCON keeps retrying in the background), or "Unavailable - Waiting for
-// the server..." while ReCON's login waits for the server to answer it (no
-// other login is sent meanwhile, so no countdown). WebGUI is whether this page can
+// (ReCON keeps retrying in the background), or, in yellow, "Connecting -
+// Waiting for the server..." while ReCON's login waits for the server to
+// answer it (no other login is sent meanwhile, so no countdown). WebGUI is whether this page can
 // reach ReCON: Retrying after a failed check, Unavailable after 3 in a row.
 // While ReCON can't be reached, RCON's state can't be known: it shows
 // Unavailable - Retrying... with no countdown.
@@ -101,8 +101,8 @@ var setStatusCount;
 		if (id === 'rconStatus' && state[id] !== 'connected') {
 			// Not answering for one check or many: ReCON retries either way,
 			// or has sent its login and waits for the answer.
-			label = waiting ? 'Unavailable - Waiting for the server...' : 'Unavailable - Retrying...';
-			cls = 'unavailable';
+			label = waiting ? 'Connecting - Waiting for the server...' : 'Unavailable - Retrying...';
+			cls = waiting ? 'retrying' : 'unavailable';
 		}
 		el.textContent = label + (state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
 		el.className = 'st ' + cls;
