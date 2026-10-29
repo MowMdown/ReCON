@@ -116,7 +116,7 @@ td.act button { margin-right: 4px !important; }
 .grip.handle:hover { color: var(--color-accent) !important; }
 .grip.handle::before { box-sizing: border-box; flex: none; width: 15px !important; height: 15px !important; background: radial-gradient(circle at center, currentColor 1.4px, transparent 1.8px) 0 0 / 5px 5px !important; }
 
-/* Row action buttons: one shared height (tweakable via --rc-act-h / --rc-act-px) */
+/* Row action buttons: one shared height */
 :root { --rc-act-h: 30px; --rc-act-px: 10px; }
 #flowsTable td.actions button { box-sizing: border-box; height: var(--rc-act-h); padding: 0 var(--rc-act-px) !important; line-height: 1; white-space: nowrap; vertical-align: middle; }
 #flowsTable td.actions { font-size: 0; }
