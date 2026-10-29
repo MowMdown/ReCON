@@ -127,7 +127,7 @@ Mount `/data` as a volume, or everything ReCON has recorded is lost when the con
 
 Every page shows two status lines at the top:
 
-- **RCON Status:** whether ReCON can reach the game server (it reads the player list every 5 seconds and sends a heartbeat every 30; three checks missed in a row means unavailable): *Connected*, or *Unavailable - Retrying...* with a small grey countdown to ReCON's next try. While the server is unavailable, ReCON only sends the heartbeat, every 30 seconds, and logs in again when one goes unanswered: at most one login every 30 seconds, so a restarting server doesn't log a pile of RCon admin logins when it comes back. It keeps retrying in the background on its own. [How ReCON logs in again after a restart](docs/rcon-login.md) has the full sequence as a flow chart.
+- **RCON Status:** whether ReCON can reach the game server (it reads the player list every 5 seconds and sends a heartbeat every 30; three checks missed in a row means unavailable): *Connected*, *Unavailable - Retrying...* with a small grey countdown to ReCON's next try, or *Unavailable - Waiting for the server...* once ReCON has sent its login and is waiting for the answer. While the server is unavailable, ReCON only sends the heartbeat, every 30 seconds. It sends **one** login, once the server's port is open again, and waits for the answer: a restarting server can take a minute or more to answer it, and every extra login would show up as another RCon admin login. As soon as the answer comes, the status turns *Connected*. [How ReCON logs in again after a restart](docs/rcon-login.md) has the full sequence as a flow chart.
 - **WebGUI Status:** whether your browser can reach ReCON. While it can, the page's count follows *Connected*: players online, bans or flows.
 
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
@@ -536,7 +536,7 @@ curl -X POST http://<host>:8080/api/flows/3/run \
 
 ### Status
 
-`GET /health` returns `{"ok": true}`. `GET /api/status` returns the RCON state the pages show: `{"ok": true, "rcon": "connected"}` (or `retrying` / `unavailable`).
+`GET /health` returns `{"ok": true}`. `GET /api/status` returns the RCON state the pages show: `{"ok": true, "rcon": "connected"}` (or `retrying` / `unavailable`, with `"waiting": true` while ReCON waits for the server to answer its login, otherwise `retryInMs` until the next try).
 
 ### From a task scheduler
 

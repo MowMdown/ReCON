@@ -181,12 +181,135 @@ func testDB(t *testing.T) *store.Database {
 	return db
 }
 
-// TestOneLoginPerHeartbeat checks that a server which isn't answering gets
-// at most one login packet per heartbeat (each queued packet becomes another
-// "RCon admin logged in" when the server catches up), that commands never
-// log in, and that an accepted login is followed by exactly one #unlock and
-// no new login while it settles.
-func TestOneLoginPerHeartbeat(t *testing.T) {
+// TestOneLoginWhileStarting checks the login against a server that is
+// starting up: it takes packets but answers none until BattlEye is up, then
+// answers the logins it got. ReCON sends ONE login and waits for it (every
+// queued login becomes another "RCon admin logged in"), commands never log
+// in, and the late answer makes it connected straight away, with one #unlock.
+func TestOneLoginWhileStarting(t *testing.T) {
+	testDB(t)
+	resetWeb(t)
+	f := test.NewServer(t)
+	SetTarget(f.Addr(), "pw")
+	oldBeat, oldPoll, oldReply, oldResend := heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, LoginResendAfter
+	t.Cleanup(func() {
+		heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, LoginResendAfter = oldBeat, oldPoll, oldReply, oldResend
+		Fails.Store(0)
+		loginPollDue.Store(false)
+	})
+	heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait = 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond
+	Fails.Store(0)
+	select {
+	case <-loginAnswered: // from an earlier test
+	default:
+	}
+
+	// Nothing is logged in yet: commands fail without logging in.
+	f.Hold()
+	for i := 0; i < 5; i++ {
+		if _, _, err := Run("players", 10*time.Millisecond, false, ""); !errors.Is(err, ErrNotLoggedIn) {
+			t.Fatalf("err = %v, want ErrNotLoggedIn", err)
+		}
+	}
+	if l, _ := f.Counts(); l != 0 {
+		t.Fatalf("commands sent %d login(s)", l)
+	}
+
+	// Two minutes of rounds: one login, then only empty commands that check
+	// the port is still open.
+	var w serverWatch
+	t0 := time.Now()
+	for i := 0; i <= 24; i++ {
+		w.check(t0.Add(time.Duration(i) * pollEvery))
+	}
+	if l, _ := f.Counts(); l != 1 {
+		t.Fatalf("%d login packets in two minutes of rounds; want 1", l)
+	}
+	if Status() != "unavailable" || !WaitingForLogin() {
+		t.Fatalf("status %s, waiting for the login %v", Status(), WaitingForLogin())
+	}
+	if _, _, err := Run("players", 10*time.Millisecond, false, ""); !errors.Is(err, ErrNotLoggedIn) {
+		t.Fatalf("err = %v while the login waits, want ErrNotLoggedIn", err)
+	}
+
+	// BattlEye is up and answers the login: connected at once, one #unlock.
+	f.Release()
+	select {
+	case <-loginAnswered:
+	case <-time.After(time.Second):
+		t.Fatal("the late answer to the login didn't wake the server watch")
+	}
+	w.loginLanded(time.Now())
+	if Status() != "connected" || WaitingForLogin() {
+		t.Fatalf("status %s, waiting for the login %v, after the login was answered", Status(), WaitingForLogin())
+	}
+	if l, u := f.Counts(); l != 1 || u != 1 {
+		t.Fatalf("%d login(s), %d #unlock(s); want 1 and 1", l, u)
+	}
+	w.check(t0.Add(25 * pollEvery))
+	if l, u := f.Counts(); l != 1 || u != 1 || Status() != "connected" {
+		t.Fatalf("a round later: %d login(s), %d #unlock(s), status %s", l, u, Status())
+	}
+}
+
+// TestLoginLostOnlyWhenRefused checks that a login is sent again when the
+// first can't be answered: the server refused it (its port was closed), or
+// no answer came within LoginResendAfter (the packet was lost), in which
+// case it goes on the same socket.
+func TestLoginLostOnlyWhenRefused(t *testing.T) {
+	testDB(t)
+	resetWeb(t)
+	oldBeat, oldPoll, oldReply, oldResend := heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, LoginResendAfter
+	t.Cleanup(func() {
+		heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, LoginResendAfter = oldBeat, oldPoll, oldReply, oldResend
+		Fails.Store(0)
+		loginPollDue.Store(false)
+	})
+	heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait = 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond
+
+	// Nothing listens on the port: each heartbeat's login is refused.
+	f := test.NewServer(t)
+	closed := test.NewServer(t)
+	addr := closed.Addr()
+	closed.Close()
+	SetTarget(addr, "pw")
+	if err := Login(); err == nil || errors.Is(err, battleye.ErrLoginPending) || WaitingForLogin() {
+		t.Fatalf("login to a closed port: %v, waiting %v", err, WaitingForLogin())
+	}
+
+	// A login the server holds: no other until LoginResendAfter.
+	SetTarget(f.Addr(), "pw")
+	f.Hold()
+	for i := 0; i < 3; i++ {
+		if err := Login(); !errors.Is(err, battleye.ErrLoginPending) {
+			t.Fatalf("err = %v, want ErrLoginPending", err)
+		}
+	}
+	if l, _ := f.Counts(); l != 1 {
+		t.Fatalf("%d login(s) while one waits, want 1", l)
+	}
+	before, _ := liveOrPending()
+	LoginResendAfter = 0
+	Login()
+	if l, _ := f.Counts(); l != 2 {
+		t.Fatalf("%d login(s) after LoginResendAfter, want 2", l)
+	}
+	if after, _ := liveOrPending(); after != before {
+		t.Fatal("the login was sent again on a new socket")
+	}
+}
+
+// liveOrPending is the web session, logged in or not.
+func liveOrPending() (*battleye.Session, bool) {
+	webConnection.Lock()
+	defer webConnection.Unlock()
+	return webConnection.connection, webConnection.connection != nil
+}
+
+// TestOneLoginWhileSettling checks a server that accepts logins but doesn't
+// answer commands yet: one login and one #unlock, no new login while it
+// settles (ReloginSettle), then one on the same socket.
+func TestOneLoginWhileSettling(t *testing.T) {
 	testDB(t)
 	resetWeb(t)
 	f := test.NewServer(t)
@@ -200,56 +323,29 @@ func TestOneLoginPerHeartbeat(t *testing.T) {
 	heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait = 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond
 	Fails.Store(0)
 
-	// Nothing is logged in yet: commands fail without logging in.
-	f.SetSilent(true)
-	for i := 0; i < 5; i++ {
-		if _, _, err := Run("players", 10*time.Millisecond, false, ""); !errors.Is(err, ErrNotLoggedIn) {
-			t.Fatalf("err = %v, want ErrNotLoggedIn", err)
-		}
-	}
-	if l, _ := f.Counts(); l != 0 {
-		t.Fatalf("commands sent %d login(s)", l)
-	}
-
+	f.SetMute(true)
 	var w serverWatch
 	t0 := time.Now()
-	logins := func() int { l, _ := f.Counts(); return l }
-	// A minute of rounds against a silent server: one login per heartbeat
-	// (new sockets while none is accepted).
-	for i := 0; i <= 12; i++ {
-		w.check(t0.Add(time.Duration(i) * pollEvery))
-	}
-	if l := logins(); l != 3 {
-		t.Fatalf("%d login packets in a minute of rounds; want 3 (one per heartbeat)", l)
-	}
-	if Status() != "unavailable" {
-		t.Fatalf("status %s", Status())
-	}
-
-	// The server takes logins but doesn't answer commands yet (it's starting
-	// up): one login, one #unlock, and no new login while it settles.
-	f.SetSilent(false)
-	f.SetMute(true)
-	for i := 6; i <= 12; i++ {
+	for i := 0; i <= 6; i++ {
 		w.check(t0.Add(time.Duration(i) * heartbeatEvery / 2))
 	}
-	if l, u := f.Counts(); l != 4 || u != 1 {
-		t.Fatalf("while settling: %d login(s), %d #unlock(s); want 4 and 1", l, u)
+	if l, u := f.Counts(); l != 1 || u != 1 {
+		t.Fatalf("while settling: %d login(s), %d #unlock(s); want 1 and 1", l, u)
 	}
 	// Once it has settled, a heartbeat logs in again on the same socket.
 	ReloginSettle = 0
-	w.check(t0.Add(7 * heartbeatEvery))
-	if l, u := f.Counts(); l != 5 || u != 2 {
-		t.Fatalf("after settling: %d login(s), %d #unlock(s); want 5 and 2", l, u)
+	w.check(t0.Add(4 * heartbeatEvery))
+	if l, u := f.Counts(); l != 2 || u != 2 {
+		t.Fatalf("after settling: %d login(s), %d #unlock(s); want 2 and 2", l, u)
 	}
 	// It answers: connected, and no more logins.
 	f.SetMute(false)
-	w.check(t0.Add(8 * heartbeatEvery))
+	w.check(t0.Add(5 * heartbeatEvery))
 	if Status() != "connected" {
 		t.Fatalf("status %s after an answered heartbeat", Status())
 	}
-	if l := logins(); l != 5 {
-		t.Fatalf("%d login(s) once answering, want 5", l)
+	if l, _ := f.Counts(); l != 2 {
+		t.Fatalf("%d login(s) once answering, want 2", l)
 	}
 }
 

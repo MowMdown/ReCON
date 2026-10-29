@@ -51,12 +51,17 @@ func buildWebRoutes() *http.ServeMux {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 	// The status bar on every page: {"rcon": "connected" | "retrying" |
-	// "unavailable"}, and while not connected "retryInMs": time until the next
-	// check of the game server.
+	// "unavailable"}, and while not connected either "waiting": true (a
+	// login was sent and ReCON is waiting for the server to answer it) or
+	// "retryInMs": time until the next check of the game server.
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		st := map[string]any{"ok": true, "rcon": game.Status()}
 		if st["rcon"] != "connected" {
-			st["retryInMs"] = max(time.Until(game.NextCheck()).Milliseconds(), 0)
+			if game.WaitingForLogin() {
+				st["waiting"] = true
+			} else {
+				st["retryInMs"] = max(time.Until(game.NextCheck()).Milliseconds(), 0)
+			}
 		}
 		writeJSON(w, 200, st)
 	})
