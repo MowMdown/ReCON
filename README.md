@@ -561,7 +561,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
 | `internal/store/` | The SQLite database: every SQL statement |
-| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), both embedded into the binary at build time |
+| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker) and the favicons and app icons (`assets/icons/`), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |
 | `examples/flows.json` | Example flows to import |
 | `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |

@@ -58,6 +58,13 @@ td.act button:last-child { margin-right: 0; }
 .importbox .buttons { margin-top: 12px; flex: none; }
 </style>{{end}}
 
+{{define "icons"}}{{/* The browser tab icon, the iOS home-screen icon and the manifest (the
+   icon and name when the page is installed as an app). Files in assets/icons/. */}}<link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="assets/icons/favicon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="assets/icons/favicon-180.png">
+<link rel="manifest" href="assets/manifest.json">{{end}}
+
 {{define "theme"}}{{/* The theme (assets/): Nocturne tokens applied to the pages, Phosphor icons on
    the buttons, and a theme picker (Default, Terminal, Tokyo Night) in the nav.
    It comes after each page's own <style> so it overrides it. */}}<link rel="stylesheet" href="assets/phosphor/style.css">

@@ -20,6 +20,12 @@ RUN CGO_ENABLED=0 GOOS=linux \
 # --- Stage 2: Runtime ---
 FROM alpine:3.20
 
+# The container's icon in Unraid's Docker tab (and other dashboards that read
+# the label). It's a URL, not a file in the image: the app icon in this repo.
+LABEL org.opencontainers.image.title="ReCON" \
+      org.opencontainers.image.source="https://github.com/MowMdown/ReCON" \
+      net.unraid.docker.icon="https://raw.githubusercontent.com/MowMdown/ReCON/main/internal/web/assets/icons/dayz-rcon-app-icon-256.png"
+
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
