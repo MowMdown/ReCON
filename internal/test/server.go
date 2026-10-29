@@ -24,8 +24,8 @@ type Server struct {
 	silent   bool       // take packets but don't answer, like a server still starting
 	holding  bool       // like silent, but keep the logins and answer them on Release
 	held     []net.Addr // where the held logins came from
-	mute     bool   // answer logins but not commands, like a server that's nearly up
-	password string // when set, other passwords are rejected
+	mute     bool       // answer logins but not commands, like a server that's nearly up
+	password string     // when set, other passwords are rejected
 	logins   int
 	commands []string
 	beats    int // empty commands (heartbeats)
