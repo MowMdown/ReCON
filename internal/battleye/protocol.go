@@ -35,6 +35,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -74,37 +75,15 @@ var errLoginRejected = errors.New("RCON login rejected (wrong password or IP not
 // (neither RCON_PASSWORD nor RCON Settings).
 var ErrNoPassword = errors.New("no RCON password set: set RCON_PASSWORD, or enter one in RCON Settings on the Players page")
 
-// loginWithPassword authenticates on an already-dialed UDP connection. It sends the
-// loginWithPassword packet up to `tries` times, waiting `wait` for a reply each time.
-// The CLI and console try 3 times (UDP is lossy); the web session sends
-// one packet, because every packet a busy server queues becomes another
-// "RCon admin logged in" when it catches up.
-func loginWithPassword(conn net.Conn, buf []byte, password string, tries int, wait time.Duration) error {
-	for attempt := 0; attempt < tries; attempt++ {
-		if _, err := conn.Write(BuildPacket(0, []byte(password))); err != nil {
-			return err
-		}
-		conn.SetReadDeadline(time.Now().Add(wait))
-		for {
-			n, err := conn.Read(buf)
-			if err != nil {
-				if isTimeout(err) {
-					break // no answer within 1s: go to the next attempt
-				}
-				return err
-			}
-			t, p, ok := ParsePacket(buf[:n])
-			if !ok || t != 0 {
-				continue // junk or a non-login packet: keep waiting for the real reply
-			}
-			if len(p) < 1 || p[0] != 1 {
-				return errLoginRejected
-			}
-			return nil
-		}
-	}
-	return errors.New("no reply to RCON login: RCon not enabled (no RConPassword), wrong port, UDP blocked, or the server is still starting")
-}
+// ErrLoginPending is returned when a login packet got no answer in the time
+// waited for one. The packet isn't lost: a starting server can take it and
+// answer it much later (37s in a test against DayZ), so a session dialed
+// with KeepWaiting stays open and logs in when the answer comes. Sending
+// another login meanwhile only adds another "RCon admin logged in".
+var ErrLoginPending = errors.New("RCON login sent, waiting for the server to answer it")
+
+// errNoLoginReply is Dial's error when it gives up on an unanswered login.
+var errNoLoginReply = errors.New("no reply to RCON login: RCon not enabled (no RConPassword), wrong port, UDP blocked, or the server is still starting")
 
 // addPart stores one command-reply body (the payload after the seq byte) and
 // reports whether the reply is complete. Long replies arrive as
@@ -148,27 +127,35 @@ type Session struct {
 	commandLock sync.Mutex    // ensures only one command is in flight at a time
 	seq         byte          // next command sequence number (wraps at 255)
 	replies     chan []byte   // command replies (seq byte + body) handed from readServerPackets() to runRawCommand()
-	logins      chan byte     // login replies (1 = accepted) handed from readServerPackets() to reloginSameSocket()
+	loginReply  chan byte     // login replies (1 = accepted) handed from readServerPackets() to login()
 	done        chan struct{} // closed by readServerPackets() when the socket dies
 	stop        chan struct{} // closed by close() to stop the keepalive goroutine
 	once        sync.Once     // makes close() idempotent
 	Err         error         // the error that killed the reader (valid once done is closed)
 	seen        []byte        // recent server-message seqs; only readServerPackets() touches it
 	onMessage   func(string)  // called with each new server message (may be nil)
+	onLogin     func()        // called by readServerPackets() for each accepted login (may be nil)
+	loggedIn    atomic.Bool   // the server accepted the last login sent
+	loginSent   atomic.Int64  // when the unanswered login was sent (Unix ns), 0 when none is
+	logins      atomic.Uint64 // accepted logins on this socket
 }
 
 // DialOptions is how Dial logs in and what the session does with
 // server messages.
 type DialOptions struct {
-	Source    string        // label for log lines ("web", "cli")
-	Tries     int           // login packets to send before giving up
-	ReplyWait time.Duration // how long to wait for each login reply
-	Keepalive bool          // send an empty command every keepaliveEvery
-	OnMessage func(string)  // called with each new server message (may be nil)
+	Source      string        // label for log lines ("web", "cli")
+	Tries       int           // login packets to send before giving up
+	ReplyWait   time.Duration // how long to wait for each login reply
+	KeepWaiting bool          // when no login is answered in time, keep the session (ErrLoginPending)
+	Keepalive   bool          // send an empty command every keepaliveEvery
+	OnMessage   func(string)  // called with each new server message (may be nil)
+	OnLogin     func()        // called for each accepted login, even a late one (may be nil, must not block)
 }
 
-// Dial connects to address, logs in with password and starts the
-// background reader, as opt says.
+// Dial connects to address, starts the background reader and logs in with
+// password, as opt says. With KeepWaiting, a login that isn't answered in
+// time returns the session with ErrLoginPending: it stays open and logs in
+// when the server answers.
 func Dial(address, password string, opt DialOptions) (*Session, error) {
 	if password == "" {
 		return nil, ErrNoPassword
@@ -177,24 +164,29 @@ func Dial(address, password string, opt DialOptions) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := loginWithPassword(conn, make([]byte, 4096), password, opt.Tries, opt.ReplyWait); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	// loginWithPassword() left a 1s read deadline; clear it so readServerPackets() can block.
-	_ = conn.SetReadDeadline(time.Time{})
-
 	l := &Session{
-		src:       opt.Source,
-		conn:      conn,
-		password:  password,
-		replies:   make(chan []byte, 32),
-		logins:    make(chan byte, 4),
-		done:      make(chan struct{}),
-		stop:      make(chan struct{}),
-		onMessage: opt.OnMessage,
+		src:        opt.Source,
+		conn:       conn,
+		password:   password,
+		replies:    make(chan []byte, 32),
+		loginReply: make(chan byte, 4),
+		done:       make(chan struct{}),
+		stop:       make(chan struct{}),
+		onMessage:  opt.OnMessage,
+		onLogin:    opt.OnLogin,
 	}
 	go l.readServerPackets()
+	err = l.login(opt.Tries, opt.ReplyWait)
+	if errors.Is(err, ErrLoginPending) && opt.KeepWaiting {
+		return l, err
+	}
+	if err != nil {
+		l.Close()
+		if errors.Is(err, ErrLoginPending) {
+			err = errNoLoginReply
+		}
+		return nil, err
+	}
 	if opt.Keepalive {
 		go l.keepSessionAlive()
 	}
@@ -257,14 +249,24 @@ func (l *Session) readServerPackets() {
 		}
 		switch t {
 		case 0:
+			l.loginSent.Store(0)
 			if p[0] == 1 {
-				// A fresh login (e.g. after a server restart) can start the
-				// message numbering again at 0, so forget the seqs seen so far.
+				// A fresh login (e.g. after a server restart) starts the
+				// message numbering again at 0, so forget the seqs seen so
+				// far, and the server expects commands from seq 0 again.
 				l.seen = l.seen[:0]
+				l.writeLock.Lock()
+				l.seq = 0
+				l.writeLock.Unlock()
+				l.loggedIn.Store(true)
+				l.logins.Add(1)
 			}
-			select { // a reply to reloginSameSocket()
-			case l.logins <- p[0]:
+			select { // a reply to login()
+			case l.loginReply <- p[0]:
 			default:
+			}
+			if p[0] == 1 && l.onLogin != nil {
+				l.onLogin()
 			}
 		case 2:
 			// ACK first, every time, even for a resend: a resend means our
@@ -316,41 +318,76 @@ func (l *Session) keepSessionAlive() {
 	}
 }
 
-// ReloginReplyWait is how long relogin waits for the answer to its one
-// login packet.
+// ReloginReplyWait is how long the web session waits for the answer to its
+// one login packet before it carries on: the login stays pending
+// (ErrLoginPending) and the answer is still taken when it comes.
 var ReloginReplyWait = 3 * time.Second
 
-// reloginSameSocket logs in again on this same socket. BattlEye keys admin slots by
-// IP and port, so the server keeps the slot it already gave this socket
-// instead of opening a new one (and leaving the old one behind until it
-// times out). It sends ONE login packet: while the server is restarting, its
-// port can take packets without answering and then handle the whole backlog
-// at once, so every extra packet becomes another "RCon admin logged in" (see
-// game.Relogin for the pacing). On success the command sequence starts
-// again at 0.
-func (l *Session) Relogin() error {
+// login sends a login packet up to tries times, waiting `wait` for an answer
+// after each. The CLI and console try 3 times (UDP is lossy); the web
+// session sends one packet, because every packet a starting server queues
+// becomes another "RCon admin logged in" when it catches up.
+func (l *Session) login(tries int, wait time.Duration) error {
 	l.commandLock.Lock() // no command in flight while logging in
 	defer l.commandLock.Unlock()
-	for len(l.logins) > 0 {
-		<-l.logins // late answers to an earlier login
-	}
-	if err := l.write(BuildPacket(0, []byte(l.password))); err != nil {
-		return err
-	}
-	select {
-	case ok := <-l.logins:
-		if ok != 1 {
-			return errLoginRejected
+	for attempt := 0; attempt < tries; attempt++ {
+		for len(l.loginReply) > 0 {
+			<-l.loginReply // late answers to an earlier login
 		}
-		l.writeLock.Lock()
-		l.seq = 0
-		l.writeLock.Unlock()
-		return nil
-	case <-time.After(ReloginReplyWait):
-		return errors.New("no reply to RCON login")
-	case <-l.done:
-		return l.Err
+		if err := l.SendLogin(); err != nil {
+			return err
+		}
+		select {
+		case ok := <-l.loginReply:
+			if ok != 1 {
+				return errLoginRejected
+			}
+			return nil
+		case <-time.After(wait):
+		case <-l.done:
+			return l.Err
+		}
 	}
+	return ErrLoginPending
+}
+
+// SendLogin sends one login packet and doesn't wait: the session counts as
+// logged out until the server answers it (LoginPending).
+func (l *Session) SendLogin() error {
+	l.loggedIn.Store(false)
+	l.loginSent.Store(time.Now().UnixNano())
+	return l.write(BuildPacket(0, []byte(l.password)))
+}
+
+// Relogin logs in again on this same socket. BattlEye keys admin slots by
+// IP and port, so the server keeps the slot it already gave this socket
+// instead of opening a new one (and leaving the old one behind until it
+// times out). It sends ONE login packet and waits ReloginReplyWait for the
+// answer; after that the login stays pending (ErrLoginPending) and is
+// taken whenever the server answers it.
+func (l *Session) Relogin() error {
+	return l.login(1, ReloginReplyWait)
+}
+
+// LoggedIn reports whether the server accepted the last login sent.
+func (l *Session) LoggedIn() bool { return l.loggedIn.Load() }
+
+// LoginPending reports when the login the server hasn't answered yet was
+// sent; ok is false when there is none.
+func (l *Session) LoginPending() (since time.Time, ok bool) {
+	ns := l.loginSent.Load()
+	return time.Unix(0, ns), ns != 0
+}
+
+// Logins is how many logins the server has accepted on this socket.
+func (l *Session) Logins() uint64 { return l.logins.Load() }
+
+// Probe sends an empty command without waiting for an answer. On a socket
+// waiting for its login it tells whether the port is still open: if the
+// server has gone away the system reports the port refused, and the
+// session closes.
+func (l *Session) Probe() error {
+	return l.write(BuildPacket(1, []byte{l.nextSeq()}))
 }
 
 // isResponsive probes the session with an empty command and reports whether
