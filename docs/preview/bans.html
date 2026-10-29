@@ -28,6 +28,11 @@ th[draggable="true"] { cursor: grab; user-select: none; }
 th.dragging { opacity: 0.4; }
 th.drag-over-left { box-shadow: inset 3px 0 0 #8ab4f8; }
 th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
+ 
+.tablewrap { overflow-x: auto; scrollbar-color: #555 #1b1b1b; }
+.tablewrap.pin { padding-bottom: 12px; overscroll-behavior-x: none; }
+.tablewrap.pin tr > .act:last-child { position: sticky; right: 0; background: #111; text-align: right; }
+td.act button:last-child { margin-right: 0; }
 .statusbar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; font-size: 13px; color: #aaa; }
  
 .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -54,6 +59,8 @@ th.drag-over-right { box-shadow: inset -3px 0 0 #8ab4f8; }
 </style>
 <style>
 td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
+ 
+#bansTable { min-width: 1400px; }
 select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; background: #111; color: #eee; border: 1px solid #555; }
  
 .toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 0 0 16px; }
@@ -65,6 +72,11 @@ select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; 
 .importbox label.pick.locked { opacity: .5; cursor: not-allowed; }
 .importbox label.pick.locked:hover { background: none; }
 </style>
+<link rel="stylesheet" href="assets/phosphor/style.css">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/recon-theme.css">
+<script src="assets/recon-theme-switch.js"></script>
+<script src="assets/recon-icons.js" defer></script>
 </head>
 <body>
 <nav><a href="/players">Players</a><a class="active" href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
@@ -148,20 +160,22 @@ var setStatusCount;
 	</div>
 	<div class="right"><button onclick="openBan()">Ban Player</button></div>
 </div>
-<table>
+<div class="tablewrap pin">
+<table id="bansTable">
 	<colgroup>
 		<col style="width: 60px">
 		<col style="width: 190px">
 		<col style="width: 300px">
 		<col style="width: 130px">
 		<col>
-		<col style="width: 120px">
+		<col class="act" style="width: 82px">
 	</colgroup>
 	<thead>
-		<tr><th>#</th><th>Player</th><th>GUID</th><th>Time left</th><th>Reason</th><th>Actions</th></tr>
+		<tr><th>#</th><th>Player</th><th>GUID</th><th>Time left</th><th>Reason</th><th class="act">Actions</th></tr>
 	</thead>
 	<tbody id="bans"></tbody>
 </table>
+</div>
 
 <div id="banModal" class="modal" onclick="if (event.target === this) closeBan()">
 	<div class="box">
@@ -225,7 +239,7 @@ async function refresh() {
 				'<td class="mono">' + esc(b.guid) + '</td>' +
 				'<td>' + fmtMinutes(b) + '</td>' +
 				'<td title="' + esc(b.reason) + '">' + esc(b.reason) + '</td>' +
-				'<td><button data-guid="' + esc(b.guid) + '" data-name="' + n + '" onclick="unban(this)">Unban</button></td>' +
+				'<td class="act"><button data-guid="' + esc(b.guid) + '" data-name="' + n + '" onclick="unban(this)">Unban</button></td>' +
 			'</tr>';
 		}).join('');
 	} catch(e) {

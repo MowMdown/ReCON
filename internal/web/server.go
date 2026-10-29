@@ -45,16 +45,28 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/players", http.StatusFound)
 	})
+	// The theme's stylesheets and scripts (assets/, see base.html "theme").
+	mux.Handle("GET /assets/", http.FileServerFS(assetFiles))
+	// For anything that asks for /favicon.ico without reading the page's
+	// icon links (browsers' bookmarks, link previews). Browsers take a PNG.
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, assetFiles, "assets/icons/favicon-32.png")
+	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 	// The status bar on every page: {"rcon": "connected" | "retrying" |
-	// "unavailable"}, and while not connected "retryInMs": time until the next
-	// check of the game server.
+	// "unavailable"}, and while not connected either "waiting": true (a
+	// login was sent and ReCON is waiting for the server to answer it) or
+	// "retryInMs": time until the next check of the game server.
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		st := map[string]any{"ok": true, "rcon": game.Status()}
 		if st["rcon"] != "connected" {
-			st["retryInMs"] = max(time.Until(game.NextCheck()).Milliseconds(), 0)
+			if game.WaitingForLogin() {
+				st["waiting"] = true
+			} else {
+				st["retryInMs"] = max(time.Until(game.NextCheck()).Milliseconds(), 0)
+			}
 		}
 		writeJSON(w, 200, st)
 	})
@@ -116,20 +128,20 @@ func buildWebRoutes() *http.ServeMux {
 
 // quietPaths are the pages' routine GET polls, left out of the request log.
 var quietPaths = map[string]bool{
-	"/health": true, "/players": true, "/bans": true, "/flows": true,
+	"/health": true, "/favicon.ico": true, "/players": true, "/bans": true, "/flows": true,
 	"/api/players": true, "/api/bans": true, "/api/flows": true, "/api/status": true,
 	"/api/console": true,
 }
 
-// isQuiet reports whether a request is a routine read: a quietPaths GET, or
-// the Message and Details dialogs reading one player
-// (/api/players/<guid>/chat, /details, /steam).
+// isQuiet reports whether a request is a routine read: a quietPaths GET, a
+// theme file (/assets/...), or the Message and Details dialogs reading one
+// player (/api/players/<guid>/chat, /details, /steam).
 func isQuiet(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
 	p := r.URL.Path
-	return quietPaths[p] || (strings.HasPrefix(p, "/api/players/") &&
+	return quietPaths[p] || strings.HasPrefix(p, "/assets/") || (strings.HasPrefix(p, "/api/players/") &&
 		(strings.HasSuffix(p, "/chat") || strings.HasSuffix(p, "/details") || strings.HasSuffix(p, "/steam")))
 }
 
@@ -184,6 +196,11 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 //
 //go:embed templates/*.html
 var templateFiles embed.FS
+
+// assetFiles are the theme's stylesheets and scripts, served at /assets/.
+//
+//go:embed assets
+var assetFiles embed.FS
 
 // loadPageTemplate parses one page together with base.html.
 func loadPageTemplate(name string) *template.Template {

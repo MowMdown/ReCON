@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -307,8 +308,9 @@ var previewCrons = []string{"*/20 * * * *", "0 */6 * * *", "0 0,6,12,18 * * *", 
 //	RECON_PREVIEW=1 go test -run TestPreview ./internal/web
 //
 // It writes players.html, bans.html and flows.html (each loading data.js and
-// preview.js, the stand-in for the API) and data.js (the chat commands, the
-// example flows and the cron descriptions, from the Go code).
+// preview.js, the stand-in for the API), data.js (the chat commands, the
+// example flows and the cron descriptions, from the Go code) and assets/ (the
+// theme, as the app serves it).
 func TestPreview(t *testing.T) {
 	if os.Getenv("RECON_PREVIEW") != "1" {
 		t.Skip("set RECON_PREVIEW=1 to rebuild docs/preview")
@@ -324,6 +326,25 @@ func TestPreview(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(html), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "assets")); err != nil {
+		t.Fatal(err)
+	}
+	err := fs.WalkDir(assetFiles, "assets", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dir, path), 0o755)
+		}
+		data, err := assetFiles.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, path), data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	testDB(t)
