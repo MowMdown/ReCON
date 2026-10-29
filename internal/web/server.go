@@ -47,6 +47,11 @@ func buildWebRoutes() *http.ServeMux {
 	})
 	// The theme's stylesheets and scripts (assets/, see base.html "theme").
 	mux.Handle("GET /assets/", http.FileServerFS(assetFiles))
+	// For anything that asks for /favicon.ico without reading the page's
+	// icon links (browsers' bookmarks, link previews). Browsers take a PNG.
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, assetFiles, "assets/icons/favicon-32.png")
+	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
@@ -123,7 +128,7 @@ func buildWebRoutes() *http.ServeMux {
 
 // quietPaths are the pages' routine GET polls, left out of the request log.
 var quietPaths = map[string]bool{
-	"/health": true, "/players": true, "/bans": true, "/flows": true,
+	"/health": true, "/favicon.ico": true, "/players": true, "/bans": true, "/flows": true,
 	"/api/players": true, "/api/bans": true, "/api/flows": true, "/api/status": true,
 	"/api/console": true,
 }

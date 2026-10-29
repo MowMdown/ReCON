@@ -127,7 +127,7 @@ Mount `/data` as a volume, or everything ReCON has recorded is lost when the con
 
 Every page shows two status lines at the top:
 
-- **RCON Status:** whether ReCON can reach the game server (it reads the player list every 5 seconds and sends a heartbeat every 30, or every 5 once a check goes unanswered; three checks missed in a row means unavailable): *Connected*, *Unavailable - Retrying...* with a small grey countdown to ReCON's next try, or *Unavailable - Waiting for the server...* once ReCON has sent its login and is waiting for the answer. While the server is unavailable, ReCON only sends the heartbeat, every 5 seconds. It sends **one** login, once the server's port is open again, and waits for the answer: a restarting server can take a minute or more to answer it, and every extra login would show up as another RCon admin login. As soon as the answer comes, the status turns *Connected*. [How ReCON logs in again after a restart](docs/rcon-login.md) has the full sequence as a flow chart.
+- **RCON Status:** whether ReCON can reach the game server (it reads the player list every 5 seconds and sends a heartbeat every 30, or every 5 once a check goes unanswered; three checks missed in a row means unavailable): *Connected*, *Unavailable - Retrying...* with a small grey countdown to ReCON's next try, or *Connecting - Waiting for the server...* (in yellow) once ReCON has sent its login and is waiting for the answer. While the server is unavailable, ReCON only sends the heartbeat, every 5 seconds. It sends **one** login, once the server's port is open again, and waits for the answer: a restarting server can take a minute or more to answer it, and every extra login would show up as another RCon admin login. As soon as the answer comes, the status turns *Connected*. [How ReCON logs in again after a restart](docs/rcon-login.md) has the full sequence as a flow chart.
 - **WebGUI Status:** whether your browser can reach ReCON. While it can, the page's count follows *Connected*: players online, bans or flows.
 
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
@@ -561,7 +561,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
 | `internal/store/` | The SQLite database: every SQL statement |
-| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), both embedded into the binary at build time |
+| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker) and the favicons and app icons (`assets/icons/`), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |
 | `examples/flows.json` | Example flows to import |
 | `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |

@@ -58,6 +58,13 @@ td.act button:last-child { margin-right: 0; }
 .importbox .buttons { margin-top: 12px; flex: none; }
 </style>{{end}}
 
+{{define "icons"}}{{/* The browser tab icon, the iOS home-screen icon and the manifest (the
+   icon and name when the page is installed as an app). Files in assets/icons/. */}}<link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="assets/icons/favicon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="assets/icons/favicon-180.png">
+<link rel="manifest" href="assets/manifest.json">{{end}}
+
 {{define "theme"}}{{/* The theme (assets/): Nocturne tokens applied to the pages, Phosphor icons on
    the buttons, and a theme picker (Default, Terminal, Tokyo Night) in the nav.
    It comes after each page's own <style> so it overrides it. */}}<link rel="stylesheet" href="assets/phosphor/style.css">
@@ -74,9 +81,9 @@ td.act button:last-child { margin-right: 0; }
 // Status bar shown on every page. RCON is the game server as ReCON's
 // 5-second player check last saw it (GET /api/status): Connected, or
 // "Unavailable - Retrying..." with a grey countdown to ReCON's next try
-// (ReCON keeps retrying in the background), or "Unavailable - Waiting for
-// the server..." while ReCON's login waits for the server to answer it (no
-// other login is sent meanwhile, so no countdown). WebGUI is whether this page can
+// (ReCON keeps retrying in the background), or, in yellow, "Connecting -
+// Waiting for the server..." while ReCON's login waits for the server to
+// answer it (no other login is sent meanwhile, so no countdown). WebGUI is whether this page can
 // reach ReCON: Retrying after a failed check, Unavailable after 3 in a row.
 // While ReCON can't be reached, RCON's state can't be known: it shows
 // Unavailable - Retrying... with no countdown.
@@ -101,8 +108,8 @@ var setStatusCount;
 		if (id === 'rconStatus' && state[id] !== 'connected') {
 			// Not answering for one check or many: ReCON retries either way,
 			// or has sent its login and waits for the answer.
-			label = waiting ? 'Unavailable - Waiting for the server...' : 'Unavailable - Retrying...';
-			cls = 'unavailable';
+			label = waiting ? 'Connecting - Waiting for the server...' : 'Unavailable - Retrying...';
+			cls = waiting ? 'retrying' : 'unavailable';
 		}
 		el.textContent = label + (state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
 		el.className = 'st ' + cls;
