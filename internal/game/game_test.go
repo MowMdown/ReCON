@@ -351,8 +351,10 @@ func TestOneLoginWhileSettling(t *testing.T) {
 
 // TestServerWatch checks the server watch: `players` every round and the
 // heartbeat every heartbeatEvery while the server answers, the ban list
-// after a login; three unanswered rounds mark the server down without
-// logging in; while it's down only the heartbeat checks it.
+// after a login; after an unanswered round the heartbeat runs every round;
+// three unanswered rounds mark the server down without logging in; while
+// it's down only the heartbeat checks it, with one login that waits for its
+// answer.
 func TestServerWatch(t *testing.T) {
 	testDB(t)
 	resetWeb(t)
@@ -393,7 +395,7 @@ func TestServerWatch(t *testing.T) {
 	w.check(t0.Add(heartbeatEvery))
 	want("a heartbeat later", 2, 3, 1)
 
-	f.SetSilent(true)
+	f.Hold()
 	logins, _ := f.Counts()
 	for i := 1; i <= DownAfterMisses; i++ {
 		w.check(t0.Add(heartbeatEvery + time.Duration(i)*pollEvery))
@@ -404,23 +406,29 @@ func TestServerWatch(t *testing.T) {
 	if l, _ := f.Counts(); l != logins {
 		t.Fatalf("%d login(s) between heartbeats, want 0", l-logins)
 	}
-	want("three missed polls", 2, 6, 1)
+	want("three missed polls", 4, 6, 1) // a heartbeat with each poll after the first miss
 	w.check(t0.Add(heartbeatEvery + 4*pollEvery))
-	want("a round while down", 2, 6, 1) // no poll, no heartbeat yet
+	want("a round while down", 5, 6, 1) // the heartbeat, no poll
+	if l, _ := f.Counts(); l != logins+1 || !WaitingForLogin() {
+		t.Fatalf("while down: %d login(s), waiting %v; want 1 waiting", l-logins, WaitingForLogin())
+	}
 
-	f.SetSilent(false)
-	w.check(t0.Add(2 * heartbeatEvery)) // the heartbeat finds it back
+	f.Release() // the server answers the login
+	for c, _ := liveOrPending(); !c.LoggedIn(); time.Sleep(time.Millisecond) {
+	}
+	w.check(t0.Add(heartbeatEvery + 5*pollEvery)) // the next round's heartbeat finds it back
 	if Status() != "connected" {
 		t.Fatalf("status %s after an answered heartbeat", Status())
 	}
-	want("back", 3, 6, 1)
-	w.check(t0.Add(2*heartbeatEvery + pollEvery))
-	want("polling again", 3, 7, 1)
+	want("back", 6, 6, 1)
+	w.check(t0.Add(heartbeatEvery + 6*pollEvery))
+	want("polling again", 6, 7, 1) // and the heartbeat back to every heartbeatEvery
 }
 
 // TestNextCheckFollowsRounds checks the retry countdown the status bar shows:
 // the next round while the server answers or has missed one or two checks,
-// and the next heartbeat once it is down.
+// and the next heartbeat once it is down: retryHeartbeatEvery after the
+// last one.
 func TestNextCheckFollowsRounds(t *testing.T) {
 	oldNext, oldFails := NextPoll.Load(), Fails.Load()
 	t.Cleanup(func() {
@@ -429,16 +437,16 @@ func TestNextCheckFollowsRounds(t *testing.T) {
 	})
 	now := time.Now()
 	Fails.Store(1)
-	w := serverWatch{lastHeartbeat: now.Add(-10 * time.Second)}
+	w := serverWatch{lastHeartbeat: now.Add(-2 * time.Second)}
 	w.storeNextCheck(now)
 	if d := NextCheck().Sub(now); d < 4900*time.Millisecond || d > 5100*time.Millisecond {
 		t.Fatalf("next check in %v, want the next round (5s)", d)
 	}
-	// Down: only the heartbeat tries, 30s after the last one (20s from now).
+	// Down: only the heartbeat tries, 5s after the last one (3s from now).
 	Fails.Store(DownAfterMisses)
 	w.storeNextCheck(now)
-	if d := NextCheck().Sub(now); d < 19900*time.Millisecond || d > 20100*time.Millisecond {
-		t.Fatalf("next check in %v, want the next heartbeat (20s)", d)
+	if d := NextCheck().Sub(now); d < 2900*time.Millisecond || d > 3100*time.Millisecond {
+		t.Fatalf("next check in %v, want the next heartbeat (3s)", d)
 	}
 }
 

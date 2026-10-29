@@ -11,7 +11,8 @@
 //
 //   - The server watch (StartWatch, session.go): every 5 seconds it polls
 //     `players` while the server answers, and every 30 seconds it sends the
-//     heartbeat, an empty command that keeps the web session alive. The
+//     heartbeat, an empty command that keeps the web session alive (every 5
+//     seconds once a check has gone unanswered). The
 //     heartbeat is the only thing that logs in: on a new socket only when the
 //     old one has died, otherwise again on the same socket, so BattlEye keeps
 //     the same admin slot. A login the server doesn't answer straight away
@@ -733,12 +734,19 @@ func NextCheck() time.Time {
 // console log missed leaving is closed within one poll.
 var pollEvery = 5 * time.Second
 
-// heartbeatEvery is how often an empty command is sent, whether or not the
-// server is answering. BattlEye drops a client it hasn't heard from in about
-// 45 seconds. The heartbeat is also the only thing that logs in, so a server
-// that isn't answering gets at most one login packet per heartbeatEvery;
-// while it's down, the heartbeat is the only check (polls pause).
+// heartbeatEvery is how often an empty command is sent while the server is
+// answering. BattlEye drops a client it hasn't heard from in about 45
+// seconds. Once a check goes unanswered, the heartbeat runs every round
+// instead (retryHeartbeatEvery), so a server that comes back is found within
+// 5 seconds. The heartbeat is also the only thing that logs in, so a server
+// that isn't answering gets at most one login packet per round, and none
+// while a login waits for its answer; while it's down, the heartbeat is the
+// only check (polls pause).
 var heartbeatEvery = 30 * time.Second
+
+// retryHeartbeatEvery is how often the heartbeat runs after an unanswered
+// check, until the server answers again.
+var retryHeartbeatEvery = pollEvery
 
 var heartbeatWait = 2 * time.Second
 
@@ -747,7 +755,8 @@ var heartbeatWait = 2 * time.Second
 //   - Delete timed bans that have run out, if one is due (ExpireDue), and let go
 //     of players who didn't come back after a restart in time
 //     (ForgetAway).
-//   - Every heartbeatEvery, the heartbeat: log in on a new socket if there is
+//   - Every heartbeatEvery (every retryHeartbeatEvery after an unanswered
+//     check), the heartbeat: log in on a new socket if there is
 //     no live session (Login), then send an empty command
 //     (heartbeatWait). While the server is down and the empty command goes
 //     unanswered, log in again on the same socket (Relogin). A login
@@ -791,12 +800,21 @@ type serverWatch struct {
 // isDown reports whether the server has missed DownAfterMisses checks in a row.
 func (w *serverWatch) isDown() bool { return Fails.Load() >= DownAfterMisses }
 
+// heartbeatInterval is the time between heartbeats: heartbeatEvery while
+// the server answers, retryHeartbeatEvery once a check has gone unanswered.
+func (w *serverWatch) heartbeatInterval() time.Duration {
+	if Fails.Load() > 0 {
+		return retryHeartbeatEvery
+	}
+	return heartbeatEvery
+}
+
 // check is one round (see Start).
 func (w *serverWatch) check(now time.Time) {
 	ExpireBans(now)
 	ForgetAway(now)
 	defer w.storeNextCheck(now)
-	heartbeatDue := now.Sub(w.lastHeartbeat) >= heartbeatEvery
+	heartbeatDue := now.Sub(w.lastHeartbeat) >= w.heartbeatInterval()
 	if w.isDown() && !heartbeatDue {
 		return // only the heartbeat checks a server that's down
 	}
@@ -880,7 +898,7 @@ func (w *serverWatch) answered(now time.Time) {
 func (w *serverWatch) storeNextCheck(now time.Time) {
 	next := now.Add(pollEvery)
 	if w.isDown() {
-		next = w.lastHeartbeat.Add(heartbeatEvery)
+		next = w.lastHeartbeat.Add(w.heartbeatInterval())
 	}
 	NextPoll.Store(next.UnixMilli())
 }

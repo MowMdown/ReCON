@@ -17,7 +17,8 @@ The rules that shape it:
   is down its port is closed, and the system reports every packet sent there
   as refused; that closes the socket, and the next heartbeat logs in on a new
   one. A refused login is never answered later, so it leaves nothing behind.
-- **Only the heartbeat logs in**, every 30 seconds at most. Page actions,
+- **Only the heartbeat logs in**: every 30 seconds while the server answers,
+  every 5 seconds once a check has gone unanswered. Page actions,
   flow steps and polls never log in; while ReCON isn't logged in they fail
   straight away with "not logged in to RCON".
 - **The answer is taken as soon as it comes**: ReCON sends `#unlock`, reads
@@ -42,9 +43,9 @@ commands start again at sequence number 0.
 ```mermaid
 flowchart TD
     R(["Round, every 5s<br/>expire due bans · drop players past the 5-min restart grace"])
-    R --> D{"Server down (3+ misses)<br/>and heartbeat not due (under 30s)?"}
+    R --> D{"Server down (3+ misses)<br/>and heartbeat not due (under 5s)?"}
     D -- yes --> W(["Wait for the next round<br/>(only heartbeats while down)"])
-    D -- no --> H{"Heartbeat due<br/>(30s since the last one)?"}
+    D -- no --> H{"Heartbeat due?<br/>(30s since the last one,<br/>5s after a miss)"}
 
     H -- no --> P
     H -- yes --> C{"Socket?"}
@@ -86,7 +87,7 @@ flowchart TD
 | 0s | Gets `#shutdown`, process exits | Sends the command once (`acked` may be false: the server can die before replying). Players' disconnect lines close their sessions. |
 | +5s, +10s | Down, port closed | `players` polls fail (the port refuses them and the socket closes): misses 1 and 2, status **Retrying**. |
 | +15s | Down | Miss 3: status **Unavailable**. Sessions still open are closed at the time the server last answered; those players are remembered for the restart grace. |
-| Every 30s | Port closed | The heartbeat's one login is refused at once; nothing is left behind. |
+| Every 5s | Port closed | The heartbeat's one login is refused at once; nothing is left behind. |
 | First heartbeat with the port open | BattlEye still starting | One login, no answer within 3s: the socket is kept and the login is pending. Status **Unavailable - Waiting for the server...**, no countdown. Later heartbeats send only an empty command. |
 | When BattlEye is up | Answers the login | Login accepted: `> #unlock` in the console, the 5-minute restart grace starts, `players` is read at once: status **Connected**, the ban list is read, polls every 5s resume. |
 | Within 5 minutes | Players reconnecting | A player back **from the same IP** keeps the session they had; the time the server was down isn't counted. From a new IP, they get a new session. |
@@ -99,7 +100,7 @@ socket.
 
 If BattlEye accepts the login but doesn't answer commands yet (still loading
 the map), ReCON doesn't log in again for 60 seconds and keeps sending a
-heartbeat every 30 seconds until one is answered.
+heartbeat every 5 seconds until one is answered.
 
 BattlEye may report ReCON's login late, after the map has loaded, in a burst
 with its `Config entry` lines. That is the same login (same port), not a second
@@ -111,6 +112,7 @@ one.
 |---|---|---|
 | Round (`players` poll while answering) | 5s | `pollEvery` (`internal/game`) |
 | Heartbeat (and the only login) | 30s | `heartbeatEvery` (`internal/game`) |
+| Heartbeat after an unanswered check, until one is answered | 5s | `retryHeartbeatEvery` (`internal/game`) |
 | Wait for a heartbeat's answer | 2s | `heartbeatWait` (`internal/game`) |
 | Wait for a `players` reply | 3s | `PlayersPollWait` (`internal/game`) |
 | Wait for a login reply before it counts as pending | 3s | `ReloginReplyWait` (`internal/battleye`) |
