@@ -426,6 +426,15 @@
 			p.role = r;
 			return json({ ok: true, role: r });
 		}],
+		['DELETE', /^\/api\/players\/([0-9a-f]{32})$/, function (m, o) {
+			var p = byGuid(m[1]);
+			if (!p) return fail(404, 'unknown player (this GUID has never been seen on the server)');
+			if (p.isOnline) return fail(409, 'this player is online; a player can only be deleted while offline');
+			if (body(o).name !== p.name) return fail(400, "the name doesn't match; type the player's name exactly");
+			players.splice(players.indexOf(p), 1);
+			delete chats[p.guid];
+			return json({ ok: true });
+		}],
 		['GET', /^\/api\/players\/([0-9a-f]{32})\/steam$/, function (m) { return json(steamView(byGuid(m[1]))); }],
 		['POST', /^\/api\/players\/([0-9a-f]{32})\/steam\/search$/, function (m) {
 			var p = byGuid(m[1]);

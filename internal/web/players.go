@@ -296,6 +296,43 @@ func handleSetRole(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role": *req.Role})
 }
 
+// handleDeletePlayer serves DELETE /api/players/{guid} {"name": "..."}: the
+// Danger tab's Delete Player. It removes the player and everything recorded
+// about them (store.Database.DeletePlayer), keeping their ban record. name
+// must be their name exactly; a player who is online can't be deleted, as
+// their open session would add them straight back.
+func handleDeletePlayer(w http.ResponseWriter, r *http.Request) {
+	guid, ok := playerGUID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeBody(w, r, &req); err != nil || req.Name == "" {
+		fail(w, http.StatusBadRequest, `send {"name": "<the player's name>"}`)
+		return
+	}
+	if _, online := game.PlayerByGUID(guid); online {
+		fail(w, http.StatusConflict, "this player is online; a player can only be deleted while offline")
+		return
+	}
+	err := database.DeletePlayer(guid, req.Name)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		fail(w, http.StatusNotFound, "unknown player (this GUID has never been seen on the server)")
+		return
+	case errors.Is(err, store.ErrNameMismatch):
+		fail(w, http.StatusBadRequest, "the name doesn't match; type the player's name exactly")
+		return
+	case err != nil:
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Printf("players: deleted %s (%s) and everything recorded about them", req.Name, guid)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // handleChatHistory serves GET /api/players/{guid}/chat: the player's chat
 // and the private messages sent to them, oldest first. Works while RCON is
 // down, and for players who are offline.

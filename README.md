@@ -165,9 +165,12 @@ Details works for online and offline players. It has these tabs:
 | Steam Profile | Their Steam account (see [Steam profiles](#6-steam-profiles)) |
 | Chat          | Their chat history. While they're online you can message them from here |
 | Notes         | A private admin note of up to 500 characters. It saves when you close the dialog or switch players |
-| Permissions   | Their role for the chat commands: Player, Mod or Admin. Clicking a role saves it |
+| Role          | Their role for the chat commands: Player, Mod or Admin. Clicking a role saves it |
+| Danger        | **Delete Player** (below) |
 
 The **Ban** / **Unban** button at the bottom works whether the player is online or not.
+
+On the **Danger** tab that button is **Delete Player**: it removes the player and everything ReCON has recorded about them from the database (sessions and playtime, IPs, chat history, the note, their role and SteamID). It asks *Are you sure?*, then for the player's name, typed exactly, before **Delete** does it. It can't be undone. A ban stays on the server's ban list, and a player who joins again starts over as a new player. A player can only be deleted while offline.
 
 | Overview | Steam Profile |
 | :---: | :---: |
@@ -330,7 +333,7 @@ A schedule is a standard 5-field cron expression, `minute hour day-of-month mont
 
 `*` is any value, `1,4` a list, `1-5` a range and `*/15` every 15th. Months and weekdays also accept names (`jan`-`dec`, `sun`-`sat`); Sunday is 0 or 7.
 
-Whenever ReCON logs in to the game server (on start, and after a server restart), it sends `#unlock`. A restart flow can therefore lock the server, shut it down and leave the unlock to ReCON.
+Whenever ReCON logs in to the game server (on start, and after a server restart), it sends `#unlock` 3 seconds after the login is accepted. A restart flow can therefore lock the server, shut it down and leave the unlock to ReCON.
 
 ### Example flows
 
@@ -373,7 +376,7 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 | `!warning <code or number> <reason>` | Mods, Admins | Warns that player (see below) |
 
 - **Code or number:** a player's code is the last 6 characters of their GUID (they can type `!code`); their number is the one `!players` shows (`12` or `#12`).
-- **Roles** are set on the Players page, under **Details → Permissions**, and are stored with the player's GUID, so they survive a name change. New players are Players.
+- **Roles** are set on the Players page, under **Details → Role**, and are stored with the player's GUID, so they survive a name change. New players are Players.
 - Mods can kick, ban and warn Players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
 - Every mod and admin online is told about each kick, ban and warning. With **Announce** on, everyone is told.
 - **Warnings:** each `!warning` is sent to the player with its reason and adds one to their warnings. Warnings are counted per visit: they start again at 0 when the player leaves. The warning that reaches the threshold (**Warnings until**, 2 by default, 1 or more) is followed 5 seconds later by a kick or a permanent ban with that warning's reason, whichever the **Kick / Ban** setting next to it says at that moment, and the count starts again.
@@ -381,7 +384,7 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 
 **Chat commands** on the Flows page turns each command on or off, sets its cooldown and edits the wording of everything ReCON sends. Cooldowns are server-wide: once anyone uses a command, it's ignored for everyone until the time is up.
 
-| Chat command settings | Permissions |
+| Chat command settings | Role |
 | :---: | :---: |
 | ![Chat command settings](docs/screenshots/flows-chat-commands.png) | ![Details: Permissions](docs/screenshots/details-permissions.png) |
 
@@ -484,6 +487,7 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 | POST | `/api/players/<guid>/chat` | `{"message": "..."}` | Private message, by GUID |
 | POST | `/api/players/<guid>/note` | `{"note": "..."}` | Save the admin note (an empty note deletes it) |
 | POST | `/api/players/<guid>/role` | `{"role": 0}` | 0 Player, 1 Mod, 2 Admin |
+| DELETE | `/api/players/<guid>` | `{"name": "..."}`, their name exactly | Delete the player and everything recorded about them (not their ban). Refused while they're online (409) or when the name doesn't match (400) |
 | GET  | `/api/players/<guid>/steam` | | The Steam Profile tab; `?refresh=1` fetches it again |
 | POST | `/api/players/<guid>/steam/search` | | Start looking up the player's SteamID |
 

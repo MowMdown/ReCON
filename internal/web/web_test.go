@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
 	"github.com/MowMdown/ReCON/internal/steam"
@@ -379,5 +380,53 @@ func TestPreview(t *testing.T) {
 		"window.RECON_PREVIEW_DATA = " + string(data) + ";\n"
 	if err := os.WriteFile(filepath.Join(dir, "data.js"), []byte(js), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestDeletePlayerRoute checks DELETE /api/players/{guid}: the name must
+// match exactly, a player who is online can't be deleted, and once deleted
+// the player is gone.
+func TestDeletePlayerRoute(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Now().Add(-time.Hour)
+	if err := db.OpenPlayerSession(test.GUID1, "Marrow", "1.2.3.4", 3, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ClosePlayerSession(test.GUID1, t0.Add(time.Minute), "disconnected"); err != nil {
+		t.Fatal(err)
+	}
+	mux := buildWebRoutes()
+	del := func(guid, body string) (int, string) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/players/"+guid, strings.NewReader(body)))
+		return rec.Code, rec.Body.String()
+	}
+
+	if code, _ := del(test.GUID2, `{"name": "Marrow"}`); code != http.StatusNotFound {
+		t.Errorf("unknown player: %d, want 404", code)
+	}
+	if code, _ := del(test.GUID1, `{"name": "marrow"}`); code != http.StatusBadRequest {
+		t.Errorf("wrong name: %d, want 400", code)
+	}
+	if code, _ := del(test.GUID1, `{}`); code != http.StatusBadRequest {
+		t.Errorf("no name: %d, want 400", code)
+	}
+	// Online: refused, nothing deleted.
+	game.Track(battleye.ParseServerMessage("Player #3 Marrow (1.2.3.4:2304) connected", time.Now()))
+	game.Track(battleye.ParseServerMessage("Player #3 Marrow - BE GUID: "+test.GUID1, time.Now()))
+	if code, _ := del(test.GUID1, `{"name": "Marrow"}`); code != http.StatusConflict {
+		t.Errorf("online player: %d, want 409", code)
+	}
+	game.ResetTracker()
+	if code, body := del(test.GUID1, `{"name": "Marrow"}`); code != http.StatusOK {
+		t.Fatalf("delete: %d %s", code, body)
+	}
+	if n := test.CountRows(t, db, "players"); n != 0 {
+		t.Errorf("%d player row(s) left", n)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/players/"+test.GUID1+"/details", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("details after delete: %d, want 404", rec.Code)
 	}
 }

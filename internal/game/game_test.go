@@ -172,6 +172,44 @@ func TestSentCommandsGoInConsoleLog(t *testing.T) {
 	}
 }
 
+// The tests don't wait unlockDelay after each login, except
+// TestUnlockWaitsAfterLogin.
+func init() { unlockDelay = 0 }
+
+// TestUnlockWaitsAfterLogin checks that the login doesn't wait for #unlock,
+// which goes out unlockDelay after it, once when the server acknowledges it.
+func TestUnlockWaitsAfterLogin(t *testing.T) {
+	resetWeb(t)
+	f := test.NewServer(t)
+	SetTarget(f.Addr(), "pw")
+	unlockDelay = 200 * time.Millisecond
+	t.Cleanup(func() { unlockDelay = 0; loginPollDue.Store(false) })
+
+	start := time.Now()
+	if err := Login(); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took >= unlockDelay {
+		t.Errorf("the login took %v: it waited for #unlock", took)
+	}
+	if _, unlocks := f.Counts(); unlocks != 0 {
+		t.Fatalf("#unlock sent straight away")
+	}
+	for _, unlocks := f.Counts(); unlocks == 0; _, unlocks = f.Counts() {
+		if time.Since(start) > 2*time.Second {
+			t.Fatal("no #unlock after the login")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if took := time.Since(start); took < unlockDelay {
+		t.Errorf("#unlock went out %v after the login, want at least %v", took, unlockDelay)
+	}
+	time.Sleep(2 * unlockDelay) // acknowledged: no second one
+	if _, unlocks := f.Counts(); unlocks != 1 {
+		t.Errorf("#unlock sent %d times, want 1", unlocks)
+	}
+}
+
 // testDB opens a fresh database and resets the player tracker.
 func testDB(t *testing.T) *store.Database {
 	t.Helper()
@@ -307,20 +345,21 @@ func liveOrPending() (*battleye.Session, bool) {
 }
 
 // TestOneLoginWhileSettling checks a server that accepts logins but doesn't
-// answer commands yet: one login and one #unlock, no new login while it
-// settles (ReloginSettle), then one on the same socket.
+// answer commands yet: one login, and #unlock sent unlockTries times as it
+// goes unacknowledged; no new login while it settles (ReloginSettle), then
+// one on the same socket.
 func TestOneLoginWhileSettling(t *testing.T) {
 	testDB(t)
 	resetWeb(t)
 	f := test.NewServer(t)
 	SetTarget(f.Addr(), "pw")
-	oldBeat, oldPoll, oldReply, oldSettle := heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, ReloginSettle
+	oldBeat, oldPoll, oldReply, oldSettle, oldUnlock := heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, ReloginSettle, unlockWait
 	t.Cleanup(func() {
-		heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, ReloginSettle = oldBeat, oldPoll, oldReply, oldSettle
+		heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, ReloginSettle, unlockWait = oldBeat, oldPoll, oldReply, oldSettle, oldUnlock
 		Fails.Store(0)
 		loginPollDue.Store(false)
 	})
-	heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait = 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond
+	heartbeatWait, PlayersPollWait, battleye.ReloginReplyWait, unlockWait = 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond
 	Fails.Store(0)
 
 	f.SetMute(true)
@@ -329,14 +368,14 @@ func TestOneLoginWhileSettling(t *testing.T) {
 	for i := 0; i <= 6; i++ {
 		w.check(t0.Add(time.Duration(i) * heartbeatEvery / 2))
 	}
-	if l, u := f.Counts(); l != 1 || u != 1 {
-		t.Fatalf("while settling: %d login(s), %d #unlock(s); want 1 and 1", l, u)
+	if l, u := f.Counts(); l != 1 || u != unlockTries {
+		t.Fatalf("while settling: %d login(s), %d #unlock(s); want 1 and %d", l, u, unlockTries)
 	}
 	// Once it has settled, a heartbeat logs in again on the same socket.
 	ReloginSettle = 0
 	w.check(t0.Add(4 * heartbeatEvery))
-	if l, u := f.Counts(); l != 2 || u != 2 {
-		t.Fatalf("after settling: %d login(s), %d #unlock(s); want 2 and 2", l, u)
+	if l, u := f.Counts(); l != 2 || u != 2*unlockTries {
+		t.Fatalf("after settling: %d login(s), %d #unlock(s); want 2 and %d", l, u, 2*unlockTries)
 	}
 	// It answers: connected, and no more logins.
 	f.SetMute(false)

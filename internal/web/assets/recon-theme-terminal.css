@@ -19,7 +19,8 @@ html[data-theme="terminal"] {
   --radius-sm: 1px; --radius-md: 2px; --radius-lg: 3px;
   --shadow-sm: 0 0 0 1px var(--color-divider); --shadow-md: 0 0 0 1px var(--color-divider); --shadow-lg: 0 0 24px oklch(0.91 0.1 150 / .14);
   --rc-ok: oklch(0.88 0.12 150); --rc-warn: oklch(0.85 0.11 85); --rc-err: oklch(0.72 0.15 25);
-  --c-player: oklch(0.82 0.11 85); --c-server: oklch(0.72 0.15 25); --c-time: oklch(0.85 0.11 85); --c-logic: oklch(0.82 0.08 200);
+  /* Flow step colours: Server steps white, Players steps red */
+  --c-player: oklch(0.72 0.15 25); --c-server: oklch(0.97 0 0); --c-time: oklch(0.85 0.11 85); --c-logic: oklch(0.82 0.08 200);
 }
 html[data-theme="terminal"] body { font-size: 13px; letter-spacing: 0; text-shadow: 0 0 4px oklch(0.91 0.1 150 / .08); }
 html[data-theme="terminal"] body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100; background: repeating-linear-gradient(to bottom, transparent 0 3px, oklch(0 0 0 / .05) 3px 4px); }
@@ -44,3 +45,14 @@ html[data-theme="terminal"] ::selection { background: var(--color-accent); color
 html[data-theme="terminal"] .dtabs button.active, html[data-theme="terminal"] .tabs button.active { background: oklch(0.91 0.1 150 / .08) !important; }
 html[data-theme="terminal"] td.act button, html[data-theme="terminal"] td.actions button { font-size: 12px; }
 html[data-theme="terminal"] #onlineTable td.act button { padding: 0 8px; }
+/* Flows' Commands dialog: its buttons on the green surface, as Tokyo Night does on its own (recon-theme-nocturne.css) */
+html[data-theme="terminal"] .srvlist button { background: var(--color-surface) !important; border-color: var(--color-divider) !important; }
+html[data-theme="terminal"] .srvlist button:hover, html[data-theme="terminal"] .srvlist button:focus-visible { background: oklch(0.91 0.1 150 / .08) !important; border-color: var(--color-accent) !important; color: var(--color-text) !important; }
+html[data-theme="terminal"] .srvlist .ic { background: var(--color-neutral-900) !important; }
+/* Flow editor: the step-type labels take their background and border from
+   their own (Terminal) colour instead of the page's fixed tints, and the
+   If / End if connector rows the If colour. */
+html[data-theme="terminal"] .pill { background: color-mix(in srgb, currentColor 12%, transparent) !important; border-color: color-mix(in srgb, currentColor 40%, transparent) !important; }
+html[data-theme="terminal"] .step.joint { background: color-mix(in srgb, var(--c-logic) 6%, transparent) !important; border-color: color-mix(in srgb, var(--c-logic) 35%, transparent) !important; }
+/* ...but every row of the If block still lights up on hover (.hl), as on the If row */
+html[data-theme="terminal"] .step.joint.hl { border-color: var(--c-logic) !important; }
