@@ -54,3 +54,5 @@ html[data-theme="terminal"] .srvlist .ic { background: var(--color-neutral-900) 
    If / End if connector rows the If colour. */
 html[data-theme="terminal"] .pill { background: color-mix(in srgb, currentColor 12%, transparent) !important; border-color: color-mix(in srgb, currentColor 40%, transparent) !important; }
 html[data-theme="terminal"] .step.joint { background: color-mix(in srgb, var(--c-logic) 6%, transparent) !important; border-color: color-mix(in srgb, var(--c-logic) 35%, transparent) !important; }
+/* ...but every row of the If block still lights up on hover (.hl), as on the If row */
+html[data-theme="terminal"] .step.joint.hl { border-color: var(--c-logic) !important; }
