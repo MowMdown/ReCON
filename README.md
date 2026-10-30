@@ -330,7 +330,7 @@ A schedule is a standard 5-field cron expression, `minute hour day-of-month mont
 
 `*` is any value, `1,4` a list, `1-5` a range and `*/15` every 15th. Months and weekdays also accept names (`jan`-`dec`, `sun`-`sat`); Sunday is 0 or 7.
 
-Whenever ReCON logs in to the game server (on start, and after a server restart), it sends `#unlock`. A restart flow can therefore lock the server, shut it down and leave the unlock to ReCON.
+Whenever ReCON logs in to the game server (on start, and after a server restart), it sends `#unlock` 3 seconds after the login is accepted. A restart flow can therefore lock the server, shut it down and leave the unlock to ReCON.
 
 ### Example flows
 

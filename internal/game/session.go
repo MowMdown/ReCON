@@ -261,7 +261,8 @@ var LoginResendAfter = 5 * time.Minute
 //   - Logged out on a live socket (the login was rejected): log in again on it.
 //
 // It returns nil when logged in and battleye.ErrLoginPending while waiting.
-// Every accepted login sends #unlock (afterLogin), even one answered late.
+// Every accepted login sends #unlock unlockDelay later (afterLogin), even one
+// answered late.
 func Login() error {
 	if _, err := liveWebSession(); err == nil {
 		return nil
@@ -318,20 +319,35 @@ func WaitingForLogin() bool {
 }
 
 // afterLogin runs once for each login the server accepts on the web
-// session, whether it was answered at once or late: it sends #unlock
-// (unlockAfterLogin). ran is false when it had already run for that login
-// (or s is no longer the web session); acked is whether the server
-// acknowledged #unlock.
-func afterLogin(s *battleye.Session) (ran, acked bool) {
+// session, whether it was answered at once or late. It asks the server watch
+// to read the ban list next (the server may have restarted, so the bans ReCON
+// knew may be out of date), runs the login hooks, and sends #unlock
+// unlockDelay later in the background (unlockAfterLogin), so the login and
+// the status don't wait for it. It reports false when it had already run for
+// that login (or s is no longer the web session).
+func afterLogin(s *battleye.Session) bool {
 	webConnection.Lock()
 	if s != webConnection.connection || s.Logins() <= webConnection.handled {
 		webConnection.Unlock()
-		return false, false
+		return false
 	}
 	webConnection.handled = s.Logins()
-	webConnection.lastErr, webConnection.loggedInAt = nil, time.Now()
+	now := time.Now()
+	webConnection.lastErr, webConnection.loggedInAt = nil, now
 	webConnection.Unlock()
-	return true, unlockAfterLogin(s)
+	loginPollDue.Store(true)
+	loginHooks.Lock()
+	hooks := loginHooks.fns
+	loginHooks.Unlock()
+	for _, fn := range hooks {
+		fn(now)
+	}
+	if delay, wait := unlockDelay, unlockWait; delay > 0 {
+		go unlockAfterLogin(s, s.Logins(), delay, wait)
+	} else {
+		unlockAfterLogin(s, s.Logins(), 0, wait) // no delay (the tests): at once, in order
+	}
+	return true
 }
 
 // loginAnswered wakes the server watch when a login is accepted
@@ -429,26 +445,47 @@ func Relogin() bool {
 // loginSource is the logAs label for what ReCON sends by itself after a login.
 const loginSource = "login"
 
+// unlockDelay is how long after an accepted login ReCON waits before sending
+// #unlock, and before sending it again when it went unacknowledged: the
+// server reports the login first ("RCon admin #N ... logged in") and, after
+// a restart, is ready to answer it.
+var unlockDelay = 3 * time.Second
+
+// unlockTries is how many times #unlock is sent after a login, unlockDelay
+// apart, until the server acknowledges it; unlockWait is how long each waits
+// for the acknowledgement.
+const unlockTries = 3
+
+var unlockWait = 2 * time.Second
+
 // unlockAfterLogin sends #unlock on a session that has just logged in (see
-// Login), logs it like any other sent command, and asks the
-// server watch to read the ban list next: the server may have restarted,
-// so the bans ReCON knew may be out of date. It uses runRawCommand
-// because the callers already hold the session. It reports whether the
-// server acknowledged #unlock.
-func unlockAfterLogin(s *battleye.Session) bool {
-	Events.Publish(battleye.ServerEvent{Time: time.Now(), Kind: battleye.EventSent, Text: "> #unlock", Source: loginSource, PlayerID: -1})
-	out, acked, err := s.RunRaw("#unlock", 2*time.Second)
-	battleye.LogSentCommand(webSource, loginSource, "#unlock", acked, err)
-	logCommandResult(loginSource, out, acked, err)
-	loginPollDue.Store(true)
-	now := time.Now()
-	loginHooks.Lock()
-	hooks := loginHooks.fns
-	loginHooks.Unlock()
-	for _, fn := range hooks {
-		fn(now)
+// afterLogin), delay (unlockDelay) after the login, waiting wait
+// (unlockWait) for the acknowledgement, and logs it like any other sent
+// command. While the server doesn't acknowledge it, it sends it again delay
+// later, up to unlockTries times in all. It stops when s is
+// closed, no longer the web session, or has logged in again since (login is
+// s.Logins() when it started). It reports whether the server acknowledged
+// #unlock.
+func unlockAfterLogin(s *battleye.Session, login uint64, delay, wait time.Duration) bool {
+	for try := 1; ; try++ {
+		time.Sleep(delay)
+		webConnection.Lock()
+		current := s == webConnection.connection
+		webConnection.Unlock()
+		if !current || s.IsClosed() || s.Logins() != login {
+			return false
+		}
+		Events.Publish(battleye.ServerEvent{Time: time.Now(), Kind: battleye.EventSent, Text: "> #unlock", Source: loginSource, PlayerID: -1})
+		out, acked, err := s.RunRaw("#unlock", wait)
+		battleye.LogSentCommand(webSource, loginSource, "#unlock", acked, err)
+		logCommandResult(loginSource, out, acked, err)
+		if err == nil && acked {
+			return true
+		}
+		if err != nil || try == unlockTries {
+			return false
+		}
 	}
-	return err == nil && acked
 }
 
 // loginHooks is what runs after every login of the web session (OnLogin).
@@ -841,8 +878,9 @@ func (w *serverWatch) check(now time.Time) {
 }
 
 // loginLanded runs when the server accepts a login (signalLogin). For a
-// login the heartbeat stopped waiting for, it sends #unlock (afterLogin)
-// and polls `players`; either answered makes the status connected. A login
+// login the heartbeat stopped waiting for, it runs afterLogin (#unlock
+// follows unlockDelay later) and polls `players`; an answer makes the
+// status connected. A login
 // accepted while the heartbeat waited was already handled there.
 func (w *serverWatch) loginLanded(now time.Time) {
 	webConnection.Lock()
@@ -851,14 +889,13 @@ func (w *serverWatch) loginLanded(now time.Time) {
 	if c == nil {
 		return
 	}
-	ran, acked := afterLogin(c)
-	if !ran {
+	if !afterLogin(c) {
 		return
 	}
 	log.Printf("rcon: the server answered the login; logged in")
 	defer w.storeNextCheck(now)
 	Polled.Store(true)
-	if PollPlayers() || acked {
+	if PollPlayers() {
 		w.answered(now)
 	}
 }
