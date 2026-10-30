@@ -29,8 +29,9 @@
     var label = el.textContent;
     if (!label.trim()) return;
     // Primary/danger by label, also for buttons with their own icon (Commands,
-    // Settings, Console), but not the Commands dialog's big buttons.
-    if (kind === 'button' && !el.closest('.srvlist')) {
+    // Settings, Console), but not the Commands dialog's big buttons or tabs
+    // (Help's Chat commands tab, the Details tabs), which have their own look.
+    if (kind === 'button' && !el.closest('.srvlist, .tabs, .dtabs')) {
       var l = label.trim().toLowerCase();
       el.classList.toggle('rc-danger', DANGER.test(l));
       el.classList.toggle('rc-primary', !DANGER.test(l) && PRIMARY.test(l));
