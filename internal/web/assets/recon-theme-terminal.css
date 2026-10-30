@@ -44,3 +44,7 @@ html[data-theme="terminal"] ::selection { background: var(--color-accent); color
 html[data-theme="terminal"] .dtabs button.active, html[data-theme="terminal"] .tabs button.active { background: oklch(0.91 0.1 150 / .08) !important; }
 html[data-theme="terminal"] td.act button, html[data-theme="terminal"] td.actions button { font-size: 12px; }
 html[data-theme="terminal"] #onlineTable td.act button { padding: 0 8px; }
+/* Flows' Commands dialog: its buttons on the green surface, as Tokyo Night does on its own (recon-theme-nocturne.css) */
+html[data-theme="terminal"] .srvlist button { background: var(--color-surface) !important; border-color: var(--color-divider) !important; }
+html[data-theme="terminal"] .srvlist button:hover, html[data-theme="terminal"] .srvlist button:focus-visible { background: oklch(0.91 0.1 150 / .08) !important; border-color: var(--color-accent) !important; color: var(--color-text) !important; }
+html[data-theme="terminal"] .srvlist .ic { background: var(--color-neutral-900) !important; }

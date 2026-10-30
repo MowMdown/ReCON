@@ -203,7 +203,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .box.cmdbox { width: min(920px, 96vw); max-height: 90vh; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
 .cmdbox h2 { margin: 0; }
 .cmdbox .intro { color: #aaa; font-size: 13px; line-height: 1.55; margin: 0; }
-.cmdbox code, .ph code { font-family: var(--mono); font-size: 12px; background: #111; padding: 1px 4px; border-radius: 3px; color: #d7e3fc; }
+.cmdbox code, .phint code { font-family: var(--mono); font-size: 12px; background: #111; padding: 1px 4px; border-radius: 3px; color: #d7e3fc; }
 .cmdlist { flex: 1; min-height: 0; overflow-y: auto; border-top: 1px solid #333; border-bottom: 1px solid #333; }
 .cmd { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 12px 18px; padding: 14px 4px; border-bottom: 1px solid #2c2c2c; }
 .cmd:last-child { border-bottom: 0; }
@@ -222,7 +222,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 .field label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
 .field input { width: 100%; font-family: var(--mono); font-size: 13px; padding: 7px 9px; }
 .field .err { margin-top: 4px; }
-.ph { font-size: 12px; color: #888; margin-top: 3px; line-height: 1.6; }
+/* The "Can use: {...}" hint under a step's fields. Not .ph: that's the icons' class. */
+.phint { font-size: 12px; color: #888; margin-top: 3px; line-height: 1.6; }
 .cmdfoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cmdfoot .saved { color: #81c995; font-size: 13px; }
 .cmdfoot .bad { color: #f28b82; font-size: 13px; }
@@ -2062,7 +2063,7 @@ function renderCmds() {
 			const inp = el('input', { value: s.msgs[f.key], spellcheck: 'false', autocomplete: 'off', id: 'f-' + c.cmd + '-' + f.key });
 			const err = el('div', { class: 'err' });
 			const wrap = el('div', { class: 'field' }, el('label', { for: inp.id, text: f.label }), inp, err,
-				el('div', { class: 'ph' }, 'Can use: ', f.ph.map((k, i) => [i ? ' ' : '', el('code', { text: '{' + k + '}' })])));
+				el('div', { class: 'phint' }, 'Can use: ', f.ph.map((k, i) => [i ? ' ' : '', el('code', { text: '{' + k + '}' })])));
 			const upd = () => {
 				const bad = unknown(inp.value, f.ph);
 				inp.classList.toggle('bad', bad.length > 0 || !inp.value.trim());
