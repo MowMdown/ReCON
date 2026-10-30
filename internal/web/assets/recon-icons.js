@@ -13,7 +13,7 @@
     ['steps', 'list-numbers'], ['if / else', 'git-fork'], ['triggers', 'lightning'], ['schedule', 'calendar-dots'],
     ['players', 'users'], ['server bans', 'prohibit'], ['flows', 'flow-arrow']
   ];
-  var PRIMARY = /^(new flow|save|send|connect|confirm|import|export|ban player|ok|run)\b/;
+  var PRIMARY = /^(new flow|help|chat commands|commands|settings|console|save|send|connect|confirm|import|export|ban player|ok|run)\b/;
   var DANGER = /^(kick|ban|unban|delete|remove|stop)\b/;
 
   function pick(label) {
@@ -26,17 +26,19 @@
   }
   function decorate(el, kind) {
     if (el.closest('.menu')) { el.classList.remove('rc-primary', 'rc-danger'); var o = el.querySelector(':scope > i.ph'); if (o) o.remove(); return; }
-    var first = el.firstElementChild;
-    if (first && first.classList.contains('ph')) return;
-    if (el.querySelector('svg')) return; // already has its own icon
     var label = el.textContent;
     if (!label.trim()) return;
-    var name = pick(label);
-    if (kind === 'button') {
+    // Primary/danger by label, also for buttons with their own icon (Commands,
+    // Settings, Console), but not the Commands dialog's big buttons.
+    if (kind === 'button' && !el.closest('.srvlist')) {
       var l = label.trim().toLowerCase();
       el.classList.toggle('rc-danger', DANGER.test(l));
       el.classList.toggle('rc-primary', !DANGER.test(l) && PRIMARY.test(l));
     }
+    var first = el.firstElementChild;
+    if (first && first.classList.contains('ph')) return;
+    if (el.querySelector('svg')) return; // already has its own icon
+    var name = pick(label);
     if (!name) return;
     var i = document.createElement('i');
     i.className = 'ph ph-' + name;
