@@ -6,6 +6,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DayZ Server Bans</title>
+<link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="assets/icons/favicon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="assets/icons/favicon-180.png">
+<link rel="manifest" href="assets/manifest.json">
 <style>
 body { font-family: system-ui, sans-serif; margin: 24px; background: #111; color: #eee; }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -97,12 +102,15 @@ select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; 
 
 
 
+
+
 var setStatusCount;
 (function () {
 	var fails = 0;
 	var text = { connected: 'Connected', retrying: 'Retrying ...', unavailable: 'Unavailable' };
 	var state = {}, count = {};
 	var retryAt = 0; 
+	var waiting = false; 
 	function show(id, s) {
 		if (s) state[id] = s;
 		var el = document.getElementById(id);
@@ -111,8 +119,9 @@ var setStatusCount;
 		var cls = state[id];
 		if (id === 'rconStatus' && state[id] !== 'connected') {
 			
-			label = 'Unavailable - Retrying...';
-			cls = 'unavailable';
+			
+			label = waiting ? 'Connecting - Waiting for the server...' : 'Unavailable - Retrying...';
+			cls = waiting ? 'retrying' : 'unavailable';
 		}
 		el.textContent = label + (state[id] === 'connected' && count[id] ? ' - ' + count[id] : '');
 		el.className = 'st ' + cls;
@@ -133,11 +142,13 @@ var setStatusCount;
 			var d = await (await fetch('/api/status', { cache: 'no-store' })).json();
 			fails = 0;
 			retryAt = typeof d.retryInMs === 'number' ? Date.now() + d.retryInMs : 0;
+			waiting = !!d.waiting;
 			show('webStatus', 'connected');
 			show('rconStatus', d.rcon);
 		} catch (e) {
 			fails++;
 			retryAt = 0;
+			waiting = false;
 			var state = fails >= 3 ? 'unavailable' : 'retrying';
 			show('webStatus', state);
 			show('rconStatus', state);
