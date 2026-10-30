@@ -48,3 +48,8 @@ html[data-theme="terminal"] #onlineTable td.act button { padding: 0 8px; }
 html[data-theme="terminal"] .srvlist button { background: var(--color-surface) !important; border-color: var(--color-divider) !important; }
 html[data-theme="terminal"] .srvlist button:hover, html[data-theme="terminal"] .srvlist button:focus-visible { background: oklch(0.91 0.1 150 / .08) !important; border-color: var(--color-accent) !important; color: var(--color-text) !important; }
 html[data-theme="terminal"] .srvlist .ic { background: var(--color-neutral-900) !important; }
+/* Flow editor: the step-type labels take their background and border from
+   their own (Terminal) colour instead of the page's fixed tints, and the
+   If / End if connector rows the If colour. */
+html[data-theme="terminal"] .pill { background: color-mix(in srgb, currentColor 12%, transparent) !important; border-color: color-mix(in srgb, currentColor 40%, transparent) !important; }
+html[data-theme="terminal"] .step.joint { background: color-mix(in srgb, var(--c-logic) 6%, transparent) !important; border-color: color-mix(in srgb, var(--c-logic) 35%, transparent) !important; }
