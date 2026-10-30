@@ -21,7 +21,8 @@ The rules that shape it:
   every 5 seconds once a check has gone unanswered. Page actions,
   flow steps and polls never log in; while ReCON isn't logged in they fail
   straight away with "not logged in to RCON".
-- **The answer is taken as soon as it comes**: ReCON sends `#unlock`, reads
+- **The answer is taken as soon as it comes**: ReCON sends `#unlock` 3
+  seconds later (after the server's "RCon admin … logged in" line), reads
   the player list and shows **Connected** without waiting for the next round.
 
 What a DayZ server did after `#shutdown`, measured from ReCON's machine:
