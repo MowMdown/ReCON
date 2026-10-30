@@ -85,6 +85,7 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/players/{guid}/details", handlePlayerDetails)     // Details dialog: sessions, IPs, ban, note
 	mux.HandleFunc("POST /api/players/{guid}/note", handleSaveNote)            // {"note": ...}, up to 500 characters
 	mux.HandleFunc("POST /api/players/{guid}/role", handleSetRole)             // {"role": 0|1|2}: Player, Mod, Admin
+	mux.HandleFunc("DELETE /api/players/{guid}", handleDeletePlayer)           // {"name": ...}: their exact name; not while online
 	mux.HandleFunc("GET /api/players/{guid}/steam", handlePlayerSteam)         // Steam Profile tab; ?refresh=1 fetches now
 	mux.HandleFunc("POST /api/players/{guid}/steam/search", handleSteamSearch) // find a player's SteamID from their GUID
 
