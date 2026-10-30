@@ -42,6 +42,10 @@ button.rc-primary:hover { background: color-mix(in srgb, var(--color-accent) 12%
 button.rc-primary:active { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
 button.rc-danger { color: var(--rc-err); border-color: color-mix(in srgb, var(--rc-err) 45%, transparent); }
 button.rc-danger:hover { background: var(--rc-err-bg); border-color: var(--rc-err); }
+/* Disabled buttons are plain grey whatever their kind (Run on a join or chat
+   flow, Delete while a flow runs): no accent or danger colour on the text,
+   icon or border, no glow, and hovering doesn't light them up. */
+button:disabled, button:disabled:hover { color: var(--color-neutral-500) !important; border-color: var(--color-divider) !important; background: transparent !important; box-shadow: none !important; text-shadow: none !important; }
 td.act button, td.actions button { padding: 4px 9px; font-size: 12px; }
 .buttons { display: flex; justify-content: flex-end; gap: var(--space-2); }
 .buttons button, .top button { margin: 0 !important; }
@@ -139,3 +143,21 @@ td.act button { margin-right: 4px !important; }
 
 #bansTable th:last-child, #bansTable td:last-child { background: var(--color-bg) !important; }
 #bansTable td:last-child button { box-sizing: border-box; height: 30px; padding: 0 10px; }
+
+/* Players' Details dialog: the Overview and Steam tiles, the Permissions role
+   cards, their code chips and the good/bad/warning notes, in the theme's
+   colours instead of the page's own fixed greys. */
+.tile, .role { background: var(--color-bg) !important; border-color: var(--color-divider) !important; }
+.tile .k { color: var(--color-neutral-500) !important; }
+.role:hover { border-color: var(--color-neutral-600) !important; }
+.role.sel { border-color: var(--color-accent) !important; background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg)) !important; }
+.role .can code { background: color-mix(in srgb, var(--color-text) 8%, transparent) !important; color: var(--color-neutral-200); }
+.callout.good { background: color-mix(in srgb, var(--rc-ok) 10%, transparent) !important; border-color: color-mix(in srgb, var(--rc-ok) 40%, transparent) !important; }
+.callout.bad { background: color-mix(in srgb, var(--rc-err) 10%, transparent) !important; border-color: color-mix(in srgb, var(--rc-err) 40%, transparent) !important; }
+.callout.warn { background: color-mix(in srgb, var(--rc-warn) 10%, transparent) !important; border-color: color-mix(in srgb, var(--rc-warn) 40%, transparent) !important; }
+.callout.good b { color: var(--rc-ok) !important; } .callout.bad b { color: var(--rc-err) !important; } .callout.warn b { color: var(--rc-warn) !important; }
+
+/* Flows: the Help and Chat commands code chips, the editor's footer line and
+   the Chat commands list's lines, in the theme's colours too. */
+.helpbox code, .cmdbox code, .phint code { background: color-mix(in srgb, var(--color-text) 8%, transparent) !important; color: var(--color-neutral-200) !important; }
+.fb-foot, .cmdlist { border-color: var(--color-divider) !important; }
