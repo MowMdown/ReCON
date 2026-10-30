@@ -151,6 +151,7 @@ td.act button { margin-right: 4px !important; }
 .tile .k { color: var(--color-neutral-500) !important; }
 .role:hover { border-color: var(--color-neutral-600) !important; }
 .role.sel { border-color: var(--color-accent) !important; background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg)) !important; }
+#delName::placeholder { color: var(--color-neutral-600) !important; }
 .role .can code { background: color-mix(in srgb, var(--color-text) 8%, transparent) !important; color: var(--color-neutral-200); }
 .callout.good { background: color-mix(in srgb, var(--rc-ok) 10%, transparent) !important; border-color: color-mix(in srgb, var(--rc-ok) 40%, transparent) !important; }
 .callout.bad { background: color-mix(in srgb, var(--rc-err) 10%, transparent) !important; border-color: color-mix(in srgb, var(--rc-err) 40%, transparent) !important; }

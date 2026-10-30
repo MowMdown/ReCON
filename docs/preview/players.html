@@ -99,6 +99,8 @@ td.lastmsg { text-overflow: ellipsis; color: #ccc; }
 .ban-on { color: #f28b82; font-weight: 600; }
 .ban-off { color: #888; }
 #onlineMsg { margin: 4px 0 0; font-size: 14px; }
+ 
+#delName::placeholder { color: #777; opacity: 1; }
 
  
 #modal { z-index: 20; }
@@ -369,7 +371,8 @@ var setStatusCount;
 			<button type="button" data-tab="steam">Steam Profile</button>
 			<button type="button" data-tab="chat">Chat</button>
 			<button type="button" data-tab="notes">Notes</button>
-			<button type="button" data-tab="permissions">Permissions</button>
+			<button type="button" data-tab="permissions">Role</button>
+			<button type="button" data-tab="danger">Danger</button>
 		</div>
 		<div class="dpanes">
 			<div class="dpane" data-pane="overview">
@@ -416,6 +419,9 @@ var setStatusCount;
 				<div id="permState"></div>
 				<p class="ownernote">This page is the server owner: its Kick and Ban buttons work on everyone, including Admins.</p>
 			</div>
+			<div class="dpane" data-pane="danger">
+				<div class="callout bad" id="detDanger"></div>
+			</div>
 		</div>
 		<div id="detErr" class="dlg-err"></div>
 		<div class="dfoot"><button type="button" id="detBan"></button><button type="button" onclick="closeDetails()">Close</button></div>
@@ -435,6 +441,28 @@ var setStatusCount;
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
 			<button id="submit"></button>
+		</div>
+	</div>
+</div>
+
+
+<div id="delModal" class="modal">
+	<div class="box" id="delAsk">
+		<h2>Delete player?</h2>
+		<p>Are you sure you want to delete <b id="delAskName"></b> from the database?</p>
+		<div class="buttons">
+			<button type="button" onclick="closeDelete()">No</button>
+			<button type="button" class="rc-danger" data-rc onclick="askDeleteName()">Yes</button>
+		</div>
+	</div>
+	<div class="box" id="delType" hidden>
+		<h2>Confirm delete</h2>
+		<label for="delName">Type the player's name to delete them</label>
+		<input id="delName" type="text" autocomplete="off" spellcheck="false">
+		<div id="delErr" class="dlg-err"></div>
+		<div class="buttons">
+			<button type="button" onclick="closeDelete()">Cancel</button>
+			<button type="button" id="delGo" disabled onclick="deletePlayer()">Delete</button>
 		</div>
 	</div>
 </div>
@@ -940,6 +968,25 @@ function showDetTab(name) {
 	}
 	if (name === 'notes') document.getElementById('noteInput').focus();
 	if (name === 'steam') loadDetSteam(false);
+	updateDetFoot();
+}
+
+
+
+function updateDetFoot() {
+	let btn = document.getElementById('detBan');
+	if (!det) return;
+	let online = det.player.online;
+	if (detTab === 'danger') {
+		btn.textContent = 'Delete Player';
+		btn.disabled = online;
+		btn.title = online ? "Can't delete a player who is online" : '';
+	} else {
+		btn.textContent = det.ban.banned ? 'Unban' : 'Ban';
+		btn.disabled = false;
+		btn.title = '';
+	}
+	btn.style.visibility = 'visible';
 }
 
 document.querySelectorAll('#detTabs button').forEach(b => b.addEventListener('click', () => showDetTab(b.getAttribute('data-tab'))));
@@ -1020,9 +1067,15 @@ function renderDetails(keepDraft) {
 	let badge = document.getElementById('detBadge');
 	badge.className = 'badge' + (ban.banned ? ' banned' : p.online ? ' online' : '');
 	badge.textContent = ban.banned ? 'Banned' : p.online ? 'Online #' + p.id : 'Offline';
-	let banBtn = document.getElementById('detBan');
-	banBtn.textContent = ban.banned ? 'Unban' : 'Ban';
-	banBtn.style.visibility = 'visible';
+	updateDetFoot();
+	let danger = document.getElementById('detDanger');
+	danger.textContent = '';
+	let warn = document.createElement('b');
+	warn.textContent = "Deleting a player can't be undone.";
+	danger.append(warn, ' It removes ' + p.name + ' and everything ReCON has recorded about them from the database: ' +
+		'sessions and playtime, IPs, chat history, the note, their role and SteamID. A ban stays on the server\'s ban list. ' +
+		'If they join again, they start over as a new player.' +
+		(p.online ? ' They are online now: a player can only be deleted once they have left.' : ''));
 
 	
 	let tiles = [
@@ -1308,6 +1361,7 @@ async function saveNote() {
 
 document.getElementById('detBan').onclick = async function () {
 	if (!det) return;
+	if (detTab === 'danger') { openDelete(); return; }
 	let p = det.player;
 	if (!det.ban.banned) {
 		openModal(p.online ? p.id : -1, 'ban', p.name, det.guid);
@@ -1666,9 +1720,65 @@ document.getElementById('rconSettingsModal').addEventListener('keydown', (e) => 
 });
 
 
+
+
+function openDelete() {
+	if (!det || det.player.online) return;
+	document.getElementById('delAskName').textContent = det.player.name;
+	document.getElementById('delAsk').hidden = false;
+	document.getElementById('delType').hidden = true;
+	document.getElementById('delModal').style.display = 'flex';
+}
+
+function askDeleteName() {
+	let inp = document.getElementById('delName');
+	inp.value = '';
+	inp.placeholder = det.player.name;
+	document.getElementById('delErr').textContent = '';
+	document.getElementById('delGo').disabled = true;
+	document.getElementById('delAsk').hidden = true;
+	document.getElementById('delType').hidden = false;
+	inp.focus();
+}
+
+function closeDelete() { document.getElementById('delModal').style.display = 'none'; }
+
+document.getElementById('delName').addEventListener('input', (e) => {
+	document.getElementById('delGo').disabled = !det || e.target.value !== det.player.name;
+});
+document.getElementById('delName').addEventListener('keydown', (e) => {
+	if (e.key === 'Enter' && !document.getElementById('delGo').disabled) deletePlayer();
+});
+
+async function deletePlayer() {
+	let name = document.getElementById('delName').value, btn = document.getElementById('delGo'), err = document.getElementById('delErr');
+	if (!det || name !== det.player.name) return;
+	btn.disabled = true;
+	err.textContent = '';
+	try {
+		let r = await fetch('/api/players/' + encodeURIComponent(det.guid), {
+			method: 'DELETE',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ name: name })
+		});
+		let d = await r.json();
+		if (!d.ok) { err.textContent = d.error || 'Delete failed'; btn.disabled = false; return; }
+	} catch (e2) {
+		err.textContent = 'ReCON could not be reached; the player was not deleted.';
+		btn.disabled = false;
+		return;
+	}
+	closeDelete();
+	det = null; 
+	closeDetails();
+	refresh();
+}
+
+
 document.addEventListener('keydown', (e) => {
 	if (e.key !== 'Escape') return;
-	if (document.getElementById('modal').style.display === 'flex') closeModal();
+	if (document.getElementById('delModal').style.display === 'flex') closeDelete();
+	else if (document.getElementById('modal').style.display === 'flex') closeModal();
 	else if (document.getElementById('rconSettingsModal').style.display === 'flex') closeRconSettings();
 	else if (document.getElementById('chatModal').style.display === 'flex') closeChat();
 	else if (document.getElementById('consoleModal').style.display === 'flex') closeConsole();

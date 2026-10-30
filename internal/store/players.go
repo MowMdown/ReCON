@@ -234,6 +234,37 @@ func (db *Database) PlayerByGUID(guid string) (battleye.Player, error) {
 	return p, err
 }
 
+// ErrNameMismatch is DeletePlayer's error when the name given isn't the
+// player's stored name exactly.
+var ErrNameMismatch = errors.New("the name doesn't match the player's name")
+
+// DeletePlayer removes a player and everything recorded about them: their
+// row (name, role, playtime, SteamID), open session, session history, IPs,
+// chat history and note, in one transaction. name must be their stored name
+// exactly (ErrNameMismatch), the safety check the Danger tab asks for. Their
+// ban record, if any, stays: bans belong to the server's ban list. It
+// returns sql.ErrNoRows if the GUID was never seen.
+func (db *Database) DeletePlayer(guid, name string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var stored string
+	if err := tx.QueryRow("SELECT username FROM players WHERE lower(guid) = lower(?)", guid).Scan(&stored); err != nil {
+		return err
+	}
+	if name != stored {
+		return ErrNameMismatch
+	}
+	for _, table := range []string{"active_sessions", "session_history", "player_ips", "chat_messages", "player_notes", "players"} {
+		if _, err := tx.Exec("DELETE FROM "+table+" WHERE lower(guid) = lower(?)", guid); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // SteamIDByGUID returns a player's SteamID64 from players.steam_id ("" until
 // a search has found it). known is false if the GUID was never seen.
 func (db *Database) SteamIDByGUID(guid string) (steamID string, known bool, err error) {
