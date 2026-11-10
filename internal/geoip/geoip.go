@@ -191,3 +191,17 @@ func Country(ip string) string {
 	}
 	return strings.ToLower(rec.Country.ISOCode)
 }
+
+// Info describes the database in use, or returns nil when there is none.
+func Info() map[string]any {
+	r := db.Load()
+	if r == nil {
+		return nil
+	}
+	return map[string]any{
+		"databaseType": r.Metadata.DatabaseType,
+		"built":        time.Unix(int64(r.Metadata.BuildEpoch), 0).UTC(),
+		"ipVersion":    r.Metadata.IPVersion,
+		"nodeCount":    r.Metadata.NodeCount,
+	}
+}

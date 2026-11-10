@@ -200,6 +200,17 @@ The list follows the server's ban list: ReCON reads it when it logs in to RCON (
 
 See [Flows](#4-flows) below. **Commands** (right of the buttons above the list) opens a dialog with **Lock server** (`#lock`), **Unlock server** (`#unlock`), **Kick everyone** (`kickall`) and **Shut down server** (`#shutdown`). Picking one sends it straight away, and the result shows just above the button. Kick everyone and Shut down ask you to confirm first.
 
+### Developer: `/developer`
+
+A page for troubleshooting. No menu item links to it: type `/developer` after the address. Anyone who can open the web GUI can open it. The list on the left is every player, with a search (name, GUID, any IP they used, SteamID) and All / Online / Offline / Banned filters. Pick one to see everything ReCON holds about them, raw and untrimmed, in sections you can fold:
+
+- **flow**: what each [placeholder](#placeholders) would be for them right now, and where it is read from. `{counter}` and `{threshold}` get a row per flow.
+- **memory**: the player tracker's entry (online, or held over a server restart), the online list as the pages see it, each flow's current or last run, a timed ban, and the ban list's state.
+- **db**: every row of every table in `players.db` for their GUID: `players`, `active_sessions`, `session_history`, `player_ips`, `chat_messages`, `player_notes`, `bans`.
+- **ext**: the Steam cache (profile, ban record, SteamID search) and GeoIP's country for each of their IPs.
+
+**Copy all as JSON** copies the lot. The page only reads, refreshes every 5 seconds, and never asks Steam for anything. Linking to `/developer#<guid>` opens that player.
+
 ---
 
 ## 4. Flows
@@ -554,6 +565,13 @@ For example, to start a manual restart flow with a 10-minute delay from a script
 curl -X POST http://<host>:8080/api/flows/3/run \
   -H "Content-Type: application/json" -d '{"minutes":10}'
 ```
+
+### Developer
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| GET | `/api/developer/players` | | Every player: GUID, name, SteamID, IPs, `onlineId` (null when offline), `banned` |
+| GET | `/api/developer/players/<guid>` | | Everything held about one player: `variables` (the flow placeholders) and `sources` (`kind`, `title`, `note`, `data`) |
 
 ### Status
 
