@@ -12,6 +12,7 @@ import (
 
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 	"github.com/MowMdown/ReCON/internal/test"
 )
@@ -904,5 +905,88 @@ func TestHelpListsWhatTheRoleMayUse(t *testing.T) {
 	}
 	if got := help(RoleAdmin, "!help !adminonly"); got != "!adminonly is for admins." {
 		t.Errorf("Admin asking about !adminonly got %q", got)
+	}
+}
+
+// TestSteamBanConditions checks the If subjects from the Steam ban record:
+// the two example flows (kick a VAC ban in the last year; kick more than one
+// VAC ban when the last is over a year old), an If skipped, Else included,
+// when there is no record, no "days since last ban" for a player with no
+// bans, and "?" for a placeholder without a record.
+func TestSteamBanConditions(t *testing.T) {
+	testDB(t)
+	var sent []string
+	oldSend, oldBans := sendCommand, steamBanRecord
+	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
+	t.Cleanup(func() { sendCommand, steamBanRecord = oldSend, oldBans })
+	player := battleye.Player{ID: 4, GUID: test.GUID1, Name: "Suspect"}
+	setOnline(player)
+	var record steam.Bans
+	known := true
+	steamBanRecord = func(_ context.Context, guid string) (steam.Bans, bool) {
+		if guid != test.GUID1 {
+			t.Errorf("ban record asked for %s", guid)
+		}
+		return record, known
+	}
+	nested := func(outer, inner Branch, reason string) []Step {
+		inner.Steps = []Step{{Type: "kick", Who: "player", Reason: reason}}
+		outer.Steps = []Step{{Type: "if", Branches: []Branch{inner}}}
+		return []Step{{Type: "if", Branches: []Branch{outer}}}
+	}
+	recent := nested(Branch{Subject: "player_vac_bans", Op: "ge", Value: "1"}, Branch{Subject: "player_days_since_last_ban", Op: "lt", Value: "365"}, "VAC ban in the last year")
+	repeat := nested(Branch{Subject: "player_vac_bans", Op: "gt", Value: "1"}, Branch{Subject: "player_days_since_last_ban", Op: "gt", Value: "365"}, "Too many VAC bans")
+	for _, steps := range [][]Step{recent, repeat} {
+		if err := checkFlowSteps(triggerJoin, 0, steps, nil); err != nil {
+			t.Fatalf("an On join flow on the ban record was rejected: %v", err)
+		}
+	}
+	run := func(steps []Step) (cmds []string, log string) {
+		sent = nil
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r := &flowRun{name: "vac", ctx: ctx, cancel: cancel}
+		(&job{run: r, ctx: ctx, p: &flowPlayer{Player: player}}).execFlowSteps(steps)
+		return sent, strings.Join(r.log, "\n")
+	}
+	for _, c := range []struct {
+		name          string
+		bans          steam.Bans
+		known         bool
+		recent, again []string
+	}{
+		{"one VAC ban 30 days ago", steam.Bans{VAC: 1, DaysSinceLast: 30}, true, []string{"kick 4 VAC ban in the last year"}, nil},
+		{"two VAC bans, last 400 days ago", steam.Bans{VAC: 2, DaysSinceLast: 400}, true, nil, []string{"kick 4 Too many VAC bans"}},
+		{"one VAC ban 400 days ago", steam.Bans{VAC: 1, DaysSinceLast: 400}, true, nil, nil},
+		{"no bans (Steam says 0 days)", steam.Bans{}, true, nil, nil},
+		{"no ban record", steam.Bans{}, false, nil, nil},
+	} {
+		record, known = c.bans, c.known
+		if got, log := run(recent); fmt.Sprint(got) != fmt.Sprint(c.recent) {
+			t.Errorf("%s, recent-ban flow: sent %q, want %q\n%s", c.name, got, c.recent, log)
+		}
+		if got, log := run(repeat); fmt.Sprint(got) != fmt.Sprint(c.again) {
+			t.Errorf("%s, repeat-ban flow: sent %q, want %q\n%s", c.name, got, c.again, log)
+		}
+	}
+
+	// No record: the If is skipped, its Else too, and the run carries on after it.
+	known = false
+	withElse := []Step{
+		{Type: "if", Branches: []Branch{{Subject: "player_vac_bans", Op: "ge", Value: "1", Steps: []Step{{Type: "kick", Who: "player", Reason: "banned"}}}},
+			Else: &[]Step{{Type: "message", To: "player", Text: "clean"}}},
+		{Type: "message", To: "player", Text: "VAC bans: {player_vac_bans}"},
+	}
+	got, log := run(withElse)
+	if fmt.Sprint(got) != fmt.Sprint([]string{"say 4 VAC bans: ?"}) {
+		t.Errorf("no record: sent %q, want only the message after the If, with ?", got)
+	}
+	if !strings.Contains(log, "If {player_vac_bans} >= 1: skipped (no Steam ban record for Suspect)") {
+		t.Errorf("no record: the skip wasn't logged:\n%s", log)
+	}
+	// With a record, the placeholder is filled and the Else runs as usual.
+	record, known = steam.Bans{VAC: 0}, true
+	if got, _ := run(withElse); fmt.Sprint(got) != fmt.Sprint([]string{"say 4 clean", "say 4 VAC bans: 0"}) {
+		t.Errorf("clean player: sent %q", got)
 	}
 }

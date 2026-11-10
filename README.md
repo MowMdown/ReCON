@@ -271,6 +271,7 @@ Move a step with its arrows, or drag it by the dotted handle on its left. Moving
 | `{player_name}` `{player_id}` | The player's name and number | On join, Player message |
 | `{player_ping}` `{player_ip}` `{player_guid}` | Their ping, IP address and GUID | On join, Player message |
 | `{player_role}` | Player, Mod or Admin | On join, Player message |
+| `{player_vac_bans}` `{player_game_bans}` `{player_days_since_last_ban}` | Their VAC bans, game bans, and days since their last ban on Steam (below). `?` when ReCON has no Steam ban record for them | On join, Player message |
 | `{message}` | Everything they typed | Player message |
 
 ### If, Else if, Else
@@ -284,6 +285,14 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 | `{player_id}` `{player_guid}` | **is** / **is not** |
 | `{player_ping}` `{players_online}` | `=` `!=` `>` `>=` `<` `<=` |
 | `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Mod or Admin (Player < Mod < Admin) |
+| `{player_vac_bans}` `{player_game_bans}` `{player_days_since_last_ban}` | `=` `!=` `>` `>=` `<` `<=` |
+
+**Steam bans.** `{player_vac_bans}`, `{player_game_bans}` and `{player_days_since_last_ban}` come from the player's ban record on Steam, so they need `STEAM_API_KEY` and the player's SteamID (see [Steam profiles](#6-steam-profiles)). ReCON asks Steam once per player and keeps the answer 30 minutes. When there is no record to compare (no key, no SteamID found yet, Steam not answering), an If on one of them is **skipped**, its Else ifs and Else too, and the run log says so. A player with no bans has no "days since last ban", so an If on it is skipped for them as well. Steam's days count from the last VAC **or** game ban. For example, on an **On join** flow:
+
+- **If** `{player_vac_bans} >= 1`, **If** `{player_days_since_last_ban} < 365`: Kick *VAC ban in the last year*.
+- **If** `{player_vac_bans} > 1`, **If** `{player_days_since_last_ban} > 365`: Kick *Too many VAC bans*.
+
+A player whose SteamID isn't known when they join (no steam2guid table, or not in it) has no record until a search finds it, so these Ifs are skipped for them on that join.
 
 ![If / Else in the editor](docs/screenshots/flows-edit-if.png)
 

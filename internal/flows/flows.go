@@ -36,6 +36,7 @@ import (
 
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 )
 
@@ -681,9 +682,26 @@ func (x *job) placeholderValue(name string) (string, bool) {
 		return x.p.message, true
 	case "counter":
 		return strconv.Itoa(x.run.counterOf(x.p.GUID)), true
+	case "player_vac_bans", "player_game_bans", "player_days_since_last_ban":
+		b, ok := steamBanRecord(x.ctx, x.p.GUID)
+		switch {
+		case !ok:
+			return "", false
+		case name == "player_vac_bans":
+			return strconv.Itoa(b.VAC), true
+		case name == "player_game_bans":
+			return strconv.Itoa(b.Game), true
+		case b.VAC+b.Game == 0:
+			return "", false // no bans, so no last ban (Steam says 0 days)
+		default:
+			return strconv.Itoa(b.DaysSinceLast), true
+		}
 	}
 	return "", false
 }
+
+// steamBanRecord is the player's Steam ban record (a var for the tests).
+var steamBanRecord = steam.BanRecord
 
 // ifSubjectValue is what an If compares: the same as value, except that a role
 // is its number (0 Player, 1 Mod, 2 Admin) so "is at least Mod" can work.
@@ -698,8 +716,12 @@ func (x *job) ifSubjectValue(name string) (string, bool) {
 // as typed, and what is filled in is not expanded again.
 func (x *job) fillPlaceholders(text string) string {
 	return battleye.CleanReason(tokenRe.ReplaceAllStringFunc(text, func(m string) string {
-		if v, ok := x.placeholderValue(m[1 : len(m)-1]); ok {
+		name := m[1 : len(m)-1]
+		if v, ok := x.placeholderValue(name); ok {
 			return v
+		}
+		if steamBanSubjects[name] && x.p != nil {
+			return "?" // no Steam ban record to fill it from
 		}
 		return m
 	}))
@@ -812,6 +834,18 @@ func (x *job) execFlowSteps(list []Step) bool {
 				return false
 			}
 		case "if":
+			// An If on the Steam ban record is skipped, Else included, when there
+			// is no record to compare (no STEAM_API_KEY, no SteamID, Steam down).
+			if sub := s.Branches[0].Subject; steamBanSubjects[sub] {
+				if _, ok := x.ifSubjectValue(sub); !ok {
+					name := "the player"
+					if x.p != nil {
+						name = battleye.BareName(x.p.Name)
+					}
+					x.run.logf("If %s: skipped (no Steam ban record for %s)", describeIfCondition(s.Branches[0]), name)
+					continue
+				}
+			}
 			ran := false
 			for k, b := range s.Branches {
 				v, _ := x.ifSubjectValue(b.Subject)
