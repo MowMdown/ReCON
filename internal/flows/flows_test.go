@@ -858,3 +858,51 @@ func TestFlowsTableLosesAutoincrement(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestHelpListsWhatTheRoleMayUse checks that !help lists only the commands
+// the caller's role may use, with ! prefixes: Players don't see the Mod
+// commands, Mods don't see Admin-only ones (an Admin-only command is added
+// for the test), Admins see everything. !help !<command> for a command
+// they may not use says nothing.
+func TestHelpListsWhatTheRoleMayUse(t *testing.T) {
+	testDB(t)
+	oldDefs, oldSay := ChatCommandDefs, chatSay
+	ChatCommandDefs = append(append([]chatCommandDef{}, oldDefs...), chatCommandDef{Cmd: "adminonly", Role: RoleAdmin, Cool: "0", Help: "!adminonly is for admins."})
+	t.Cleanup(func() {
+		ChatCommandDefs, chatSay = oldDefs, oldSay
+		chatState.Lock()
+		chatState.loaded = false
+		chatState.Unlock()
+	})
+	var said []string
+	chatSay = func(to battleye.Player, everyone bool, text string) bool { said = append(said, text); return true }
+	chatState.Lock()
+	chatState.settings, chatState.loaded = DefaultChatSettings(), true
+	chatState.Unlock()
+	p := battleye.Player{ID: 3, GUID: test.GUID1, Name: "Someone"}
+	help := func(role int, text string) string {
+		said = nil
+		handleChatCommand(p, role, text)
+		return strings.Join(said, "|")
+	}
+
+	everyone := "!help, !shout, !whisper, !players, !vote, !code"
+	if got, want := help(RolePlayer, "!help"), "Commands: "+everyone+". Type !help !<command> for details."; got != want {
+		t.Errorf("Player:\n got %q\nwant %q", got, want)
+	}
+	if got, want := help(roleMod, "!help"), "Commands: "+everyone+", !kick, !ban, !warning. Type !help !<command> for details."; got != want {
+		t.Errorf("Mod:\n got %q\nwant %q", got, want)
+	}
+	if got, want := help(RoleAdmin, "!help"), "Commands: "+everyone+", !kick, !ban, !warning, !adminonly. Type !help !<command> for details."; got != want {
+		t.Errorf("Admin:\n got %q\nwant %q", got, want)
+	}
+	if got := help(RolePlayer, "!help !kick"); got != "" {
+		t.Errorf("Player asking about !kick got %q, want nothing", got)
+	}
+	if got := help(roleMod, "!help !adminonly"); got != "" {
+		t.Errorf("Mod asking about !adminonly got %q, want nothing", got)
+	}
+	if got := help(RoleAdmin, "!help !adminonly"); got != "!adminonly is for admins." {
+		t.Errorf("Admin asking about !adminonly got %q", got)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/geoip"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 )
@@ -55,6 +56,13 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		if c, ok := last[online[i].ID]; ok && strings.EqualFold(c.GUID, online[i].GUID) {
 			online[i].LastMessage, online[i].LastMessageChannel, online[i].LastMessageUnix = c.Chat.Text, c.Chat.Channel, c.Chat.At.Unix()
 		}
+	}
+	// The flag next to each IP.
+	for i := range online {
+		online[i].Country = geoip.Country(online[i].IP)
+	}
+	for i := range offlinePlayers {
+		offlinePlayers[i].Country = geoip.Country(offlinePlayers[i].IP)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
@@ -225,6 +233,14 @@ func handlePlayerDetails(w http.ResponseWriter, r *http.Request) {
 		d.Player.Name = battleye.BareName(p.Name)
 	}
 	d.Ban = game.BanStatusOf(guid)
+	// The flag next to each IP.
+	d.Player.LastIPCountry = geoip.Country(d.Player.LastIP)
+	for i := range d.Sessions.Recent {
+		d.Sessions.Recent[i].Country = geoip.Country(d.Sessions.Recent[i].IP)
+	}
+	for i := range d.IPs {
+		d.IPs[i].Country = geoip.Country(d.IPs[i].IP)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "details": d})
 }
 

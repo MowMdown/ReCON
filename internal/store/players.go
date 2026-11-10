@@ -449,6 +449,7 @@ type detailsPlayer struct {
 	GUID            string `json:"guid"`
 	Name            string `json:"name"`
 	LastIP          string `json:"lastIp"`
+	LastIPCountry   string `json:"lastIpCountry,omitempty"` // filled in by the web handler (package geoip)
 	FirstSeen       int64  `json:"firstSeen"`
 	LastSeen        int64  `json:"lastSeen"`
 	PlaytimeSeconds int64  `json:"playtimeSeconds"`
@@ -462,6 +463,7 @@ type detailsSession struct {
 	Disconnected int64  `json:"disconnected"` // 0 for the session in progress
 	Seconds      int64  `json:"seconds"`
 	IP           string `json:"ip"`
+	Country      string `json:"country,omitempty"` // IP's country, filled in by the web handler
 	Current      bool   `json:"current"`
 	Ended        string `json:"ended,omitempty"` // disconnected, kicked or banned ("" for older sessions)
 }
@@ -473,14 +475,15 @@ type SharedPlayer struct {
 
 type detailsIP struct {
 	IP        string         `json:"ip"`
+	Country   string         `json:"country,omitempty"` // IP's country, filled in by the web handler
 	FirstUsed int64          `json:"firstUsed"`
 	LastUsed  int64          `json:"lastUsed"`
 	Others    []SharedPlayer `json:"others"` // other players seen on this IP
 }
 
 // playerDetails is everything stored about one player, as GET
-// /api/players/{guid}/details returns it. Times are Unix seconds. Online, ID
-// and Ban are filled in by the web handler.
+// /api/players/{guid}/details returns it. Times are Unix seconds. Online, ID,
+// Ban and the IPs' countries are filled in by the web handler.
 type playerDetails struct {
 	Player   detailsPlayer `json:"player"`
 	Sessions struct {

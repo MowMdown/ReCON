@@ -9,16 +9,19 @@
 //	recon -i                interactive console
 //
 // Settings come from the environment: RCON_HOST, RCON_PORT, RCON_PASSWORD,
-// DB_PATH, LISTEN_ADDR, TZ and the STEAM_* variables (see the README).
+// DB_PATH, LISTEN_ADDR, TZ, the STEAM_* and MAXMIND_* variables and GEOIP_DIR
+// (see the README).
 package main
 
 import (
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/geoip"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 	"github.com/MowMdown/ReCON/internal/web"
@@ -41,9 +44,11 @@ func environmentOrDefault(key, def string) string {
 //  3. If command-line args were given, runs CLI mode and returns.
 //  4. Otherwise runs as a server: clears stale sessions, prepares the flows
 //     table, starts the player tracker, the chat recorder, the flow
-//     scheduler and the server watch, and serves HTTP forever.
+//     scheduler, the server watch and the GeoIP database (country flags),
+//     and serves HTTP forever.
 func main() {
-	db, err := store.OpenPlayerDatabase(environmentOrDefault("DB_PATH", "/data/players.db"))
+	dbPath := environmentOrDefault("DB_PATH", "/data/players.db")
+	db, err := store.OpenPlayerDatabase(dbPath)
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
@@ -82,10 +87,11 @@ func main() {
 	// The player tracker hands players who finished joining to the join
 	// flows, and every new session to the SteamID lookup.
 	game.SetPlayerHooks(flows.StartJoinFlows, steam.PlayerJoined)
-	game.StartChatRecorder() // chat history from the console log
-	game.StartTracker()      // sessions from the console log
-	game.RefreshBanExpiry()  // when the next timed ban runs out
-	game.StartWatch()        // keeps RCON logged in, polls players and bans
+	game.StartChatRecorder()                               // chat history from the console log
+	game.StartTracker()                                    // sessions from the console log
+	game.RefreshBanExpiry()                                // when the next timed ban runs out
+	game.StartWatch()                                      // keeps RCON logged in, polls players and bans
+	geoip.Start(geoip.ConfigFromEnv(filepath.Dir(dbPath))) // country flags next to IPs
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	log.Printf("listening on %s -> RCON %s", addr, address)

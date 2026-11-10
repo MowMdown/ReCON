@@ -335,8 +335,13 @@
 	}
 	function fail(status, msg) { return json({ ok: false, error: msg }, status); }
 	function body(opt) { try { return opt && opt.body ? JSON.parse(opt.body) : {}; } catch (e) { return {}; } }
+	// Countries for the flags next to IPs. The sample IPs are documentation
+	// addresses that no GeoIP database covers, so they are made up here.
+	var COUNTRY = { '203.0.113.24': 'us', '198.51.100.7': 'de', '203.0.113.91': 'gb', '192.0.2.15': 'ca',
+		'198.51.100.212': 'fr', '192.0.2.188': 'au', '198.51.100.66': 'nl', '192.0.2.40': 'se' };
+	function country(ip) { return COUNTRY[ip] || ''; }
 	function playerJSON(p) {
-		return { id: p.id, ip: p.ip, port: p.port, ping: p.ping, guid: p.guid, name: p.name, offline: !p.isOnline,
+		return { id: p.id, ip: p.ip, country: country(p.ip), port: p.port, ping: p.ping, guid: p.guid, name: p.name, offline: !p.isOnline,
 			totalPlaytimeSeconds: p.play, lastSeenUnix: p.isOnline ? 0 : p.lastSeen, role: p.role };
 	}
 	function banMap() { var m = {}; bans.forEach(function (b) { m[b.guid] = banOf(b.guid); }); return m; }
@@ -346,16 +351,16 @@
 	function details(p) {
 		var sessions = [], n = Math.max(1, Math.min(12, Math.round(p.play / (2.4 * HOUR))));
 		var t = p.isOnline ? NOW - (20 + p.name.length * 3) * MIN : p.lastSeen;
-		if (p.isOnline) sessions.push({ connected: t, disconnected: 0, seconds: NOW - t, ip: p.ip, current: true });
+		if (p.isOnline) sessions.push({ connected: t, disconnected: 0, seconds: NOW - t, ip: p.ip, country: country(p.ip), current: true });
 		var each = Math.floor(p.play / n);
 		for (var i = 0; i < n; i++) {
 			var end = p.isOnline ? t - (i + 1) * 20 * HOUR : t - i * 20 * HOUR;
-			sessions.push({ connected: end - each, disconnected: end, seconds: each, ip: i === 3 ? '192.0.2.' + (40 + p.name.length) : p.ip, current: false });
+			sessions.push({ connected: end - each, disconnected: end, seconds: each, ip: i === 3 ? '192.0.2.' + (40 + p.name.length) : p.ip, country: i === 3 ? '' : country(p.ip), current: false });
 		}
-		var ips = [{ ip: p.ip, firstUsed: p.firstSeen, lastUsed: p.lastSeen, others: sharedIP(p) }];
+		var ips = [{ ip: p.ip, country: country(p.ip), firstUsed: p.firstSeen, lastUsed: p.lastSeen, others: sharedIP(p) }];
 		if (n > 3) ips.push({ ip: '192.0.2.' + (40 + p.name.length), firstUsed: p.firstSeen + 2 * DAY, lastUsed: p.firstSeen + 2 * DAY, others: [] });
 		return {
-			player: { guid: p.guid, name: p.name, lastIp: p.ip, firstSeen: p.firstSeen, lastSeen: p.lastSeen, playtimeSeconds: p.play,
+			player: { guid: p.guid, name: p.name, lastIp: p.ip, lastIpCountry: country(p.ip), firstSeen: p.firstSeen, lastSeen: p.lastSeen, playtimeSeconds: p.play,
 				online: p.isOnline, id: p.id, role: p.role },
 			sessions: { count: n, avgSeconds: each, recent: sessions },
 			ips: ips, ban: banOf(p.guid), note: { text: p.note, updated: p.note ? NOW - 3 * DAY : 0 }

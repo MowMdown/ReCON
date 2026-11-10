@@ -2146,7 +2146,7 @@ function renderCmds() {
 	list.textContent = '';
 	for (const c of CMDS) {
 		const s = draft[c.cmd];
-		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.staff ? el('span', { class: 'who', text: 'MODS & ADMINS' }) : null));
+		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.role ? el('span', { class: 'who', text: c.role >= 2 ? 'ADMINS' : 'MODS & ADMINS' }) : null));
 		const on = el('input', { type: 'checkbox', checked: s.on, id: 'on-' + c.cmd });
 		head.append(el('label', { class: 'opt', for: 'on-' + c.cmd }, on, 'On'));
 		head.append(el('label', { class: 'opt', for: 'cool-' + c.cmd }, 'Cooldown', durInput('cool-' + c.cmd, s.cool, '0', true, (v) => { s.cool = v; })));

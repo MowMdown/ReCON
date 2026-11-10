@@ -100,7 +100,12 @@ td.lastmsg { text-overflow: ellipsis; color: #ccc; }
 .ban-off { color: #888; }
 #onlineMsg { margin: 4px 0 0; font-size: 14px; }
  
+img.flag { display: inline-block; width: 16px; height: 12px; margin-right: 7px; vertical-align: -1px; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px rgba(127, 127, 127, .35); }
+ 
 #delName::placeholder { color: #777; opacity: 1; }
+ 
+.detnav { margin-left: auto; display: flex; gap: 6px; }
+.detnav button { margin: 0; }
 
  
 #modal { z-index: 20; }
@@ -324,7 +329,7 @@ var setStatusCount;
 		<col style="width: 300px">
 		<col style="width: 160px">
 		<col>
-		<col class="act" style="width: 274px">
+		<col class="act" style="width: 221px">
 	</colgroup>
 	<thead>
 		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th class="act">Actions</th></tr>
@@ -363,6 +368,10 @@ var setStatusCount;
 			<span id="detBadge" class="badge"></span>
 			<span id="detRole" class="badge" hidden></span>
 			<span id="detGuid" class="sub"></span>
+			<div class="detnav">
+				<button type="button" onclick="stepDetails(-1)" title="Previous player"><i class="ph ph-caret-left" aria-hidden="true"></i>Prev</button>
+				<button type="button" onclick="stepDetails(1)" title="Next player">Next<i class="ph ph-caret-right" aria-hidden="true"></i></button>
+			</div>
 		</div>
 		<div class="dtabs" id="detTabs">
 			<button type="button" data-tab="overview">Overview</button>
@@ -533,11 +542,61 @@ function esc(s) {
 const ROLE_NAMES = ['Player', 'Mod', 'Admin'];
 
 
+
+
+const regionNames = (function () { try { return new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) { return null; } })();
+function countryName(cc) {
+	try { return (regionNames && regionNames.of(cc.toUpperCase())) || cc.toUpperCase(); } catch (e) { return cc.toUpperCase(); }
+}
+
+
+
+
+
+function flagEl(cc) {
+	if (!/^[a-z]{2}$/.test(cc || '')) return null;
+	let img = document.createElement('img');
+	img.className = 'flag';
+	img.src = 'assets/flags/' + cc + '.svg';
+	img.alt = cc.toUpperCase();
+	img.title = countryName(cc);
+	img.onerror = function () { img.remove(); };
+	return img;
+}
+function flagHTML(cc) { let f = flagEl(cc); return f ? f.outerHTML.replace('<img ', '<img onerror="this.remove()" ') : ''; }
+
+
 function roleBadge(role) {
 	return role > 0 ? ' <span class="badge role-' + role + '">' + ROLE_NAMES[role] + '</span>' : '';
 }
 
 async function api(url, opt = {}) { return fetch(url, opt); }
+
+
+
+
+
+
+
+const wideColumnMax = 600;
+function fitWideColumn(table) {
+	if (!table.dataset.baseMin) table.dataset.baseMin = parseFloat(getComputedStyle(table).minWidth) || 0;
+	let cols = Array.prototype.slice.call(table.querySelectorAll('col'));
+	let flex = cols.findIndex(c => !c.style.width);
+	if (flex < 0) return;
+	let fixed = 0;
+	cols.forEach((c, i) => { if (i !== flex) fixed += parseFloat(getComputedStyle(c).width) || 0; });
+	let need = 0;
+	table.querySelectorAll('tbody tr').forEach(function (tr) {
+		if (tr.children.length === cols.length) need = Math.max(need, tr.children[flex].scrollWidth);
+	});
+	let min = Math.max(Number(table.dataset.baseMin), Math.ceil(fixed + Math.min(need, wideColumnMax)));
+	if (table.style.minWidth !== min + 'px') table.style.minWidth = min + 'px';
+}
+
+
+
+let navOnline = [], navOffline = [];
 
 async function refresh() {
 	try {
@@ -555,14 +614,13 @@ async function refresh() {
 			return '<tr>' +
 				'<td>' + p.id + '</td>' +
 				'<td title="' + n + '">' + n + roleBadge(p.role) + '</td>' +
-				'<td class="mono">' + esc(p.ip) + '</td>' +
+				'<td class="mono">' + flagHTML(p.country) + esc(p.ip) + '</td>' +
 				'<td class="mono">' + g + '</td>' +
 				'<td>' + p.ping + '</td>' +
 				lastMessageCell(p) +
 				'<td class="act">' +
 					'<button data-id="' + p.id + '" data-guid="' + g + '" data-action="message" data-name="' + n + '" onclick="handleActionClick(this)">Message</button>' +
 					'<button data-id="' + p.id + '" data-action="kick" data-name="' + n + '" onclick="handleActionClick(this)">Kick</button>' +
-					'<button data-id="' + p.id + '" data-action="ban" data-name="' + n + '" onclick="handleActionClick(this)">Ban</button>' +
 					'<button data-guid="' + g + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button>' +
 				'</td>' +
 			'</tr>';
@@ -570,6 +628,10 @@ async function refresh() {
 
 		
 		let bans = d.bans || {};
+		
+		setTimeout(() => fitWideColumn(document.getElementById('onlineTable')), 0);
+		navOnline = d.connected ? (d.players || []).slice().sort((a, b) => a.id - b.id) : [];
+		navOffline = d.offlinePlayers || [];
 		document.getElementById('offlinePlayers').innerHTML = (d.offlinePlayers || []).map(function(p) {
 			let ban = bans[String(p.guid).toLowerCase()];
 			let seconds = Math.max(0, Number(p.totalPlaytimeSeconds) || 0);
@@ -580,7 +642,7 @@ async function refresh() {
 
 			return '<tr>' +
 				'<td title="' + esc(p.name) + '">' + esc(p.name) + roleBadge(p.role) + '</td>' +
-				'<td class="mono">' + esc(p.ip) + '</td>' +
+				'<td class="mono">' + flagHTML(p.country) + esc(p.ip) + '</td>' +
 				'<td class="mono">' + esc(p.guid) + '</td>' +
 				'<td>' + playtime + '</td>' +
 				'<td>' + fmtLastSeen(p.lastSeenUnix) + '</td>' +
@@ -588,6 +650,7 @@ async function refresh() {
 				'<td class="act"><button data-guid="' + esc(p.guid) + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button></td>' +
 			'</tr>';
 		}).join('');
+		setTimeout(() => fitWideColumn(document.getElementById('offlineTable')), 0);
 	} catch(e) {
 		setStatusCount(''); 
 	}
@@ -1023,6 +1086,22 @@ async function openDetails(guid) {
 
 
 
+
+
+function stepDetails(dir) {
+	let seen = {}, list = [];
+	navOnline.concat(navOffline).forEach(function (p) {
+		let g = String(p.guid || '').toLowerCase();
+		if (g && !seen[g]) { seen[g] = true; list.push(g); }
+	});
+	if (!list.length) return;
+	let i = list.indexOf(String(detOpenGuid || '').toLowerCase());
+	let next = i < 0 ? 0 : (i + dir + list.length) % list.length;
+	openDetails(list[next]);
+}
+
+
+
 let closing = false;
 async function closeDetails() {
 	if (closing) return;
@@ -1084,7 +1163,7 @@ function renderDetails(keepDraft) {
 		['Time on server', fmtDuration(p.playtimeSeconds)],
 		['Sessions', String(s.count + (p.online ? 1 : 0))],
 		['Average session', s.count ? fmtDuration(s.avgSeconds) : '—'],
-		['Last IP', p.lastIp || '—']
+		['Last IP', p.lastIp || '—', p.lastIpCountry]
 	];
 	let tl = document.getElementById('detTiles');
 	tl.textContent = '';
@@ -1093,6 +1172,8 @@ function renderDetails(keepDraft) {
 		el.className = 'tile';
 		let k = document.createElement('div'); k.className = 'k'; k.textContent = t[0];
 		let v = document.createElement('div'); v.className = 'v'; v.textContent = t[1];
+		let f = flagEl(t[2]); 
+		if (f) v.prepend(f);
 		el.append(k, v);
 		tl.append(el);
 	});
@@ -1137,7 +1218,11 @@ function renderDetails(keepDraft) {
 		[fmtStamp(x.connected), left, fmtDuration(x.seconds), x.ip].forEach(function (v, i) {
 			let td = document.createElement('td');
 			td.textContent = v;
-			if (i === 3) td.className = 'mono';
+			if (i === 3) {
+				td.className = 'mono';
+				let f = flagEl(x.country);
+				if (f) td.prepend(f);
+			}
 			if (x.current && i === 1) td.style.color = '#81c995';
 			tr.append(td);
 		});
@@ -1152,7 +1237,11 @@ function renderDetails(keepDraft) {
 		[i.ip, fmtDay(i.firstUsed), fmtDay(i.lastUsed)].forEach(function (v, n) {
 			let td = document.createElement('td');
 			td.textContent = v;
-			if (n === 0) td.className = 'mono';
+			if (n === 0) {
+				td.className = 'mono';
+				let f = flagEl(i.country);
+				if (f) td.prepend(f);
+			}
 			tr.append(td);
 		});
 		let td = document.createElement('td');
@@ -1601,7 +1690,7 @@ function renderSteam(d) {
 	let tiles = [
 		['Account created', p.createdUnix ? fmtDay(p.createdUnix) + ' (' + fmtAge(p.createdUnix) + ')' : 'Hidden'],
 		['Steam level', p.level == null ? 'Hidden' : String(p.level)],
-		['Country', p.countryCode || (p.public ? 'Not set' : 'Hidden')],
+		['Country', p.countryCode ? countryName(p.countryCode) : (p.public ? 'Not set' : 'Hidden'), (p.countryCode || '').toLowerCase()],
 		['DayZ on Steam', dayz],
 		['DayZ, last 2 weeks', dayz2],
 		['Last online on Steam', lastOnline],
@@ -1616,6 +1705,8 @@ function renderSteam(d) {
 		el.className = 'tile';
 		let k = document.createElement('div'); k.className = 'k'; k.textContent = t[0];
 		let v = document.createElement('div'); v.className = 'v'; v.textContent = t[1];
+		let f = flagEl(t[2]); 
+		if (f) v.prepend(f);
 		el.append(k, v);
 		tl.append(el);
 	});
