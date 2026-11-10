@@ -37,6 +37,9 @@ type Player struct {
 	LastMessage        string `json:"lastMessage,omitempty"`
 	LastMessageChannel string `json:"lastMessageChannel,omitempty"`
 	LastMessageUnix    int64  `json:"lastMessageUnix,omitempty"`
+	// Country is IP's country ("gb", lower case; "" when unknown), for the
+	// flag next to it. Filled in by /api/players (package geoip).
+	Country string `json:"country,omitempty"`
 }
 
 // Ban is one entry of the GUID section of the BattlEye `bans` output, also the

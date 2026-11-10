@@ -55,6 +55,8 @@ services:
       STEAM_SEARCH_MODE: "manual"
       STEAM_SEARCH_CORES: "2"
       STEAM_SEARCH_PRIORITY: "medium"
+      MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}     # optional, country flags (see below)
+      MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
     volumes:
       - ./data:/data
     ports:
@@ -66,6 +68,8 @@ Put the secrets in `.env`, next to `docker-compose.yaml`:
 ```env
 RCON_PASSWORD=your-rcon-password
 STEAM_API_KEY=your-steam-web-api-key
+MAXMIND_ACCOUNT_ID=123456
+MAXMIND_LICENSE_KEY=your-maxmind-license-key
 ```
 
 ### Build and start
@@ -116,6 +120,9 @@ Everything is set with environment variables.
 | `STEAM_SEARCH_MODE`     | `manual`           | How SteamIDs the steam2guid table can't answer are searched for (the table, if you have one, is always read first, as soon as a player joins). `manual`: when you press **Search Steam ID**. `auto`: by itself, in one search for everyone waiting, starting 60s after the first join (+30s per join, at most 3 minutes or 15 players). Either way a search covers every player still missing a SteamID |
 | `STEAM_SEARCH_CORES`    | `1`                | CPU cores a SteamID lookup may use (capped at the cores available) |
 | `STEAM_SEARCH_PRIORITY` | `medium`           | How much of each core it uses: `low` 33%, `medium` 66%, `high` 99% |
+| `MAXMIND_ACCOUNT_ID`    | none               | With `MAXMIND_LICENSE_KEY`, turns on the country flags next to IPs (below). Both are on your free [MaxMind](https://www.maxmind.com/en/geolite2/signup) account's *Manage License Keys* page |
+| `MAXMIND_LICENSE_KEY`   | none               | MaxMind licence key, for downloading the GeoLite2-Country database |
+| `GEOIP_DIR`             | the folder `DB_PATH` is in | Where `GeoLite2-Country.mmdb` is kept |
 
 `RCON_HOST`, `RCON_PORT` and `RCON_PASSWORD` are the defaults: **Settings** on the Players page can override any of them without editing `docker-compose.yaml` (see below).
 
@@ -142,8 +149,7 @@ The top table lists the players online now (refreshed every 5 seconds). ReCON fo
 | ------- | ------------ |
 | Message | Opens that player's conversation: their chat, the private messages ReCON sent them, and a box to send another |
 | Kick    | Kicks them with the reason you type |
-| Ban     | Bans their GUID for the minutes you enter (**0 = permanent**), then kicks them |
-| Details | Opens everything ReCON has recorded about them (below) |
+| Details | Opens everything ReCON has recorded about them (below), including **Ban** |
 
 **Offline Players** lists everyone who has played before: last IP, total time on the server, when they were last seen, and their ban status and reason. If the game server stops answering, this list still shows from the database.
 
@@ -153,9 +159,11 @@ The top table lists the players online now (refreshed every 5 seconds). ReCON fo
 
 ![RCON console](docs/screenshots/players-console.png)
 
+Every IP on the page (the online and offline lists, and in Details the last IP, sessions and IPs) has its country's flag to its left; hover it for the country's name. The flags need MaxMind's free GeoLite2-Country database: with `MAXMIND_ACCOUNT_ID` and `MAXMIND_LICENSE_KEY` set, ReCON downloads it to `GEOIP_DIR` when it starts if it isn't there, and again when it is a week old (MaxMind updates it twice a week). Without them nothing is downloaded and there are no flags, unless you put `GeoLite2-Country.mmdb` in that folder yourself. Private and LAN addresses have no country, so no flag.
+
 #### Details
 
-Details works for online and offline players. It has these tabs:
+Details works for online and offline players. **Prev** and **Next** in its top right corner go through the players in the page's order, online players by number, then offline ones by name, and wrap around at either end. It has these tabs:
 
 | Tab           | Shows |
 | ------------- | ----- |
@@ -263,6 +271,7 @@ Move a step with its arrows, or drag it by the dotted handle on its left. Moving
 | `{player_name}` `{player_id}` | The player's name and number | On join, Player message |
 | `{player_ping}` `{player_ip}` `{player_guid}` | Their ping, IP address and GUID | On join, Player message |
 | `{player_role}` | Player, Mod or Admin | On join, Player message |
+| `{player_vac_bans}` `{player_game_bans}` `{player_days_since_last_ban}` | Their VAC bans, game bans, and days since their last ban on Steam (below). `?` when ReCON has no Steam ban record for them | On join, Player message |
 | `{message}` | Everything they typed | Player message |
 
 ### If, Else if, Else
@@ -276,6 +285,14 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 | `{player_id}` `{player_guid}` | **is** / **is not** |
 | `{player_ping}` `{players_online}` | `=` `!=` `>` `>=` `<` `<=` |
 | `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Mod or Admin (Player < Mod < Admin) |
+| `{player_vac_bans}` `{player_game_bans}` `{player_days_since_last_ban}` | `=` `!=` `>` `>=` `<` `<=` |
+
+**Steam bans.** `{player_vac_bans}`, `{player_game_bans}` and `{player_days_since_last_ban}` come from the player's ban record on Steam, so they need `STEAM_API_KEY` and the player's SteamID (see [Steam profiles](#6-steam-profiles)). ReCON asks Steam once per player and keeps the answer 30 minutes. When there is no record to compare (no key, no SteamID found yet, Steam not answering), an If on one of them is **skipped**, its Else ifs and Else too, and the run log says so. A player with no bans has no "days since last ban", so an If on it is skipped for them as well. Steam's days count from the last VAC **or** game ban. For example, on an **On join** flow:
+
+- **If** `{player_vac_bans} >= 1`, **If** `{player_days_since_last_ban} < 365`: Kick *VAC ban in the last year*.
+- **If** `{player_vac_bans} > 1`, **If** `{player_days_since_last_ban} > 365`: Kick *Too many VAC bans*.
+
+A player whose SteamID isn't known when they join (no steam2guid table, or not in it) has no record until a search finds it, so these Ifs are skipped for them on that join.
 
 ![If / Else in the editor](docs/screenshots/flows-edit-if.png)
 
@@ -365,7 +382,7 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 
 | Command | Who | Does |
 | ------- | --- | ---- |
-| `!help` | Everyone | Lists the commands; `!help !vote` explains one |
+| `!help` | Everyone | Lists the commands the player's role may use (Players don't see the Mod commands); `!help !vote` explains one |
 | `!shout <message>` | Everyone | Sends the message to everyone |
 | `!whisper <number> <message>` | Everyone | Private message to that player |
 | `!players` | Everyone | Lists everyone online with their number |
@@ -400,7 +417,7 @@ BattlEye only reports a GUID, which is a one-way hash of the player's SteamID. R
 Without `STEAM_API_KEY`, the tab shows only the SteamID and a link to the profile. With a key it also shows:
 
 - VAC and game bans (from any game), community and trade bans
-- account age, Steam level, country, and when they were last online
+- account age, Steam level, country (its flag and name), and when they were last online
 - DayZ hours (total and the last two weeks), and a warning when DayZ isn't in their library, which can mean they're playing on a Family Sharing copy
 - games owned, friend count, and which of their Steam friends have played on your server
 
@@ -550,7 +567,7 @@ Any tool with a "POST to a URI" action can call these routes. For example: URI `
 
 ## 9. Development
 
-ReCON is a single Go program with no dependencies besides the SQLite driver. It follows the standard Go layout: the program in `cmd/recon`, its packages under `internal/`.
+ReCON is a single Go program whose only dependencies are the SQLite driver and MaxMind's database reader (for the country flags). It follows the standard Go layout: the program in `cmd/recon`, its packages under `internal/`.
 
 ```bash
 go build -o recon ./cmd/recon   # build
@@ -564,8 +581,9 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/game/` | The live game server and what ReCON mirrors from it: the web session, RCON settings, the console log and the server watch (`session.go`); who is online and their sessions, kept across a server restart for players back from the same IP within 5 minutes, and chat history (`players.go`); the ban list kept in step with BattlEye's, placing bans, export/import (`bans.go`) |
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
+| `internal/geoip/` | The country of an IP, for the flags, from MaxMind's GeoLite2-Country database, and downloading it |
 | `internal/store/` | The SQLite database: every SQL statement |
-| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker) and the favicons and app icons (`assets/icons/`), both embedded into the binary at build time |
+| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), the favicons and app icons (`assets/icons/`) and the country flags (`assets/flags/`), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |
 | `examples/flows.json` | Example flows to import |
 | `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |
@@ -585,3 +603,5 @@ This rewrites `docs/preview/players.html`, `bans.html`, `flows.html`, `data.js` 
 ## License
 
 [MIT](LICENSE)
+
+The country flags are from [flag-icons](https://github.com/lipis/flag-icons) by Panayiotis Lipiridis (MIT, `internal/web/assets/flags/LICENSE`). The icons are [Phosphor](https://phosphoricons.com) (MIT). This product includes GeoLite2 data created by MaxMind, available from [https://www.maxmind.com](https://www.maxmind.com).

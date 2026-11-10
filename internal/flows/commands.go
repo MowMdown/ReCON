@@ -21,7 +21,7 @@ import (
 // default wording and the placeholders it may use).
 type chatCommandDef struct {
 	Cmd      string      `json:"cmd"`
-	Staff    bool        `json:"staff"`    // mods and admins only
+	Role     int         `json:"role"`     // the lowest role that may use it: RolePlayer (everyone), roleMod or RoleAdmin
 	Cool     string      `json:"cool"`     // default cooldown
 	Announce bool        `json:"announce"` // has the Announce setting
 	Length   bool        `json:"length"`   // has the vote length setting
@@ -53,17 +53,17 @@ var ChatCommandDefs = []chatCommandDef{
 		}},
 	{Cmd: "code", Cool: "0", Help: "!code sends your player code to the admins and mods online, so they can find you.",
 		Fields: []chatField{{"staff", "Message (to each mod and admin online)", "Code for {player_name} (#{player_id}): {code}", []string{"player_name", "player_id", "code"}}}},
-	{Cmd: "kick", Staff: true, Cool: "0", Announce: true, Help: "!kick <code or player number> <reason> kicks that player. Their code comes from !code, their number from !players.",
+	{Cmd: "kick", Role: roleMod, Cool: "0", Announce: true, Help: "!kick <code or player number> <reason> kicks that player. Their code comes from !code, their number from !players.",
 		Fields: []chatField{
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been kicked by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
 			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been kicked", []string{"target_name", "reason"}},
 		}},
-	{Cmd: "ban", Staff: true, Cool: "0", Announce: true, Help: "!ban <code or player number> <reason> permanently bans that player. Their code (the last 6 characters of their GUID) comes from !code, their number from !players.",
+	{Cmd: "ban", Role: roleMod, Cool: "0", Announce: true, Help: "!ban <code or player number> <reason> permanently bans that player. Their code (the last 6 characters of their GUID) comes from !code, their number from !players.",
 		Fields: []chatField{
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been banned by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
 			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been banned", []string{"target_name", "reason"}},
 		}},
-	{Cmd: "warning", Staff: true, Cool: "0", Announce: true, Warn: true, Help: "!warning <code or player number> <reason> warns that player. Enough warnings in one visit and they are kicked or banned.",
+	{Cmd: "warning", Role: roleMod, Cool: "0", Announce: true, Warn: true, Help: "!warning <code or player number> <reason> warns that player. Enough warnings in one visit and they are kicked or banned.",
 		Fields: []chatField{
 			{"player", "Warning (to the player)", "Warning {warnings}/{warn_count} from {player_name}: {reason}", []string{"target_name", "player_name", "reason", "warnings", "warn_count"}},
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} was warned by {player_name} ({warnings}/{warn_count}): {reason}", []string{"target_name", "player_name", "reason", "warnings", "warn_count"}},
@@ -79,6 +79,10 @@ const (
 	defaultWarnAction    = "ban"
 	maxWarnThreshold     = 100
 )
+
+// allowedFor reports whether a player with role may use the command, and so
+// whether !help lists it for them.
+func (d *chatCommandDef) allowedFor(role int) bool { return role >= d.Role }
 
 func chatDef(cmd string) *chatCommandDef {
 	for i := range ChatCommandDefs {
@@ -367,7 +371,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 	}
 	all := CurrentChatSettings()
 	set := all[cmd]
-	if !set.On || def.Staff && role < roleMod {
+	if !set.On || !def.allowedFor(role) {
 		return
 	}
 	rest := strings.TrimSpace(text[len(fields[0]):])
@@ -381,7 +385,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 		if len(args) == 0 {
 			var names []string
 			for _, d := range ChatCommandDefs {
-				if all[d.Cmd].On && (!d.Staff || role >= roleMod) {
+				if all[d.Cmd].On && d.allowedFor(role) { // only what their role may use
 					names = append(names, "!"+d.Cmd)
 				}
 			}
@@ -391,7 +395,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 			return
 		}
 		d := chatDef(strings.ToLower(strings.TrimPrefix(args[0], "!")))
-		if d == nil || !all[d.Cmd].On || d.Staff && role < roleMod {
+		if d == nil || !all[d.Cmd].On || !d.allowedFor(role) {
 			return
 		}
 		if chatSay(p, false, d.Help) {

@@ -718,6 +718,77 @@ func ProfileFor(ctx context.Context, steamID string, refresh bool) (*steamProfil
 	return p, nil
 }
 
+// Bans is a player's ban record on Steam (GetPlayerBans), for the flows'
+// If subjects {player_vac_bans}, {player_game_bans} and
+// {player_days_since_last_ban}. DaysSinceLast is Steam's days since their
+// last VAC or game ban (Steam reports 0 for a player with none).
+type Bans struct {
+	VAC, Game, DaysSinceLast int
+}
+
+var banCache = struct {
+	sync.Mutex
+	byID map[string]bansSeen
+}{byID: map[string]bansSeen{}}
+
+type bansSeen struct {
+	bans Bans
+	at   time.Time
+}
+
+// BanRecord returns the Steam ban record of the player with this GUID. ok is
+// false when there is none to be had: no STEAM_API_KEY, no SteamID known for
+// them yet (see the search), no such Steam account, or Steam not answering.
+// A profile the Steam tab fetched within steamCacheFor is used as it is;
+// otherwise only GetPlayerBans is asked, and its answer kept as long.
+func BanRecord(ctx context.Context, guid string) (Bans, bool) {
+	if APIKey == "" || database == nil {
+		return Bans{}, false
+	}
+	steamID, _, err := database.SteamIDByGUID(guid)
+	if err != nil || steamID == "" {
+		return Bans{}, false
+	}
+	steamCache.Lock()
+	p := steamCache.byID[steamID]
+	steamCache.Unlock()
+	if p != nil && p.Found && time.Since(time.Unix(p.FetchedUnix, 0)) < steamCacheFor {
+		return Bans{VAC: p.VACBans, Game: p.GameBans, DaysSinceLast: p.DaysSinceLastBan}, true
+	}
+	banCache.Lock()
+	seen, ok := banCache.byID[steamID]
+	banCache.Unlock()
+	if ok && time.Since(seen.at) < steamCacheFor {
+		return seen.bans, true
+	}
+	var bans struct {
+		Players []struct {
+			NumberOfVACBans  int `json:"NumberOfVACBans"`
+			NumberOfGameBans int `json:"NumberOfGameBans"`
+			DaysSinceLastBan int `json:"DaysSinceLastBan"`
+		} `json:"players"`
+	}
+	if err := callSteamAPI(ctx, "/ISteamUser/GetPlayerBans/v1/", url.Values{"steamids": {steamID}}, &bans); err != nil {
+		log.Printf("steam: ban record of %s: %v", steamID, err)
+		return Bans{}, false
+	}
+	if len(bans.Players) == 0 {
+		return Bans{}, false // no such account
+	}
+	b := Bans{VAC: bans.Players[0].NumberOfVACBans, Game: bans.Players[0].NumberOfGameBans, DaysSinceLast: bans.Players[0].DaysSinceLastBan}
+	banCache.Lock()
+	banCache.byID[steamID] = bansSeen{bans: b, at: time.Now()}
+	if len(banCache.byID) > 1000 { // drop expired records now and then
+		for id, e := range banCache.byID {
+			if time.Since(e.at) > steamCacheFor {
+				delete(banCache.byID, id)
+			}
+		}
+	}
+	banCache.Unlock()
+	return b, true
+}
+
 // database is the player database, set at startup (SetDatabase).
 var database *store.Database
 

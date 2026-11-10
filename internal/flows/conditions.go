@@ -47,6 +47,7 @@ var flowTokens = map[string]string{
 	"player_ip": needPlayer, "player_guid": needPlayer, "player_role": needPlayer,
 	"message": needChat, "players_online": needNothing,
 	"counter": needPlayer, "threshold": needThreshold,
+	"player_vac_bans": needPlayer, "player_game_bans": needPlayer, "player_days_since_last_ban": needPlayer,
 }
 
 var tokenRe = regexp.MustCompile(`\{(\w+)\}`)
@@ -74,7 +75,18 @@ var condSubjects = map[string]condSubject{
 	"players_online": {"num", needNothing},
 	// The player's counter in this run of the flow (see Branch.Counter).
 	"counter": {"num", needPlayer},
+	// The player's Steam ban record (steamBanSubjects). An If on one of these
+	// is skipped, Else included, when the record can't be had.
+	"player_vac_bans":            {"num", needPlayer},
+	"player_game_bans":           {"num", needPlayer},
+	"player_days_since_last_ban": {"num", needPlayer},
 }
+
+// steamBanSubjects are the subjects and placeholders that come from the
+// player's Steam ban record (package steam, BanRecord): it needs
+// STEAM_API_KEY and their SteamID. Without the record they have no value: an
+// If on one is skipped and the placeholder is filled with "?".
+var steamBanSubjects = map[string]bool{"player_vac_bans": true, "player_game_bans": true, "player_days_since_last_ban": true}
 
 var condOps = map[string][]string{
 	"word":  {"has", "starts", "exact"},

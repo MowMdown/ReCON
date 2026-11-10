@@ -135,7 +135,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 .step.dragging { opacity: .4; }
 .step.drop-above { box-shadow: 0 -3px 0 var(--accent); }
 .step.drop-below { box-shadow: 0 3px 0 var(--accent); }
-.step.has-err { border-color: #6b3632; }
+/* A step with an error, or a collapsed If / For each with one inside (data-err-inside). */
+.step.has-err, .step:has(> .sentence[data-err-inside]), .step:has(> * > .sentence[data-err-inside]) { border-color: #6b3632; }
 .step.joint { padding: 4px 8px; background: #1c1922; border-style: dashed; border-color: #3d3350; }
 .step.joint .num { visibility: hidden; }
 .step.hl { border-color: var(--c-logic); }
@@ -145,18 +146,21 @@ button:disabled { opacity: 0.4; cursor: default; }
 .grip { display: inline-flex; width: 15px; height: 15px; padding: 2px 4px; color: var(--faint); user-select: none; }
 .grip.handle { cursor: grab; }
 /* Folding an If or For each: the ▾ / ▸ before its name, and the note on a folded one. */
-.fb .fold { background: none; border: 0; padding: 0 2px; margin: 0; width: 24px; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.fb .fold { display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; padding: 0; margin: 0; width: 24px; height: 24px; color: var(--muted); line-height: 1; cursor: pointer; }
+.fb .fold svg { display: block; }
 .fb .fold:hover { color: var(--fg); }
-.folded { color: var(--muted); font-size: 12.5px; padding-left: 4px; }
-.folded.bad { color: var(--err); }
 .grip.handle::before { content: ""; width: 15px; height: 15px; background: radial-gradient(circle, currentColor 1.4px, transparent 1.7px) 0 0 / 5px 5px; }
-.num { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
+.num { color: var(--faint); font-size: 16px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
 .body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .sentence .w { color: var(--muted); }
 .fb .sentence input.text { flex: 1 1 220px; }
 .fb .sentence input.dur { width: 96px; font-family: var(--mono); font-size: 13px; }
-.fb .sentence input.val { flex: 1 1 140px; max-width: 320px; }
+/* An If / Else if value: always on a line of its own, from the If label to the
+   end of the row (an If's fold arrow is outside .block's inner sentence). */
+.fb .sentence input.val { flex: 1 1 100%; }
+.fb .sentence.block { flex-wrap: nowrap; }
+.fb .sentence.block > .sentence { flex: 1 1 auto; }
 .pill { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; white-space: nowrap; border: 1px solid; }
 .pill.msg { color: var(--c-msg); border-color: #36507a; background: #1a2333; }
 .pill.time { color: var(--c-time); border-color: #5c5126; background: #2a2614; }
@@ -167,7 +171,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .sends { font: 12px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
 .err { font-size: 12px; color: var(--err); }
 .tools { display: flex; gap: 2px; }
-.fb .tools button { padding: 3px 7px; font-size: 13px; background: transparent; border: 1px solid transparent; color: var(--muted); }
+.fb .tools button { padding: 3px 7px; font-size: 16px; line-height: 1; background: transparent; border: 1px solid transparent; color: var(--muted); }
 .fb .tools button:hover:not(:disabled) { background: #333; color: var(--fg); }
 .fb .tools button.addelse { font-size: 12px; color: var(--c-logic); }
 .empty { color: var(--faint); font-size: 13px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 6px; text-align: center; }
@@ -1046,6 +1050,9 @@ const TOKENS = [
 	{ tok: '{player_ip}', need: 'player', title: 'Their IP address' },
 	{ tok: '{player_guid}', need: 'player', title: 'Their BattlEye GUID' },
 	{ tok: '{player_role}', need: 'player', title: 'Their role: Player, Mod or Admin' },
+	{ tok: '{player_vac_bans}', need: 'player', title: 'Their VAC bans on Steam (needs STEAM_API_KEY and their SteamID; an If on it is skipped without)' },
+	{ tok: '{player_game_bans}', need: 'player', title: 'Their game bans on Steam (as above)' },
+	{ tok: '{player_days_since_last_ban}', need: 'player', title: 'Days since their last VAC or game ban on Steam (none for a player with no bans)' },
 	{ tok: '{message}', need: 'chat', title: 'What they typed (Player message), or the chat line in a For each' },
 	{ tok: '{players_online}', need: '', title: 'How many players are online (any flow)' },
 	{ tok: '{counter}', need: 'player', counters: true, title: 'The player\'s counter in this run: starts at 0, changed by the counter setting on If, Else if and Else' },
@@ -1074,7 +1081,11 @@ const SUBJECTS = [
 	['player_guid', '{player_guid}', 'ident', 'player'],
 	['player_role', '{player_role}', 'role', 'player'],
 	['players_online', '{players_online}', 'num', ''],
-	['counter', '{counter}', 'num', 'player']
+	['counter', '{counter}', 'num', 'player'],
+	// The player's Steam ban record: an If on one is skipped when there is none.
+	['player_vac_bans', '{player_vac_bans}', 'num', 'player'],
+	['player_game_bans', '{player_game_bans}', 'num', 'player'],
+	['player_days_since_last_ban', '{player_days_since_last_ban}', 'num', 'player']
 ];
 // What an If, Else if or Else does to the player's counter when it runs.
 const COUNTER_OPS = [['', '0'], ['inc', '++'], ['dec', '--'], ['reset', 'reset']];
@@ -1365,6 +1376,12 @@ function findParent(root, target) {
 	return null;
 }
 
+// The fold arrows: triangles drawn in a 16px box and centred optically, on
+// their centroid (where they look centred) rather than their bounding box.
+// So the down arrow sits a little low and the right arrow a little right.
+const FOLD_DOWN = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5.33h10L8 13.33z" fill="currentColor"/></svg>';
+const FOLD_RIGHT = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.33 3v10l8-5z" fill="currentColor"/></svg>';
+
 function renderSteps(key) {
 	const box = key === 'steps' ? $('steps') : $('onStop');
 	const list = ed[key];
@@ -1388,17 +1405,30 @@ function renderSteps(key) {
 			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
 			if (isBlock(s)) {
 				const folded = collapsed.has(s);
-				sentence.prepend(el('button', { type: 'button', class: 'fold', 'aria-expanded': String(!folded),
+				const fold = el('button', { type: 'button', class: 'fold', 'aria-expanded': String(!folded),
 					title: folded ? 'Show the steps inside' : 'Hide the steps inside', 'aria-label': (folded ? 'Expand' : 'Collapse') + ' step ' + n,
-					onclick: () => { if (folded) collapsed.delete(s); else collapsed.add(s); changed(true); }, text: folded ? '▸' : '▾' }));
+					onclick: () => { if (folded) collapsed.delete(s); else collapsed.add(s); changed(true); } });
+				fold.innerHTML = folded ? FOLD_RIGHT : FOLD_DOWN;
+				sentence.prepend(fold);
 			}
 			const obj = s.type === 'if' ? s.branches[0] : s;
 			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
 			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop) || ''); // null when hidden: append would write "null"
+			// Collapsed: no line of its own; the arrow's tooltip says what's inside, and an
+			// error inside gives the row the red border.
 			if (isFolded(s)) {
 				const c = insideCount(s, errs, nums);
-				sentence.append(el('span', { class: 'folded' + (c.bad.length ? ' bad' : ''),
-					text: c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' + (c.bad.length ? ', error: step' + (c.bad.length === 1 ? ' ' : 's ') + c.bad.join(', ') : '') }));
+				sentence.firstChild.title = 'Show the ' + c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' +
+					(c.bad.length ? ' (error: step' + (c.bad.length === 1 ? ' ' : 's ') + c.bad.join(', ') + ')' : '');
+				if (c.bad.length) sentence.dataset.errInside = '1';
+			}
+			// An If or For each: the fold arrow on its own, centred on the row like the grip, and
+			// the label, fields and value (which wraps to a second line) beside it.
+			if (isBlock(s)) {
+				const fold = sentence.firstChild, inner = el('div', { class: 'sentence' });
+				while (fold.nextSibling) inner.append(fold.nextSibling);
+				sentence.append(inner);
+				sentence.classList.add('block');
 			}
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
@@ -1424,11 +1454,10 @@ function renderSteps(key) {
 			rowRefs[key].push({ row, sends, err, s, ek: obj });
 		} else if (r.kind === 'elif') {
 			const b = r.b, k = r.k;
-			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill logic', text: 'Else if' }));
-			// An Else if always compares the same thing as its If; only the operator and value change.
-			for (const p of STEPS.if.parts) sentence.append(p.k === 'subject'
-				? el('span', { class: 'w', title: 'Set by the If: change it there', style: 'color:var(--fg);font-family:var(--mono);font-size:12.5px;padding:0 4px', text: subjectOf(b)[1] })
-				: field(b, p, key, r.inLoop));
+			// An Else if always compares the same thing as its If, so it shows only
+			// [Else if] [operator] and the value; hovering the label names the subject.
+			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill logic', text: 'Else if', title: 'Compares ' + subjectOf(b)[1] + ', set by the If' }));
+			for (const p of STEPS.if.parts) if (p.k !== 'subject') sentence.append(field(b, p, key, r.inLoop));
 			sentence.append(counterField(b, 'counter', r.inLoop) || '');
 			const err = el('div', { class: 'err' });
 			const what = 'Else if ' + k + ' of step ' + n;
@@ -2028,7 +2057,7 @@ function renderCmds() {
 	list.textContent = '';
 	for (const c of CMDS) {
 		const s = draft[c.cmd];
-		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.staff ? el('span', { class: 'who', text: 'MODS & ADMINS' }) : null));
+		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.role ? el('span', { class: 'who', text: c.role >= 2 ? 'ADMINS' : 'MODS & ADMINS' }) : null));
 		const on = el('input', { type: 'checkbox', checked: s.on, id: 'on-' + c.cmd });
 		head.append(el('label', { class: 'opt', for: 'on-' + c.cmd }, on, 'On'));
 		head.append(el('label', { class: 'opt', for: 'cool-' + c.cmd }, 'Cooldown', durInput('cool-' + c.cmd, s.cool, '0', true, (v) => { s.cool = v; })));
