@@ -749,17 +749,8 @@ func BanRecord(ctx context.Context, guid string) (Bans, bool) {
 	if err != nil || steamID == "" {
 		return Bans{}, false
 	}
-	steamCache.Lock()
-	p := steamCache.byID[steamID]
-	steamCache.Unlock()
-	if p != nil && p.Found && time.Since(time.Unix(p.FetchedUnix, 0)) < steamCacheFor {
-		return Bans{VAC: p.VACBans, Game: p.GameBans, DaysSinceLast: p.DaysSinceLastBan}, true
-	}
-	banCache.Lock()
-	seen, ok := banCache.byID[steamID]
-	banCache.Unlock()
-	if ok && time.Since(seen.at) < steamCacheFor {
-		return seen.bans, true
+	if b, _, ok := cachedBans(steamID); ok {
+		return b, true
 	}
 	var bans struct {
 		Players []struct {
@@ -787,6 +778,25 @@ func BanRecord(ctx context.Context, guid string) (Bans, bool) {
 	}
 	banCache.Unlock()
 	return b, true
+}
+
+// cachedBans is the ban record of steamID if one is held and fresh: from a
+// profile the Steam tab fetched, else from an earlier GetPlayerBans. from
+// says which ("profile" or "bans").
+func cachedBans(steamID string) (b Bans, from string, ok bool) {
+	steamCache.Lock()
+	p := steamCache.byID[steamID]
+	steamCache.Unlock()
+	if p != nil && p.Found && time.Since(time.Unix(p.FetchedUnix, 0)) < steamCacheFor {
+		return Bans{VAC: p.VACBans, Game: p.GameBans, DaysSinceLast: p.DaysSinceLastBan}, "profile", true
+	}
+	banCache.Lock()
+	seen, ok := banCache.byID[steamID]
+	banCache.Unlock()
+	if ok && time.Since(seen.at) < steamCacheFor {
+		return seen.bans, "bans", true
+	}
+	return Bans{}, "", false
 }
 
 // database is the player database, set at startup (SetDatabase).

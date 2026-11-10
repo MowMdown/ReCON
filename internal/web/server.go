@@ -120,6 +120,11 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /api/flows/import", handleFlowImport)    // {flows: [...]}
 	mux.HandleFunc("POST /api/flows/command", handleQuickCommand) // {command: lock|unlock|shutdown|kickall}
 
+	// Developer page: not in the nav, read only (developer.go)
+	mux.HandleFunc("GET /developer", servePageHandler(devPage))
+	mux.HandleFunc("GET /api/developer/players", handleDevPlayers)       // every player: online, banned, IPs
+	mux.HandleFunc("GET /api/developer/players/{guid}", handleDevPlayer) // everything ReCON holds about one
+
 	// Built-in chat commands (!help, !shout, ...): their settings, edited on the Flows page.
 	mux.HandleFunc("GET /api/chat-commands", handleChatCommandsGet)
 	mux.HandleFunc("POST /api/chat-commands", handleChatCommandsSave) // {settings: {...}}
@@ -131,18 +136,18 @@ func buildWebRoutes() *http.ServeMux {
 var quietPaths = map[string]bool{
 	"/health": true, "/favicon.ico": true, "/players": true, "/bans": true, "/flows": true,
 	"/api/players": true, "/api/bans": true, "/api/flows": true, "/api/status": true,
-	"/api/console": true,
+	"/api/console": true, "/developer": true, "/api/developer/players": true,
 }
 
 // isQuiet reports whether a request is a routine read: a quietPaths GET, a
-// theme file (/assets/...), or the Message and Details dialogs reading one
+// theme file (/assets/...), the Developer page's reads, or the Message and Details dialogs reading one
 // player (/api/players/<guid>/chat, /details, /steam).
 func isQuiet(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
 	p := r.URL.Path
-	return quietPaths[p] || strings.HasPrefix(p, "/assets/") || (strings.HasPrefix(p, "/api/players/") &&
+	return quietPaths[p] || strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/api/developer/") || (strings.HasPrefix(p, "/api/players/") &&
 		(strings.HasSuffix(p, "/chat") || strings.HasSuffix(p, "/details") || strings.HasSuffix(p, "/steam")))
 }
 
@@ -212,6 +217,7 @@ var (
 	playersPage = loadPageTemplate("players.html")
 	bansPage    = loadPageTemplate("bans.html")
 	flowsPage   = loadPageTemplate("flows.html")
+	devPage     = loadPageTemplate("developer.html")
 )
 
 // servePageHandler serves an HTML page. Its layout values (widths, paddings, font

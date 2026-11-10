@@ -430,3 +430,99 @@ func TestDeletePlayerRoute(t *testing.T) {
 		t.Errorf("details after delete: %d, want 404", rec.Code)
 	}
 }
+
+// TestDeveloperRoutes checks the Developer page's API: the list shows who is
+// online and banned, and one player's data has every source, all their
+// rows (nothing trimmed), the tracker entry and the flow variables.
+func TestDeveloperRoutes(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(game.ResetTracker)
+	t0 := time.Now().Add(-time.Hour)
+	for i := 0; i < 3; i++ { // three past sessions
+		at := t0.Add(time.Duration(i) * 10 * time.Minute)
+		if err := db.OpenPlayerSession(test.GUID1, "Marrow", "1.2.3.4", 3, at); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ClosePlayerSession(test.GUID1, at.Add(time.Minute), "disconnected"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.RecordPlayerBan(test.GUID2, "Fenwick", "5.6.7.8", "cheating", false, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	game.Track(battleye.ParseServerMessage("Player #3 Marrow (1.2.3.4:2304) connected", time.Now()))
+	game.Track(battleye.ParseServerMessage("Player #3 Marrow - BE GUID: "+test.GUID1, time.Now()))
+	mux := buildWebRoutes()
+	get := func(path string, out any) int {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if out != nil {
+			if err := json.Unmarshal(rec.Body.Bytes(), out); err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+		}
+		return rec.Code
+	}
+
+	if code := get("/developer", nil); code != http.StatusOK {
+		t.Fatalf("/developer: %d", code)
+	}
+	var list struct {
+		Players []struct {
+			GUID     string `json:"guid"`
+			OnlineID *int   `json:"onlineId"`
+		} `json:"players"`
+	}
+	get("/api/developer/players", &list)
+	if len(list.Players) != 1 || list.Players[0].GUID != test.GUID1 || list.Players[0].OnlineID == nil || *list.Players[0].OnlineID != 3 {
+		t.Errorf("list: %+v, want Marrow online as #3", list.Players)
+	}
+
+	var one struct {
+		Name      string `json:"name"`
+		Variables []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+			Known bool   `json:"known"`
+		} `json:"variables"`
+		Sources []struct {
+			Title string          `json:"title"`
+			Data  json.RawMessage `json:"data"`
+		} `json:"sources"`
+	}
+	if code := get("/api/developer/players/"+strings.ToUpper(test.GUID1), &one); code != http.StatusOK {
+		t.Fatalf("player: %d", code)
+	}
+	src := map[string]json.RawMessage{}
+	for _, s := range one.Sources {
+		src[s.Title] = s.Data
+	}
+	var history []map[string]any
+	json.Unmarshal(src["session_history"], &history)
+	if one.Name != "Marrow" || len(history) != 3 {
+		t.Errorf("name %q, %d history rows, want Marrow and 3", one.Name, len(history))
+	}
+	if !strings.Contains(string(src["Player tracker (game tracker)"]), `"id":3`) {
+		t.Errorf("tracker: %s", src["Player tracker (game tracker)"])
+	}
+	vars := map[string]string{}
+	for _, v := range one.Variables {
+		if v.Known {
+			vars[v.Name] = v.Value
+		}
+	}
+	if vars["player_name"] != "Marrow" || vars["player_id"] != "3" || vars["player_role"] != "Player" {
+		t.Errorf("variables: %v", vars)
+	}
+
+	// The timed ban held in memory shows up for the banned player.
+	get("/api/developer/players/"+test.GUID2, &one)
+	for _, s := range one.Sources {
+		if s.Title == "Timed ban (store, memory only)" && !strings.Contains(string(s.Data), "cheating") {
+			t.Errorf("timed ban: %s", s.Data)
+		}
+	}
+	if code := get("/api/developer/players/nope", nil); code != http.StatusBadRequest {
+		t.Errorf("bad GUID: %d, want 400", code)
+	}
+}

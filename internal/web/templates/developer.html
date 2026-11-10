@@ -1,0 +1,238 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReCON Developer</title>
+{{template "icons" .}}
+{{template "style" .}}
+<style>
+/* /developer: every player's raw data. Nothing in the nav links here. */
+.dev { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 800px) { .dev { grid-template-columns: minmax(0, 1fr); } }
+.devlist { border: 1px solid #333; border-radius: 6px; overflow: hidden; }
+.devlist .tools { padding: 8px; border-bottom: 1px solid #333; }
+.devlist .tools input { margin: 0; }
+.devlist .seg2 { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; border-bottom: 1px solid #333; }
+.devlist .seg2 button { margin: 0; font-size: 12px; padding: 3px 9px; white-space: nowrap; flex: 1 1 auto; }
+.devlist .seg2 button.on { outline: 1px solid currentColor; }
+.devrows { max-height: calc(100vh - 260px); min-height: 200px; overflow-y: auto; }
+.devrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding: 7px 10px; border-bottom: 1px solid #2a2a2a; cursor: pointer; }
+.devrow:hover { background: rgba(255, 255, 255, .04); }
+.devrow.sel { background: rgba(138, 180, 248, .16); box-shadow: inset 3px 0 0 #8ab4f8; }
+.devrow .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devrow .g { grid-column: 1 / -1; font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: #888; }
+.devrow .b { font-size: 11px; color: #888; }
+.devrow .b.on { color: #81c995; }
+.devrow .b.ban { color: #f28b82; }
+.devempty { padding: 12px; color: #888; font-size: 13px; }
+.devhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.devhead h2 { margin: 0; font-size: 20px; }
+.devhead .sub { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #aaa; overflow-wrap: anywhere; }
+.devhead .right { margin-left: auto; display: flex; gap: 6px; }
+.devhead .right button { margin: 0; }
+details.src { border: 1px solid #333; border-radius: 6px; margin-bottom: 8px; }
+details.src > summary { cursor: pointer; padding: 7px 10px; display: flex; gap: 8px; align-items: baseline; list-style: none; flex-wrap: wrap; }
+details.src > summary::-webkit-details-marker { display: none; }
+details.src > summary::before { content: '\25B8'; color: #888; width: 1ch; }
+details.src[open] > summary::before { content: '\25BE'; }
+details.src .kind { font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid #555; color: #aaa; }
+details.src .kind.memory { color: #fdd663; border-color: #5c5224; }
+details.src .kind.db { color: #8ab4f8; border-color: #36507a; }
+details.src .kind.ext { color: #c58af9; border-color: #523a6e; }
+details.src .kind.flow { color: #81c995; border-color: #2f5a3b; }
+details.src .what { color: #888; font-size: 12px; }
+details.src pre { margin: 0; padding: 10px 12px; border-top: 1px solid #333; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; max-height: 480px; overflow: auto; }
+details.src .tw { border-top: 1px solid #333; overflow-x: auto; }
+table.vars { width: 100%; min-width: 0; table-layout: auto; border-collapse: collapse; margin: 0; }
+table.vars th, table.vars td { height: auto; padding: 5px 10px; font-size: 13px; white-space: normal; overflow: visible; }
+table.vars td.mono { font-family: ui-monospace, Menlo, Consolas, monospace; white-space: nowrap; }
+table.vars td.v { overflow-wrap: anywhere; white-space: normal; }
+table.vars .unk { color: #f28b82; }
+table.vars td.from { color: #9aa0a6; }
+.devnote { color: #888; font-size: 12px; margin: 0 0 12px; }
+html[data-theme] .devrow.sel { background: color-mix(in srgb, var(--color-accent) 14%, transparent); box-shadow: inset 3px 0 0 var(--color-accent); }
+html[data-theme] details.src .kind.flow { color: var(--color-success, #81c995); border-color: color-mix(in srgb, var(--color-success, #81c995) 45%, transparent); }
+html[data-theme] .devlist, html[data-theme] details.src, html[data-theme] details.src pre, html[data-theme] details.src .tw,
+html[data-theme] .devlist .tools, html[data-theme] .devlist .seg2, html[data-theme] .devrow,
+html[data-theme] table.vars th, html[data-theme] table.vars td { border-color: var(--color-divider); }
+</style>
+{{template "theme" .}}
+</head>
+<body>
+<nav><a href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a></nav>
+{{template "statusbar" .}}
+<div class="top"><h1>Developer</h1></div>
+<p class="devnote">Every player and everything ReCON holds about them, raw: <b>flow</b> is what each flow {variable} would be right now, <b>memory</b> is what ReCON keeps while it runs, <b>db</b> is every row in players.db, <b>ext</b> is the Steam cache and GeoIP. Nothing is trimmed. Read only; refreshes every 5 seconds.</p>
+<div class="dev">
+	<div class="devlist">
+		<div class="tools"><input id="devq" type="search" placeholder="Name, GUID, IP or SteamID" autocomplete="off"></div>
+		<div class="seg2" id="devfilter"></div>
+		<div class="devrows" id="devrows"></div>
+	</div>
+	<div>
+		<div class="devhead"><h2 id="devname"></h2><span class="sub" id="devguid"></span>
+			<span class="right"><button id="devcopy" disabled>Copy all as JSON</button><button id="devexpand" disabled>Expand all</button></span></div>
+		<div id="devsrc"><p class="devempty">Pick a player.</p></div>
+	</div>
+</div>
+<script>
+(function () {
+	var players = [], filter = 'all', current = '', data = null, lastJSON = '';
+	// Which sections are open, by title; these start open.
+	var open = { 'Flow {variables}': true, 'Player tracker (game tracker)': true, 'players': true, 'active_sessions': true };
+	var listEl = document.getElementById('devrows'), qEl = document.getElementById('devq');
+
+	function el(tag, cls, text) {
+		var e = document.createElement(tag);
+		if (cls) e.className = cls;
+		if (text != null) e.textContent = text;
+		return e;
+	}
+
+	var FILTERS = [['all', 'All', function () { return true; }],
+		['online', 'Online', function (p) { return p.onlineId != null; }],
+		['offline', 'Offline', function (p) { return p.onlineId == null; }],
+		['banned', 'Banned', function (p) { return p.banned; }]];
+
+	function renderList() {
+		var box = document.getElementById('devfilter');
+		box.textContent = '';
+		FILTERS.forEach(function (f) {
+			var b = el('button', f[0] === filter ? 'on' : '', f[1] + ' ' + players.filter(f[2]).length);
+			b.onclick = function () { filter = f[0]; renderList(); };
+			box.append(b);
+		});
+		var q = qEl.value.trim().toLowerCase(), want = FILTERS.find(function (f) { return f[0] === filter; })[2];
+		var shown = players.filter(function (p) {
+			return want(p) && (!q || [p.name, p.guid, p.steamId].concat(p.ips || []).some(function (s) { return (s || '').toLowerCase().indexOf(q) >= 0; }));
+		});
+		// Online first, by number; then the rest by name (as the API sends them).
+		shown.sort(function (a, b) {
+			if ((a.onlineId == null) !== (b.onlineId == null)) return a.onlineId == null ? 1 : -1;
+			return a.onlineId != null ? a.onlineId - b.onlineId : 0;
+		});
+		var top = listEl.scrollTop;
+		listEl.textContent = '';
+		if (!shown.length) listEl.append(el('div', 'devempty', players.length ? 'No player matches.' : 'No players yet.'));
+		shown.forEach(function (p) {
+			var r = el('div', 'devrow' + (p.guid.toLowerCase() === current ? ' sel' : ''));
+			r.append(el('span', 'n', p.name));
+			var st = p.onlineId != null ? 'online #' + p.onlineId : p.banned ? 'banned' : 'offline';
+			if (p.onlineId != null && p.banned) st += ', banned';
+			var b = el('span', 'b' + (p.onlineId != null ? ' on' : p.banned ? ' ban' : ''), st);
+			r.append(b, el('span', 'g', p.guid));
+			r.onclick = function () { pick(p.guid); };
+			listEl.append(r);
+		});
+		listEl.scrollTop = top;
+	}
+
+	async function loadList() {
+		try {
+			var res = await fetch('/api/developer/players');
+			var d = await res.json();
+			if (d.ok) { players = d.players || []; renderList(); }
+		} catch (e) { /* the status bar shows the connection */ }
+	}
+
+	function pick(guid) {
+		current = guid.toLowerCase();
+		history.replaceState(null, '', '#' + current);
+		lastJSON = '';
+		renderList();
+		loadPlayer();
+	}
+
+	function section(kind, title, note, body) {
+		var d = el('details', 'src');
+		d.open = !!open[title];
+		var s = el('summary');
+		s.append(el('span', 'kind ' + kind, kind), el('b', '', title));
+		if (note) s.append(el('span', 'what', note));
+		d.append(s, body);
+		d.addEventListener('toggle', function () { open[title] = d.open; });
+		return d;
+	}
+
+	function varsTable(vars) {
+		var w = el('div', 'tw'), t = el('table', 'vars'), h = el('tr');
+		['Variable', 'Value', 'Read from'].forEach(function (x) { h.append(el('th', '', x)); });
+		t.append(h);
+		vars.forEach(function (v) {
+			var r = el('tr');
+			r.append(el('td', 'mono', '{' + v.name + '}' + (v.flow ? ' · ' + v.flow : '')));
+			// The value; an unknown one is what a step would show: "?" for the
+			// Steam ones, the placeholder left as typed for the rest.
+			var val = el('td', 'mono v');
+			val.append(v.known ? document.createTextNode(v.value) : el('span', 'unk', v.source.indexOf('Steam') === 0 ? '?' : '(none)'));
+			r.append(val);
+			r.append(el('td', 'from', v.source));
+			t.append(r);
+		});
+		w.append(t);
+		return w;
+	}
+
+	function render() {
+		var box = document.getElementById('devsrc'), y = window.scrollY;
+		document.getElementById('devname').textContent = data.name || '(no name)';
+		document.getElementById('devguid').textContent = data.guid + (data.steamId ? '  ·  SteamID ' + data.steamId : '');
+		box.textContent = '';
+		box.append(section('flow', 'Flow {variables}', 'what a flow step would read for this player right now', varsTable(data.variables || [])));
+		(data.sources || []).forEach(function (s) {
+			box.append(section(s.kind, s.title, s.note, el('pre', '', s.data == null ? 'null' : JSON.stringify(s.data, null, 2))));
+		});
+		window.scrollTo(0, y);
+		document.getElementById('devcopy').disabled = false;
+		document.getElementById('devexpand').disabled = false;
+	}
+
+	async function loadPlayer() {
+		if (!current) return;
+		var guid = current;
+		try {
+			var res = await fetch('/api/developer/players/' + encodeURIComponent(guid));
+			var text = await res.text();
+			if (guid !== current || text === lastJSON) return;
+			var d = JSON.parse(text);
+			if (!d.ok) {
+				document.getElementById('devsrc').textContent = d.error || 'Not found.';
+				return;
+			}
+			lastJSON = text;
+			data = d;
+			render();
+		} catch (e) { /* the status bar shows the connection */ }
+	}
+
+	document.getElementById('devcopy').onclick = function () {
+		var text = JSON.stringify(data, null, 2), b = this;
+		var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy all as JSON'; }, 1500); };
+		if (navigator.clipboard && window.isSecureContext) {
+			navigator.clipboard.writeText(text).then(done);
+		} else {
+			var ta = el('textarea');
+			ta.value = text;
+			document.body.append(ta);
+			ta.select();
+			document.execCommand('copy');
+			ta.remove();
+			done();
+		}
+	};
+	document.getElementById('devexpand').onclick = function () {
+		var all = document.querySelectorAll('#devsrc details'), any = Array.prototype.some.call(all, function (d) { return !d.open; });
+		all.forEach(function (d) { d.open = any; });
+		this.textContent = any ? 'Collapse all' : 'Expand all';
+	};
+	qEl.addEventListener('input', renderList);
+
+	var start = location.hash.slice(1).toLowerCase();
+	if (/^[0-9a-f]{32}$/.test(start)) pick(start);
+	loadList();
+	setInterval(function () { loadList(); loadPlayer(); }, 5000);
+})();
+</script>
+</body>
+</html>
