@@ -209,7 +209,7 @@ A page for troubleshooting. No menu item links to it: type `/developer` after th
 - **db**: every row of every table in `players.db` for their GUID: `players`, `active_sessions`, `session_history`, `player_ips`, `chat_messages`, `player_notes`, `bans`.
 - **ext**: the Steam cache (profile, ban record, SteamID search) and GeoIP's country for each of their IPs.
 
-**Copy all as JSON** copies the lot. The page only reads, refreshes every 5 seconds, and never asks Steam for anything. Linking to `/developer#<guid>` opens that player.
+**Copy all as JSON** copies the lot. The page only reads and never asks Steam for anything. It doesn't refresh by itself, so nothing moves while you read: **Refresh** reads the list and the player again. Linking to `/developer#<guid>` opens that player.
 
 ---
 

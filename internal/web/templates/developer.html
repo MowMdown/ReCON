@@ -31,6 +31,7 @@
 .devhead .sub { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #aaa; overflow-wrap: anywhere; }
 .devhead .right { margin-left: auto; display: flex; gap: 6px; }
 .devhead .right button { margin: 0; }
+.devhead .right .when { align-self: center; color: #888; font-size: 12px; }
 details.src { border: 1px solid #333; border-radius: 6px; margin-bottom: 8px; }
 details.src > summary { cursor: pointer; padding: 7px 10px; display: flex; gap: 8px; align-items: baseline; list-style: none; flex-wrap: wrap; }
 details.src > summary::-webkit-details-marker { display: none; }
@@ -63,7 +64,7 @@ html[data-theme] table.vars th, html[data-theme] table.vars td { border-color: v
 <nav><a href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a></nav>
 {{template "statusbar" .}}
 <div class="top"><h1>Developer</h1></div>
-<p class="devnote">Every player and everything ReCON holds about them, raw: <b>flow</b> is what each flow {variable} would be right now, <b>memory</b> is what ReCON keeps while it runs, <b>db</b> is every row in players.db, <b>ext</b> is the Steam cache and GeoIP. Nothing is trimmed. Read only; refreshes every 5 seconds.</p>
+<p class="devnote">Every player and everything ReCON holds about them, raw: <b>flow</b> is what each flow {variable} would be right now, <b>memory</b> is what ReCON keeps while it runs, <b>db</b> is every row in players.db, <b>ext</b> is the Steam cache and GeoIP. Nothing is trimmed. Read only; press Refresh to read it again.</p>
 <div class="dev">
 	<div class="devlist">
 		<div class="tools"><input id="devq" type="search" placeholder="Name, GUID, IP or SteamID" autocomplete="off"></div>
@@ -72,7 +73,7 @@ html[data-theme] table.vars th, html[data-theme] table.vars td { border-color: v
 	</div>
 	<div>
 		<div class="devhead"><h2 id="devname"></h2><span class="sub" id="devguid"></span>
-			<span class="right"><button id="devcopy" disabled>Copy all as JSON</button><button id="devexpand" disabled>Expand all</button></span></div>
+			<span class="right"><span class="when" id="devwhen"></span><button id="devrefresh" title="Read the player list and this player again">Refresh</button><button id="devcopy" disabled>Copy all as JSON</button><button id="devexpand" disabled>Expand all</button></span></div>
 		<div id="devsrc"><p class="devempty">Pick a player.</p></div>
 	</div>
 </div>
@@ -178,10 +179,20 @@ html[data-theme] table.vars th, html[data-theme] table.vars td { border-color: v
 		var box = document.getElementById('devsrc'), y = window.scrollY;
 		document.getElementById('devname').textContent = data.name || '(no name)';
 		document.getElementById('devguid').textContent = data.guid + (data.steamId ? '  ·  SteamID ' + data.steamId : '');
+		// Keep where each section's box was scrolled to (by title) over a Refresh.
+		var inner = {};
+		box.querySelectorAll('details.src').forEach(function (d) {
+			var sc = d.querySelector('pre, .tw');
+			if (sc) inner[d.querySelector('summary b').textContent] = [sc.scrollTop, sc.scrollLeft];
+		});
 		box.textContent = '';
 		box.append(section('flow', 'Flow {variables}', 'what a flow step would read for this player right now', varsTable(data.variables || [])));
 		(data.sources || []).forEach(function (s) {
 			box.append(section(s.kind, s.title, s.note, el('pre', '', s.data == null ? 'null' : JSON.stringify(s.data, null, 2))));
+		});
+		box.querySelectorAll('details.src').forEach(function (d) {
+			var pos = inner[d.querySelector('summary b').textContent], sc = d.querySelector('pre, .tw');
+			if (pos && sc) { sc.scrollTop = pos[0]; sc.scrollLeft = pos[1]; }
 		});
 		window.scrollTo(0, y);
 		document.getElementById('devcopy').disabled = false;
@@ -203,6 +214,7 @@ html[data-theme] table.vars th, html[data-theme] table.vars td { border-color: v
 			lastJSON = text;
 			data = d;
 			render();
+			document.getElementById('devwhen').textContent = 'Read at ' + new Date().toLocaleTimeString();
 		} catch (e) { /* the status bar shows the connection */ }
 	}
 
@@ -231,7 +243,15 @@ html[data-theme] table.vars th, html[data-theme] table.vars td { border-color: v
 	var start = location.hash.slice(1).toLowerCase();
 	if (/^[0-9a-f]{32}$/.test(start)) pick(start);
 	loadList();
-	setInterval(function () { loadList(); loadPlayer(); }, 5000);
+	// No timer: redrawing while someone reads loses their place. Refresh
+	// reads the list and the open player again.
+	document.getElementById('devrefresh').onclick = async function () {
+		var b = this;
+		b.disabled = true;
+		lastJSON = '';
+		await Promise.all([loadList(), loadPlayer()]);
+		b.disabled = false;
+	};
 })();
 </script>
 </body>
