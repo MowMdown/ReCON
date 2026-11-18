@@ -106,7 +106,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	<div class="row r4">
 		<div class="card"><h3>Players</h3><div class="big" id="players">-</div><div class="bar"><i id="pbar" style="width:0"></i></div><div class="note" id="queue"></div></div>
 		<div class="card"><h3>In-game time</h3><div class="big" id="gtime">-</div><div class="note" id="gtimenote"></div>
-			<div class="pills"><span class="pill" title="Day speed (serverTimeAcceleration)" id="dayx"></span><span class="pill" title="Night speed, on top of the day speed (serverNightTimeAcceleration)" id="nightx"></span></div></div>
+			<div class="pills"><span class="pill" title="Day speed (serverTimeAcceleration)" id="dayx"></span><span class="pill" id="nightx"></span></div></div>
 		<div class="card"><h3>Server location</h3><div class="big m" id="loc">-</div><div class="note" id="locnote"></div></div>
 		<div class="card"><h3>Uptime</h3><div class="big" id="uptime">-</div><div class="note" id="uptimenote"></div></div>
 	</div>
@@ -211,7 +211,10 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		var dx = k.dayAccel || 1, nx = k.nightAccel || 1;
 		$('gtime').textContent = k.time || '-';
 		$('dayx').textContent = '☀ ×' + dx;
-		$('nightx').textContent = '☾ ×' + nx;
+		// Night runs at the day speed times the night speed: show the result.
+		var nightSpeed = +(dx * nx).toFixed(2);
+		$('nightx').textContent = '☾ ×' + nightSpeed;
+		$('nightx').title = 'Night speed: ×' + dx + ' (serverTimeAcceleration) × ×' + nx + ' (serverNightTimeAcceleration)';
 
 		// Location from GeoIP on the public IP.
 		var loc = $('loc');
@@ -270,7 +273,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		$('daylen').textContent = sun.polar === 'night' ? 'No day' : dur(dayLen);
 		$('daynote').textContent = sun.polar === 'night' ? 'polar night' : (set - rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + dx;
 		$('night').textContent = sun.polar === 'day' ? 'No night' : dur(nightLen);
-		$('nightnote').textContent = sun.polar === 'day' ? 'midnight sun' : (24 - set + rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + dx + ' \u00d7 \u00d7' + nx;
+		$('nightnote').textContent = sun.polar === 'day' ? 'midnight sun' : (24 - set + rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + +(dx * nx).toFixed(2);
 		var isDay = sun.polar === 'day' || (sun.polar !== 'night' && t >= rise && t < set);
 		$('gtimenote').textContent = !isFinite(t) ? '' : (isDay ? 'Daytime' : 'Night') + (s.readAt ? ' · at ' + new Date(s.readAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
 		if (!isFinite(t) || sun.polar) {
