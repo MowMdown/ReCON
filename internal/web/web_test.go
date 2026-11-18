@@ -18,6 +18,7 @@ import (
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/serverinfo"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 	"github.com/MowMdown/ReCON/internal/test"
@@ -61,7 +62,7 @@ func flowIDs(t *testing.T) []int64 {
 	return ids
 }
 
-func TestRootRedirectsToPlayers(t *testing.T) {
+func TestRootRedirectsToServerInfo(t *testing.T) {
 	mux := buildWebRoutes()
 	for path, want := range map[string]int{"/": http.StatusFound, "/plyers": http.StatusNotFound} {
 		rec := httptest.NewRecorder()
@@ -69,7 +70,7 @@ func TestRootRedirectsToPlayers(t *testing.T) {
 		if rec.Code != want {
 			t.Errorf("GET %s = %d, want %d", path, rec.Code, want)
 		}
-		if want == http.StatusFound && rec.Header().Get("Location") != "/players" {
+		if want == http.StatusFound && rec.Header().Get("Location") != "/server" {
 			t.Errorf("GET %s redirects to %q", path, rec.Header().Get("Location"))
 		}
 	}
@@ -570,5 +571,44 @@ func TestOfflineListLastMessageNoBanned(t *testing.T) {
 	p := d.Offline[0]
 	if p.LastMessage != "brb dinner" || p.LastMessageChannel != "Side" || p.LastMessageUnix != t0.Add(2*time.Second).Unix() {
 		t.Errorf("last message %q (%s, %d), want \"brb dinner\" (Side, %d)", p.LastMessage, p.LastMessageChannel, p.LastMessageUnix, t0.Add(2*time.Second).Unix())
+	}
+}
+
+// TestServerInfoRoutes checks the Server Info API: the page and its data
+// answer with nothing recorded yet, a mod update is acknowledged, and a bad
+// range or unknown mod is refused.
+func TestServerInfoRoutes(t *testing.T) {
+	db := testDB(t)
+	serverinfo.SetDatabase(db)
+	t.Cleanup(func() { serverinfo.SetDatabase(nil) })
+	if err := db.SaveModFromSteam(store.ModUpdate{WorkshopID: "1559212036", Name: "CF", SteamUpdated: 100}); err != nil {
+		t.Fatal(err)
+	}
+	// Steam has a newer one.
+	if _, err := db.Exec("UPDATE mod_updates SET steam_updated = 200"); err != nil {
+		t.Fatal(err)
+	}
+	mux := buildWebRoutes()
+	do := func(method, path string) int {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+		return rec.Code
+	}
+	for path, want := range map[string]int{
+		"/server": 200, "/api/server": 200, "/api/server/population?range=7d": 200, "/api/server/population?range=all": 200,
+		"/api/server/population?range=3y": 400, "/api/server/busiest?tz=America/New_York": 200, "/api/server/busiest?tz=nope": 200,
+	} {
+		if code := do(http.MethodGet, path); code != want {
+			t.Errorf("GET %s = %d, want %d", path, code, want)
+		}
+	}
+	if code := do(http.MethodPost, "/api/server/mods/1559212036/ack"); code != 200 {
+		t.Errorf("ack = %d", code)
+	}
+	if rows, _ := db.ModUpdates(); rows["1559212036"].AckedUpdated != 200 {
+		t.Errorf("not acknowledged: %+v", rows)
+	}
+	if code := do(http.MethodPost, "/api/server/mods/42/ack"); code != 404 {
+		t.Errorf("unknown mod ack = %d, want 404", code)
 	}
 }

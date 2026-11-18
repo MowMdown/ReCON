@@ -123,6 +123,11 @@ Everything is set with environment variables.
 | `MAXMIND_ACCOUNT_ID`    | none               | With `MAXMIND_LICENSE_KEY`, turns on the country flags next to IPs (below). Both are on your free [MaxMind](https://www.maxmind.com/en/geolite2/signup) account's *Manage License Keys* page |
 | `MAXMIND_LICENSE_KEY`   | none               | MaxMind licence key, for downloading the GeoLite2-Country database |
 | `GEOIP_DIR`             | the folder `DB_PATH` is in | Where `GeoLite2-Country.mmdb` is kept |
+| `QUERY_HOST`            | `RCON_HOST`        | Where to send Steam's server query, for the Server Info page |
+| `QUERY_PORT`            | `27016`            | The server's Steam query port (`steamQueryPort` in `serverDZ.cfg`) |
+| `SERVER_IP`             | `QUERY_HOST` if it is a public address | The public IP shown under **Connect** on the Server Info page, and its country |
+| `SERVER_SUNRISE`        | `05:00`            | In-game sunrise on your map, for the Server Info page's day and night |
+| `SERVER_SUNSET`         | `19:00`            | In-game sunset |
 
 `RCON_HOST`, `RCON_PORT` and `RCON_PASSWORD` are the defaults: **Settings** on the Players page can override any of them without editing `docker-compose.yaml` (see below).
 
@@ -140,6 +145,20 @@ Every page shows two status lines at the top:
 On the Players and Server Bans pages you can drag table headers to reorder the columns; **Reset columns** puts them back.
 
 The picker at the top right sets the look: **Default** (the plain look, what a browser starts with), **Terminal** (green monospace) or **Tokyo Night**. Your browser remembers the choice. The icons ([Phosphor](https://phosphoricons.com), MIT) are built into ReCON, so they work without internet. The fonts (Inter, JetBrains Mono) come from Google Fonts; without internet the pages use the system's fonts instead.
+
+### Server Info: `/server`
+
+The page ReCON opens on. Every minute ReCON asks the game server what it tells Steam's server browser (the query port, `QUERY_PORT`), so it shows the same things a server list does, and adds what ReCON has recorded itself:
+
+- **The server:** name, map, 1PP or 3PP, version, BattlEye, and whether it is answering (a red dot and "Not answering" when it isn't, with the last answer still shown).
+- **Players** and the queue, **in-game time** with the day and night speeds (☀ ×2, ☾ ×4), the server's **location** (GeoIP on `SERVER_IP`) and **uptime** over the last 7 days (of the time ReCON was running).
+- **Connect:** the IP, game port and query port. Click one to copy it.
+- **Day & night:** a bar of the 24 in-game hours with sunrise, sunset and the current time, how long until sunset and sunrise in real time, and how long a night lasts. DayZ multiplies the night speed by the day speed, so a 10-hour night at ×2 and ×4 lasts 1h 15m. Sunrise and sunset differ per map: set `SERVER_SUNRISE` and `SERVER_SUNSET`.
+- **Population:** players online over the last day, 7 days, 2 weeks, month or all time, with the peak, average, different players and sessions over 7 days. It comes from the session history, so it is exact, and it has history from the first day ReCON recorded.
+- **Busiest times:** the average number of players for each weekday and hour over the last 4 weeks, in your browser's time zone.
+- **Mods:** the server's Workshop mods, each linking to its Workshop page, and the total download size. ReCON asks Steam every 3 hours when each was last updated; a mod Steam has updated since glows red. Click it to acknowledge the update and it goes back to normal. A mod seen for the first time counts as up to date.
+
+It doesn't refresh by itself: **Refresh** asks the server again.
 
 ### Players: `/players`
 
@@ -573,6 +592,16 @@ curl -X POST http://<host>:8080/api/flows/3/run \
 | GET | `/api/developer/players` | | Every player: GUID, name, SteamID, IPs, `onlineId` (null when offline), `banned` |
 | GET | `/api/developer/players/<guid>` | | Everything held about one player: `variables` (the flow placeholders) and `sources` (`kind`, `title`, `note`, `data`) |
 
+### Server Info
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| GET  | `/api/server` | | The server's latest answer (name, map, players, keywords, mods), connect details, uptime, 7-day stats, mods with Steam's updates |
+| POST | `/api/server/refresh` | | Ask the server now, then the same as `GET /api/server` |
+| GET  | `/api/server/population` | `?range=1d`, `7d`, `2w`, `1m` or `all` | Players online over time, as steps |
+| GET  | `/api/server/busiest` | `?tz=America/New_York` | Average players per weekday and hour over the last 4 weeks |
+| POST | `/api/server/mods/<workshop id>/ack` | | Acknowledge a mod's update on Steam |
+
 ### Status
 
 `GET /health` returns `{"ok": true}`. `GET /api/status` returns the RCON state the pages show: `{"ok": true, "rcon": "connected"}` (or `retrying` / `unavailable`, with `"waiting": true` while ReCON waits for the server to answer its login, otherwise `retryInMs` until the next try).
@@ -600,6 +629,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
 | `internal/geoip/` | The country of an IP, for the flags, from MaxMind's GeoLite2-Country database, and downloading it |
+| `internal/serverinfo/` | The Server Info page's data: Steam's server query (A2S) and DayZ's keywords and mod list, uptime, population and busiest times, and mod updates from the Steam Workshop |
 | `internal/store/` | The SQLite database: every SQL statement |
 | `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), the favicons and app icons (`assets/icons/`) and the country flags (`assets/flags/`), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |

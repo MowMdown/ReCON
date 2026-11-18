@@ -112,8 +112,29 @@ func OpenPlayerDatabase(filepath string) (*Database, error) {
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	);
+	-- When the game server answered its Steam query (up = 1) or didn't
+	-- (up = 0), as intervals; times ReCON wasn't running are in no row.
+	-- For the Server Info page's uptime.
+	CREATE TABLE IF NOT EXISTS server_uptime (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		started DATETIME NOT NULL,
+		ended DATETIME NOT NULL,
+		up INTEGER NOT NULL
+	);
+	-- Each Workshop mod the server has run, and when Steam last said it was
+	-- updated: steam_updated is Steam's latest, acked_updated the one
+	-- acknowledged on the Server Info page (set to Steam's when first seen).
+	CREATE TABLE IF NOT EXISTS mod_updates (
+		workshop_id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL DEFAULT 0,
+		steam_updated INTEGER NOT NULL DEFAULT 0,
+		acked_updated INTEGER NOT NULL DEFAULT 0
+	);
 	CREATE INDEX IF NOT EXISTS idx_session_history_guid
 		ON session_history(guid);
+	CREATE INDEX IF NOT EXISTS idx_session_history_disconnected
+		ON session_history(disconnected_at);
 	CREATE INDEX IF NOT EXISTS idx_chat_messages_guid
 		ON chat_messages(guid, id);
 	-- The same names the old guidsearch tool used, so databases it touched

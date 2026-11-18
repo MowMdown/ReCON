@@ -20,6 +20,9 @@ services:
       STEAM_SEARCH_PRIORITY: "high"
       MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
+      # Server Info page: the server's Steam query port and public IP
+      # QUERY_PORT: "27016"
+      # SERVER_IP: 203.0.113.10
     volumes:
       - /mnt/user/appdata/recon/deerisle:/data
     ports:
@@ -46,6 +49,9 @@ services:
       STEAM_SEARCH_PRIORITY: "high"
       MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
+      # Server Info page: the server's Steam query port and public IP
+      # QUERY_PORT: "27016"
+      # SERVER_IP: 203.0.113.10
     volumes:
       - /mnt/user/appdata/recon/namalsk:/data
     ports:
@@ -72,6 +78,9 @@ services:
       STEAM_SEARCH_PRIORITY: "high"
       MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
+      # Server Info page: the server's Steam query port and public IP
+      # QUERY_PORT: "27016"
+      # SERVER_IP: 203.0.113.10
     volumes:
       - /mnt/user/appdata/recon/nasdara:/data
     ports:

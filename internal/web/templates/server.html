@@ -1,0 +1,363 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DayZ Server Info</title>
+{{template "icons" .}}
+{{template "style" .}}
+<style>
+/* Server Info: what the server tells Steam's server query, and ReCON's own history */
+.gi { display: grid; gap: 12px; }
+.gihead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gihead h2 { margin: 0; font-size: 20px; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.gihead .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #81c995; box-shadow: 0 0 8px #81c995; }
+.gihead .dot.down { background: #f28b82; box-shadow: 0 0 8px #f28b82; }
+.gihead .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.gihead .right button { margin: 0; }
+.gisub { font: 12px ui-monospace, Consolas, monospace; color: #aaa; letter-spacing: .04em; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; text-transform: uppercase; }
+.gisub .tag { border: 1px solid #555; border-radius: 3px; padding: 1px 6px; color: #ddd; text-transform: none; }
+.gisub .bad { color: #f28b82; text-transform: none; }
+.when { color: #888; font-size: 12px; }
+.row { display: grid; gap: 12px; }
+.r4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.r3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.r2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { .r4, .r3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .r4, .r3, .r2 { grid-template-columns: minmax(0, 1fr); } }
+.card { border: 1px solid #333; border-radius: 8px; padding: 14px 16px; min-width: 0; position: relative; }
+.card h3 { margin: 0 0 8px; font: 600 11px ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: #999; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card h3 .r { margin-left: auto; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.big { font: 32px/1.15 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.big small { font-size: 15px; color: #999; }
+.big.m { font-size: 22px; }
+.note { color: #888; font-size: 12px; margin-top: 4px; }
+.pill { display: inline-flex; gap: 4px; align-items: center; border: 1px solid #444; border-radius: 6px; padding: 2px 8px; font: 12px ui-monospace, Consolas, monospace; color: #ccc; }
+.pills { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.bar { height: 6px; background: #2a2a2a; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: #81c995; }
+img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2px; margin-right: 6px; border-radius: 2px; }
+.conn { display: flex; align-items: center; gap: 10px; }
+.conn > div { flex: 1; min-width: 0; }
+.conn .big { font-size: 24px; }
+.conn.copy { cursor: pointer; transition: border-color .15s; }
+.conn.copy:hover { border-color: #8ab4f8; }
+.conn .cp { margin-left: auto; font-weight: 400; letter-spacing: 0; text-transform: none; color: #777; opacity: 0; transition: opacity .15s; }
+.conn.copy:hover .cp, .conn.copy.done .cp { opacity: 1; }
+.conn.copy.done { border-color: #81c995; }
+.conn.copy.done .cp { color: #81c995; }
+.daybar { position: relative; height: 10px; border-radius: 5px; margin: 14px 0 26px; }
+.daybar .tick { position: absolute; top: -4px; width: 2px; height: 18px; background: #ddd; }
+.daybar .tick span { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); font: 12px ui-monospace, Consolas, monospace; color: #aaa; white-space: nowrap; }
+.daybar .now { position: absolute; top: -6px; width: 4px; height: 22px; background: #fff; border-radius: 2px; box-shadow: 0 0 6px rgba(0, 0, 0, .6); }
+.mods { display: flex; flex-wrap: wrap; gap: 8px; }
+.mods a { display: inline-flex; gap: 6px; align-items: center; border: 1px solid #444; border-radius: 6px; padding: 5px 10px; font-size: 13px; color: #ddd; text-decoration: none; }
+.mods a:hover { border-color: #8ab4f8; }
+.mods a .k { font-size: 11px; color: #999; }
+.mods a.upd, html[data-theme] .mods a.upd { border-color: #f28b82 !important; box-shadow: 0 0 0 1px rgba(242, 139, 130, .35), 0 0 12px rgba(242, 139, 130, .45); animation: updglow 2.4s ease-in-out infinite; }
+.mods a.upd .u { color: #f28b82; }
+@keyframes updglow { 50% { box-shadow: 0 0 0 1px rgba(242, 139, 130, .2), 0 0 6px rgba(242, 139, 130, .25); } }
+.seg { display: inline-flex; border: 1px solid #444; border-radius: 6px; overflow: hidden; }
+.seg button { margin: 0; border: 0; border-radius: 0; padding: 3px 10px; font-size: 12px; background: none; color: #aaa; }
+.seg button.on { background: #333; color: #fff; }
+svg.chart { width: 100%; height: 200px; display: block; }
+.stats { display: flex; gap: 28px; margin-top: 10px; flex-wrap: wrap; }
+.stats div b { display: block; font: 11px ui-monospace, Consolas, monospace; color: #999; letter-spacing: .06em; }
+.stats div span { font: 16px ui-monospace, Consolas, monospace; }
+.heat { display: grid; grid-template-columns: 36px repeat(24, minmax(0, 1fr)); gap: 3px; font: 11px ui-monospace, Consolas, monospace; color: #999; align-items: center; }
+.heat i { display: block; height: 18px; border-radius: 3px; background: #222; }
+.legend { display: flex; gap: 6px; align-items: center; margin-top: 10px; font: 12px ui-monospace, Consolas, monospace; color: #999; flex-wrap: wrap; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.empty { color: #888; font-size: 13px; }
+html[data-theme]:not([data-theme="default"]) .card, html[data-theme]:not([data-theme="default"]) .mods a:not(.upd),
+html[data-theme]:not([data-theme="default"]) .seg, html[data-theme]:not([data-theme="default"]) .pill { border-color: var(--color-divider); }
+html[data-theme]:not([data-theme="default"]) .conn.copy:hover { border-color: var(--color-accent); }
+html[data-theme]:not([data-theme="default"]) .bar i { background: var(--color-accent); }
+html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-text, #fff); }
+</style>
+{{template "theme" .}}
+</head>
+<body>
+<nav><a class="active" href="/server">Server Info</a><a href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a></nav>
+{{template "statusbar" .}}
+<div class="top"><h1>Server Info</h1></div>
+<div class="gi" id="gi">
+	<div class="gihead">
+		<h2><span class="dot" id="dot"></span><span id="sname">Asking the server...</span></h2>
+		<span class="right"><span class="when" id="when"></span><button id="refresh">Refresh</button></span>
+	</div>
+	<div class="gisub" id="ssub"></div>
+
+	<div class="row r4">
+		<div class="card"><h3>Players</h3><div class="big" id="players">-</div><div class="bar"><i id="pbar" style="width:0"></i></div><div class="note" id="queue"></div></div>
+		<div class="card"><h3>In-game time</h3><div class="big" id="gtime">-</div><div class="note" id="gtimenote"></div>
+			<div class="pills"><span class="pill" title="Day speed (serverTimeAcceleration)" id="dayx"></span><span class="pill" title="Night speed, on top of the day speed (serverNightTimeAcceleration)" id="nightx"></span></div></div>
+		<div class="card"><h3>Server location</h3><div class="big m" id="loc">-</div><div class="note" id="locnote"></div></div>
+		<div class="card"><h3>Uptime</h3><div class="big" id="uptime">-</div><div class="note" id="uptimenote"></div></div>
+	</div>
+
+	<div class="card"><h3>Connect</h3>
+		<div class="row r3">
+			<div class="card conn" id="cip"><div><h3>IP address <span class="cp">click to copy</span></h3><div class="big">-</div></div></div>
+			<div class="card conn" id="cgame"><div><h3>Game port <span class="cp">click to copy</span></h3><div class="big">-</div></div></div>
+			<div class="card conn" id="cquery"><div><h3>Query port <span class="cp">click to copy</span></h3><div class="big">-</div></div></div>
+		</div>
+	</div>
+
+	<div class="card"><h3>Day &amp; night <span class="r note" id="sunnote"></span></h3>
+		<div class="daybar" id="daybar"></div>
+		<div class="row r3">
+			<div class="card"><h3 id="first">Sunset in</h3><div class="big m" id="firstv">-</div><div class="note">real time</div></div>
+			<div class="card"><h3 id="second">Sunrise in</h3><div class="big m" id="secondv">-</div><div class="note">real time</div></div>
+			<div class="card"><h3>Night lasts</h3><div class="big m" id="night">-</div><div class="note" id="nightnote"></div></div>
+		</div>
+	</div>
+
+	<div class="card"><h3>Population <span class="r"><span class="seg" id="ranges"><button data-r="1d" class="on">1d</button><button data-r="7d">7d</button><button data-r="2w">2w</button><button data-r="1m">1m</button><button data-r="all">All</button></span></span></h3>
+		<svg class="chart" id="pop" viewBox="0 0 1000 200" preserveAspectRatio="none"></svg>
+		<div class="stats"><div><b>PEAK 7D</b><span id="speak">-</span></div><div><b>AVERAGE 7D</b><span id="savg">-</span></div><div><b>UNIQUE PLAYERS 7D</b><span id="suniq">-</span></div><div><b>SESSIONS 7D</b><span id="ssess">-</span></div></div>
+	</div>
+
+	<div class="row r2">
+		<div class="card"><h3>Busiest times <span class="r note" id="tz"></span></h3><div class="heat" id="heat"></div>
+			<div class="legend" id="legend"></div></div>
+		<div class="card"><h3><span id="modtitle">Mods</span> <span class="r note" id="modnote"></span></h3>
+			<div class="mods" id="mods"><span class="empty">No mods listed yet.</span></div>
+		</div>
+	</div>
+</div>
+<script>
+(function () {
+	var MAPS = { chernarusplus: 'Chernarus', enoch: 'Livonia', sakhal: 'Sakhal', deerisle: 'Deer Isle', namalsk: 'Namalsk', takistanplus: 'Takistan', banov: 'Banov', esseker: 'Esseker', pripyat: 'Pripyat' };
+	var $ = function (id) { return document.getElementById(id); };
+	var data = null, range = '1d';
+
+	function hours(hhmm) { var p = String(hhmm || '').split(':'); return p.length === 2 ? +p[0] + +p[1] / 60 : NaN; }
+	function dur(h) { if (!isFinite(h) || h < 0) return '-'; var m = Math.round(h * 60); return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; }
+	function bytes(n) { if (!n) return ''; return n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? Math.round(n / 1e6) + ' MB' : Math.round(n / 1e3) + ' KB'; }
+	function day(unix) { var d = new Date(unix * 1000); return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+	function ago(iso) { var s = (Date.now() - Date.parse(iso)) / 1000; return s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; }
+	function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+	var countryNames = null;
+	try { countryNames = new Intl.DisplayNames(undefined, { type: 'region' }); } catch (e) { }
+
+	function copyTile(id, value) {
+		var c = $(id);
+		c.querySelector('.big').textContent = value || '-';
+		c.classList.toggle('copy', !!value);
+		c.title = value ? 'Click to copy' : '';
+		c.dataset.copy = value || '';
+	}
+	document.querySelectorAll('.conn').forEach(function (c) {
+		c.addEventListener('click', function () {
+			var v = c.dataset.copy, cp = c.querySelector('.cp');
+			if (!v) return;
+			var done = function () { c.classList.add('done'); cp.textContent = 'copied'; setTimeout(function () { c.classList.remove('done'); cp.textContent = 'click to copy'; }, 1200); };
+			if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(v).then(done, done);
+			else { var t = document.createElement('textarea'); t.value = v; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); done(); }
+		});
+	});
+
+	function render() {
+		var s = data.server, info = s.info || {}, k = s.keywords || {};
+		var known = !!info.name;
+		$('dot').className = 'dot' + (s.answered ? '' : ' down');
+		$('sname').textContent = known ? info.name : 'Waiting for the server to answer its query port';
+		$('when').textContent = s.readAt && s.readAt.indexOf('0001') !== 0 ? 'Read at ' + new Date(s.readAt).toLocaleTimeString() : '';
+		var sub = $('ssub');
+		sub.textContent = '';
+		var parts = [];
+		if (known) {
+			parts.push(MAPS[String(info.map).toLowerCase()] || info.map);
+			parts.push(k.firstPerson ? '1PP' : '3PP');
+			if (info.version) parts.push('v' + info.version);
+			if (k.battleye) parts.push('BattlEye');
+			if (info.password) parts.push('Password');
+		}
+		parts.forEach(function (p, i) { if (i) sub.append(el('span', '', '·')); sub.append(el('span', '', p)); });
+		if (data.mods.length) sub.append(el('span', 'tag', data.mods.length + ' mods' + (data.modsBytes ? ' · ' + bytes(data.modsBytes) : '')));
+		if (!s.answered) sub.append(el('span', 'bad', known ? 'Not answering (last answer ' + ago(s.lastSeen) + ')' : (s.error || 'No answer yet')));
+
+		$('players').innerHTML = '';
+		$('players').append(document.createTextNode(known ? info.players : '-'));
+		if (known) $('players').append(el('small', '', '/' + info.maxPlayers));
+		$('pbar').style.width = known && info.maxPlayers ? Math.min(100, 100 * info.players / info.maxPlayers) + '%' : '0';
+		$('queue').textContent = known ? (k.queue || 0) + ' in the queue' : '';
+
+		var t = hours(k.time), rise = hours(data.sunrise), set = hours(data.sunset);
+		var dx = k.dayAccel || 1, nx = k.nightAccel || 1;
+		$('gtime').textContent = k.time || '-';
+		$('dayx').textContent = '☀ ×' + dx;
+		$('nightx').textContent = '☾ ×' + nx;
+		var isDay = t >= rise && t < set;
+		$('gtimenote').textContent = !isFinite(t) ? '' : (isDay ? 'Daytime' : 'Night') + (s.readAt ? ' · at ' + new Date(s.readAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+
+		// Location from GeoIP on the public IP.
+		var loc = $('loc');
+		loc.textContent = '';
+		if (data.country) {
+			var img = el('img', 'flag'); img.src = 'assets/flags/' + data.country + '.svg'; img.alt = '';
+			loc.append(img, data.country.toUpperCase());
+			$('locnote').textContent = (countryNames ? countryNames.of(data.country.toUpperCase()) : '') + ' (GeoIP on ' + data.connect.ip + ')';
+		} else {
+			loc.textContent = '-';
+			$('locnote').textContent = data.connect.ip ? 'Not in the GeoIP database' : 'Set SERVER_IP to show it';
+		}
+
+		if (data.uptime) {
+			$('uptime').innerHTML = '';
+			$('uptime').append(document.createTextNode(data.uptime.percent >= 99.95 ? '100' : data.uptime.percent.toFixed(1).replace(/\.0$/, '')), el('small', '', '%'));
+			$('uptimenote').textContent = 'last 7 days · down ' + dur(data.uptime.downSeconds / 3600);
+		} else { $('uptime').textContent = '-'; $('uptimenote').textContent = 'not measured yet'; }
+
+		copyTile('cip', data.connect.ip);
+		copyTile('cgame', data.connect.gamePort ? String(data.connect.gamePort) : '');
+		copyTile('cquery', String(data.connect.queryPort));
+
+		// Day and night: 24 game hours, sunrise and sunset ticks, the time marker.
+		var bar = $('daybar');
+		bar.textContent = '';
+		var pct = function (h) { return (h / 24 * 100).toFixed(2) + '%'; };
+		bar.style.background = 'linear-gradient(90deg, #1d2340 0%, #2a2f55 ' + pct(rise - 2) + ', #d6935a ' + pct(rise) + ', #7fd3ee ' + pct(rise + 2.5) + ', #7fd3ee ' + pct(set - 1.5) + ', #e07a4a ' + pct(set) + ', #3a2f55 ' + pct(set + 2) + ', #1d2340 100%)';
+		var tick = function (h, cls, label) { var d = el('div', cls); d.style.left = 'calc(' + pct(h) + ' - 1px)'; if (label) d.append(el('span', '', label)); bar.append(d); };
+		tick(rise, 'tick', '☀ ' + data.sunrise);
+		tick(set, 'tick', '☾ ' + data.sunset);
+		if (isFinite(t)) tick(t, 'now');
+		$('sunnote').textContent = 'sunrise ' + data.sunrise + ' · sunset ' + data.sunset + ' (SERVER_SUNRISE, SERVER_SUNSET)';
+		var nightLen = (24 - set + rise) / (dx * nx), dayLen = (set - rise) / dx;
+		$('night').textContent = dur(nightLen);
+		$('nightnote').textContent = (24 - set + rise) + ' game hours at ×' + dx + ' × ×' + nx;
+		if (!isFinite(t)) { $('firstv').textContent = $('secondv').textContent = '-'; }
+		else if (isDay) {
+			$('first').textContent = 'Sunset in'; $('firstv').textContent = dur((set - t) / dx);
+			$('second').textContent = 'Sunrise in'; $('secondv').textContent = dur((set - t) / dx + nightLen);
+		} else {
+			var left = (t >= set ? 24 - t + rise : rise - t) / (dx * nx);
+			$('first').textContent = 'Sunrise in'; $('firstv').textContent = dur(left);
+			$('second').textContent = 'Sunset in'; $('secondv').textContent = dur(left + dayLen);
+		}
+
+		if (data.week) {
+			$('speak').textContent = data.week.peak; $('savg').textContent = data.week.average.toFixed(1);
+			$('suniq').textContent = data.week.unique; $('ssess').textContent = data.week.sessions;
+		}
+
+		// Mods: red when Steam has an update not acknowledged yet; clicking
+		// a red one acknowledges it, any other opens its Workshop page.
+		var mods = $('mods');
+		mods.textContent = '';
+		$('modtitle').textContent = 'Mods · ' + data.mods.length;
+		var upd = data.mods.filter(function (m) { return m.updated; }).length;
+		var note = $('modnote');
+		note.textContent = '';
+		if (upd) { var us = el('span', '', upd + ' updated on Steam · '); us.style.color = '#f28b82'; note.append(us); }
+		if (data.modsBytes) note.append(bytes(data.modsBytes) + ' to download');
+		if (!data.mods.length) mods.append(el('span', 'empty', known ? (data.modsKnown ? 'No mods.' : 'The mod list could not be read.') : 'No mods listed yet.'));
+		data.mods.forEach(function (m) {
+			var a = el('a', m.updated ? 'upd' : '', m.name);
+			a.href = 'https://steamcommunity.com/sharedfiles/filedetails/?id=' + m.workshopId;
+			a.target = '_blank'; a.rel = 'noopener';
+			a.title = m.updated ? 'Updated on Steam ' + day(m.steamUpdated) + ' · click to acknowledge' : 'Opens its Steam Workshop page' + (m.sizeBytes ? ' · ' + bytes(m.sizeBytes) : '');
+			if (m.updated) a.append(el('span', 'k u', 'updated ' + day(m.steamUpdated)));
+			a.addEventListener('click', async function (e) {
+				if (!a.classList.contains('upd')) return;
+				e.preventDefault();
+				var r = await fetch('/api/server/mods/' + m.workshopId + '/ack', { method: 'POST' });
+				if (r.ok) { m.updated = false; render(); }
+			});
+			mods.append(a);
+		});
+	}
+
+	// Population: a step line of players over the range, from the sessions.
+	async function loadPop() {
+		var svg = $('pop'), ns = 'http://www.w3.org/2000/svg';
+		try {
+			var d = await (await fetch('/api/server/population?range=' + range)).json();
+			if (!d.ok) return;
+			svg.textContent = '';
+			var pts = d.points, W = 1000, top = 12, bot = 176, L = 30, max = 1;
+			pts.forEach(function (p) { max = Math.max(max, p.n); });
+			var x = function (t) { return L + (W - L) * (t - d.from) / Math.max(1, d.to - d.from); };
+			var y = function (n) { return bot - (bot - top) * n / max; };
+			var add = function (tag, a, text) { var e = document.createElementNS(ns, tag); for (var k in a) e.setAttribute(k, a[k]); if (text != null) e.textContent = text; svg.append(e); return e; };
+			var accent = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim() || '#f28b5a';
+			if (document.documentElement.getAttribute('data-theme') === 'default' || !document.documentElement.getAttribute('data-theme')) accent = '#f28b5a';
+			var step = Math.max(1, Math.ceil(max / 4));
+			for (var n = 0; n <= max; n += step) {
+				add('line', { x1: L, x2: W, y1: y(n), y2: y(n), stroke: '#2c2c2c' });
+				add('text', { x: 0, y: y(n) + 4, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace' }, n);
+			}
+			var dpath = '';
+			pts.forEach(function (p, i) {
+				var nx = i + 1 < pts.length ? pts[i + 1].t : d.to;
+				dpath += (i ? ' L' : 'M') + x(p.t) + ' ' + y(p.n) + ' L' + x(nx) + ' ' + y(p.n);
+			});
+			add('path', { d: dpath + ' L' + W + ' ' + bot + ' L' + L + ' ' + bot + 'Z', fill: accent, 'fill-opacity': 0.12, stroke: 'none' });
+			add('path', { d: dpath, fill: 'none', stroke: accent, 'stroke-width': 1.6, 'vector-effect': 'non-scaling-stroke' });
+			for (var i = 0; i <= 4; i++) {
+				var t = d.from + (d.to - d.from) * i / 4, dt = new Date(t * 1000);
+				var label = d.to - d.from <= 2 * 86400 ? dt.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' }) : dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
+				add('text', { x: L + (W - L) * i / 4, y: 196, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace', 'text-anchor': i === 0 ? 'start' : i === 4 ? 'end' : 'middle' }, label);
+			}
+		} catch (e) { }
+	}
+
+	// Busiest times: average players per weekday and hour, in this browser's time zone.
+	async function loadBusiest() {
+		var tz = '';
+		try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { }
+		try {
+			var d = await (await fetch('/api/server/busiest?tz=' + encodeURIComponent(tz))).json();
+			if (!d.ok) return;
+			$('tz').textContent = 'average players · ' + d.tz + ' · last 4 weeks';
+			var heat = $('heat'), shades = ['#222', '#3d3d3d', '#6a6a6a', '#a5a5a5', '#e6e6e6'];
+			heat.textContent = '';
+			heat.append(el('span'));
+			for (var h = 0; h < 24; h++) heat.append(el('span', '', h % 6 ? '' : String(h)));
+			['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(function (name, di) {
+				heat.append(el('span', '', name));
+				for (var h = 0; h < 24; h++) {
+					var v = d.days[di][h], lv = d.peak > 0 && v > 0 ? Math.max(1, Math.round(4 * v / d.peak)) : 0;
+					var c = el('i'); c.style.background = shades[lv];
+					c.title = name + ' ' + String(h).padStart(2, '0') + ':00 · avg ' + v.toFixed(1) + ' players';
+					heat.append(c);
+				}
+			});
+			var lg = $('legend');
+			lg.textContent = '';
+			lg.append('quietest ');
+			shades.forEach(function (c) { var i = el('i'); i.style.background = c; lg.append(i); });
+			lg.append(' busiest · peak ' + (d.peak >= 1 ? d.peak.toFixed(1) : d.peak.toFixed(2)) + ' players');
+		} catch (e) { }
+	}
+
+	async function load(fresh) {
+		try {
+			var r = await fetch(fresh ? '/api/server/refresh' : '/api/server', fresh ? { method: 'POST' } : {});
+			var d = await r.json();
+			if (d.ok) { data = d; render(); }
+		} catch (e) { /* the status bar shows that ReCON can't be reached */ }
+	}
+
+	document.querySelectorAll('#ranges button').forEach(function (b) {
+		b.onclick = function () {
+			range = b.dataset.r;
+			document.querySelectorAll('#ranges button').forEach(function (x) { x.classList.toggle('on', x === b); });
+			loadPop();
+		};
+	});
+	// No timer: Refresh asks the server again and re-reads everything.
+	$('refresh').onclick = async function () {
+		var b = this;
+		b.disabled = true;
+		await Promise.all([load(true), loadPop(), loadBusiest()]);
+		b.disabled = false;
+	};
+	load(false);
+	loadPop();
+	loadBusiest();
+})();
+</script>
+</body>
+</html>

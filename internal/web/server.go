@@ -39,11 +39,11 @@ func Serve(addr string) error {
 // routing.
 func buildWebRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
-	// The bare address opens the Players page. {$} matches "/" only, so a
+	// The bare address opens the Server Info page. {$} matches "/" only, so a
 	// mistyped path still gets a 404. 302, not 301: browsers keep a 301, and
 	// a page at / later would never be seen.
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/players", http.StatusFound)
+		http.Redirect(w, r, "/server", http.StatusFound)
 	})
 	// The theme's stylesheets and scripts (assets/, see base.html "theme").
 	mux.Handle("GET /assets/", http.FileServerFS(assetFiles))
@@ -76,6 +76,14 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /kickall", handleKickAll) // optional {"reason": ...}
 
 	// Players.
+	// Server Info: the Steam query's answer, uptime, population, mods (serverinfo.go)
+	mux.HandleFunc("GET /server", servePageHandler(serverPage))
+	mux.HandleFunc("GET /api/server", handleServerInfo)
+	mux.HandleFunc("POST /api/server/refresh", handleServerRefresh)      // ask the server now
+	mux.HandleFunc("GET /api/server/population", handleServerPopulation) // ?range=1d|7d|2w|1m|all
+	mux.HandleFunc("GET /api/server/busiest", handleServerBusiest)       // ?tz=America/New_York
+	mux.HandleFunc("POST /api/server/mods/{id}/ack", handleServerModAck) // an update on Steam was seen
+
 	mux.HandleFunc("GET /players", servePageHandler(playersPage))
 	mux.HandleFunc("GET /api/players", handlePlayersJSON)                      // online + offline players
 	mux.HandleFunc("GET /api/players/all", handleAllPlayersJSON)               // every player ever seen (no RCON needed)
@@ -134,7 +142,7 @@ func buildWebRoutes() *http.ServeMux {
 
 // quietPaths are the pages' routine GET polls, left out of the request log.
 var quietPaths = map[string]bool{
-	"/health": true, "/favicon.ico": true, "/players": true, "/bans": true, "/flows": true,
+	"/health": true, "/favicon.ico": true, "/server": true, "/api/server": true, "/players": true, "/bans": true, "/flows": true,
 	"/api/players": true, "/api/bans": true, "/api/flows": true, "/api/status": true,
 	"/api/console": true, "/developer": true, "/api/developer/players": true,
 }
@@ -218,6 +226,7 @@ var (
 	bansPage    = loadPageTemplate("bans.html")
 	flowsPage   = loadPageTemplate("flows.html")
 	devPage     = loadPageTemplate("developer.html")
+	serverPage  = loadPageTemplate("server.html")
 )
 
 // servePageHandler serves an HTML page. Its layout values (widths, paddings, font
