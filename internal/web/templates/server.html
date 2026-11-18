@@ -43,7 +43,7 @@ img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2p
 .conn.copy { cursor: pointer; transition: border-color .15s; }
 .conn.copy:hover { border-color: #8ab4f8; }
 .conn .cp { margin-left: auto; font-weight: 400; letter-spacing: 0; text-transform: none; color: #777; opacity: 0; transition: opacity .15s; }
-.conn.copy:hover .cp, .conn.copy.done .cp { opacity: 1; }
+.conn.copy.done .cp { opacity: 1; }
 .conn.copy.done { border-color: #81c995; }
 .conn.copy.done .cp { color: #81c995; }
 .daybar { position: relative; height: 10px; border-radius: 5px; margin: 30px 0 42px; }
@@ -113,9 +113,9 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 
 	<div class="card"><h3>Connect</h3>
 		<div class="row r3">
-			<div class="card conn" id="cip"><div><h3>IP address <span class="cp">click to copy</span></h3><div class="big">-</div></div></div>
-			<div class="card conn" id="cgame"><div><h3>Game port <span class="cp">click to copy</span></h3><div class="big">-</div></div></div>
-			<div class="card conn" id="cquery"><div><h3>Query port <span class="cp">click to copy</span></h3><div class="big">-</div></div></div>
+			<div class="card conn" id="cip"><div><h3>IP address <span class="cp"></span></h3><div class="big">-</div></div></div>
+			<div class="card conn" id="cgame"><div><h3>Game port <span class="cp"></span></h3><div class="big">-</div></div></div>
+			<div class="card conn" id="cquery"><div><h3>Query port <span class="cp"></span></h3><div class="big">-</div></div></div>
 		</div>
 	</div>
 
@@ -166,14 +166,13 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		var c = $(id);
 		c.querySelector('.big').textContent = value || '-';
 		c.classList.toggle('copy', !!value);
-		c.title = value ? 'Click to copy' : '';
 		c.dataset.copy = value || '';
 	}
 	document.querySelectorAll('.conn').forEach(function (c) {
 		c.addEventListener('click', function () {
 			var v = c.dataset.copy, cp = c.querySelector('.cp');
 			if (!v) return;
-			var done = function () { c.classList.add('done'); cp.textContent = 'copied'; setTimeout(function () { c.classList.remove('done'); cp.textContent = 'click to copy'; }, 1200); };
+			var done = function () { c.classList.add('done'); cp.textContent = 'copied'; setTimeout(function () { c.classList.remove('done'); cp.textContent = ''; }, 1200); };
 			if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(v).then(done, done);
 			else { var t = document.createElement('textarea'); t.value = v; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); done(); }
 		});
