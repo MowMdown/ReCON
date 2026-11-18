@@ -8,13 +8,15 @@ import (
 )
 
 // Keywords is what DayZ puts in A2S_INFO's keywords, a comma-separated
-// list such as "battleye,no3rd,external,privHive,shard,lqs0,etm2.000000,
-// entm4.000000,mod,14:59".
+// list such as "battleye,external,privHive,shard,lqs0,etm2.000000,
+// entm4.000000,mod,14:59". A 3PP server also lists "no3rd" (checked on a
+// live server: despite the name, it is there when third person is allowed,
+// and missing on a 1PP-only server).
 type Keywords struct {
 	Time        string  `json:"time"`        // in-game time, "14:59"
 	DayAccel    float64 `json:"dayAccel"`    // etm: serverTimeAcceleration
 	NightAccel  float64 `json:"nightAccel"`  // entm: serverNightTimeAcceleration (on top of DayAccel)
-	FirstPerson bool    `json:"firstPerson"` // no3rd: third person is off
+	FirstPerson bool    `json:"firstPerson"` // 1PP only: no "no3rd" in the list
 	BattlEye    bool    `json:"battleye"`
 	Queue       int     `json:"queue"` // lqs: players waiting to join
 	Modded      bool    `json:"modded"`
@@ -23,14 +25,14 @@ type Keywords struct {
 var clockRe = regexp.MustCompile(`^\d{1,2}:\d{2}$`)
 
 func parseKeywords(s string) Keywords {
-	k := Keywords{DayAccel: 1, NightAccel: 1}
+	k := Keywords{DayAccel: 1, NightAccel: 1, FirstPerson: true}
 	for _, w := range strings.Split(s, ",") {
 		w = strings.TrimSpace(w)
 		switch {
 		case clockRe.MatchString(w):
 			k.Time = w
 		case w == "no3rd":
-			k.FirstPerson = true
+			k.FirstPerson = false // third person allowed
 		case w == "battleye":
 			k.BattlEye = true
 		case w == "mod":

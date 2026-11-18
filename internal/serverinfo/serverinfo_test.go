@@ -155,7 +155,7 @@ func TestRefreshReadsTheServer(t *testing.T) {
 	t.Cleanup(func() { workshopItems = steam.WorkshopItems })
 
 	info := infoAnswer("Harambe's Safari Island Adventure", "deerisle", "1.30.164289", 2, 60, 2302,
-		"battleye,no3rd,external,privHive,shard,lqs0,etm2.000000,entm4.000000,mod,14:59")
+		"battleye,external,privHive,shard,lqs0,etm2.000000,entm4.000000,mod,14:59")
 	port := fakeQueryServer(t, info, rulesAnswer(dayzModRules(testMods, 20)))
 	state.cfg = Config{QueryHost: "127.0.0.1", QueryPort: port}
 	s := Refresh()
@@ -168,6 +168,9 @@ func TestRefreshReadsTheServer(t *testing.T) {
 	k := s.Keywords
 	if k.Time != "14:59" || k.DayAccel != 2 || k.NightAccel != 4 || !k.FirstPerson || !k.BattlEye || k.Queue != 0 {
 		t.Errorf("keywords: %+v", k)
+	}
+	if k := parseKeywords("battleye,no3rd,14:59"); k.FirstPerson {
+		t.Error("no3rd read as 1PP; it marks a 3PP server")
 	}
 	if !s.ModsKnown || len(s.Mods) != len(testMods) {
 		t.Fatalf("mods: %v %+v", s.ModsKnown, s.Mods)
