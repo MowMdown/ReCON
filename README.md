@@ -151,7 +151,7 @@ The top table lists the players online now (refreshed every 5 seconds). ReCON fo
 | Kick    | Kicks them with the reason you type |
 | Details | Opens everything ReCON has recorded about them (below), including **Ban** |
 
-**Offline Players** lists everyone who has played before: last IP, total time on the server, when they were last seen, and their ban status and reason. If the game server stops answering, this list still shows from the database.
+**Offline Players** lists everyone who has played before and isn't banned (banned players are on the Server Bans page): last IP, total time on the server, when they were last seen, and **Last Message**, the newest thing they wrote in chat, from their chat history (hover for the channel, time and full text). If the game server stops answering, this list still shows from the database.
 
 **Settings** (under the title, on the left) changes where ReCON connects: Server IP, Port and RCON password. The line under the title shows the server in use: *Connected to IP:PORT* in green, or *Can't reach IP:PORT* in red. A field left empty uses the default from `docker-compose.yaml`, shown greyed out; clear the fields and Connect to go back to those defaults. **Connect** tries one login with those settings on a new connection each time it's pressed, even if nothing changed. Only if the server accepts the login does ReCON switch to it and keep the settings, so a typo can't cut ReCON off; otherwise nothing changes and the dialog says why. The settings are kept in memory only: restarting ReCON goes back to the `docker-compose.yaml` values, which the command-line tool always uses.
 
@@ -505,7 +505,7 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 
 | Method | Path | Body | Description |
 | ------ | ---- | ---- | ----------- |
-| GET  | `/api/players` | | Online players, offline players and ban statuses |
+| GET  | `/api/players` | | Online players, offline players (banned players left out) and ban statuses |
 | GET  | `/api/players/all` | | Every player ever seen, from the database (works while RCON is down) |
 | POST | `/api/players/<id>/message` | `{"message": "..."}` | Private message, by player number |
 | POST | `/api/players/<id>/kick` | `{"reason": "..."}` | Kick, by player number |

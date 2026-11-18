@@ -167,11 +167,19 @@ func (db *Database) ResumePlayerSession(guid string, historyID int64, playerID i
 	return tx.Commit()
 }
 
-// ListOfflinePlayers returns all players from the database who are not currently connected.
+// ListOfflinePlayers returns all players from the database who are not
+// currently connected, each with the newest chat line they wrote (the
+// Last Message column), from the chat history.
 func (db *Database) ListOfflinePlayers() ([]battleye.Player, error) {
 	rows, err := db.Query(`
-		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen, p.role
+		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen, p.role,
+			c.line, c.at
 		FROM players p
+		LEFT JOIN chat_messages c ON c.id = (
+			SELECT m.id FROM chat_messages m
+			WHERE m.guid = lower(p.guid) AND m.direction = 'in'
+			ORDER BY m.id DESC LIMIT 1
+		)
 		WHERE NOT EXISTS (
 			SELECT 1 FROM active_sessions a WHERE a.guid = p.guid
 		)
@@ -186,11 +194,25 @@ func (db *Database) ListOfflinePlayers() ([]battleye.Player, error) {
 	for rows.Next() {
 		var p battleye.Player
 		var lastSeen time.Time
-		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen, &p.Role); err != nil {
+		var line sql.NullString
+		var at sql.NullTime
+		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen, &p.Role, &line, &at); err != nil {
 			return nil, err
 		}
 		p.LastSeenUnix = lastSeen.Unix()
 		p.Offline = true
+		if line.Valid {
+			// Stored as the server sent it: "(Global) Name: text".
+			ev := battleye.ParseServerMessage(line.String, at.Time)
+			if ev.Kind == battleye.EventChat {
+				p.LastMessage, p.LastMessageChannel = ev.Message, ev.Channel
+			} else {
+				p.LastMessage = line.String
+			}
+			if at.Valid {
+				p.LastMessageUnix = at.Time.Unix()
+			}
+		}
 		players = append(players, p)
 	}
 	return players, rows.Err()

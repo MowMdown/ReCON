@@ -341,8 +341,13 @@
 		'198.51.100.212': 'fr', '192.0.2.188': 'au', '198.51.100.66': 'nl', '192.0.2.40': 'se' };
 	function country(ip) { return COUNTRY[ip] || ''; }
 	function playerJSON(p) {
-		return { id: p.id, ip: p.ip, country: country(p.ip), port: p.port, ping: p.ping, guid: p.guid, name: p.name, offline: !p.isOnline,
+		var j = { id: p.id, ip: p.ip, country: country(p.ip), port: p.port, ping: p.ping, guid: p.guid, name: p.name, offline: !p.isOnline,
 			totalPlaytimeSeconds: p.play, lastSeenUnix: p.isOnline ? 0 : p.lastSeen, role: p.role };
+		// Last Message: the newest line they wrote ("(Global) Name: text").
+		var mine = (chats[p.guid] || []).filter(function (c) { return c.direction === 'in'; });
+		var last = mine[mine.length - 1], m = last && /^\(([^)]+)\) [^:]+: (.*)$/.exec(last.line);
+		if (m) { j.lastMessage = m[2]; j.lastMessageChannel = m[1]; j.lastMessageUnix = Math.floor(Date.parse(last.time) / 1000); }
+		return j;
 	}
 	function banMap() { var m = {}; bans.forEach(function (b) { m[b.guid] = banOf(b.guid); }); return m; }
 	function sharedIP(p) {
@@ -401,7 +406,7 @@
 		['GET', /^\/api\/players$/, function () {
 			var on = online();
 			return json({ ok: true, connected: true, players: on.map(playerJSON), count: on.length,
-				offlinePlayers: players.filter(function (p) { return !p.isOnline; }).sort(function (a, b) { return b.lastSeen - a.lastSeen; }).map(playerJSON),
+				offlinePlayers: players.filter(function (p) { return !p.isOnline && !banOf(p.guid).banned; }).sort(function (a, b) { return b.lastSeen - a.lastSeen; }).map(playerJSON),
 				bans: banMap() });
 		}],
 		['GET', /^\/api\/players\/all$/, function () {

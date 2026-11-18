@@ -57,6 +57,16 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 			online[i].LastMessage, online[i].LastMessageChannel, online[i].LastMessageUnix = c.Chat.Text, c.Chat.Channel, c.Chat.At.Unix()
 		}
 	}
+	// Banned players are left out of the offline list: they are on the Bans
+	// page. The online list keeps everyone the server has on it.
+	bans := game.BanStatuses()
+	kept := offlinePlayers[:0]
+	for _, p := range offlinePlayers {
+		if !bans[strings.ToLower(p.GUID)].Banned {
+			kept = append(kept, p)
+		}
+	}
+	offlinePlayers = kept
 	// The flag next to each IP.
 	for i := range online {
 		online[i].Country = geoip.Country(online[i].IP)
@@ -70,7 +80,7 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 		"players":        online,
 		"count":          len(online),
 		"offlinePlayers": offlinePlayers,
-		"bans":           game.BanStatuses(),
+		"bans":           bans,
 	})
 }
 

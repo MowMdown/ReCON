@@ -526,3 +526,49 @@ func TestDeveloperRoutes(t *testing.T) {
 		t.Errorf("bad GUID: %d, want 400", code)
 	}
 }
+
+// TestOfflineListLastMessageNoBanned checks /api/players' offline list: a
+// banned player is left out, and each player has the newest line they wrote
+// in chat (not the messages sent to them).
+func TestOfflineListLastMessageNoBanned(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Now().Add(-time.Hour).Truncate(time.Second)
+	for _, p := range []struct{ guid, name string }{{test.GUID1, "Marrow"}, {test.GUID2, "Fenwick"}} {
+		if err := db.OpenPlayerSession(p.guid, p.name, "1.2.3.4", 3, t0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ClosePlayerSession(p.guid, t0.Add(time.Minute), "disconnected"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		at        time.Duration
+		dir, line string
+	}{
+		{1, store.ChatIn, "(Global) Marrow: first"},
+		{2, store.ChatIn, "(Side) Marrow: brb dinner"},
+		{3, store.ChatOut, "> say 3 welcome back"},
+	} {
+		if err := db.AddChatMessage(t0.Add(c.at*time.Second), test.GUID1, c.dir, c.line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.RecordPlayerBan(test.GUID2, "Fenwick", "1.2.3.4", "cheating", true, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/players", nil))
+	var d struct {
+		Offline []battleye.Player `json:"offlinePlayers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Offline) != 1 || d.Offline[0].GUID != test.GUID1 {
+		t.Fatalf("offline list: %+v, want only Marrow (Fenwick is banned)", d.Offline)
+	}
+	p := d.Offline[0]
+	if p.LastMessage != "brb dinner" || p.LastMessageChannel != "Side" || p.LastMessageUnix != t0.Add(2*time.Second).Unix() {
+		t.Errorf("last message %q (%s, %d), want \"brb dinner\" (Side, %d)", p.LastMessage, p.LastMessageChannel, p.LastMessageUnix, t0.Add(2*time.Second).Unix())
+	}
+}

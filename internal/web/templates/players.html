@@ -39,9 +39,8 @@ td { white-space: nowrap; }
    base.html) once the window is narrower than their minimum width. */
 #onlineTable { min-width: 1400px; }
 #offlineTable { min-width: 1400px; }
-/* Ban Status | Reason fills the rest of the row; a long reason ends in "..."
-   and shows in full on hover. */
-td.ban-cell { text-overflow: ellipsis; }
+/* Last Message fills the rest of the row; a long one ends in "..." and
+   shows in full on hover. */
 td.lastmsg { text-overflow: ellipsis; color: #ccc; }
 .ban-on { color: #f28b82; font-weight: 600; }
 .ban-off { color: #888; }
@@ -207,7 +206,7 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 	<tbody id="players"></tbody>
 </table>
 </div>
-<p id="onlineMsg" class="ban-off" hidden>The game server isn't answering, so online players can't be shown. Everyone ReCON has seen is listed under Offline Players.</p>
+<p id="onlineMsg" class="ban-off" hidden>The game server isn't answering, so online players can't be shown. Everyone ReCON has seen (except banned players) is listed under Offline Players.</p>
 
 <div class="offline-section">
 	<h2>Offline Players</h2>
@@ -223,7 +222,7 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 			<col class="act" style="width: 84px">
 		</colgroup>
 		<thead>
-			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Ban Status | Reason</th><th class="act">Actions</th></tr>
+			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Last Message</th><th class="act">Actions</th></tr>
 		</thead>
 		<tbody id="offlinePlayers"></tbody>
 	</table>
@@ -445,7 +444,7 @@ function roleBadge(role) {
 async function api(url, opt = {}) { return fetch(url, opt); }
 
 // fitWideColumn widens a table's flexible column (the one whose <col> has no
-// width: Last Message, Ban Status | Reason) to its longest text, up to
+// width: Last Message) to its longest text, up to
 // wideColumnMax, by raising the table's minimum width. On a narrow screen
 // scrolling sideways then shows the whole text instead of cutting it off at
 // "..." next to the pinned Actions column. Longer text still ends in "...",
@@ -498,14 +497,13 @@ async function refresh() {
 			'</tr>';
 		}).join('');
 
-		// Render offline players returned by the database.
-		let bans = d.bans || {};
+		// Render offline players returned by the database (banned players
+		// aren't in it: they are on the Bans page).
 		// After the column reordering (base.html) has moved the new rows' cells.
 		setTimeout(() => fitWideColumn(document.getElementById('onlineTable')), 0);
 		navOnline = d.connected ? (d.players || []).slice().sort((a, b) => a.id - b.id) : [];
 		navOffline = d.offlinePlayers || [];
 		document.getElementById('offlinePlayers').innerHTML = (d.offlinePlayers || []).map(function(p) {
-			let ban = bans[String(p.guid).toLowerCase()];
 			let seconds = Math.max(0, Number(p.totalPlaytimeSeconds) || 0);
 			let days = Math.floor(seconds / 86400);
 			let hours = Math.floor((seconds % 86400) / 3600);
@@ -518,7 +516,7 @@ async function refresh() {
 				'<td class="mono">' + esc(p.guid) + '</td>' +
 				'<td>' + playtime + '</td>' +
 				'<td>' + fmtLastSeen(p.lastSeenUnix) + '</td>' +
-				'<td class="ban-cell ' + (ban ? 'ban-on' : 'ban-off') + '" title="' + esc(banWithReason(ban)) + '">' + esc(banWithReason(ban)) + '</td>' +
+				lastMessageCell(p) +
 				'<td class="act"><button data-guid="' + esc(p.guid) + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button></td>' +
 			'</tr>';
 		}).join('');
@@ -529,8 +527,9 @@ async function refresh() {
 }
 
 // lastMessageCell is the Last Message column: the newest line the player
-// wrote in chat this session (messages sent to them don't count), with the
-// channel and time in the tooltip. Empty until they chat.
+// wrote in chat (this session when online, from the chat history when
+// offline; messages sent to them don't count), with the channel and time in
+// the tooltip. Empty until they chat.
 function lastMessageCell(p) {
 	if (!p.lastMessage) return '<td class="lastmsg"></td>';
 	let tip = (p.lastMessageChannel ? '(' + p.lastMessageChannel + ') ' : '') + fmtLastSeen(p.lastMessageUnix) + ': ' + p.lastMessage;
@@ -565,13 +564,6 @@ function banText(b) {
 	if (b.perm) return 'Banned (Perm)';
 	if (b.minutesLeft < 0) return 'Banned';
 	return 'Banned (' + fmtMinutesLeft(b.minutesLeft) + ' left)';
-}
-
-// banWithReason is the Ban Status | Reason column: the status, then
-// " - " and the reason when there is one.
-function banWithReason(b) {
-	let s = banText(b);
-	return b && b.banned && b.reason ? s + ' - ' + b.reason : s;
 }
 
 function fmtMinutesLeft(min) {
