@@ -704,7 +704,6 @@ function toggleIPMap(tr, i) {
 	cn.append(countryName(cc) || '');
 	line('dim', 'Within about ' + l.radiusKm + ' km');
 	line('dim mono', l.lat.toFixed(2) + ', ' + l.lon.toFixed(2));
-	line('dim', 'Where the IP is registered, not the player\'s address. GeoLite2-City.').style.marginTop = '8px';
 	let a = document.createElement('a');
 	a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Open in OpenStreetMap';
 	a.href = 'https://www.openstreetmap.org/?mlat=' + l.lat + '&mlon=' + l.lon + '#map=10/' + l.lat + '/' + l.lon;

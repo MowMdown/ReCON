@@ -25,6 +25,9 @@
 .r2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 900px) { .r4, .r3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .r4, .r3, .r2 { grid-template-columns: minmax(0, 1fr); } }
+/* Peak hours and Mods side by side only when there's room: on a portrait or
+   narrow screen the mods go under the heatmap. */
+@media (max-width: 1100px), (orientation: portrait) { .r2.hm { grid-template-columns: minmax(0, 1fr); } }
 .card { border: 1px solid #333; border-radius: 8px; padding: 14px 16px; min-width: 0; position: relative; }
 .card h3 { margin: 0 0 8px; font: 600 11px ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: #999; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .card h3 .r { margin-left: auto; font-weight: 400; text-transform: none; letter-spacing: 0; }
@@ -190,7 +193,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		<div class="stats"><div><b>PEAK 7D</b><span id="speak">-</span></div><div><b>AVERAGE 7D</b><span id="savg">-</span></div><div><b>UNIQUE PLAYERS 7D</b><span id="suniq">-</span></div><div><b>SESSIONS 7D</b><span id="ssess">-</span></div></div>
 	</div>
 
-	<div class="row r2">
+	<div class="row r2 hm">
 		<div class="card"><h3>Peak hours <span class="r note" id="tz"></span></h3><div class="heat" id="heat"></div>
 			<div class="legend" id="legend"></div></div>
 		<div class="card"><h3><span id="modtitle">Mods</span> <span class="r note" id="modnote"></span></h3>
