@@ -50,7 +50,7 @@ img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2p
 /* Sunrise and sunset: a tick through the bar, labelled above it */
 .daybar .tick { position: absolute; top: -4px; width: 2px; height: 18px; background: #ddd; }
 .daybar .tick span { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); font: 12px ui-monospace, Consolas, monospace; color: #aaa; white-space: nowrap; }
-/* The hour scale under the bar: a mark every hour, labelled every 4 */
+/* The hour scale under the bar: a mark every hour, labelled every 4 (the end as 23:59) */
 .daybar .hr { position: absolute; top: 13px; width: 1px; height: 4px; background: #555; }
 .daybar .hr.major { height: 7px; background: #888; }
 .daybar .hr span { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); font: 11px ui-monospace, Consolas, monospace; color: #888; white-space: nowrap; }
@@ -243,7 +243,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		for (var h = 0; h <= 24; h++) {
 			var hr = el('div', 'hr' + (h % 4 ? '' : ' major') + (h === 0 ? ' first' : h === 24 ? ' last' : ''));
 			hr.style.left = 'calc(' + pct(h) + (h === 24 ? ' - 1px' : '') + ')';
-			if (h % 4 === 0) hr.append(el('span', '', String(h).padStart(2, '0') + ':00'));
+			if (h % 4 === 0) hr.append(el('span', '', h === 24 ? '23:59' : String(h).padStart(2, '0') + ':00'));
 			bar.append(hr);
 		}
 		if (isFinite(t)) tick(t, 'now');
