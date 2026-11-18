@@ -76,6 +76,7 @@ type Sun struct {
 	Sunset   string  `json:"sunset"`
 	Polar    string  `json:"polar,omitempty"` // "day" (midnight sun) or "night"
 	Date     string  `json:"date"`            // "08-31", the date it is worked out for
+	Day      int     `json:"dayOfYear"`       // that date's day of the year, for the sky circle
 	Latitude float64 `json:"latitude"`        // degrees north
 	MapKnown bool    `json:"mapKnown"`        // the latitude is the map's, not the default
 }
@@ -94,5 +95,5 @@ func SunFor(c Config, mapName string, now time.Time) Sun {
 		}
 	}
 	rise, set, polar := SunTimes(date, lat)
-	return Sun{Sunrise: rise, Sunset: set, Polar: polar, Date: date.Format("01-02"), Latitude: lat, MapKnown: known}
+	return Sun{Sunrise: rise, Sunset: set, Polar: polar, Date: date.Format("01-02"), Day: date.YearDay(), Latitude: lat, MapKnown: known}
 }

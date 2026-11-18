@@ -56,7 +56,15 @@ img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2p
 .daybar .hr span { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); font: 11px ui-monospace, Consolas, monospace; color: #888; white-space: nowrap; }
 .daybar .hr.first span { transform: none; left: 0; }
 .daybar .hr.last span { transform: translateX(-100%); left: 0; }
+@media (max-width: 560px) { .daybar .hr.side span { display: none; } }
 .daybar .now { position: absolute; top: -6px; width: 4px; height: 22px; background: #fff; border-radius: 2px; box-shadow: 0 0 6px rgba(0, 0, 0, .6); }
+/* Day and night: the bar and boxes, and the sky circle to their right */
+.dn { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 12px; align-items: stretch; }
+.dn .dnmain { min-width: 0; }
+.sky { display: flex; flex-direction: column; align-items: center; padding: 12px; }
+.sky h3 { align-self: flex-start; margin: 0 0 4px; }
+.sky svg { width: 180px; height: 180px; max-width: 100%; }
+@media (max-width: 900px) { .dn { grid-template-columns: minmax(0, 1fr); } }
 .mods { display: flex; flex-wrap: wrap; gap: 8px; }
 .mods a { display: inline-flex; gap: 6px; align-items: center; border: 1px solid #444; border-radius: 6px; padding: 5px 10px; font-size: 13px; color: #ddd; text-decoration: none; }
 .mods a:hover { border-color: #8ab4f8; }
@@ -112,12 +120,17 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	</div>
 
 	<div class="card"><h3>Day &amp; night <span class="r note" id="sunnote"></span></h3>
-		<div class="daybar" id="daybar"></div>
-		<div class="row r4">
-			<div class="card"><h3 id="first">Sunset in</h3><div class="big m" id="firstv">-</div><div class="note">real time</div></div>
-			<div class="card"><h3 id="second">Sunrise in</h3><div class="big m" id="secondv">-</div><div class="note">real time</div></div>
-			<div class="card"><h3>Day lasts</h3><div class="big m" id="daylen">-</div><div class="note" id="daynote"></div></div>
-			<div class="card"><h3>Night lasts</h3><div class="big m" id="night">-</div><div class="note" id="nightnote"></div></div>
+		<div class="dn">
+			<div class="dnmain">
+				<div class="daybar" id="daybar"></div>
+				<div class="row r4">
+					<div class="card"><h3 id="first">Sunset in</h3><div class="big m" id="firstv">-</div><div class="note">real time</div></div>
+					<div class="card"><h3 id="second">Sunrise in</h3><div class="big m" id="secondv">-</div><div class="note">real time</div></div>
+					<div class="card"><h3>Day lasts</h3><div class="big m" id="daylen">-</div><div class="note" id="daynote"></div></div>
+					<div class="card"><h3>Night lasts</h3><div class="big m" id="night">-</div><div class="note" id="nightnote"></div></div>
+				</div>
+			</div>
+			<div class="card sky" id="sky"><h3>Sky</h3><svg id="skysvg" viewBox="0 0 180 180" role="img" aria-label="The sun and moon over the horizon"></svg></div>
 		</div>
 	</div>
 
@@ -242,12 +255,13 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			tick(set, 'tick', '\u263E ' + sun.sunset);
 		}
 		for (var h = 0; h <= 24; h++) {
-			var hr = el('div', 'hr' + (h % 4 ? '' : ' major') + (h === 0 ? ' first' : h === 24 ? ' last' : ''));
+			var hr = el('div', 'hr' + (h % 4 ? '' : ' major') + (h === 0 ? ' first' : h === 24 ? ' last' : '') + (h === 4 || h === 20 ? ' side' : ''));
 			hr.style.left = 'calc(' + pct(h) + (h === 24 ? ' - 1px' : '') + ')';
 			if (h % 4 === 0) hr.append(el('span', '', h === 24 ? '23:59' : String(h).padStart(2, '0') + ':00'));
 			bar.append(hr);
 		}
 		if (isFinite(t)) tick(t, 'now');
+		drawSky(sun, t);
 		var when = sun.date ? new Date(2000, +sun.date.slice(0, 2) - 1, +sun.date.slice(3)).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
 		var lat = sun.latitude != null ? Math.abs(sun.latitude) + '\u00b0' + (sun.latitude >= 0 ? 'N' : 'S') : '';
 		$('sunnote').textContent = (sun.polar === 'day' ? 'midnight sun' : sun.polar === 'night' ? 'polar night' : 'sunrise ' + sun.sunrise + ' · sunset ' + sun.sunset) +
@@ -301,6 +315,50 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			});
 			mods.append(a);
 		});
+	}
+
+	// drawSky draws the sky circle: the horizon across the middle, the sun's
+	// path through the game day (rising on the left, setting on the right),
+	// the sun at its height now, and the moon directly opposite it. Heights
+	// come from the same date and latitude as sunrise and sunset.
+	function drawSky(sun, t) {
+		var svg = $('skysvg'), ns = 'http://www.w3.org/2000/svg';
+		svg.textContent = '';
+		var box = $('sky');
+		if (!isFinite(t) || !sun.date) { box.title = ''; return; }
+		var r = Math.PI / 180, lat = sun.latitude, doy = sun.dayOfYear;
+		var decl = -23.44 * Math.cos(2 * Math.PI / 365 * (doy + 10));
+		var alt = function (h, dc) { return Math.asin(Math.sin(lat * r) * Math.sin(dc * r) + Math.cos(lat * r) * Math.cos(dc * r) * Math.cos((h - 12) * 15 * r)) / r; };
+		var R = 78, C = 90;
+		// Across by the hour (noon in the middle, midnight at the edges), up by the height.
+		var pos = function (h, dc) { var ha = (h - 12) * 15 * r; return [C + R * 0.92 * Math.sin(ha / 2), C - R * 0.92 * alt(h, dc) / 90]; };
+		var sunAlt = alt(t, decl), moonT = (t + 12) % 24, moonAlt = alt(moonT, -decl), up = sunAlt > -0.833;
+		var add = function (parent, tag, a) { var e = document.createElementNS(ns, tag); for (var k in a) e.setAttribute(k, a[k]); parent.append(e); return e; };
+		var defs = add(svg, 'defs', {});
+		add(add(defs, 'clipPath', { id: 'skydome' }), 'circle', { cx: C, cy: C, r: R });
+		var g = add(defs, 'linearGradient', { id: 'skyfill', x1: 0, y1: 0, x2: 0, y2: 1 });
+		add(g, 'stop', { offset: 0, 'stop-color': up ? '#7fd3ee' : '#1d2340' });
+		add(g, 'stop', { offset: 1, 'stop-color': up ? '#cfeffa' : '#2a2f55' });
+		var dome = add(svg, 'g', { 'clip-path': 'url(#skydome)' });
+		add(dome, 'rect', { x: 0, y: 0, width: 180, height: C, fill: 'url(#skyfill)' });
+		add(dome, 'rect', { x: 0, y: C, width: 180, height: C, fill: '#15171c' });
+		var d = '';
+		for (var i = 0; i <= 96; i++) { var p = pos(i / 4, decl); d += (i ? ' L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }
+		add(dome, 'path', { d: d, fill: 'none', stroke: up ? '#3b6f84' : '#8a8fb0', 'stroke-width': 1, 'stroke-dasharray': '2 3' });
+		add(dome, 'line', { x1: 0, x2: 180, y1: C, y2: C, stroke: '#d6935a', 'stroke-width': 1.5 });
+		var m = pos(moonT, -decl), mg = add(dome, 'g', { opacity: moonAlt > 0 ? 1 : 0.35 });
+		add(mg, 'circle', { cx: m[0], cy: m[1], r: 8, fill: '#e8e6d9' });
+		add(mg, 'circle', { cx: m[0] + 4, cy: m[1] - 2, r: 7, fill: moonAlt > 0 ? (up ? '#7fd3ee' : '#1d2340') : '#15171c' });
+		var sp = pos(t, decl), sg = add(dome, 'g', { opacity: up ? 1 : 0.45 });
+		add(sg, 'circle', { cx: sp[0], cy: sp[1], r: 13, fill: '#fdd663', opacity: 0.25 });
+		add(sg, 'circle', { cx: sp[0], cy: sp[1], r: 8, fill: '#fdd663' });
+		add(svg, 'circle', { cx: C, cy: C, r: R, fill: 'none', stroke: '#444' });
+		var lbl = function (x, text) { var e = add(svg, 'text', { x: x, y: C - 4, fill: '#d6935a', 'font-size': 9, 'font-family': 'ui-monospace, Consolas, monospace' }); e.textContent = text; };
+		lbl(C - R + 4, 'E');
+		lbl(C + R - 10, 'W');
+		var deg = function (a) { return Math.abs(a).toFixed(1) + '\u00b0 ' + (a >= -0.05 ? 'above' : 'below'); };
+		var one = function (a) { return (Math.abs(a) < 0.05 ? 0 : a).toFixed(1); };
+		box.title = 'Sun ' + deg(sunAlt) + ' the horizon (highest today ' + one(alt(12, decl)) + '\u00b0 at 12:00) \u00b7 moon ' + deg(moonAlt);
 	}
 
 	// Population: a step line of players over the range, from the sessions.
