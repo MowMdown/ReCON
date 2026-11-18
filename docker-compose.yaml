@@ -20,9 +20,11 @@ services:
       STEAM_SEARCH_PRIORITY: "high"
       MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
-      # Server Info page: the server's Steam query port and public IP
+      # Server Info page: the server's Steam query port, serverDZ.cfg's
+      # serverTime, and the map's latitude if it isn't Chernarus
       # QUERY_PORT: "27016"
-      # SERVER_IP: 203.0.113.10
+      # SERVER_TIME: "2000/8/31/06/00"
+      # SERVER_LATITUDE: "45"
     volumes:
       - /mnt/user/appdata/recon/deerisle:/data
     ports:
@@ -49,9 +51,11 @@ services:
       STEAM_SEARCH_PRIORITY: "high"
       MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
-      # Server Info page: the server's Steam query port and public IP
+      # Server Info page: the server's Steam query port, serverDZ.cfg's
+      # serverTime, and the map's latitude if it isn't Chernarus
       # QUERY_PORT: "27016"
-      # SERVER_IP: 203.0.113.10
+      # SERVER_TIME: "2000/8/31/06/00"
+      # SERVER_LATITUDE: "45"
     volumes:
       - /mnt/user/appdata/recon/namalsk:/data
     ports:
@@ -78,9 +82,11 @@ services:
       STEAM_SEARCH_PRIORITY: "high"
       MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
-      # Server Info page: the server's Steam query port and public IP
+      # Server Info page: the server's Steam query port, serverDZ.cfg's
+      # serverTime, and the map's latitude if it isn't Chernarus
       # QUERY_PORT: "27016"
-      # SERVER_IP: 203.0.113.10
+      # SERVER_TIME: "2000/8/31/06/00"
+      # SERVER_LATITUDE: "45"
     volumes:
       - /mnt/user/appdata/recon/nasdara:/data
     ports:

@@ -184,13 +184,13 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		$('pbar').style.width = known && info.maxPlayers ? Math.min(100, 100 * info.players / info.maxPlayers) + '%' : '0';
 		$('queue').textContent = known ? (k.queue || 0) + ' in the queue' : '';
 
-		var t = hours(k.time), rise = hours(data.sunrise), set = hours(data.sunset);
+		var sun = data.sun || {}, t = hours(k.time), rise = hours(sun.sunrise), set = hours(sun.sunset);
+		// A polar day or night: no sunrise or sunset, all day or all night.
+		if (sun.polar === 'day') { rise = 0; set = 24; } else if (sun.polar === 'night') { rise = set = 12; }
 		var dx = k.dayAccel || 1, nx = k.nightAccel || 1;
 		$('gtime').textContent = k.time || '-';
 		$('dayx').textContent = '☀ ×' + dx;
 		$('nightx').textContent = '☾ ×' + nx;
-		var isDay = t >= rise && t < set;
-		$('gtimenote').textContent = !isFinite(t) ? '' : (isDay ? 'Daytime' : 'Night') + (s.readAt ? ' · at ' + new Date(s.readAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
 
 		// Location from GeoIP on the public IP.
 		var loc = $('loc');
@@ -217,18 +217,29 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		// Day and night: 24 game hours, sunrise and sunset ticks, the time marker.
 		var bar = $('daybar');
 		bar.textContent = '';
-		var pct = function (h) { return (h / 24 * 100).toFixed(2) + '%'; };
-		bar.style.background = 'linear-gradient(90deg, #1d2340 0%, #2a2f55 ' + pct(rise - 2) + ', #d6935a ' + pct(rise) + ', #7fd3ee ' + pct(rise + 2.5) + ', #7fd3ee ' + pct(set - 1.5) + ', #e07a4a ' + pct(set) + ', #3a2f55 ' + pct(set + 2) + ', #1d2340 100%)';
+		var pct = function (h) { return (Math.max(0, Math.min(24, h)) / 24 * 100).toFixed(2) + '%'; };
+		if (sun.polar === 'day') bar.style.background = '#7fd3ee';
+		else if (sun.polar === 'night') bar.style.background = '#1d2340';
+		else bar.style.background = 'linear-gradient(90deg, #1d2340 0%, #2a2f55 ' + pct(rise - 2) + ', #d6935a ' + pct(rise) + ', #7fd3ee ' + pct(rise + 2.5) + ', #7fd3ee ' + pct(set - 1.5) + ', #e07a4a ' + pct(set) + ', #3a2f55 ' + pct(set + 2) + ', #1d2340 100%)';
 		var tick = function (h, cls, label) { var d = el('div', cls); d.style.left = 'calc(' + pct(h) + ' - 1px)'; if (label) d.append(el('span', '', label)); bar.append(d); };
-		tick(rise, 'tick', '☀ ' + data.sunrise);
-		tick(set, 'tick', '☾ ' + data.sunset);
+		if (!sun.polar) {
+			tick(rise, 'tick', '\u2600 ' + sun.sunrise);
+			tick(set, 'tick', '\u263E ' + sun.sunset);
+		}
 		if (isFinite(t)) tick(t, 'now');
-		$('sunnote').textContent = 'sunrise ' + data.sunrise + ' · sunset ' + data.sunset + ' (SERVER_SUNRISE, SERVER_SUNSET)';
-		var nightLen = (24 - set + rise) / (dx * nx), dayLen = (set - rise) / dx;
-		$('night').textContent = dur(nightLen);
-		$('nightnote').textContent = (24 - set + rise) + ' game hours at ×' + dx + ' × ×' + nx;
-		if (!isFinite(t)) { $('firstv').textContent = $('secondv').textContent = '-'; }
-		else if (isDay) {
+		var when = sun.date ? new Date(2000, +sun.date.slice(0, 2) - 1, +sun.date.slice(3)).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
+		var lat = sun.latitude != null ? Math.abs(sun.latitude) + '\u00b0' + (sun.latitude >= 0 ? 'N' : 'S') : '';
+		$('sunnote').textContent = (sun.polar === 'day' ? 'midnight sun' : sun.polar === 'night' ? 'polar night' : 'sunrise ' + sun.sunrise + ' · sunset ' + sun.sunset) +
+			' · ' + when + ' at ' + lat + (sun.mapKnown ? '' : ' (default: set SERVER_LATITUDE for this map)');
+		var dayLen = (set - rise) / dx, nightLen = (24 - set + rise) / (dx * nx);
+		$('night').textContent = sun.polar === 'day' ? 'No night' : dur(nightLen);
+		$('nightnote').textContent = sun.polar === 'day' ? 'midnight sun' : (24 - set + rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + dx + ' \u00d7 \u00d7' + nx;
+		var isDay = sun.polar === 'day' || (sun.polar !== 'night' && t >= rise && t < set);
+		$('gtimenote').textContent = !isFinite(t) ? '' : (isDay ? 'Daytime' : 'Night') + (s.readAt ? ' · at ' + new Date(s.readAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+		if (!isFinite(t) || sun.polar) {
+			$('first').textContent = 'Sunset in'; $('second').textContent = 'Sunrise in';
+			$('firstv').textContent = $('secondv').textContent = sun.polar ? 'None' : '-';
+		} else if (isDay) {
 			$('first').textContent = 'Sunset in'; $('firstv').textContent = dur((set - t) / dx);
 			$('second').textContent = 'Sunrise in'; $('secondv').textContent = dur((set - t) / dx + nightLen);
 		} else {

@@ -125,9 +125,9 @@ Everything is set with environment variables.
 | `GEOIP_DIR`             | the folder `DB_PATH` is in | Where `GeoLite2-City.mmdb` is kept |
 | `QUERY_HOST`            | `RCON_HOST`        | Where to send Steam's server query, for the Server Info page |
 | `QUERY_PORT`            | `27016`            | The server's Steam query port (`steamQueryPort` in `serverDZ.cfg`) |
-| `SERVER_IP`             | `QUERY_HOST` if it is a public address | The public IP shown under **Connect** on the Server Info page, and its country |
-| `SERVER_SUNRISE`        | `05:00`            | In-game sunrise on your map, for the Server Info page's day and night |
-| `SERVER_SUNSET`         | `19:00`            | In-game sunset |
+| `SERVER_IP`             | `QUERY_HOST` if it is a public address, else asked from Steam | The public IP shown under **Connect** on the Server Info page, and its country. Only needed without `STEAM_API_KEY`: with one, ReCON asks Steam for the server's address by its Steam ID |
+| `SERVER_TIME`           | `SystemTime`       | Your `serverTime` from `serverDZ.cfg`: `2000/8/31/06/00` (YYYY/MM/DD/HH/MM) or `SystemTime`. Its date and the map's latitude give sunrise and sunset on the Server Info page |
+| `SERVER_LATITUDE`       | the map's (45 when unknown) | The map's latitude in degrees north, for sunrise and sunset on a map ReCON doesn't know (it knows Chernarus) |
 
 `RCON_HOST`, `RCON_PORT` and `RCON_PASSWORD` are the defaults: **Settings** on the Players page can override any of them without editing `docker-compose.yaml` (see below).
 
@@ -151,9 +151,9 @@ The picker at the top right sets the look: **Default** (the plain look, what a b
 The page ReCON opens on. Every minute ReCON asks the game server what it tells Steam's server browser (the query port, `QUERY_PORT`), so it shows the same things a server list does, and adds what ReCON has recorded itself:
 
 - **The server:** name, map, 1PP or 3PP, version, BattlEye, and whether it is answering (a red dot and "Not answering" when it isn't, with the last answer still shown).
-- **Players** and the queue, **in-game time** with the day and night speeds (☀ ×2, ☾ ×4), the server's **location** (GeoIP on `SERVER_IP`) and **uptime** over the last 7 days (of the time ReCON was running).
+- **Players** and the queue, **in-game time** with the day and night speeds (☀ ×2, ☾ ×4), the server's **location** (GeoIP on its public IP) and **uptime** over the last 7 days (of the time ReCON was running).
 - **Connect:** the IP, game port and query port. Click one to copy it.
-- **Day & night:** a bar of the 24 in-game hours with sunrise, sunset and the current time, how long until sunset and sunrise in real time, and how long a night lasts. DayZ multiplies the night speed by the day speed, so a 10-hour night at ×2 and ×4 lasts 1h 15m. Sunrise and sunset differ per map: set `SERVER_SUNRISE` and `SERVER_SUNSET`.
+- **Day & night:** a bar of the 24 in-game hours with sunrise, sunset and the current time, how long until sunset and sunrise in real time, and how long a night lasts. DayZ multiplies the night speed by the day speed, so a 10-hour night at ×2 and ×4 lasts 1h 15m. Sunrise and sunset are worked out from the date in `SERVER_TIME` (as in `serverDZ.cfg`) and the map's latitude, with the standard sunrise equation; the in-game date moves on as days pass, but sunrise only shifts a few minutes a week. For a map other than Chernarus, set `SERVER_LATITUDE` (it defaults to 45°N). Near the poles it shows midnight sun or polar night.
 - **Population:** players online over the last day, 7 days, 2 weeks, month or all time, with the peak, average, different players and sessions over 7 days. It comes from the session history, so it is exact, and it has history from the first day ReCON recorded.
 - **Busiest times:** the average number of players for each weekday and hour over the last 4 weeks, in your browser's time zone.
 - **Mods:** the server's Workshop mods, each linking to its Workshop page, and the total download size. ReCON asks Steam every 3 hours when each was last updated; a mod Steam has updated since glows red. Click it to acknowledge the update and it goes back to normal. A mod seen for the first time counts as up to date.

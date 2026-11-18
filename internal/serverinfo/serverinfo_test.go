@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"math"
 	"net"
 	"strconv"
 	"testing"
@@ -267,11 +268,11 @@ func TestBusiest(t *testing.T) {
 }
 
 func TestConfigFromEnv(t *testing.T) {
-	for _, k := range []string{"QUERY_HOST", "QUERY_PORT", "SERVER_IP", "SERVER_SUNRISE", "SERVER_SUNSET"} {
+	for _, k := range []string{"QUERY_HOST", "QUERY_PORT", "SERVER_IP", "SERVER_TIME", "SERVER_LATITUDE"} {
 		t.Setenv(k, "")
 	}
 	c := ConfigFromEnv("127.0.0.1")
-	if c.QueryHost != "127.0.0.1" || c.QueryPort != 27016 || c.PublicIP != "" || c.Sunrise != "05:00" || c.Sunset != "19:00" {
+	if c.QueryHost != "127.0.0.1" || c.QueryPort != 27016 || c.PublicIP != "" || c.ServerTime != "SystemTime" || !math.IsNaN(c.Latitude) {
 		t.Errorf("defaults: %+v", c)
 	}
 	if c := ConfigFromEnv("173.27.253.74"); c.PublicIP != "173.27.253.74" {
@@ -279,8 +280,43 @@ func TestConfigFromEnv(t *testing.T) {
 	}
 	t.Setenv("QUERY_PORT", "27017")
 	t.Setenv("SERVER_IP", "203.0.113.5")
-	t.Setenv("SERVER_SUNSET", "25:00")
-	if c := ConfigFromEnv("127.0.0.1"); c.QueryPort != 27017 || c.PublicIP != "203.0.113.5" || c.Sunset != "19:00" {
+	t.Setenv("SERVER_TIME", "2000/8/31/06/00")
+	t.Setenv("SERVER_LATITUDE", "66.5")
+	if c := ConfigFromEnv("127.0.0.1"); c.QueryPort != 27017 || c.PublicIP != "203.0.113.5" || c.ServerTime != "2000/8/31/06/00" || c.Latitude != 66.5 {
 		t.Errorf("set: %+v", c)
+	}
+	t.Setenv("SERVER_TIME", "2000/2/31/06/00")
+	t.Setenv("SERVER_LATITUDE", "north")
+	if c := ConfigFromEnv("127.0.0.1"); c.ServerTime != "SystemTime" || !math.IsNaN(c.Latitude) {
+		t.Errorf("bad values kept: %+v", c)
+	}
+}
+
+// TestSun checks sunrise and sunset for 31 August: Chernarus's latitude,
+// the Arctic Circle, the default for an unknown map, and midnight sun.
+func TestSun(t *testing.T) {
+	c := Config{ServerTime: "2000/8/31/06/00", Latitude: math.NaN()}
+	now := time.Now()
+	for _, tc := range []struct {
+		mapName   string
+		lat       float64
+		rise, set string
+		polar     string
+		mapKnown  bool
+	}{
+		{"ChernarusPlus", math.NaN(), "05:24", "18:36", "", true},
+		{"deerisle", math.NaN(), "05:24", "18:36", "", false}, // the default 45°N
+		{"namalsk", 66.56, "04:37", "19:23", "", true},
+		{"anything", 85, "", "", "day", true},
+	} {
+		c.Latitude = tc.lat
+		s := SunFor(c, tc.mapName, now)
+		if s.Sunrise != tc.rise || s.Sunset != tc.set || s.Polar != tc.polar || s.MapKnown != tc.mapKnown || s.Date != "08-31" {
+			t.Errorf("%s at %v: %+v", tc.mapName, tc.lat, s)
+		}
+	}
+	// SystemTime uses today's date.
+	if s := SunFor(Config{ServerTime: "SystemTime", Latitude: math.NaN()}, "chernarusplus", now); s.Date != now.Format("01-02") {
+		t.Errorf("SystemTime date %s", s.Date)
 	}
 }

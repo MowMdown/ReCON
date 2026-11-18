@@ -29,8 +29,7 @@ func handleServerInfo(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"ok": true, "server": snap,
 		"connect":   map[string]any{"ip": cfg.PublicIP, "gamePort": snap.Info.GamePort, "queryPort": cfg.QueryPort},
 		"country":   geoip.Country(cfg.PublicIP),
-		"sunrise":   cfg.Sunrise,
-		"sunset":    cfg.Sunset,
+		"sun":       serverinfo.SunFor(cfg, snap.Info.Map, now),
 		"modsKnown": snap.ModsKnown,
 	}
 	// Uptime over the last 7 days, of the time ReCON was running.
