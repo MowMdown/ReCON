@@ -497,7 +497,8 @@ type SharedPlayer struct {
 
 type detailsIP struct {
 	IP        string         `json:"ip"`
-	Country   string         `json:"country,omitempty"` // IP's country, filled in by the web handler
+	Country   string         `json:"country,omitempty"`  // IP's country, filled in by the web handler
+	Location  any            `json:"location,omitempty"` // where it is (geoip.Location), filled in by the web handler
 	FirstUsed int64          `json:"firstUsed"`
 	LastUsed  int64          `json:"lastUsed"`
 	Others    []SharedPlayer `json:"others"` // other players seen on this IP

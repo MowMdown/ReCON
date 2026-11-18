@@ -18,6 +18,7 @@ import (
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/geoip"
 	"github.com/MowMdown/ReCON/internal/serverinfo"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
@@ -610,5 +611,59 @@ func TestServerInfoRoutes(t *testing.T) {
 	}
 	if code := do(http.MethodPost, "/api/server/mods/42/ack"); code != 404 {
 		t.Errorf("unknown mod ack = %d, want 404", code)
+	}
+}
+
+// TestDetailsIPLocation checks that the Details dialog's IPs come with
+// where GeoLite2-City puts them, for the map, and none for an unknown IP.
+func TestDetailsIPLocation(t *testing.T) {
+	db := testDB(t)
+	path := filepath.Join(t.TempDir(), geoip.FileName)
+	if err := os.WriteFile(path, test.GeoIPCityDatabase(t, "81.2.69.0", "GB", "Leeds", "England", 53.8, -1.55, 20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := geoip.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Now().Add(-time.Hour)
+	for _, ip := range []string{"81.2.69.160", "10.0.0.2"} {
+		if err := db.OpenPlayerSession(test.GUID1, "Marrow", ip, 3, t0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ClosePlayerSession(test.GUID1, t0.Add(time.Minute), "disconnected"); err != nil {
+			t.Fatal(err)
+		}
+		t0 = t0.Add(2 * time.Minute)
+	}
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/players/"+test.GUID1+"/details", nil))
+	var d struct {
+		Details struct {
+			IPs []struct {
+				IP       string          `json:"ip"`
+				Location *geoip.Location `json:"location"`
+			} `json:"ips"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, i := range d.Details.IPs {
+		switch i.IP {
+		case "81.2.69.160":
+			if i.Location == nil || i.Location.City != "Leeds" || i.Location.RadiusKm != 20 {
+				t.Errorf("81.2.69.160: %+v", i.Location)
+			}
+			found++
+		case "10.0.0.2":
+			if i.Location != nil {
+				t.Errorf("10.0.0.2 has a location: %+v", i.Location)
+			}
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("IPs: %s", rec.Body.String())
 	}
 }

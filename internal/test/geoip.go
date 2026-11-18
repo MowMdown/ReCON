@@ -2,15 +2,65 @@ package test
 
 import (
 	"encoding/binary"
+	"math"
 	"net"
 	"testing"
 )
 
-// GeoIPDatabase returns a tiny database in MaxMind's format (the GeoLite2-
-// Country layout, IPv4 only) that puts every address in network, an IPv4
-// /24 such as "81.2.69.0", in the country iso ("GB"). Other addresses have no
-// country.
+// GeoIPDatabase returns a tiny database in MaxMind's format (IPv4 only)
+// that puts every address in network, an IPv4 /24 such as "81.2.69.0", in
+// the country iso ("GB"). Other addresses have no country.
 func GeoIPDatabase(t testing.TB, network, iso string) []byte {
+	t.Helper()
+	return geoIPDatabase(t, network, "GeoLite2-Country", KV{"country", KV{"iso_code", iso}})
+}
+
+// GeoIPCityDatabase is GeoIPDatabase in the GeoLite2-City layout: the
+// network also has a city, a region, and a location (latitude, longitude,
+// accuracy radius in km).
+func GeoIPCityDatabase(t testing.TB, network, iso, city, region string, lat, lon float64, radiusKm uint16) []byte {
+	t.Helper()
+	return geoIPDatabase(t, network, "GeoLite2-City", KV{
+		"city", KV{"names", KV{"en", city}},
+		"country", KV{"iso_code", iso},
+		"location", KV{"accuracy_radius", radiusKm, "latitude", lat, "longitude", lon},
+		"subdivisions", []any{KV{"names", KV{"en", region}}},
+	})
+}
+
+// KV is an MMDB map, as key, value, key, value, ...
+type KV []any
+
+// mmdbEncode writes a value in MaxMind's data format: maps (KV), strings,
+// doubles, uint16s and arrays.
+func mmdbEncode(v any) []byte {
+	switch x := v.(type) {
+	case KV:
+		out := []byte{0xE0 | byte(len(x)/2)}
+		for i := 0; i+1 < len(x); i += 2 {
+			out = append(out, mmdbString(x[i].(string))...)
+			out = append(out, mmdbEncode(x[i+1])...)
+		}
+		return out
+	case string:
+		return mmdbString(x)
+	case float64:
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, math.Float64bits(x))
+		return append([]byte{0x68}, b...)
+	case uint16:
+		return mmdbUint16(x)
+	case []any:
+		out := []byte{byte(len(x)), 0x04} // extended type 11: array
+		for _, e := range x {
+			out = append(out, mmdbEncode(e)...)
+		}
+		return out
+	}
+	panic("mmdbEncode: unsupported value")
+}
+
+func geoIPDatabase(t testing.TB, network, dbType string, record KV) []byte {
 	t.Helper()
 	ip := net.ParseIP(network).To4()
 	if ip == nil {
@@ -18,11 +68,7 @@ func GeoIPDatabase(t testing.TB, network, iso string) []byte {
 	}
 	const depth = 24 // a /24: one node per bit of the prefix
 	nodeCount := uint32(depth)
-	// The data: {"country": {"iso_code": iso}}.
-	data := append([]byte{0xE1}, mmdbString("country")...)
-	data = append(data, 0xE1)
-	data = append(data, mmdbString("iso_code")...)
-	data = append(data, mmdbString(iso)...)
+	data := mmdbEncode(record)
 	dataPointer := nodeCount + 16 // the record value pointing at data offset 0
 
 	// The search tree: node i follows bit i of the prefix; the other branch is
@@ -49,7 +95,7 @@ func GeoIPDatabase(t testing.TB, network, iso string) []byte {
 		{"binary_format_major_version", mmdbUint16(2)},
 		{"binary_format_minor_version", mmdbUint16(0)},
 		{"build_epoch", []byte{0x00, 0x02}}, // uint64 0
-		{"database_type", mmdbString("GeoLite2-Country")},
+		{"database_type", mmdbString(dbType)},
 		{"description", []byte{0xE0}}, // empty map
 		{"ip_version", mmdbUint16(4)},
 		{"languages", []byte{0x00, 0x04}}, // empty array

@@ -108,3 +108,50 @@ func TestConfigFromEnv(t *testing.T) {
 		t.Errorf("got %+v, want /geo and download on", c)
 	}
 }
+
+// TestLocate checks the City lookup: an address in the network has its
+// city, region and point; others, and a country-only database, have none.
+func TestLocate(t *testing.T) {
+	db.Store(nil)
+	t.Cleanup(func() { db.Store(nil) })
+	path := filepath.Join(t.TempDir(), FileName)
+	if err := os.WriteFile(path, test.GeoIPCityDatabase(t, "81.2.69.0", "GB", "Leeds", "England", 53.8, -1.55, 20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	l, ok := Locate("81.2.69.160")
+	if !ok || l.Country != "gb" || l.City != "Leeds" || l.Region != "England" || l.Lat != 53.8 || l.Lon != -1.55 || l.RadiusKm != 20 {
+		t.Errorf("Locate = %+v %v", l, ok)
+	}
+	if Country("81.2.69.160") != "gb" {
+		t.Error("the City database gives no country")
+	}
+	if _, ok := Locate("10.0.0.2"); ok {
+		t.Error("a private address has a location")
+	}
+	// A country-only database: flags, but no locations.
+	if err := os.WriteFile(path, test.GeoIPDatabase(t, "81.2.69.0", "GB"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	Load(path)
+	if _, ok := Locate("81.2.69.160"); ok {
+		t.Error("a country-only database gave a location")
+	}
+}
+
+// TestStartFallsBackToCountry checks that an older GeoLite2-Country.mmdb
+// in the folder still gives flags when there is no City database.
+func TestStartFallsBackToCountry(t *testing.T) {
+	db.Store(nil)
+	t.Cleanup(func() { db.Store(nil) })
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, legacyFileName), test.GeoIPDatabase(t, "81.2.69.0", "GB"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	Start(Config{Dir: dir})
+	if got := Country("81.2.69.160"); got != "gb" {
+		t.Errorf("Country = %q, want gb from the old Country database", got)
+	}
+}

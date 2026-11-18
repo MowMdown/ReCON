@@ -121,8 +121,8 @@ Everything is set with environment variables.
 | `STEAM_SEARCH_CORES`    | `1`                | CPU cores a SteamID lookup may use (capped at the cores available) |
 | `STEAM_SEARCH_PRIORITY` | `medium`           | How much of each core it uses: `low` 33%, `medium` 66%, `high` 99% |
 | `MAXMIND_ACCOUNT_ID`    | none               | With `MAXMIND_LICENSE_KEY`, turns on the country flags next to IPs (below). Both are on your free [MaxMind](https://www.maxmind.com/en/geolite2/signup) account's *Manage License Keys* page |
-| `MAXMIND_LICENSE_KEY`   | none               | MaxMind licence key, for downloading the GeoLite2-Country database |
-| `GEOIP_DIR`             | the folder `DB_PATH` is in | Where `GeoLite2-Country.mmdb` is kept |
+| `MAXMIND_LICENSE_KEY`   | none               | MaxMind licence key, for downloading the GeoLite2-City database |
+| `GEOIP_DIR`             | the folder `DB_PATH` is in | Where `GeoLite2-City.mmdb` is kept |
 | `QUERY_HOST`            | `RCON_HOST`        | Where to send Steam's server query, for the Server Info page |
 | `QUERY_PORT`            | `27016`            | The server's Steam query port (`steamQueryPort` in `serverDZ.cfg`) |
 | `SERVER_IP`             | `QUERY_HOST` if it is a public address | The public IP shown under **Connect** on the Server Info page, and its country |
@@ -178,7 +178,7 @@ The top table lists the players online now (refreshed every 5 seconds). ReCON fo
 
 ![RCON console](docs/screenshots/players-console.png)
 
-Every IP on the page (the online and offline lists, and in Details the last IP, sessions and IPs) has its country's flag to its left; hover it for the country's name. The flags need MaxMind's free GeoLite2-Country database: with `MAXMIND_ACCOUNT_ID` and `MAXMIND_LICENSE_KEY` set, ReCON downloads it to `GEOIP_DIR` when it starts if it isn't there, and again when it is a week old (MaxMind updates it twice a week). Without them nothing is downloaded and there are no flags, unless you put `GeoLite2-Country.mmdb` in that folder yourself. Private and LAN addresses have no country, so no flag.
+Every IP on the page (the online and offline lists, and in Details the last IP, sessions and IPs) has its country's flag to its left; hover it for the country's name. The flags need MaxMind's free GeoLite2-City database (about 60 MB): with `MAXMIND_ACCOUNT_ID` and `MAXMIND_LICENSE_KEY` set, ReCON downloads it to `GEOIP_DIR` when it starts if it isn't there, and again when it is a week old (MaxMind updates it twice a week). Without them nothing is downloaded and there are no flags, unless you put `GeoLite2-City.mmdb` in that folder yourself. A `GeoLite2-Country.mmdb` left there by an older ReCON still gives the flags (but no maps) until the City one is downloaded. Private and LAN addresses have no country, so no flag.
 
 #### Details
 
@@ -188,7 +188,7 @@ Details works for online and offline players. **Prev** and **Next** in its top r
 | ------------- | ----- |
 | Overview      | First and last seen, total time, sessions, average session, last IP, ban status, and a warning when the player shares an IP with anyone else |
 | Sessions      | Each visit: connected, disconnected (noted when they were kicked or banned), duration and IP. A player back from the same IP within 5 minutes of ReCON logging in again after a server restart keeps the same session, including players the restart itself disconnected (a `#shutdown` or Kick everyone in the 2 minutes before), unless they were banned; the time they were away doesn't count. Back from another IP, they get a new session |
-| IPs           | Every IP they used, and anyone else seen on the same IP. Names are links to that player's details |
+| IPs           | Every IP they used, and anyone else seen on the same IP. Names are links to that player's details. Click an IP with a location to open a map under it: where GeoLite2-City puts the IP (where it is registered, not the player's address), with a circle for how accurate that is, the city and region, and a link to OpenStreetMap. The map's tiles come from OpenStreetMap, so your browser needs internet for them; the place shows without |
 | Steam Profile | Their Steam account (see [Steam profiles](#6-steam-profiles)) |
 | Chat          | Their chat history. While they're online you can message them from here |
 | Notes         | A private admin note of up to 500 characters. It saves when you close the dialog or switch players |
@@ -628,7 +628,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/game/` | The live game server and what ReCON mirrors from it: the web session, RCON settings, the console log and the server watch (`session.go`); who is online and their sessions, kept across a server restart for players back from the same IP within 5 minutes, and chat history (`players.go`); the ban list kept in step with BattlEye's, placing bans, export/import (`bans.go`) |
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
-| `internal/geoip/` | The country of an IP, for the flags, from MaxMind's GeoLite2-Country database, and downloading it |
+| `internal/geoip/` | Where an IP is (country for the flags, city and point for the IP map), from MaxMind's GeoLite2-City database, and downloading it |
 | `internal/serverinfo/` | The Server Info page's data: Steam's server query (A2S) and DayZ's keywords and mod list, uptime, population and busiest times, and mod updates from the Steam Workshop |
 | `internal/store/` | The SQLite database: every SQL statement |
 | `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), the favicons and app icons (`assets/icons/`) and the country flags (`assets/flags/`), both embedded into the binary at build time |
@@ -652,4 +652,4 @@ This rewrites `docs/preview/players.html`, `bans.html`, `flows.html`, `data.js` 
 
 [MIT](LICENSE)
 
-The country flags are from [flag-icons](https://github.com/lipis/flag-icons) by Panayiotis Lipiridis (MIT, `internal/web/assets/flags/LICENSE`). The icons are [Phosphor](https://phosphoricons.com) (MIT). This product includes GeoLite2 data created by MaxMind, available from [https://www.maxmind.com](https://www.maxmind.com).
+The country flags are from [flag-icons](https://github.com/lipis/flag-icons) by Panayiotis Lipiridis (MIT, `internal/web/assets/flags/LICENSE`). The icons are [Phosphor](https://phosphoricons.com) (MIT). The IP map is [Leaflet](https://leafletjs.com) (BSD 2-Clause, `internal/web/assets/leaflet/LICENSE`) with tiles and data from [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors. This product includes GeoLite2 data created by MaxMind, available from [https://www.maxmind.com](https://www.maxmind.com).

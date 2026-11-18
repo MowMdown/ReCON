@@ -62,6 +62,8 @@ td.act button:last-child { margin-right: 0; }
 .importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
 .importbox .buttons { margin-top: 12px; flex: none; }
 </style>
+<link rel="stylesheet" href="assets/leaflet/leaflet.css">
+<script src="assets/leaflet/leaflet.js"></script>
 <style>
 td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
@@ -151,6 +153,29 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 .callout.warn { background: #2a2614; border: 1px solid #5c5224; }
 .callout.warn b { color: #fdd663; }
 .dt { table-layout: auto; }
+ 
+#detIPs tr.iprow.has { cursor: pointer; }
+#detIPs tr.iprow.has:hover td { background: rgba(255, 255, 255, .04); }
+#detIPs tr.iprow td:first-child::before { content: ''; display: inline-block; width: 14px; color: #888; }
+#detIPs tr.iprow.has td:first-child::before { content: '\25B8'; }
+#detIPs tr.iprow.open td:first-child::before { content: '\25BE'; }
+#detIPs tr.iprow.open td { background: rgba(138, 180, 248, .08); }
+#detIPs tr.ipmap > td { padding: 0 0 10px; }
+.ipmapbox { display: grid; grid-template-columns: minmax(0, 1fr) 230px; border: 1px solid #333; border-radius: 6px; overflow: hidden; margin: 0 4px; }
+@media (max-width: 640px) { .ipmapbox { grid-template-columns: minmax(0, 1fr); } }
+.ipmapbox .map { height: 240px; background: #1a1a1a; }
+.ipmapbox .info { white-space: normal; overflow-wrap: anywhere; padding: 12px 14px; font-size: 13px; line-height: 1.6; border-left: 1px solid #333; }
+.ipmapbox .info .place { font-size: 15px; font-weight: 600; }
+.ipmapbox .info .dim { color: #999; }
+.ipmapbox .info a { color: #8ab4f8; }
+.ipmapbox .leaflet-container { font: inherit; background: #1a1a1a; }
+ 
+.ipmapbox .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+.ipmapbox .leaflet-control-attribution { background: rgba(0, 0, 0, .6) !important; color: #aaa; }
+.ipmapbox .leaflet-control-attribution a { color: #8ab4f8; }
+html[data-theme]:not([data-theme="default"]) .ipmapbox, html[data-theme]:not([data-theme="default"]) .ipmapbox .info { border-color: var(--color-divider); }
+html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+
 .dt th, .dt td { height: auto; padding: 7px 9px; font-size: 13px; }
 .linkbtn { background: none; border: none; padding: 0; margin: 0 8px 0 0; color: #fdd663; cursor: pointer; font-size: 13px; text-decoration: underline; }
 .dim { color: #888; }
@@ -226,7 +251,7 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 <script src="assets/recon-icons.js" defer></script>
 </head>
 <body>
-<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a href="/server">Server Info</a><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <div class="statusbar">
 	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
@@ -652,6 +677,47 @@ async function refresh() {
 	} catch(e) {
 		setStatusCount(''); 
 	}
+}
+
+
+
+
+let ipMap = null;
+function toggleIPMap(tr, i) {
+	let wasOpen = tr.classList.contains('open');
+	if (ipMap) { ipMap.remove(); ipMap = null; }
+	document.querySelectorAll('#detIPs tr.ipmap').forEach(r => r.remove());
+	document.querySelectorAll('#detIPs tr.iprow.open').forEach(r => r.classList.remove('open'));
+	if (wasOpen) return;
+	tr.classList.add('open');
+	let l = i.location, row = document.createElement('tr'), td = document.createElement('td');
+	row.className = 'ipmap';
+	td.colSpan = 4;
+	let box = document.createElement('div'); box.className = 'ipmapbox';
+	let map = document.createElement('div'); map.className = 'map';
+	let info = document.createElement('div'); info.className = 'info';
+	let line = (cls, text) => { let d = document.createElement('div'); if (cls) d.className = cls; d.textContent = text; info.append(d); return d; };
+	let cc = l.country || i.country;
+	line('place', [l.city, l.region].filter(Boolean).join(', ') || countryName(cc) || 'Unknown place');
+	let cn = line('', ''), f = flagEl(cc);
+	if (f) cn.append(f, ' ');
+	cn.append(countryName(cc) || '');
+	line('dim', 'Within about ' + l.radiusKm + ' km');
+	line('dim mono', l.lat.toFixed(2) + ', ' + l.lon.toFixed(2));
+	line('dim', 'Where the IP is registered, not the player\'s address. GeoLite2-City.').style.marginTop = '8px';
+	let a = document.createElement('a');
+	a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Open in OpenStreetMap';
+	a.href = 'https://www.openstreetmap.org/?mlat=' + l.lat + '&mlon=' + l.lon + '#map=10/' + l.lat + '/' + l.lon;
+	line('', '').append(a);
+	info.lastChild.style.marginTop = '8px';
+	box.append(map, info); td.append(box); row.append(td);
+	tr.after(row);
+	if (typeof L === 'undefined') { map.textContent = ''; return; } 
+	ipMap = L.map(map, { scrollWheelZoom: false }).setView([l.lat, l.lon], l.radiusKm > 200 ? 5 : l.radiusKm > 50 ? 7 : 8);
+	ipMap.attributionControl.setPrefix(false);
+	L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 12, attribution: '&copy; OpenStreetMap' }).addTo(ipMap);
+	L.circle([l.lat, l.lon], { radius: l.radiusKm * 1000, color: '#8ab4f8', weight: 1, fillOpacity: .15 }).addTo(ipMap);
+	L.circleMarker([l.lat, l.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#8ab4f8', fillOpacity: 1 }).addTo(ipMap);
 }
 
 
@@ -1226,6 +1292,9 @@ function renderDetails(keepDraft) {
 	ib.textContent = '';
 	det.ips.forEach(function (i) {
 		let tr = document.createElement('tr');
+		tr.className = 'iprow' + (i.location ? ' has' : '');
+		tr.title = i.location ? 'Show where this IP is' : '';
+		if (i.location) tr.addEventListener('click', function (e) { if (!e.target.closest('a')) toggleIPMap(tr, i); });
 		[i.ip, fmtDay(i.firstUsed), fmtDay(i.lastUsed)].forEach(function (v, n) {
 			let td = document.createElement('td');
 			td.textContent = v;

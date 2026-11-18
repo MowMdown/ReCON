@@ -340,6 +340,11 @@
 	var COUNTRY = { '203.0.113.24': 'us', '198.51.100.7': 'de', '203.0.113.91': 'gb', '192.0.2.15': 'ca',
 		'198.51.100.212': 'fr', '192.0.2.188': 'au', '198.51.100.66': 'nl', '192.0.2.40': 'se' };
 	function country(ip) { return COUNTRY[ip] || ''; }
+	// Where GeoLite2-City would put each sample IP (city, region, point, accuracy in km).
+	var LOC = { us: ['Columbus', 'Ohio', 39.96, -83.00, 20], de: ['Frankfurt am Main', 'Hesse', 50.11, 8.68, 10], gb: ['Leeds', 'England', 53.80, -1.55, 20],
+		ca: ['Toronto', 'Ontario', 43.65, -79.38, 10], fr: ['Lyon', 'Auvergne-Rhone-Alpes', 45.76, 4.84, 20], au: ['Brisbane', 'Queensland', -27.47, 153.03, 50],
+		nl: ['Utrecht', 'Utrecht', 52.09, 5.12, 10], se: ['Gothenburg', 'Vastra Gotaland', 57.71, 11.97, 20] };
+	function locate(ip) { var c = country(ip), l = LOC[c]; return l ? { country: c, city: l[0], region: l[1], lat: l[2], lon: l[3], radiusKm: l[4] } : undefined; }
 	function playerJSON(p) {
 		var j = { id: p.id, ip: p.ip, country: country(p.ip), port: p.port, ping: p.ping, guid: p.guid, name: p.name, offline: !p.isOnline,
 			totalPlaytimeSeconds: p.play, lastSeenUnix: p.isOnline ? 0 : p.lastSeen, role: p.role };
@@ -362,7 +367,7 @@
 			var end = p.isOnline ? t - (i + 1) * 20 * HOUR : t - i * 20 * HOUR;
 			sessions.push({ connected: end - each, disconnected: end, seconds: each, ip: i === 3 ? '192.0.2.' + (40 + p.name.length) : p.ip, country: i === 3 ? '' : country(p.ip), current: false });
 		}
-		var ips = [{ ip: p.ip, country: country(p.ip), firstUsed: p.firstSeen, lastUsed: p.lastSeen, others: sharedIP(p) }];
+		var ips = [{ ip: p.ip, country: country(p.ip), location: locate(p.ip), firstUsed: p.firstSeen, lastUsed: p.lastSeen, others: sharedIP(p) }];
 		if (n > 3) ips.push({ ip: '192.0.2.' + (40 + p.name.length), firstUsed: p.firstSeen + 2 * DAY, lastUsed: p.firstSeen + 2 * DAY, others: [] });
 		return {
 			player: { guid: p.guid, name: p.name, lastIp: p.ip, lastIpCountry: country(p.ip), firstSeen: p.firstSeen, lastSeen: p.lastSeen, playtimeSeconds: p.play,

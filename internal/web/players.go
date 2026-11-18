@@ -250,6 +250,9 @@ func handlePlayerDetails(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range d.IPs {
 		d.IPs[i].Country = geoip.Country(d.IPs[i].IP)
+		if l, ok := geoip.Locate(d.IPs[i].IP); ok {
+			d.IPs[i].Location = l // the map in the IPs tab
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "details": d})
 }
