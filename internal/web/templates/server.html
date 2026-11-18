@@ -46,7 +46,7 @@ img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2p
 .conn.copy:hover .cp, .conn.copy.done .cp { opacity: 1; }
 .conn.copy.done { border-color: #81c995; }
 .conn.copy.done .cp { color: #81c995; }
-.daybar { position: relative; height: 10px; border-radius: 5px; margin: 30px 0 34px; }
+.daybar { position: relative; height: 10px; border-radius: 5px; margin: 30px 0 42px; }
 /* Sunrise and sunset: a tick through the bar, labelled above it */
 .daybar .tick { position: absolute; top: -4px; width: 2px; height: 18px; background: #ddd; }
 .daybar .tick span { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); font: 12px ui-monospace, Consolas, monospace; color: #aaa; white-space: nowrap; }
@@ -72,7 +72,7 @@ svg.chart { width: 100%; height: 200px; display: block; }
 .stats div b { display: block; font: 11px ui-monospace, Consolas, monospace; color: #999; letter-spacing: .06em; }
 .stats div span { font: 16px ui-monospace, Consolas, monospace; }
 .heat { display: grid; grid-template-columns: 36px repeat(24, minmax(0, 1fr)); gap: 3px; font: 11px ui-monospace, Consolas, monospace; color: #999; align-items: center; }
-.heat i { display: block; height: 18px; border-radius: 3px; background: #222; }
+.heat i { display: block; height: 18px; border-radius: 3px; background: #1d2033; }
 .legend { display: flex; gap: 6px; align-items: center; margin-top: 10px; font: 12px ui-monospace, Consolas, monospace; color: #999; flex-wrap: wrap; }
 .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .empty { color: #888; font-size: 13px; }
@@ -113,9 +113,10 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 
 	<div class="card"><h3>Day &amp; night <span class="r note" id="sunnote"></span></h3>
 		<div class="daybar" id="daybar"></div>
-		<div class="row r3">
+		<div class="row r4">
 			<div class="card"><h3 id="first">Sunset in</h3><div class="big m" id="firstv">-</div><div class="note">real time</div></div>
 			<div class="card"><h3 id="second">Sunrise in</h3><div class="big m" id="secondv">-</div><div class="note">real time</div></div>
+			<div class="card"><h3>Day lasts</h3><div class="big m" id="daylen">-</div><div class="note" id="daynote"></div></div>
 			<div class="card"><h3>Night lasts</h3><div class="big m" id="night">-</div><div class="note" id="nightnote"></div></div>
 		</div>
 	</div>
@@ -252,6 +253,8 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		$('sunnote').textContent = (sun.polar === 'day' ? 'midnight sun' : sun.polar === 'night' ? 'polar night' : 'sunrise ' + sun.sunrise + ' · sunset ' + sun.sunset) +
 			' · ' + when + ' at ' + lat + (sun.mapKnown ? '' : ' (default: set SERVER_LATITUDE for this map)');
 		var dayLen = (set - rise) / dx, nightLen = (24 - set + rise) / (dx * nx);
+		$('daylen').textContent = sun.polar === 'night' ? 'No day' : dur(dayLen);
+		$('daynote').textContent = sun.polar === 'night' ? 'polar night' : (set - rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + dx;
 		$('night').textContent = sun.polar === 'day' ? 'No night' : dur(nightLen);
 		$('nightnote').textContent = sun.polar === 'day' ? 'midnight sun' : (24 - set + rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + dx + ' \u00d7 \u00d7' + nx;
 		var isDay = sun.polar === 'day' || (sun.polar !== 'night' && t >= rise && t < set);
@@ -346,7 +349,9 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			var d = await (await fetch('/api/server/busiest?tz=' + encodeURIComponent(tz))).json();
 			if (!d.ok) return;
 			$('tz').textContent = 'average players · ' + d.tz + ' · last 4 weeks';
-			var heat = $('heat'), shades = ['#222', '#3d3d3d', '#6a6a6a', '#a5a5a5', '#e6e6e6'];
+			// The day bar's colours: night purple when quiet, through dusk red, to
+			// sunrise orange when busiest. Empty slots stay near the background.
+			var heat = $('heat'), shades = ['#1d2033', '#2a2f55', '#5b3a63', '#e07a4a', '#ffa64d'];
 			heat.textContent = '';
 			heat.append(el('span'));
 			for (var h = 0; h < 24; h++) heat.append(el('span', '', h % 6 ? '' : String(h)));

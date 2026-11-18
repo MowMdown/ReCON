@@ -323,3 +323,24 @@ func TestSun(t *testing.T) {
 		t.Errorf("SystemTime date %s", s.Date)
 	}
 }
+
+// TestBusiestAcrossDaylightSaving checks a session over the night clocks go
+// back (1:00 to 2:00 happens twice): it must finish, and count every hour.
+func TestBusiestAcrossDaylightSaving(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip(err)
+	}
+	start := time.Date(2026, 11, 1, 0, 30, 0, 0, loc) // 1 Nov 2026: 2:00 EDT becomes 1:00 EST
+	spans := []store.Span{{GUID: "a", Start: start, End: start.Add(4 * time.Hour)}}
+	done := make(chan [7][24]float64, 1)
+	go func() { done <- Busiest(spans, start.Add(-time.Hour), start.Add(5*time.Hour), loc) }()
+	select {
+	case b := <-done:
+		if b[time.Sunday][1] == 0 || b[time.Sunday][2] == 0 {
+			t.Errorf("hours around the change not counted: %v", b[time.Sunday][:4])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Busiest never finished across the clock change")
+	}
+}

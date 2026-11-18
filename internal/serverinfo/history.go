@@ -161,7 +161,15 @@ func Busiest(spans []store.Span, since, now time.Time, loc *time.Location) [7][2
 		}
 		for t := start; t.Before(end); {
 			lt := t.In(loc)
-			next := time.Date(lt.Year(), lt.Month(), lt.Day(), lt.Hour(), 0, 0, 0, loc).Add(time.Hour)
+			// The start of t's local hour, by subtracting the minutes and
+			// seconds: rebuilding it with time.Date picks the first of the
+			// two 1:00s when clocks go back, which is before t, and the
+			// loop would never end.
+			next := t.Add(-time.Duration(lt.Minute())*time.Minute - time.Duration(lt.Second())*time.Second -
+				time.Duration(lt.Nanosecond())).Add(time.Hour)
+			if !next.After(t) {
+				next = t.Add(time.Hour)
+			}
 			if next.After(end) {
 				next = end
 			}
