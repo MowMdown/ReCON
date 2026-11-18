@@ -155,7 +155,7 @@ The page ReCON opens on. Every 5 seconds ReCON asks the game server what it tell
 - **Connect:** the IP, game port and query port. Click one to copy it (it shows "copied").
 - **Day & night:** a bar of the 24 in-game hours (marked every hour, labelled every 4) with sunrise, sunset and the current time; how long until sunset and sunrise in real time, and how long a day and a night last. Beside it, a **sky** circle: the horizon, the sun's path through the game day, the sun at its height now and the moon opposite it (hover for the angles). DayZ multiplies the night speed by the day speed, so a 10-hour night at ×2 and ×4 lasts 1h 15m. Sunrise and sunset are worked out from the date in `SERVER_TIME` (as in `serverDZ.cfg`) and the map's latitude, with the standard sunrise equation; the in-game date moves on as days pass, but sunrise only shifts a few minutes a week. For a map other than Chernarus, set `SERVER_LATITUDE` (it defaults to 45°N). Near the poles it shows midnight sun or polar night.
 - **Population:** players online over the last day, 7 days, 2 weeks, month or all time, with the peak, average, different players and sessions over 7 days. It comes from the session history, so it is exact, and it has history from the first day ReCON recorded.
-- **Busiest times:** the average number of players for each weekday and hour over the last 4 weeks, in your browser's time zone.
+- **Peak hours:** the average number of players for each weekday and hour over the last 4 weeks, in your browser's time zone.
 - **Mods:** the server's Workshop mods, each linking to its Workshop page, and the total download size. ReCON asks Steam every 3 hours when each was last updated; a mod Steam has updated since glows red. Click it to acknowledge the update and it goes back to normal. A mod seen for the first time counts as up to date.
 
 The page is live: ReCON asks the server every 5 seconds and the page updates as often; the graphs every minute.
@@ -629,7 +629,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
 | `internal/geoip/` | Where an IP is (country for the flags, city and point for the IP map), from MaxMind's GeoLite2-City database, and downloading it |
-| `internal/serverinfo/` | The Server Info page's data: Steam's server query (A2S) and DayZ's keywords and mod list, uptime, population and busiest times, and mod updates from the Steam Workshop |
+| `internal/serverinfo/` | The Server Info page's data: Steam's server query (A2S) and DayZ's keywords and mod list, uptime, population and peak hours, and mod updates from the Steam Workshop |
 | `internal/store/` | The SQLite database: every SQL statement |
 | `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), the favicons and app icons (`assets/icons/`) and the country flags (`assets/flags/`), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |

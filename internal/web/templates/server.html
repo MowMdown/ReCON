@@ -37,8 +37,8 @@
 .bar { height: 6px; background: #2a2a2a; border-radius: 3px; margin-top: 8px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: #81c995; }
 img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2px; margin-right: 6px; border-radius: 2px; }
-.conn { display: flex; align-items: center; gap: 10px; }
-.conn > div { flex: 1; min-width: 0; }
+/* A plain block like the other boxes (the theme centres flex .card boxes) */
+.card.conn { display: block; }
 .conn .big { font-size: 24px; }
 .conn.copy { cursor: pointer; transition: border-color .15s; }
 .conn.copy:hover { border-color: #8ab4f8; }
@@ -140,7 +140,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	</div>
 
 	<div class="row r2">
-		<div class="card"><h3>Busiest times <span class="r note" id="tz"></span></h3><div class="heat" id="heat"></div>
+		<div class="card"><h3>Peak hours <span class="r note" id="tz"></span></h3><div class="heat" id="heat"></div>
 			<div class="legend" id="legend"></div></div>
 		<div class="card"><h3><span id="modtitle">Mods</span> <span class="r note" id="modnote"></span></h3>
 			<div class="mods" id="mods"><span class="empty">No mods listed yet.</span></div>
@@ -401,7 +401,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		} catch (e) { }
 	}
 
-	// Busiest times: average players per weekday and hour, in this browser's time zone.
+	// Peak hours: average players per weekday and hour, in this browser's time zone.
 	async function loadBusiest() {
 		var tz = '';
 		try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { }
