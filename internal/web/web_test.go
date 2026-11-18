@@ -667,3 +667,33 @@ func TestDetailsIPLocation(t *testing.T) {
 		t.Errorf("IPs: %s", rec.Body.String())
 	}
 }
+
+// TestPopulationAll checks the population graph's All: it starts at the
+// oldest session and covers the ones in it.
+func TestPopulationAll(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Now().Add(-40 * 24 * time.Hour).Truncate(time.Second)
+	if err := db.OpenPlayerSession(test.GUID1, "Marrow", "1.2.3.4", 3, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ClosePlayerSession(test.GUID1, t0.Add(time.Hour), "disconnected"); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/server/population?range=all", nil))
+	var d struct {
+		OK     bool               `json:"ok"`
+		From   int64              `json:"from"`
+		Points []serverinfo.Point `json:"points"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil || rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	peak := 0
+	for _, p := range d.Points {
+		peak = max(peak, p.Players)
+	}
+	if d.From != t0.Unix() || peak != 1 {
+		t.Errorf("from %d (want %d), peak %d (want 1)", d.From, t0.Unix(), peak)
+	}
+}

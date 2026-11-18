@@ -135,6 +135,8 @@ func OpenPlayerDatabase(filepath string) (*Database, error) {
 		ON session_history(guid);
 	CREATE INDEX IF NOT EXISTS idx_session_history_disconnected
 		ON session_history(disconnected_at);
+	CREATE INDEX IF NOT EXISTS idx_session_history_connected
+		ON session_history(connected_at);
 	CREATE INDEX IF NOT EXISTS idx_chat_messages_guid
 		ON chat_messages(guid, id);
 	-- The same names the old guidsearch tool used, so databases it touched

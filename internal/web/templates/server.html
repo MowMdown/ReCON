@@ -308,7 +308,11 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			add('path', { d: dpath, fill: 'none', stroke: accent, 'stroke-width': 1.6, 'vector-effect': 'non-scaling-stroke' });
 			for (var i = 0; i <= 4; i++) {
 				var t = d.from + (d.to - d.from) * i / 4, dt = new Date(t * 1000);
-				var label = d.to - d.from <= 2 * 86400 ? dt.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' }) : dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
+				var span = d.to - d.from;
+				var label = span <= 600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) :
+					span <= 6 * 3600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) :
+					span <= 2 * 86400 ? dt.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' }) :
+					dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
 				add('text', { x: L + (W - L) * i / 4, y: 196, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace', 'text-anchor': i === 0 ? 'start' : i === 4 ? 'end' : 'middle' }, label);
 			}
 		} catch (e) { }

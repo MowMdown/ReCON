@@ -91,9 +91,11 @@ func handleServerPopulation(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		since = first
-		if since.IsZero() || now.Sub(since) < time.Hour {
-			since = now.Add(-time.Hour)
+		since = first // from the first session ReCON recorded
+		if since.IsZero() {
+			since = now.Add(-24 * time.Hour) // none yet: an empty day
+		} else if now.Sub(since) < time.Minute {
+			since = now.Add(-time.Minute)
 		}
 	} else {
 		fail(w, http.StatusBadRequest, "range is 1d, 7d, 2w, 1m or all")

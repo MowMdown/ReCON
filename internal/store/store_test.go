@@ -187,3 +187,26 @@ func TestDeletePlayer(t *testing.T) {
 		t.Errorf("deleting again: err = %v, want sql.ErrNoRows", err)
 	}
 }
+
+// TestFirstSessionStart checks the oldest session's start, finished or
+// open (the population graph's All), and none in an empty database.
+func TestFirstSessionStart(t *testing.T) {
+	db := test.OpenDB(t)
+	if first, err := db.FirstSessionStart(); err != nil || !first.IsZero() {
+		t.Fatalf("empty: %v %v", first, err)
+	}
+	t0 := time.Now().Add(-72 * time.Hour).Truncate(time.Second)
+	if err := db.OpenPlayerSession(test.GUID1, "A", "1.2.3.4", 1, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ClosePlayerSession(test.GUID1, t0.Add(time.Hour), "disconnected"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.OpenPlayerSession(test.GUID2, "B", "1.2.3.5", 2, t0.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.FirstSessionStart()
+	if err != nil || !first.Equal(t0) {
+		t.Errorf("first = %v (%v), want %v", first, err, t0)
+	}
+}

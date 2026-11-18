@@ -93,13 +93,23 @@ func (db *Database) SessionSpans(since, now time.Time) ([]Span, error) {
 // FirstSessionStart is when the oldest session began (zero with none), for
 // the population graph's All.
 func (db *Database) FirstSessionStart() (time.Time, error) {
-	var t sql.NullTime
-	err := db.QueryRow(`SELECT MIN(connected_at) FROM (
-		SELECT connected_at FROM session_history UNION ALL SELECT connected_at FROM active_sessions)`).Scan(&t)
-	if err != nil || !t.Valid {
-		return time.Time{}, err
+	// The oldest row of each table, read as the column itself: MIN() would
+	// come back as text, which doesn't scan into a time.
+	var first time.Time
+	for _, table := range []string{"session_history", "active_sessions"} {
+		var t time.Time
+		err := db.QueryRow("SELECT connected_at FROM " + table + " ORDER BY connected_at LIMIT 1").Scan(&t)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return time.Time{}, err
+		}
+		if first.IsZero() || t.Before(first) {
+			first = t
+		}
 	}
-	return t.Time, nil
+	return first, nil
 }
 
 // ModUpdate is a mod's row in mod_updates.
