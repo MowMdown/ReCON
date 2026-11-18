@@ -220,7 +220,14 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		var pct = function (h) { return (Math.max(0, Math.min(24, h)) / 24 * 100).toFixed(2) + '%'; };
 		if (sun.polar === 'day') bar.style.background = '#7fd3ee';
 		else if (sun.polar === 'night') bar.style.background = '#1d2340';
-		else bar.style.background = 'linear-gradient(90deg, #1d2340 0%, #2a2f55 ' + pct(rise - 2) + ', #d6935a ' + pct(rise) + ', #7fd3ee ' + pct(rise + 2.5) + ', #7fd3ee ' + pct(set - 1.5) + ', #e07a4a ' + pct(set) + ', #3a2f55 ' + pct(set + 2) + ', #1d2340 100%)';
+		else {
+			// The fades scale with the day and night, so a short Arctic day
+			// keeps its colours in order: dawn, daylight, dusk.
+			var dayH = set - rise, nightH = 24 - dayH;
+			var dawn = Math.min(2.5, dayH * 0.4), dusk = Math.min(1.5, dayH * 0.3), twi = Math.min(2, nightH * 0.25);
+			bar.style.background = 'linear-gradient(90deg, #1d2340 0%, #2a2f55 ' + pct(rise - twi) + ', #d6935a ' + pct(rise) + ', #7fd3ee ' + pct(rise + dawn) +
+				', #7fd3ee ' + pct(set - dusk) + ', #e07a4a ' + pct(set) + ', #3a2f55 ' + pct(set + twi) + ', #1d2340 100%)';
+		}
 		var tick = function (h, cls, label) { var d = el('div', cls); d.style.left = 'calc(' + pct(h) + ' - 1px)'; if (label) d.append(el('span', '', label)); bar.append(d); };
 		if (!sun.polar) {
 			tick(rise, 'tick', '\u2600 ' + sun.sunrise);
