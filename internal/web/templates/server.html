@@ -46,9 +46,16 @@ img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2p
 .conn.copy:hover .cp, .conn.copy.done .cp { opacity: 1; }
 .conn.copy.done { border-color: #81c995; }
 .conn.copy.done .cp { color: #81c995; }
-.daybar { position: relative; height: 10px; border-radius: 5px; margin: 14px 0 26px; }
+.daybar { position: relative; height: 10px; border-radius: 5px; margin: 30px 0 34px; }
+/* Sunrise and sunset: a tick through the bar, labelled above it */
 .daybar .tick { position: absolute; top: -4px; width: 2px; height: 18px; background: #ddd; }
-.daybar .tick span { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); font: 12px ui-monospace, Consolas, monospace; color: #aaa; white-space: nowrap; }
+.daybar .tick span { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); font: 12px ui-monospace, Consolas, monospace; color: #aaa; white-space: nowrap; }
+/* The hour scale under the bar: a mark every hour, labelled every 4 */
+.daybar .hr { position: absolute; top: 13px; width: 1px; height: 4px; background: #555; }
+.daybar .hr.major { height: 7px; background: #888; }
+.daybar .hr span { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); font: 11px ui-monospace, Consolas, monospace; color: #888; white-space: nowrap; }
+.daybar .hr.first span { transform: none; left: 0; }
+.daybar .hr.last span { transform: translateX(-100%); left: 0; }
 .daybar .now { position: absolute; top: -6px; width: 4px; height: 22px; background: #fff; border-radius: 2px; box-shadow: 0 0 6px rgba(0, 0, 0, .6); }
 .mods { display: flex; flex-wrap: wrap; gap: 8px; }
 .mods a { display: inline-flex; gap: 6px; align-items: center; border: 1px solid #444; border-radius: 6px; padding: 5px 10px; font-size: 13px; color: #ddd; text-decoration: none; }
@@ -232,6 +239,12 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		if (!sun.polar) {
 			tick(rise, 'tick', '\u2600 ' + sun.sunrise);
 			tick(set, 'tick', '\u263E ' + sun.sunset);
+		}
+		for (var h = 0; h <= 24; h++) {
+			var hr = el('div', 'hr' + (h % 4 ? '' : ' major') + (h === 0 ? ' first' : h === 24 ? ' last' : ''));
+			hr.style.left = 'calc(' + pct(h) + (h === 24 ? ' - 1px' : '') + ')';
+			if (h % 4 === 0) hr.append(el('span', '', String(h).padStart(2, '0') + ':00'));
+			bar.append(hr);
 		}
 		if (isFinite(t)) tick(t, 'now');
 		var when = sun.date ? new Date(2000, +sun.date.slice(0, 2) - 1, +sun.date.slice(3)).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
