@@ -141,3 +141,11 @@ func loadSettings() {
 	state.cfg, saved = c, s
 	state.Unlock()
 }
+
+// SteamIP is the public IP Steam gave for the server's Steam ID ("" when it
+// wasn't asked or didn't say).
+func SteamIP() string {
+	state.Lock()
+	defer state.Unlock()
+	return state.steamIP
+}

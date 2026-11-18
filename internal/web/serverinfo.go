@@ -163,9 +163,14 @@ func serverSettingsView() map[string]any {
 	if !math.IsNaN(def.Latitude) {
 		lat = strconv.FormatFloat(def.Latitude, 'f', -1, 64)
 	}
+	// An empty Public IP uses the container's, else the one Steam gave for
+	// the server; until Steam has answered, say that is where it comes from.
 	ip := def.PublicIP
 	if ip == "" {
-		ip = "asked from Steam"
+		ip = serverinfo.SteamIP()
+	}
+	if ip == "" {
+		ip = "Queried from Steam"
 	}
 	snap, cfg := serverinfo.Current()
 	return map[string]any{"ok": true, "settings": serverinfo.SavedSettings(),

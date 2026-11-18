@@ -387,3 +387,23 @@ func TestSettings(t *testing.T) {
 		t.Errorf("cleared settings: %+v", c)
 	}
 }
+
+// TestPublicIPFromSteam checks that with no public IP set, the one Steam
+// gives for the server's Steam ID is used, and only asked for once.
+func TestPublicIPFromSteam(t *testing.T) {
+	asked := 0
+	serverAddress = func(ctx context.Context, id uint64) (string, error) { asked++; return "173.27.253.74", nil }
+	oldKey := steam.APIKey
+	steam.APIKey = "key"
+	t.Cleanup(func() {
+		serverAddress = steam.ServerAddress
+		steam.APIKey = oldKey
+		state.steamIP, state.steamIPFor = "", 0
+	})
+	state.cfg = Config{QueryHost: "10.0.1.174", QueryPort: 27016}
+	lookUpPublicIP(90297760921309191, time.Now())
+	lookUpPublicIP(90297760921309191, time.Now())
+	if _, c := Current(); c.PublicIP != "173.27.253.74" || SteamIP() != "173.27.253.74" || asked != 1 {
+		t.Errorf("public IP %q, Steam asked %d times", c.PublicIP, asked)
+	}
+}

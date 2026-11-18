@@ -160,7 +160,7 @@ The page ReCON opens on. Every 5 seconds ReCON asks the game server what it tell
 
 The page is live: ReCON asks the server every 5 seconds and the page updates as often; the graphs every minute.
 
-**Settings** (under the title) sets the same things as the container's `QUERY_HOST`, `QUERY_PORT`, `SERVER_IP`, `SERVER_TIME` and `SERVER_LATITUDE`. Empty fields use the container's values, shown greyed out. **Save** checks the values (nothing changes if one is wrong), keeps them in the database so they survive restarts, and asks the server at once: the top of the dialog says whether it answers on that port.
+**Settings** (under the title) sets the same things as the container's `QUERY_HOST`, `QUERY_PORT`, `SERVER_IP`, `SERVER_TIME` and `SERVER_LATITUDE`. Empty fields use the container's values, shown greyed out; an empty Public IP shows the IP Steam gave for the server, or "Queried from Steam" until Steam has answered. **Save** checks the values (nothing changes if one is wrong), keeps them in the database so they survive restarts, and asks the server at once: the top of the dialog says whether it answers on that port.
 
 ### Players: `/players`
 
