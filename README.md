@@ -148,7 +148,7 @@ The picker at the top right sets the look: **Default** (the plain look, what a b
 
 ### Server Info: `/server`
 
-The page ReCON opens on. Every minute ReCON asks the game server what it tells Steam's server browser (the query port, `QUERY_PORT`), so it shows the same things a server list does, and adds what ReCON has recorded itself:
+The page ReCON opens on. Every 5 seconds ReCON asks the game server what it tells Steam's server browser (the query port, `QUERY_PORT`), so it shows the same things a server list does, and adds what ReCON has recorded itself:
 
 - **The server:** name, map, 1PP or 3PP, version, BattlEye, and whether it is answering (a red dot and "Not answering" when it isn't, with the last answer still shown).
 - **Players** and the queue, **in-game time** with the day and night speeds (☀ ×2, ☾ ×4), the server's **location** (GeoIP on its public IP) and **uptime** over the last 7 days (of the time ReCON was running).
@@ -158,7 +158,7 @@ The page ReCON opens on. Every minute ReCON asks the game server what it tells S
 - **Busiest times:** the average number of players for each weekday and hour over the last 4 weeks, in your browser's time zone.
 - **Mods:** the server's Workshop mods, each linking to its Workshop page, and the total download size. ReCON asks Steam every 3 hours when each was last updated; a mod Steam has updated since glows red. Click it to acknowledge the update and it goes back to normal. A mod seen for the first time counts as up to date.
 
-It doesn't refresh by itself: **Refresh** asks the server again.
+The page is live: ReCON asks the server every 5 seconds and the page updates as often; the graphs every minute.
 
 ### Players: `/players`
 

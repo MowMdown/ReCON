@@ -84,7 +84,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 <div class="gi" id="gi">
 	<div class="gihead">
 		<h2><span class="dot" id="dot"></span><span id="sname">Asking the server...</span></h2>
-		<span class="right"><span class="when" id="when"></span><button id="refresh">Refresh</button></span>
+		<span class="right"><span class="when" id="when"></span></span>
 	</div>
 	<div class="gisub" id="ssub"></div>
 
@@ -343,11 +343,14 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		} catch (e) { }
 	}
 
-	async function load(fresh) {
+	// load re-reads the page's data; it redraws only when something changed,
+	// so hovering a mod or reading a value isn't disturbed every 5 seconds.
+	var lastText = '';
+	async function load() {
 		try {
-			var r = await fetch(fresh ? '/api/server/refresh' : '/api/server', fresh ? { method: 'POST' } : {});
-			var d = await r.json();
-			if (d.ok) { data = d; render(); }
+			var r = await fetch('/api/server');
+			var text = await r.text(), d = JSON.parse(text);
+			if (d.ok && text !== lastText) { lastText = text; data = d; render(); }
 		} catch (e) { /* the status bar shows that ReCON can't be reached */ }
 	}
 
@@ -358,16 +361,14 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			loadPop();
 		};
 	});
-	// No timer: Refresh asks the server again and re-reads everything.
-	$('refresh').onclick = async function () {
-		var b = this;
-		b.disabled = true;
-		await Promise.all([load(true), loadPop(), loadBusiest()]);
-		b.disabled = false;
-	};
-	load(false);
+	// ReCON asks the game server every 5 seconds and the page reads what it
+	// has as often; the graphs every minute. Nothing is read while the
+	// tab is hidden.
+	load();
 	loadPop();
 	loadBusiest();
+	setInterval(function () { if (!document.hidden) load(); }, 5000);
+	setInterval(function () { if (!document.hidden) { loadPop(); loadBusiest(); } }, 60000);
 })();
 </script>
 </body>

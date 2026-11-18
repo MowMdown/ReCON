@@ -4,7 +4,7 @@
 // (population and busiest times, from the session history), and which mods
 // Steam says were updated since someone acknowledged it.
 //
-// ReCON asks the server's query port every pollEvery, from the game host:
+// ReCON asks the server's query port every pollEvery (5 seconds), from the game host:
 // QUERY_HOST (default the RCON host) and QUERY_PORT (default 27016).
 package serverinfo
 
@@ -84,7 +84,7 @@ type Snapshot struct {
 }
 
 var (
-	pollEvery     = time.Minute
+	pollEvery     = 5 * time.Second
 	queryTimeout  = 3 * time.Second
 	modCheckEvery = 3 * time.Hour
 	modRetryAfter = 10 * time.Minute // after Steam didn't answer
