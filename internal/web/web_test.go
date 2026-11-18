@@ -697,3 +697,25 @@ func TestPopulationAll(t *testing.T) {
 		t.Errorf("from %d (want %d), peak %d (want 1)", d.From, t0.Unix(), peak)
 	}
 }
+
+// TestServerSettingsRoutes checks GET and POST /api/server/settings.
+func TestServerSettingsRoutes(t *testing.T) {
+	db := testDB(t)
+	serverinfo.SetDatabase(db)
+	t.Cleanup(func() { serverinfo.SaveSettings(serverinfo.Settings{}); serverinfo.SetDatabase(nil) })
+	mux := buildWebRoutes()
+	do := func(method, body string) (int, string) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(method, "/api/server/settings", strings.NewReader(body)))
+		return rec.Code, rec.Body.String()
+	}
+	if code, body := do(http.MethodGet, ""); code != 200 || !strings.Contains(body, `"defaults"`) {
+		t.Fatalf("GET: %d %s", code, body)
+	}
+	if code, _ := do(http.MethodPost, `{"queryPort": "abc"}`); code != 400 {
+		t.Errorf("bad port: %d, want 400", code)
+	}
+	if code, body := do(http.MethodPost, `{"queryPort": "27999", "latitude": "33"}`); code != 200 || !strings.Contains(body, `"queryPort":"27999"`) {
+		t.Errorf("save: %d %s", code, body)
+	}
+}

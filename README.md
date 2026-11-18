@@ -160,6 +160,8 @@ The page ReCON opens on. Every 5 seconds ReCON asks the game server what it tell
 
 The page is live: ReCON asks the server every 5 seconds and the page updates as often; the graphs every minute.
 
+**Settings** (under the title) sets the same things as the container's `QUERY_HOST`, `QUERY_PORT`, `SERVER_IP`, `SERVER_TIME` and `SERVER_LATITUDE`. Empty fields use the container's values, shown greyed out. **Save** checks the values (nothing changes if one is wrong), keeps them in the database so they survive restarts, and asks the server at once: the top of the dialog says whether it answers on that port.
+
 ### Players: `/players`
 
 The top table lists the players online now (refreshed every 5 seconds). ReCON follows who connects and disconnects from the server's own messages, and also asks the server for the player list every 5 seconds, for up-to-date pings and anyone whose disconnect it missed. Mods and Admins have a badge after their name. **Last Message** shows the newest thing each player has written in chat since they connected (hover for the channel, time and full text). It's empty until they chat; messages sent to them aren't shown there, only in their chat history.
@@ -600,6 +602,8 @@ curl -X POST http://<host>:8080/api/flows/3/run \
 | POST | `/api/server/refresh` | | Ask the server now, then the same as `GET /api/server` |
 | GET  | `/api/server/population` | `?range=1d`, `7d`, `2w`, `1m` or `all` | Players online over time, as steps |
 | GET  | `/api/server/busiest` | `?tz=America/New_York` | Average players per weekday and hour over the last 4 weeks |
+| GET  | `/api/server/settings` | | The Settings saved on the page, and the container's values the empty ones use |
+| POST | `/api/server/settings` | `{"queryHost", "queryPort", "publicIp", "serverTime", "latitude"}` | Save them (empty: the container's value) and ask the server |
 | POST | `/api/server/mods/<workshop id>/ack` | | Acknowledge a mod's update on Steam |
 
 ### Status

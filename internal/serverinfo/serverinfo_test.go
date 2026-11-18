@@ -344,3 +344,46 @@ func TestBusiestAcrossDaylightSaving(t *testing.T) {
 		t.Fatal("Busiest never finished across the clock change")
 	}
 }
+
+// TestSettings checks the page's settings: filled-in fields override the
+// container's, a wrong one changes nothing, and they come back after a
+// restart.
+func TestSettings(t *testing.T) {
+	db := test.OpenDB(t)
+	SetDatabase(db)
+	t.Cleanup(func() { SetDatabase(nil); saved = Settings{} })
+	def := Config{QueryHost: "10.0.1.174", QueryPort: 27016, ServerTime: "SystemTime", Latitude: math.NaN()}
+	state.cfg, defaults, saved = def, def, Settings{}
+
+	if _, err := SaveSettings(Settings{QueryPort: "70000"}); err == nil {
+		t.Error("port 70000 accepted")
+	}
+	if _, c := Current(); c.QueryPort != 27016 {
+		t.Errorf("a refused save changed the port to %d", c.QueryPort)
+	}
+	for _, bad := range []Settings{{PublicIP: "nope"}, {ServerTime: "2000/13/1/06/00"}, {Latitude: "95"}, {QueryHost: "a b"}} {
+		if _, err := SaveSettings(bad); err == nil {
+			t.Errorf("%+v accepted", bad)
+		}
+	}
+	if _, err := SaveSettings(Settings{QueryPort: "27017", PublicIP: "173.27.253.74", ServerTime: "2000/12/21/08/00", Latitude: "66.56"}); err != nil {
+		t.Fatal(err)
+	}
+	_, c := Current()
+	if c.QueryHost != "10.0.1.174" || c.QueryPort != 27017 || c.PublicIP != "173.27.253.74" || c.ServerTime != "2000/12/21/08/00" || c.Latitude != 66.56 {
+		t.Errorf("after saving: %+v", c)
+	}
+	// A restart: the container's config again, then what was saved.
+	state.cfg, saved = def, Settings{}
+	loadSettings()
+	if _, c := Current(); c.QueryPort != 27017 || c.Latitude != 66.56 {
+		t.Errorf("not loaded after a restart: %+v", c)
+	}
+	// Emptying a field goes back to the container's value.
+	if _, err := SaveSettings(Settings{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, c := Current(); c.QueryPort != 27016 || !math.IsNaN(c.Latitude) {
+		t.Errorf("cleared settings: %+v", c)
+	}
+}

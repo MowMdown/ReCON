@@ -1,6 +1,8 @@
 package web
 
 import (
+	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -151,4 +153,46 @@ func handleServerModAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// serverSettingsView is GET /api/server/settings: what was saved on the
+// page, and the container's values the empty fields use.
+func serverSettingsView() map[string]any {
+	def := serverinfo.Defaults()
+	lat := "the map's (45 unless it is Chernarus)"
+	if !math.IsNaN(def.Latitude) {
+		lat = strconv.FormatFloat(def.Latitude, 'f', -1, 64)
+	}
+	ip := def.PublicIP
+	if ip == "" {
+		ip = "asked from Steam"
+	}
+	snap, cfg := serverinfo.Current()
+	return map[string]any{"ok": true, "settings": serverinfo.SavedSettings(),
+		"defaults": map[string]any{"queryHost": def.QueryHost, "queryPort": strconv.Itoa(def.QueryPort),
+			"publicIp": ip, "serverTime": def.ServerTime, "latitude": lat},
+		"address": net.JoinHostPort(cfg.QueryHost, strconv.Itoa(cfg.QueryPort)), "answered": snap.Answered, "error": snap.Error}
+}
+
+// handleServerSettingsGet serves GET /api/server/settings.
+func handleServerSettingsGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, serverSettingsView())
+}
+
+// handleServerSettingsSave serves POST /api/server/settings {queryHost,
+// queryPort, publicIp, serverTime, latitude}: empty fields use the
+// container's values. It saves them (nothing changes if one is wrong) and
+// asks the server at once, so the answer says whether it replies.
+func handleServerSettingsSave(w http.ResponseWriter, r *http.Request) {
+	var s serverinfo.Settings
+	if err := decodeBody(w, r, &s); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	if _, err := serverinfo.SaveSettings(s); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	serverinfo.Refresh()
+	writeJSON(w, http.StatusOK, serverSettingsView())
 }

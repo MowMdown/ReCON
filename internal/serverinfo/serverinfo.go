@@ -134,8 +134,10 @@ func Current() (Snapshot, Config) {
 // ReCON runs.
 func Start(c Config) {
 	state.Lock()
-	state.cfg = c
+	state.cfg, defaults = c, c
 	state.Unlock()
+	loadSettings() // what was saved on the page overrides the container's
+	_, c = Current()
 	log.Printf("serverinfo: asking %s:%d every %s", c.QueryHost, c.QueryPort, pollEvery)
 	go func() {
 		for {

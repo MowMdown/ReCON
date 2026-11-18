@@ -58,6 +58,26 @@ img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2p
 .daybar .hr.last span { transform: translateX(-100%); left: 0; }
 @media (max-width: 560px) { .daybar .hr.side span { display: none; } }
 .daybar .now { position: absolute; top: -6px; width: 4px; height: 22px; background: #fff; border-radius: 2px; box-shadow: 0 0 6px rgba(0, 0, 0, .6); }
+/* Under the title, as on Players: Settings on the left */
+.toolbar { display: flex; margin: 0 0 16px; }
+.toolbar .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+.hdrbtn { width: 104px; justify-content: center; box-sizing: border-box; margin: 0; }
+/* Server Info Settings: empty fields use the container's values, shown as the placeholders */
+#siSettingsModal { z-index: 50; } /* above the page's positioned boxes */
+.siset { width: min(460px, 92vw); }
+.siset input::placeholder { color: #666; }
+.siset .row { display: flex; gap: 10px; }
+.siset .row > div:first-child { flex: 1; min-width: 0; }
+.siset .row > div:last-child { width: 130px; }
+.siset .now { font-size: 13px; margin: -4px 0 14px; }
+.siset .now.on { color: #81c995; }
+.siset .now.off { color: #f28b82; }
+.siset .now b { font-weight: 600; }
+.siset #sisMsg { font-size: 13px; margin: 0 0 10px; min-height: 1em; white-space: pre-line; }
+.siset #sisMsg.ok { color: #81c995; }
+.siset #sisMsg.err { color: #f28b82; }
+.siset .buttons { display: flex; gap: 8px; align-items: center; }
+.siset .buttons .spacer { flex: 1; }
 /* Day and night: the bar and boxes, and the sky circle to their right */
 .dn { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 12px; align-items: stretch; }
 .dn .dnmain { min-width: 0; }
@@ -96,6 +116,37 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 <nav><a class="active" href="/server">Server Info</a><a href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a></nav>
 {{template "statusbar" .}}
 <div class="top"><h1>Server Info</h1></div>
+<div class="toolbar">
+	<button type="button" class="icon-btn hdrbtn" onclick="openServerSettings()" title="Server Info Settings">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+		Settings
+	</button>
+</div>
+
+<!-- Server Info Settings: the same as the container's QUERY_HOST, QUERY_PORT,
+     SERVER_IP, SERVER_TIME and SERVER_LATITUDE; empty fields use those. -->
+<div id="siSettingsModal" class="modal" onclick="if (event.target === this) closeServerSettings()">
+	<div class="box siset" role="dialog" aria-labelledby="sisTitle">
+		<h2 id="sisTitle">Server Info Settings</h2>
+		<p class="now" id="sisNow"></p>
+		<div class="row">
+			<div><label for="sisHost">Query host</label><input id="sisHost" type="text" autocomplete="off" spellcheck="false"></div>
+			<div><label for="sisPort">Query port</label><input id="sisPort" type="text" inputmode="numeric" autocomplete="off"></div>
+		</div>
+		<label for="sisIP">Public IP</label>
+		<input id="sisIP" type="text" autocomplete="off" spellcheck="false">
+		<div class="row">
+			<div><label for="sisTime">Server time (serverTime)</label><input id="sisTime" type="text" autocomplete="off" spellcheck="false"></div>
+			<div><label for="sisLat">Latitude</label><input id="sisLat" type="text" inputmode="decimal" autocomplete="off"></div>
+		</div>
+		<p id="sisMsg"></p>
+		<div class="buttons">
+			<span class="spacer"></span>
+			<button type="button" onclick="closeServerSettings()">Cancel</button>
+			<button type="button" id="sisSave" onclick="saveServerSettings()">Save</button>
+		</div>
+	</div>
+</div>
 <div class="gi" id="gi">
 	<div class="gihead">
 		<h2><span class="dot" id="dot"></span><span id="sname">Asking the server...</span></h2>
@@ -460,12 +511,65 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	// ReCON asks the game server every 5 seconds and the page reads what it
 	// has as often; the graphs every minute. Nothing is read while the
 	// tab is hidden.
+	window.reloadServerInfo = function () { lastText = ''; load(); loadPop(); loadBusiest(); };
 	load();
 	loadPop();
 	loadBusiest();
 	setInterval(function () { if (!document.hidden) load(); }, 5000);
 	setInterval(function () { if (!document.hidden) { loadPop(); loadBusiest(); } }, 60000);
 })();
+
+// Server Info Settings (GET/POST /api/server/settings): what is saved here
+// overrides the container's variables; empty fields use those, shown greyed out.
+function sisMsg(text, cls) { var m = document.getElementById('sisMsg'); m.textContent = text; m.className = cls || ''; }
+var SIS = { queryHost: 'sisHost', queryPort: 'sisPort', publicIp: 'sisIP', serverTime: 'sisTime', latitude: 'sisLat' };
+function showServerNow(d) {
+	var now = document.getElementById('sisNow'), b = document.createElement('b');
+	b.textContent = d.address;
+	now.className = 'now ' + (d.answered ? 'on' : 'off');
+	now.textContent = d.answered ? 'Answering on ' : 'No answer from ';
+	now.append(b);
+}
+async function openServerSettings() {
+	sisMsg('');
+	document.getElementById('sisNow').textContent = '';
+	document.getElementById('siSettingsModal').style.display = 'flex';
+	var d;
+	try { d = await (await fetch('/api/server/settings', { cache: 'no-store' })).json(); }
+	catch (e) { sisMsg('ReCON could not be reached.', 'err'); return; }
+	if (!d.ok) { sisMsg(d.error || 'Could not read the settings.', 'err'); return; }
+	for (var k in SIS) {
+		var f = document.getElementById(SIS[k]);
+		f.value = d.settings[k] || '';
+		f.placeholder = d.defaults[k] || '';
+	}
+	showServerNow(d);
+	document.getElementById('sisHost').focus();
+}
+function closeServerSettings() { document.getElementById('siSettingsModal').style.display = 'none'; }
+async function saveServerSettings() {
+	var btn = document.getElementById('sisSave');
+	if (btn.disabled) return;
+	btn.disabled = true;
+	sisMsg('Saving and asking the server...');
+	var body = {}, d;
+	for (var k in SIS) body[k] = document.getElementById(SIS[k]).value;
+	try {
+		d = await (await fetch('/api/server/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+	} catch (e) {
+		d = { ok: false, error: 'ReCON could not be reached; nothing was changed.' };
+	} finally {
+		btn.disabled = false;
+	}
+	if (!d.ok) { sisMsg(d.error || 'Save failed.', 'err'); return; }
+	showServerNow(d);
+	sisMsg(d.answered ? 'Saved.' : 'Saved, but the server isn\'t answering on that port' + (d.error ? ' (' + d.error + ')' : '') + '.', d.answered ? 'ok' : 'err');
+	if (window.reloadServerInfo) window.reloadServerInfo();
+}
+document.getElementById('siSettingsModal').addEventListener('keydown', function (e) {
+	if (e.key === 'Enter' && e.target.tagName === 'INPUT') saveServerSettings();
+	if (e.key === 'Escape') closeServerSettings();
+});
 </script>
 </body>
 </html>
