@@ -220,8 +220,11 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		loc.textContent = '';
 		if (data.country) {
 			var img = el('img', 'flag'); img.src = 'assets/flags/' + data.country + '.svg'; img.alt = '';
-			loc.append(img, data.country.toUpperCase());
-			$('locnote').textContent = (countryNames ? countryNames.of(data.country.toUpperCase()) : '') + ' (GeoIP on ' + data.connect.ip + ')';
+			// The full name, as on the Players page's Steam tab; the code if the browser can't name it.
+			var cname = '';
+			try { cname = countryNames ? countryNames.of(data.country.toUpperCase()) : ''; } catch (e) { }
+			loc.append(img, cname || data.country.toUpperCase());
+			$('locnote').textContent = 'GeoIP on ' + data.connect.ip;
 		} else {
 			loc.textContent = '-';
 			$('locnote').textContent = data.connect.ip ? 'Not in the GeoIP database' : 'Set SERVER_IP to show it';
