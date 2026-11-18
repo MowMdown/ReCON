@@ -233,7 +233,11 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		if (data.uptime) {
 			$('uptime').innerHTML = '';
 			$('uptime').append(document.createTextNode(data.uptime.percent >= 99.95 ? '100' : data.uptime.percent.toFixed(1).replace(/\.0$/, '')), el('small', '', '%'));
-			$('uptimenote').textContent = 'last 7 days · down ' + dur(data.uptime.downSeconds / 3600);
+			// Short times in seconds or minutes, so a new install doesn't read "down 0h 0m".
+			var span = function (sec) { return sec < 60 ? Math.round(sec) + 's' : sec < 3600 ? Math.round(sec / 60) + 'm' : dur(sec / 3600); };
+			var week = 7 * 86400;
+			$('uptimenote').textContent = (data.uptime.seenSeconds >= week - 3600 ? 'last 7 days' : 'over ' + span(data.uptime.seenSeconds) + ' so far') +
+				' · down ' + span(data.uptime.downSeconds);
 		} else { $('uptime').textContent = '-'; $('uptimenote').textContent = 'not measured yet'; }
 
 		copyTile('cip', data.connect.ip);
