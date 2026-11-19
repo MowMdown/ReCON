@@ -190,42 +190,19 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	function day(unix) { var d = new Date(unix * 1000); return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 	function ago(iso) { var s = (Date.now() - Date.parse(iso)) / 1000; return s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; }
 	function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-	// The in-game clock. The server reports its time to the minute on each
-	// answer (every 5 seconds); in between, the page runs it on at the day
-	// speed in daylight and day x night speed at night, so the time, the bar's
-	// marker, the countdowns and the sky move smoothly. Each answer re-anchors
-	// it; one up to a minute behind the page's own time (it only gives whole
-	// minutes) doesn't pull it back.
-	var clock = { t0: NaN, at: 0, running: false };
-	function gameRate(t) { // game hours per real hour at game time t
-		var c = clock, night = c.sun.polar === 'night' || (c.sun.polar !== 'day' && !(t >= c.rise && t < c.set));
-		return night ? c.dx * c.nx : c.dx;
-	}
-	function gameTime(nowMs) {
-		var c = clock, t = c.t0, left = (nowMs - c.at) / 3600000;
-		if (!isFinite(t) || !c.running || !c.sun) return t;
-		for (var i = 0; i < 8 && left > 0; i++) {
-			var rate = gameRate(t);
-			if (c.sun.polar) { t += left * rate; break; }
-			var edge = (t >= c.rise && t < c.set) ? c.set : c.rise; // the next sunset or sunrise
-			var gap = ((edge - t) % 24 + 24) % 24 || 24, need = gap / rate;
-			if (left < need) { t += left * rate; left = 0; } else { t = edge; left -= need; }
-		}
-		return ((t % 24) + 24) % 24;
-	}
+	// The in-game clock: the time the server reported on its last answer
+	// (every 5 seconds), with the bar's marker, the countdowns and the sky
+	// drawn for it.
+	var clock = { t0: NaN, running: false };
+	function gameTime() { return clock.t0; }
 	function anchorClock(srv, t) {
-		var answeredAt = Date.parse(srv.readAt), servedAt = Date.parse(data.now);
-		var at = Date.now() - (isFinite(servedAt) && isFinite(answeredAt) ? Math.max(0, servedAt - answeredAt) : 0);
-		if (!isFinite(t)) { clock.t0 = NaN; return; }
-		var ahead = isFinite(clock.t0) && clock.running ? ((gameTime(at) - t) % 24 + 24) % 24 : NaN;
-		clock.t0 = ahead >= 0 && ahead < 1 / 60 + 1e-6 ? t + ahead : t;
-		clock.at = at;
-		clock.running = !!srv.answered; // not answering: hold the last time
+		clock.t0 = t;
+		clock.running = !!srv.answered;
 	}
 	function showClock() {
 		var c = clock;
 		if (!c.sun) return;
-		var t = gameTime(Date.now()), ok = isFinite(t);
+		var t = gameTime(), ok = isFinite(t);
 		var hh = ok ? Math.floor(t) : 0, mm = ok ? Math.floor((t - hh) * 60) : 0;
 		$('gtime').textContent = ok ? String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') : '-';
 		if (c.marker) { c.marker.style.display = ok ? '' : 'none'; if (ok) c.marker.style.left = 'calc(' + (t / 24 * 100).toFixed(3) + '% - 2px)'; }
@@ -244,7 +221,6 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		}
 		drawSky(c.sun, t, c.rise, c.set);
 	}
-	setInterval(function () { if (!document.hidden && clock.running) showClock(); }, 250);
 
 	function render() {
 		var s = data.server, info = s.info || {}, k = s.keywords || {};
