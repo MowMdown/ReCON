@@ -83,7 +83,7 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/server/population", handleServerPopulation) // ?range=1d|7d|2w|1m|all
 	mux.HandleFunc("GET /api/server/busiest", handleServerBusiest)       // ?tz=America/New_York
 	mux.HandleFunc("GET /api/server/settings", handleServerSettingsGet)
-	mux.HandleFunc("POST /api/server/settings", handleServerSettingsSave) // {queryHost, queryPort, serverTime, latitude}
+	mux.HandleFunc("POST /api/server/settings", handleServerSettingsSave) // {queryHost, queryPort, publicIp, serverTime, latitude}
 	mux.HandleFunc("POST /api/server/mods/{id}/ack", handleServerModAck)  // an update on Steam was seen
 
 	mux.HandleFunc("GET /players", servePageHandler(playersPage))

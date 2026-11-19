@@ -23,12 +23,13 @@ import (
 	"github.com/MowMdown/ReCON/internal/store"
 )
 
-// Config is where to ask, and what the page needs that the query can't
-// tell: the in-game date and latitude, for sunrise and sunset. The server's
-// public IP comes from Steam only (SteamIP).
+// Config is where to ask, and what the page shows that the query can't
+// tell: the server's public IP and its in-game date and latitude, for
+// sunrise and sunset.
 type Config struct {
 	QueryHost string // where to send the query (the game host)
 	QueryPort int
+	PublicIP  string // shown under Connect; "" until known (SERVER_IP, or Steam)
 	// ServerTime is serverDZ.cfg's serverTime: "2000/8/31/06/00"
 	// (YYYY/MM/DD/HH/MM) or "SystemTime". Only its date is used.
 	ServerTime string
@@ -36,7 +37,8 @@ type Config struct {
 }
 
 // ConfigFromEnv reads QUERY_HOST (default rconHost), QUERY_PORT (27016),
-// SERVER_TIME (SystemTime) and SERVER_LATITUDE (the map's).
+// SERVER_IP (default the query host when it is a public address, else what
+// Steam says), SERVER_TIME (SystemTime) and SERVER_LATITUDE (the map's).
 func ConfigFromEnv(rconHost string) Config {
 	env := func(k, def string) string {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -48,6 +50,12 @@ func ConfigFromEnv(rconHost string) Config {
 	c.QueryPort, _ = strconv.Atoi(env("QUERY_PORT", "27016"))
 	if c.QueryPort <= 0 || c.QueryPort > 65535 {
 		c.QueryPort = 27016
+	}
+	c.PublicIP = env("SERVER_IP", "")
+	if c.PublicIP == "" {
+		if ip := net.ParseIP(c.QueryHost); ip != nil && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() {
+			c.PublicIP = ip.String()
+		}
 	}
 	if _, ok := parseServerDate(c.ServerTime, time.Now()); !ok {
 		log.Printf("serverinfo: SERVER_TIME %q isn't like 2000/8/31/06/00 or SystemTime; using SystemTime", c.ServerTime)
@@ -93,8 +101,8 @@ var state struct {
 	upID      int64
 	up        bool
 	upFlushed time.Time
-	// The public IP Steam gave for the server's Steam ID (the only source of
-	// it), and when it was asked.
+	// The public IP Steam gave for the server's Steam ID (when SERVER_IP
+	// isn't set and the query host isn't public), and when it was asked.
 	steamIP      string
 	steamIPFor   uint64
 	steamIPAsked time.Time
@@ -115,7 +123,11 @@ func Current() (Snapshot, Config) {
 	defer state.Unlock()
 	s := state.snap
 	s.Mods = append([]Mod(nil), s.Mods...)
-	return s, state.cfg
+	c := state.cfg
+	if c.PublicIP == "" {
+		c.PublicIP = state.steamIP
+	}
+	return s, c
 }
 
 // Start queries the server now and then every pollEvery, for as long as
@@ -168,7 +180,7 @@ func Refresh() Snapshot {
 	state.snap = snap
 	state.Unlock()
 	recordUptime(snap.Answered, now)
-	if snap.Answered {
+	if snap.Answered && cfg.PublicIP == "" {
 		lookUpPublicIP(snap.Info.SteamID, now)
 	}
 	if snap.ModsKnown {
@@ -246,7 +258,7 @@ func lookUpPublicIP(id uint64, now time.Time) {
 	defer cancel()
 	ip, err := serverAddress(ctx, id)
 	if err != nil {
-		log.Printf("serverinfo: public IP from Steam: %v (needs STEAM_API_KEY)", err)
+		log.Printf("serverinfo: public IP from Steam: %v (set SERVER_IP to show it)", err)
 	}
 	state.Lock()
 	state.steamIP = ip

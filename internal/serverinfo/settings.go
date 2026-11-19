@@ -5,18 +5,20 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"strconv"
 	"strings"
 	"time"
 )
 
 // Settings are the Server Info page's Settings: the same as QUERY_HOST,
-// QUERY_PORT, SERVER_TIME and SERVER_LATITUDE, as typed. An empty
+// QUERY_PORT, SERVER_IP, SERVER_TIME and SERVER_LATITUDE, as typed. An empty
 // field uses the container's value. They are kept in the settings table, so
 // they survive restarts.
 type Settings struct {
 	QueryHost  string `json:"queryHost"`
 	QueryPort  string `json:"queryPort"`
+	PublicIP   string `json:"publicIp"`
 	ServerTime string `json:"serverTime"`
 	Latitude   string `json:"latitude"`
 }
@@ -45,7 +47,7 @@ func SavedSettings() Settings {
 // apply is def with the filled-in fields of s, checked.
 func (s Settings) apply(def Config) (Config, error) {
 	s = Settings{QueryHost: strings.TrimSpace(s.QueryHost), QueryPort: strings.TrimSpace(s.QueryPort),
-		ServerTime: strings.TrimSpace(s.ServerTime), Latitude: strings.TrimSpace(s.Latitude)}
+		PublicIP: strings.TrimSpace(s.PublicIP), ServerTime: strings.TrimSpace(s.ServerTime), Latitude: strings.TrimSpace(s.Latitude)}
 	c := def
 	if s.QueryHost != "" {
 		if strings.ContainsAny(s.QueryHost, " /:") {
@@ -59,6 +61,17 @@ func (s Settings) apply(def Config) (Config, error) {
 			return c, fmt.Errorf("query port %q isn't a port (1 to 65535)", s.QueryPort)
 		}
 		c.QueryPort = p
+	}
+	switch {
+	case s.PublicIP != "":
+		if net.ParseIP(s.PublicIP) == nil {
+			return c, fmt.Errorf("public IP %q isn't an IP address", s.PublicIP)
+		}
+		c.PublicIP = s.PublicIP
+	case def.PublicIP == "":
+		if ip := net.ParseIP(c.QueryHost); ip != nil && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() {
+			c.PublicIP = ip.String()
+		}
 	}
 	if s.ServerTime != "" {
 		if _, ok := parseServerDate(s.ServerTime, time.Now()); !ok {
