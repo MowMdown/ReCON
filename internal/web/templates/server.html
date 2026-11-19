@@ -422,7 +422,8 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	}
 
 	// Population: a step line of players over the range, from the sessions.
-	// The graph is drawn at the card's real width (not stretched), so its
+	// The graph is a smooth line (see below), drawn at the card's real width
+	// (not stretched) so its
 	// labels keep their shape; it is redrawn when the window is resized.
 	var popData = null;
 	async function loadPop() {
@@ -450,13 +451,39 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 				add('line', { x1: L, x2: W, y1: y(n), y2: y(n), stroke: '#2c2c2c' });
 				add('text', { x: 0, y: y(n) + 4, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace' }, n);
 			}
-			var dpath = '';
-			pts.forEach(function (p, i) {
-				var nx = i + 1 < pts.length ? pts[i + 1].t : d.to;
-				dpath += (i ? ' L' : 'M') + x(p.t) + ' ' + y(p.n) + ' L' + x(nx) + ' ' + y(p.n);
+			// A smooth line: the average players in slices a few pixels wide
+			// (from the exact steps), through a curve that never overshoots
+			// (monotone cubic), so it stays between 0 and the real numbers.
+			var slices = Math.max(20, Math.floor((W - L) / 8)), span = Math.max(1, d.to - d.from), avg = [], k = 0;
+			for (var b = 0; b < slices; b++) {
+				var a0 = d.from + span * b / slices, a1 = d.from + span * (b + 1) / slices, sum = 0;
+				while (k + 1 < pts.length && pts[k + 1].t <= a0) k++;
+				for (var j = k; j < pts.length && pts[j].t < a1; j++) {
+					var s0 = Math.max(a0, pts[j].t), s1 = Math.min(a1, j + 1 < pts.length ? pts[j + 1].t : d.to);
+					if (s1 > s0) sum += pts[j].n * (s1 - s0);
+				}
+				avg.push([x((a0 + a1) / 2), sum / (a1 - a0)]);
+			}
+			// Each slice averaged with its neighbours, to round off the steps.
+			avg = avg.map(function (v, q) {
+				var lo = avg[Math.max(0, q - 1)][1], hi = avg[Math.min(avg.length - 1, q + 1)][1];
+				return [v[0], y((lo + 2 * v[1] + hi) / 4)];
 			});
-			add('path', { d: dpath + ' L' + W + ' ' + bot + ' L' + L + ' ' + bot + 'Z', fill: accent, 'fill-opacity': 0.12, stroke: 'none' });
-			add('path', { d: dpath, fill: 'none', stroke: accent, 'stroke-width': 1.6, 'vector-effect': 'non-scaling-stroke' });
+			var m = [], dl = [];
+			for (var q = 0; q + 1 < avg.length; q++) dl.push((avg[q + 1][1] - avg[q][1]) / (avg[q + 1][0] - avg[q][0]));
+			for (var q = 0; q < avg.length; q++) {
+				if (q === 0) m.push(dl[0]); else if (q === avg.length - 1) m.push(dl[q - 1]);
+				else m.push(dl[q - 1] * dl[q] <= 0 ? 0 : 2 / (1 / dl[q - 1] + 1 / dl[q]));
+			}
+			var dpath = 'M' + avg[0][0].toFixed(1) + ' ' + avg[0][1].toFixed(1);
+			for (var q = 0; q + 1 < avg.length; q++) {
+				var h = (avg[q + 1][0] - avg[q][0]) / 3;
+				dpath += ' C' + (avg[q][0] + h).toFixed(1) + ' ' + (avg[q][1] + m[q] * h).toFixed(1) + ' ' + (avg[q + 1][0] - h).toFixed(1) + ' ' +
+					(avg[q + 1][1] - m[q + 1] * h).toFixed(1) + ' ' + avg[q + 1][0].toFixed(1) + ' ' + avg[q + 1][1].toFixed(1);
+			}
+			var last = avg[avg.length - 1], first = avg[0];
+			add('path', { d: dpath + ' L' + last[0].toFixed(1) + ' ' + bot + ' L' + first[0].toFixed(1) + ' ' + bot + 'Z', fill: accent, 'fill-opacity': 0.12, stroke: 'none' });
+			add('path', { d: dpath, fill: 'none', stroke: accent, 'stroke-width': 1.8, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
 			// Fewer date labels on a narrow card, so they don't run into each other.
 			var nt = W < 520 ? 2 : W < 900 ? 3 : 4;
 			for (var i = 0; i <= nt; i++) {
