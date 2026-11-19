@@ -32,7 +32,7 @@ type Point struct {
 }
 
 // Ranges are the population graph's choices.
-var Ranges = map[string]time.Duration{"12h": 12 * time.Hour, "1d": 24 * time.Hour, "1w": 7 * 24 * time.Hour, "1m": 30 * 24 * time.Hour}
+var Ranges = map[string]time.Duration{"12h": 12 * time.Hour, "1d": 24 * time.Hour, "7d": 7 * 24 * time.Hour, "30d": 30 * 24 * time.Hour}
 
 // maxPoints is about how many steps a graph gets; longer ranges are put
 // in buckets showing each bucket's peak, so a short spike still shows.

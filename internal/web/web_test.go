@@ -596,7 +596,7 @@ func TestServerInfoRoutes(t *testing.T) {
 		return rec.Code
 	}
 	for path, want := range map[string]int{
-		"/server": 200, "/api/server": 200, "/api/server/population?range=1w": 200, "/api/server/population?range=12h": 200, "/api/server/population?range=7d": 400, "/api/server/population?range=all": 200,
+		"/server": 200, "/api/server": 200, "/api/server/population?range=7d": 200, "/api/server/population?range=30d": 200, "/api/server/population?range=12h": 200, "/api/server/population?range=1w": 400, "/api/server/population?range=all": 200,
 		"/api/server/population?range=3y": 400, "/api/server/busiest?tz=America/New_York": 200, "/api/server/busiest?tz=nope": 200,
 	} {
 		if code := do(http.MethodGet, path); code != want {
