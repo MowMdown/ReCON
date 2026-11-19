@@ -157,7 +157,7 @@ func TestRefreshReadsTheServer(t *testing.T) {
 	info := infoAnswer("Harambe's Safari Island Adventure", "deerisle", "1.30.164289", 2, 60, 2302,
 		"battleye,external,privHive,shard,lqs0,etm2.000000,entm4.000000,mod,14:59")
 	port := fakeQueryServer(t, info, rulesAnswer(dayzModRules(testMods, 20)))
-	state.cfg = Config{QueryHost: "127.0.0.1", QueryPort: port}
+	state.cfg, state.host = Config{QueryPort: port}, ""
 	s := Refresh()
 	if !s.Answered {
 		t.Fatalf("not answered: %s", s.Error)
@@ -205,7 +205,7 @@ func TestRefreshWhenTheServerIsDown(t *testing.T) {
 	old := queryTimeout
 	queryTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { queryTimeout = old })
-	state.cfg = Config{QueryHost: "127.0.0.1", QueryPort: port}
+	state.cfg, state.host = Config{QueryPort: port}, ""
 	state.snap = Snapshot{Answered: true, Info: Info{Name: "kept"}}
 	s := Refresh()
 	if s.Answered || s.Error == "" || s.Info.Name != "kept" {
@@ -271,22 +271,22 @@ func TestBusiest(t *testing.T) {
 }
 
 func TestConfigFromEnv(t *testing.T) {
-	for _, k := range []string{"QUERY_HOST", "QUERY_PORT", "SERVER_TIME", "SERVER_LATITUDE"} {
+	for _, k := range []string{"QUERY_PORT", "SERVER_TIME", "SERVER_LATITUDE"} {
 		t.Setenv(k, "")
 	}
-	c := ConfigFromEnv("127.0.0.1")
-	if c.QueryHost != "127.0.0.1" || c.QueryPort != 27016 || c.ServerTime != "SystemTime" || !math.IsNaN(c.Latitude) {
+	c := ConfigFromEnv()
+	if c.QueryPort != 27016 || c.ServerTime != "SystemTime" || !math.IsNaN(c.Latitude) {
 		t.Errorf("defaults: %+v", c)
 	}
 	t.Setenv("QUERY_PORT", "27017")
 	t.Setenv("SERVER_TIME", "2000/8/31/06/00")
 	t.Setenv("SERVER_LATITUDE", "66.5")
-	if c := ConfigFromEnv("127.0.0.1"); c.QueryPort != 27017 || c.ServerTime != "2000/8/31/06/00" || c.Latitude != 66.5 {
+	if c := ConfigFromEnv(); c.QueryPort != 27017 || c.ServerTime != "2000/8/31/06/00" || c.Latitude != 66.5 {
 		t.Errorf("set: %+v", c)
 	}
 	t.Setenv("SERVER_TIME", "2000/2/31/06/00")
 	t.Setenv("SERVER_LATITUDE", "north")
-	if c := ConfigFromEnv("127.0.0.1"); c.ServerTime != "SystemTime" || !math.IsNaN(c.Latitude) {
+	if c := ConfigFromEnv(); c.ServerTime != "SystemTime" || !math.IsNaN(c.Latitude) {
 		t.Errorf("bad values kept: %+v", c)
 	}
 }
@@ -348,7 +348,7 @@ func TestSettings(t *testing.T) {
 	db := test.OpenDB(t)
 	SetDatabase(db)
 	t.Cleanup(func() { SetDatabase(nil); saved = Settings{} })
-	def := Config{QueryHost: "10.0.1.174", QueryPort: 27016, ServerTime: "SystemTime", Latitude: math.NaN()}
+	def := Config{QueryPort: 27016, ServerTime: "SystemTime", Latitude: math.NaN()}
 	state.cfg, defaults, saved = def, def, Settings{}
 
 	if _, err := SaveSettings(Settings{QueryPort: "70000"}); err == nil {
@@ -357,7 +357,7 @@ func TestSettings(t *testing.T) {
 	if _, c := Current(); c.QueryPort != 27016 {
 		t.Errorf("a refused save changed the port to %d", c.QueryPort)
 	}
-	for _, bad := range []Settings{{ServerTime: "2000/13/1/06/00"}, {Latitude: "95"}, {QueryHost: "a b"}} {
+	for _, bad := range []Settings{{ServerTime: "2000/13/1/06/00"}, {Latitude: "95"}} {
 		if _, err := SaveSettings(bad); err == nil {
 			t.Errorf("%+v accepted", bad)
 		}
@@ -366,7 +366,7 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, c := Current()
-	if c.QueryHost != "10.0.1.174" || c.QueryPort != 27017 || c.ServerTime != "2000/12/21/08/00" || c.Latitude != 66.56 {
+	if c.QueryPort != 27017 || c.ServerTime != "2000/12/21/08/00" || c.Latitude != 66.56 {
 		t.Errorf("after saving: %+v", c)
 	}
 	// A restart: the container's config again, then what was saved.
@@ -396,10 +396,27 @@ func TestPublicIPFromSteam(t *testing.T) {
 		steam.APIKey = oldKey
 		state.steamIP, state.steamIPFor = "", 0
 	})
-	state.cfg = Config{QueryHost: "10.0.1.174", QueryPort: 27016}
+	state.cfg = Config{QueryPort: 27016}
 	lookUpPublicIP(90297760921309191, time.Now())
 	lookUpPublicIP(90297760921309191, time.Now())
 	if SteamIP() != "173.27.253.74" || asked != 1 {
 		t.Errorf("public IP %q, Steam asked %d times", SteamIP(), asked)
+	}
+}
+
+// TestQueryFollowsRCONHost checks that the query goes to the RCON host,
+// read on every query, and that a different host starts afresh.
+func TestQueryFollowsRCONHost(t *testing.T) {
+	old := queryHost
+	t.Cleanup(func() { queryHost = old; state.host = "" })
+	host := "10.0.1.174"
+	SetHostSource(func() string { return host })
+	state.cfg, state.host = Config{QueryPort: 27017}, ""
+	if a := QueryAddress(); a != "10.0.1.174:27017" {
+		t.Errorf("address %q", a)
+	}
+	host = "10.0.1.175"
+	if a := QueryAddress(); a != "10.0.1.175:27017" {
+		t.Errorf("after RCON moved: %q", a)
 	}
 }

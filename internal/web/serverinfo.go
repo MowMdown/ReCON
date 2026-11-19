@@ -2,7 +2,6 @@ package web
 
 import (
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -163,11 +162,11 @@ func serverSettingsView() map[string]any {
 	if !math.IsNaN(def.Latitude) {
 		lat = strconv.FormatFloat(def.Latitude, 'f', -1, 64)
 	}
-	snap, cfg := serverinfo.Current()
+	snap, _ := serverinfo.Current()
 	return map[string]any{"ok": true, "settings": serverinfo.SavedSettings(),
-		"defaults": map[string]any{"queryHost": def.QueryHost, "queryPort": strconv.Itoa(def.QueryPort),
+		"defaults": map[string]any{"queryPort": strconv.Itoa(def.QueryPort),
 			"serverTime": def.ServerTime, "latitude": lat},
-		"address": net.JoinHostPort(cfg.QueryHost, strconv.Itoa(cfg.QueryPort)), "answered": snap.Answered, "error": snap.Error}
+		"address": serverinfo.QueryAddress(), "answered": snap.Answered, "error": snap.Error}
 }
 
 // handleServerSettingsGet serves GET /api/server/settings.
@@ -175,8 +174,8 @@ func handleServerSettingsGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, serverSettingsView())
 }
 
-// handleServerSettingsSave serves POST /api/server/settings {queryHost,
-// queryPort, serverTime, latitude}: empty fields use the
+// handleServerSettingsSave serves POST /api/server/settings {queryPort,
+// serverTime, latitude}: empty fields use the
 // container's values. It saves them (nothing changes if one is wrong) and
 // asks the server at once, so the answer says whether it replies.
 func handleServerSettingsSave(w http.ResponseWriter, r *http.Request) {

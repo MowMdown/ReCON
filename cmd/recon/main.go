@@ -95,11 +95,16 @@ func main() {
 	game.RefreshBanExpiry()                                // when the next timed ban runs out
 	game.StartWatch()                                      // keeps RCON logged in, polls players and bans
 	geoip.Start(geoip.ConfigFromEnv(filepath.Dir(dbPath))) // country flags next to IPs
-	queryHost, _, err := net.SplitHostPort(address)
-	if err != nil {
-		queryHost = address
-	}
-	serverinfo.Start(serverinfo.ConfigFromEnv(queryHost)) // the Server Info page: Steam query, uptime, mod updates
+	// The Steam query goes to the same host as RCON, whatever RCON Settings
+	// say now.
+	serverinfo.SetHostSource(func() string {
+		addr, _ := game.Target()
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			return host
+		}
+		return addr
+	})
+	serverinfo.Start(serverinfo.ConfigFromEnv()) // the Server Info page: Steam query, uptime, mod updates
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	log.Printf("listening on %s -> RCON %s", addr, address)

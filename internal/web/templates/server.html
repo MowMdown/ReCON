@@ -126,17 +126,15 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	</button>
 </div>
 
-<!-- Server Info Settings: the same as the container's QUERY_HOST, QUERY_PORT,
+<!-- Server Info Settings: the same as the container's QUERY_PORT,
      SERVER_TIME and SERVER_LATITUDE; empty fields use those. The public IP
      comes from Steam only. -->
 <div id="siSettingsModal" class="modal" onclick="if (event.target === this) closeServerSettings()">
 	<div class="box siset" role="dialog" aria-labelledby="sisTitle">
 		<h2 id="sisTitle">Server Info Settings</h2>
 		<p class="now" id="sisNow"></p>
-		<div class="row">
-			<div><label for="sisHost">Query host</label><input id="sisHost" type="text" autocomplete="off" spellcheck="false"></div>
-			<div><label for="sisPort">Query port</label><input id="sisPort" type="text" inputmode="numeric" autocomplete="off"></div>
-		</div>
+		<label for="sisPort">Query port</label>
+		<input id="sisPort" type="text" inputmode="numeric" autocomplete="off">
 		<div class="row">
 			<div><label for="sisTime">Server time (serverTime)</label><input id="sisTime" type="text" autocomplete="off" spellcheck="false"></div>
 			<div><label for="sisLat">Latitude</label><input id="sisLat" type="text" inputmode="decimal" autocomplete="off"></div>
@@ -524,7 +522,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 // Server Info Settings (GET/POST /api/server/settings): what is saved here
 // overrides the container's variables; empty fields use those, shown greyed out.
 function sisMsg(text, cls) { var m = document.getElementById('sisMsg'); m.textContent = text; m.className = cls || ''; }
-var SIS = { queryHost: 'sisHost', queryPort: 'sisPort', serverTime: 'sisTime', latitude: 'sisLat' };
+var SIS = { queryPort: 'sisPort', serverTime: 'sisTime', latitude: 'sisLat' };
 function showServerNow(d) {
 	var now = document.getElementById('sisNow'), b = document.createElement('b');
 	b.textContent = d.address;
@@ -546,7 +544,7 @@ async function openServerSettings() {
 		f.placeholder = d.defaults[k] || '';
 	}
 	showServerNow(d);
-	document.getElementById('sisHost').focus();
+	document.getElementById('sisPort').focus();
 }
 function closeServerSettings() { document.getElementById('siSettingsModal').style.display = 'none'; }
 async function saveServerSettings() {

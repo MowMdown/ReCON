@@ -10,12 +10,11 @@ import (
 	"time"
 )
 
-// Settings are the Server Info page's Settings: the same as QUERY_HOST,
+// Settings are the Server Info page's Settings: the same as
 // QUERY_PORT, SERVER_TIME and SERVER_LATITUDE, as typed. An empty
 // field uses the container's value. They are kept in the settings table, so
 // they survive restarts.
 type Settings struct {
-	QueryHost  string `json:"queryHost"`
 	QueryPort  string `json:"queryPort"`
 	ServerTime string `json:"serverTime"`
 	Latitude   string `json:"latitude"`
@@ -44,15 +43,9 @@ func SavedSettings() Settings {
 
 // apply is def with the filled-in fields of s, checked.
 func (s Settings) apply(def Config) (Config, error) {
-	s = Settings{QueryHost: strings.TrimSpace(s.QueryHost), QueryPort: strings.TrimSpace(s.QueryPort),
+	s = Settings{QueryPort: strings.TrimSpace(s.QueryPort),
 		ServerTime: strings.TrimSpace(s.ServerTime), Latitude: strings.TrimSpace(s.Latitude)}
 	c := def
-	if s.QueryHost != "" {
-		if strings.ContainsAny(s.QueryHost, " /:") {
-			return c, fmt.Errorf("query host %q isn't a host name or IP address", s.QueryHost)
-		}
-		c.QueryHost = s.QueryHost
-	}
 	if s.QueryPort != "" {
 		p, err := strconv.Atoi(s.QueryPort)
 		if err != nil || p < 1 || p > 65535 {
@@ -93,7 +86,7 @@ func SaveSettings(s Settings) (Config, error) {
 		}
 	}
 	state.Lock()
-	if state.cfg.QueryHost != c.QueryHost || state.cfg.QueryPort != c.QueryPort {
+	if state.cfg.QueryPort != c.QueryPort {
 		// Another server: forget the last answer and the public IP Steam gave.
 		state.snap, state.steamIP, state.steamIPFor = Snapshot{}, "", 0
 	}

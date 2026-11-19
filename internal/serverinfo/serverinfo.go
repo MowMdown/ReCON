@@ -5,7 +5,7 @@
 // Steam says were updated since someone acknowledged it.
 //
 // ReCON asks the server's query port every pollEvery (5 seconds), from the game host:
-// QUERY_HOST (default the RCON host) and QUERY_PORT (default 27016).
+// the RCON host (RCON_HOST, or RCON Settings) and QUERY_PORT (default 27016).
 package serverinfo
 
 import (
@@ -27,7 +27,6 @@ import (
 // tell: the in-game date and latitude, for sunrise and sunset. The server's
 // public IP comes from Steam only (SteamIP).
 type Config struct {
-	QueryHost string // where to send the query (the game host)
 	QueryPort int
 	// ServerTime is serverDZ.cfg's serverTime: "2000/8/31/06/00"
 	// (YYYY/MM/DD/HH/MM) or "SystemTime". Only its date is used.
@@ -35,16 +34,16 @@ type Config struct {
 	Latitude   float64 // degrees north; NaN: the map's (mapLatitude)
 }
 
-// ConfigFromEnv reads QUERY_HOST (default rconHost), QUERY_PORT (27016),
+// ConfigFromEnv reads QUERY_PORT (27016),
 // SERVER_TIME (SystemTime) and SERVER_LATITUDE (the map's).
-func ConfigFromEnv(rconHost string) Config {
+func ConfigFromEnv() Config {
 	env := func(k, def string) string {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 			return v
 		}
 		return def
 	}
-	c := Config{QueryHost: env("QUERY_HOST", rconHost), ServerTime: env("SERVER_TIME", "SystemTime"), Latitude: math.NaN()}
+	c := Config{ServerTime: env("SERVER_TIME", "SystemTime"), Latitude: math.NaN()}
 	c.QueryPort, _ = strconv.Atoi(env("QUERY_PORT", "27016"))
 	if c.QueryPort <= 0 || c.QueryPort > 65535 {
 		c.QueryPort = 27016
@@ -88,6 +87,7 @@ var (
 var state struct {
 	sync.Mutex
 	cfg  Config
+	host string // the host the last query went to
 	snap Snapshot
 	// The open uptime interval.
 	upID      int64
@@ -105,6 +105,22 @@ var state struct {
 }
 
 var database *store.Database
+
+// queryHost is where the query goes: the game server's host, the same as
+// RCON's (set at startup by SetHostSource; 127.0.0.1 until then).
+var queryHost = func() string { return "127.0.0.1" }
+
+// SetHostSource sets where the query goes: the RCON host, read on every
+// query, so a change in RCON Settings moves the query too.
+func SetHostSource(f func() string) { queryHost = f }
+
+// QueryAddress is where the query goes now ("10.0.1.174:27016").
+func QueryAddress() string {
+	state.Lock()
+	port := state.cfg.QueryPort
+	state.Unlock()
+	return net.JoinHostPort(queryHost(), strconv.Itoa(port))
+}
 
 // SetDatabase sets the player database this package uses.
 func SetDatabase(db *store.Database) { database = db }
@@ -126,7 +142,7 @@ func Start(c Config) {
 	state.Unlock()
 	loadSettings() // what was saved on the page overrides the container's
 	_, c = Current()
-	log.Printf("serverinfo: asking %s:%d every %s", c.QueryHost, c.QueryPort, pollEvery)
+	log.Printf("serverinfo: asking %s every %s", QueryAddress(), pollEvery)
 	go func() {
 		for {
 			Refresh()
@@ -142,7 +158,18 @@ func Refresh() Snapshot {
 	state.Unlock()
 	now := time.Now()
 	snap := Snapshot{ReadAt: now}
-	a, err := dialA2S(net.JoinHostPort(cfg.QueryHost, strconv.Itoa(cfg.QueryPort)), queryTimeout)
+	host := queryHost()
+	state.Lock()
+	if host != state.host {
+		// Another server (RCON Settings changed): forget the last answer and
+		// the public IP Steam gave for it.
+		if state.host != "" {
+			state.snap, state.steamIP, state.steamIPFor = Snapshot{}, "", 0
+		}
+		state.host = host
+	}
+	state.Unlock()
+	a, err := dialA2S(net.JoinHostPort(host, strconv.Itoa(cfg.QueryPort)), queryTimeout)
 	if err == nil {
 		defer a.close()
 		snap.Info, err = queryInfo(a)
