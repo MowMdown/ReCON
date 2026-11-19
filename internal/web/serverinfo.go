@@ -76,7 +76,7 @@ func handleServerRefresh(w http.ResponseWriter, r *http.Request) {
 	handleServerInfo(w, r)
 }
 
-// handleServerPopulation serves GET /api/server/population?range=1d|7d|2w|1m|all.
+// handleServerPopulation serves GET /api/server/population?range=12h|1d|1w|1m|all.
 func handleServerPopulation(w http.ResponseWriter, r *http.Request) {
 	rng := r.URL.Query().Get("range")
 	now := time.Now()
@@ -96,7 +96,7 @@ func handleServerPopulation(w http.ResponseWriter, r *http.Request) {
 			since = now.Add(-time.Minute)
 		}
 	} else {
-		fail(w, http.StatusBadRequest, "range is 1d, 7d, 2w, 1m or all")
+		fail(w, http.StatusBadRequest, "range is 12h, 1d, 1w, 1m or all")
 		return
 	}
 	spans, err := database.SessionSpans(since, now)

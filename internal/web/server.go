@@ -80,7 +80,7 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /server", servePageHandler(serverPage))
 	mux.HandleFunc("GET /api/server", handleServerInfo)
 	mux.HandleFunc("POST /api/server/refresh", handleServerRefresh)      // ask the server now
-	mux.HandleFunc("GET /api/server/population", handleServerPopulation) // ?range=1d|7d|2w|1m|all
+	mux.HandleFunc("GET /api/server/population", handleServerPopulation) // ?range=12h|1d|1w|1m|all
 	mux.HandleFunc("GET /api/server/busiest", handleServerBusiest)       // ?tz=America/New_York
 	mux.HandleFunc("GET /api/server/settings", handleServerSettingsGet)
 	mux.HandleFunc("POST /api/server/settings", handleServerSettingsSave) // {queryPort, serverTime, latitude}

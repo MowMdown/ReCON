@@ -165,7 +165,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		</div>
 	</div>
 
-	<div class="card"><h3>Population <span class="r"><span class="seg" id="ranges"><button data-r="1d" class="on">1d</button><button data-r="7d">7d</button><button data-r="2w">2w</button><button data-r="1m">1m</button><button data-r="all">All</button></span></span></h3>
+	<div class="card"><h3>Population <span class="r"><span class="seg" id="ranges"><button data-r="12h">12h</button><button data-r="1d" class="on">1d</button><button data-r="1w">1w</button><button data-r="1m">1m</button><button data-r="all">All</button></span></span></h3>
 		<svg class="chart" id="pop" viewBox="0 0 1000 200"></svg>
 		<div class="stats"><div><b>PEAK 7D</b><span id="speak">-</span></div><div><b>AVERAGE 7D</b><span id="savg">-</span></div><div><b>UNIQUE PLAYERS 7D</b><span id="suniq">-</span></div><div><b>SESSIONS 7D</b><span id="ssess">-</span></div></div>
 	</div>
@@ -429,7 +429,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 				var t = d.from + (d.to - d.from) * i / nt, dt = new Date(t * 1000);
 				var span = d.to - d.from;
 				var label = span <= 600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) :
-					span <= 6 * 3600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) :
+					span <= 13 * 3600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) :
 					span <= 2 * 86400 ? dt.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' }) :
 					dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
 				add('text', { x: L + (W - L) * i / nt, y: 196, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace', 'text-anchor': i === 0 ? 'start' : i === nt ? 'end' : 'middle' }, label);
