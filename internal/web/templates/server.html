@@ -186,7 +186,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	</div>
 
 	<div class="card"><h3>Population <span class="r"><span class="seg" id="ranges"><button data-r="1d" class="on">1d</button><button data-r="7d">7d</button><button data-r="2w">2w</button><button data-r="1m">1m</button><button data-r="all">All</button></span></span></h3>
-		<svg class="chart" id="pop" viewBox="0 0 1000 200" preserveAspectRatio="none"></svg>
+		<svg class="chart" id="pop" viewBox="0 0 1000 200"></svg>
 		<div class="stats"><div><b>PEAK 7D</b><span id="speak">-</span></div><div><b>AVERAGE 7D</b><span id="savg">-</span></div><div><b>UNIQUE PLAYERS 7D</b><span id="suniq">-</span></div><div><b>SESSIONS 7D</b><span id="ssess">-</span></div></div>
 	</div>
 
@@ -422,13 +422,23 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	}
 
 	// Population: a step line of players over the range, from the sessions.
+	// The graph is drawn at the card's real width (not stretched), so its
+	// labels keep their shape; it is redrawn when the window is resized.
+	var popData = null;
 	async function loadPop() {
-		var svg = $('pop'), ns = 'http://www.w3.org/2000/svg';
 		try {
 			var d = await (await fetch('/api/server/population?range=' + range)).json();
 			if (!d.ok) return;
+			popData = d;
+			drawPop();
+		} catch (e) { }
+	}
+	function drawPop() {
+		var svg = $('pop'), ns = 'http://www.w3.org/2000/svg', d = popData;
+		if (!d) return;
+		{
 			svg.textContent = '';
-			var pts = d.points, W = 1000, top = 12, bot = 176, L = 30, max = 1;
+			var pts = d.points, W = Math.max(300, Math.round(svg.getBoundingClientRect().width)), top = 12, bot = 176, L = 30, max = 1;
 			pts.forEach(function (p) { max = Math.max(max, p.n); });
 			var x = function (t) { return L + (W - L) * (t - d.from) / Math.max(1, d.to - d.from); };
 			var y = function (n) { return bot - (bot - top) * n / max; };
@@ -447,16 +457,19 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			});
 			add('path', { d: dpath + ' L' + W + ' ' + bot + ' L' + L + ' ' + bot + 'Z', fill: accent, 'fill-opacity': 0.12, stroke: 'none' });
 			add('path', { d: dpath, fill: 'none', stroke: accent, 'stroke-width': 1.6, 'vector-effect': 'non-scaling-stroke' });
-			for (var i = 0; i <= 4; i++) {
-				var t = d.from + (d.to - d.from) * i / 4, dt = new Date(t * 1000);
+			// Fewer date labels on a narrow card, so they don't run into each other.
+			var nt = W < 520 ? 2 : W < 900 ? 3 : 4;
+			for (var i = 0; i <= nt; i++) {
+				var t = d.from + (d.to - d.from) * i / nt, dt = new Date(t * 1000);
 				var span = d.to - d.from;
 				var label = span <= 600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) :
 					span <= 6 * 3600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) :
 					span <= 2 * 86400 ? dt.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' }) :
 					dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
-				add('text', { x: L + (W - L) * i / 4, y: 196, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace', 'text-anchor': i === 0 ? 'start' : i === 4 ? 'end' : 'middle' }, label);
+				add('text', { x: L + (W - L) * i / nt, y: 196, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace', 'text-anchor': i === 0 ? 'start' : i === nt ? 'end' : 'middle' }, label);
 			}
-		} catch (e) { }
+			svg.setAttribute('viewBox', '0 0 ' + W + ' 200');
+		}
 	}
 
 	// Peak hours: average players per weekday and hour, in this browser's time zone.
@@ -511,6 +524,8 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	// ReCON asks the game server every 5 seconds and the page reads what it
 	// has as often; the graphs every minute. Nothing is read while the
 	// tab is hidden.
+	var popResize = null;
+	window.addEventListener('resize', function () { clearTimeout(popResize); popResize = setTimeout(drawPop, 150); });
 	window.reloadServerInfo = function () { lastText = ''; load(); loadPop(); loadBusiest(); };
 	load();
 	loadPop();
