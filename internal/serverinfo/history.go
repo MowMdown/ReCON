@@ -7,6 +7,24 @@ import (
 	"github.com/MowMdown/ReCON/internal/store"
 )
 
+// MinSession is the shortest session the Server Info page counts: a player
+// who connects and is gone within a minute (a failed join, a quick
+// reconnect) isn't counted in the graph, the stats or the peak hours.
+const MinSession = time.Minute
+
+// dropShort leaves out sessions of MinSession or less (by their whole
+// length, not the part in the range). A session still open counts once it
+// has lasted longer than that.
+func dropShort(spans []store.Span) []store.Span {
+	out := make([]store.Span, 0, len(spans))
+	for _, s := range spans {
+		if s.End.Sub(s.Start) > MinSession {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // Point is the number of players from At until the next point.
 type Point struct {
 	At      int64 `json:"t"` // Unix seconds
@@ -23,6 +41,7 @@ const maxPoints = 400
 // Population is the player count over since..now, as steps, from the
 // sessions: exact for a short range, the peak of each bucket for a long one.
 func Population(spans []store.Span, since, now time.Time) []Point {
+	spans = dropShort(spans)
 	type ev struct {
 		at time.Time
 		d  int
@@ -102,6 +121,7 @@ type Stats struct {
 }
 
 func SumUp(spans []store.Span, since, now time.Time) Stats {
+	spans = dropShort(spans)
 	var st Stats
 	guids := map[string]bool{}
 	var total time.Duration
@@ -135,6 +155,7 @@ func SumUp(spans []store.Span, since, now time.Time) Stats {
 // Busiest is the average number of players for each weekday (0 Sunday) and
 // hour, in loc, over since..now.
 func Busiest(spans []store.Span, since, now time.Time, loc *time.Location) [7][24]float64 {
+	spans = dropShort(spans)
 	var on [7][24]time.Duration // player time in each slot
 	var span [7][24]time.Duration
 	// How long each slot was covered by since..now.

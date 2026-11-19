@@ -400,3 +400,28 @@ func TestQueryFollowsRCONHost(t *testing.T) {
 		t.Errorf("after RCON moved: %q", a)
 	}
 }
+
+// TestShortSessionsIgnored checks that sessions of a minute or less don't
+// count in the graph, the stats or the peak hours.
+func TestShortSessionsIgnored(t *testing.T) {
+	t0 := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	at := func(m float64) time.Time { return t0.Add(time.Duration(m * float64(time.Minute))) }
+	spans := []store.Span{
+		{GUID: "a", Start: at(10), End: at(30)},   // 20 minutes: counts
+		{GUID: "b", Start: at(15), End: at(16)},   // exactly 1 minute: ignored
+		{GUID: "c", Start: at(40), End: at(40.5)}, // 30 seconds: ignored
+	}
+	st := SumUp(spans, t0, at(60))
+	if st.Peak != 1 || st.Unique != 1 || st.Sessions != 1 {
+		t.Errorf("stats %+v, want only the 20-minute session", st)
+	}
+	for _, p := range Population(spans, t0, at(60)) {
+		if p.Players > 1 {
+			t.Errorf("graph counts a short session: %+v", p)
+		}
+	}
+	b := Busiest(spans, t0, at(60), time.UTC)
+	if v := b[t0.Weekday()][12]; v < 0.33 || v > 0.34 {
+		t.Errorf("peak hours %v, want 20 minutes in the hour (0.33)", v)
+	}
+}
