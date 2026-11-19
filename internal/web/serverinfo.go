@@ -26,7 +26,9 @@ type serverMod struct {
 func handleServerInfo(w http.ResponseWriter, r *http.Request) {
 	snap, cfg := serverinfo.Current()
 	now := time.Now()
-	out := map[string]any{"ok": true, "server": snap,
+	// now: the server's clock when it answered, so the page can tell how old
+	// the in-game time (read at server.readAt) is without trusting its own clock.
+	out := map[string]any{"ok": true, "server": snap, "now": now,
 		"sun":       serverinfo.SunFor(cfg, snap.Info.Map, now),
 		"modsKnown": snap.ModsKnown,
 	}

@@ -74,9 +74,9 @@
 /* Day and night: the bar and boxes, and the sky circle to their right */
 .dn { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 12px; align-items: stretch; }
 .dn .dnmain { min-width: 0; }
-.sky { display: flex; flex-direction: column; align-items: center; padding: 12px; }
-.sky h3 { align-self: flex-start; margin: 0 0 4px; }
-.sky svg { width: 180px; height: 180px; max-width: 100%; }
+/* The sky dial fills its box (the box keeps the size the column gives it) */
+.sky { display: flex; align-items: center; justify-content: center; padding: 8px; }
+.sky svg { width: 100%; max-width: 194px; height: auto; aspect-ratio: 1; display: block; }
 @media (max-width: 900px) { .dn { grid-template-columns: minmax(0, 1fr); } }
 .mods { display: flex; flex-wrap: wrap; gap: 8px; }
 .mods a { display: inline-flex; gap: 6px; align-items: center; border: 1px solid #444; border-radius: 6px; padding: 5px 10px; font-size: 13px; color: #ddd; text-decoration: none; }
@@ -161,7 +161,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 					<div class="card"><h3>Night lasts</h3><div class="big m" id="night">-</div><div class="note" id="nightnote"></div></div>
 				</div>
 			</div>
-			<div class="card sky" id="sky"><h3>Sky</h3><svg id="skysvg" viewBox="0 0 180 180" role="img" aria-label="The sun and moon over the horizon"></svg></div>
+			<div class="card sky" id="sky"><svg id="skysvg" viewBox="10 10 160 160" role="img" aria-label="The sky: the sun and moon over the horizon"></svg></div>
 		</div>
 	</div>
 
@@ -190,6 +190,62 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	function day(unix) { var d = new Date(unix * 1000); return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 	function ago(iso) { var s = (Date.now() - Date.parse(iso)) / 1000; return s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; }
 	function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+	// The in-game clock. The server reports its time to the minute on each
+	// answer (every 5 seconds); in between, the page runs it on at the day
+	// speed in daylight and day x night speed at night, so the time, the bar's
+	// marker, the countdowns and the sky move smoothly. Each answer re-anchors
+	// it; one up to a minute behind the page's own time (it only gives whole
+	// minutes) doesn't pull it back.
+	var clock = { t0: NaN, at: 0, running: false };
+	function gameRate(t) { // game hours per real hour at game time t
+		var c = clock, night = c.sun.polar === 'night' || (c.sun.polar !== 'day' && !(t >= c.rise && t < c.set));
+		return night ? c.dx * c.nx : c.dx;
+	}
+	function gameTime(nowMs) {
+		var c = clock, t = c.t0, left = (nowMs - c.at) / 3600000;
+		if (!isFinite(t) || !c.running || !c.sun) return t;
+		for (var i = 0; i < 8 && left > 0; i++) {
+			var rate = gameRate(t);
+			if (c.sun.polar) { t += left * rate; break; }
+			var edge = (t >= c.rise && t < c.set) ? c.set : c.rise; // the next sunset or sunrise
+			var gap = ((edge - t) % 24 + 24) % 24 || 24, need = gap / rate;
+			if (left < need) { t += left * rate; left = 0; } else { t = edge; left -= need; }
+		}
+		return ((t % 24) + 24) % 24;
+	}
+	function anchorClock(srv, t) {
+		var answeredAt = Date.parse(srv.readAt), servedAt = Date.parse(data.now);
+		var at = Date.now() - (isFinite(servedAt) && isFinite(answeredAt) ? Math.max(0, servedAt - answeredAt) : 0);
+		if (!isFinite(t)) { clock.t0 = NaN; return; }
+		var ahead = isFinite(clock.t0) && clock.running ? ((gameTime(at) - t) % 24 + 24) % 24 : NaN;
+		clock.t0 = ahead >= 0 && ahead < 1 / 60 + 1e-6 ? t + ahead : t;
+		clock.at = at;
+		clock.running = !!srv.answered; // not answering: hold the last time
+	}
+	function showClock() {
+		var c = clock;
+		if (!c.sun) return;
+		var t = gameTime(Date.now()), ok = isFinite(t);
+		var hh = ok ? Math.floor(t) : 0, mm = ok ? Math.floor((t - hh) * 60) : 0;
+		$('gtime').textContent = ok ? String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') : '-';
+		if (c.marker) { c.marker.style.display = ok ? '' : 'none'; if (ok) c.marker.style.left = 'calc(' + (t / 24 * 100).toFixed(3) + '% - 2px)'; }
+		var isDay = c.sun.polar === 'day' || (c.sun.polar !== 'night' && t >= c.rise && t < c.set);
+		$('gtimenote').textContent = !ok ? '' : (isDay ? 'Daytime' : 'Night') + (c.running ? '' : ' · not answering');
+		if (!ok || c.sun.polar) {
+			$('first').textContent = 'Sunset in'; $('second').textContent = 'Sunrise in';
+			$('firstv').textContent = $('secondv').textContent = c.sun.polar ? 'None' : '-';
+		} else if (isDay) {
+			$('first').textContent = 'Sunset in'; $('firstv').textContent = dur((c.set - t) / c.dx);
+			$('second').textContent = 'Sunrise in'; $('secondv').textContent = dur((c.set - t) / c.dx + c.nightLen);
+		} else {
+			var left = (t >= c.set ? 24 - t + c.rise : c.rise - t) / (c.dx * c.nx);
+			$('first').textContent = 'Sunrise in'; $('firstv').textContent = dur(left);
+			$('second').textContent = 'Sunset in'; $('secondv').textContent = dur(left + c.dayLen);
+		}
+		drawSky(c.sun, t, c.rise, c.set);
+	}
+	setInterval(function () { if (!document.hidden && clock.running) showClock(); }, 250);
+
 	function render() {
 		var s = data.server, info = s.info || {}, k = s.keywords || {};
 		var known = !!info.name;
@@ -217,10 +273,10 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		$('queue').textContent = known ? (k.queue || 0) + ' in the queue' : '';
 
 		var sun = data.sun || {}, t = hours(k.time), rise = hours(sun.sunrise), set = hours(sun.sunset);
+		anchorClock(s, t);
 		// A polar day or night: no sunrise or sunset, all day or all night.
 		if (sun.polar === 'day') { rise = 0; set = 24; } else if (sun.polar === 'night') { rise = set = 12; }
 		var dx = k.dayAccel || 1, nx = k.nightAccel || 1;
-		$('gtime').textContent = k.time || '-';
 		$('dayx').textContent = '☀ ×' + dx;
 		// Night runs at the day speed times the night speed: show the result.
 		var nightSpeed = +(dx * nx).toFixed(2);
@@ -262,8 +318,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			if (h % 4 === 0) hr.append(el('span', '', h === 24 ? '23:59' : String(h).padStart(2, '0') + ':00'));
 			bar.append(hr);
 		}
-		if (isFinite(t)) tick(t, 'now');
-		drawSky(sun, t);
+		bar.append(clock.marker = el('div', 'now'));
 		var when = sun.date ? new Date(2000, +sun.date.slice(0, 2) - 1, +sun.date.slice(3)).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
 		var lat = sun.latitude != null ? Math.abs(sun.latitude) + '\u00b0' + (sun.latitude >= 0 ? 'N' : 'S') : '';
 		$('sunnote').textContent = (sun.polar === 'day' ? 'midnight sun' : sun.polar === 'night' ? 'polar night' : 'sunrise ' + sun.sunrise + ' · sunset ' + sun.sunset) +
@@ -273,19 +328,8 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		$('daynote').textContent = sun.polar === 'night' ? 'polar night' : (set - rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + dx;
 		$('night').textContent = sun.polar === 'day' ? 'No night' : dur(nightLen);
 		$('nightnote').textContent = sun.polar === 'day' ? 'midnight sun' : (24 - set + rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + +(dx * nx).toFixed(2);
-		var isDay = sun.polar === 'day' || (sun.polar !== 'night' && t >= rise && t < set);
-		$('gtimenote').textContent = !isFinite(t) ? '' : (isDay ? 'Daytime' : 'Night') + (s.readAt ? ' · at ' + new Date(s.readAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
-		if (!isFinite(t) || sun.polar) {
-			$('first').textContent = 'Sunset in'; $('second').textContent = 'Sunrise in';
-			$('firstv').textContent = $('secondv').textContent = sun.polar ? 'None' : '-';
-		} else if (isDay) {
-			$('first').textContent = 'Sunset in'; $('firstv').textContent = dur((set - t) / dx);
-			$('second').textContent = 'Sunrise in'; $('secondv').textContent = dur((set - t) / dx + nightLen);
-		} else {
-			var left = (t >= set ? 24 - t + rise : rise - t) / (dx * nx);
-			$('first').textContent = 'Sunrise in'; $('firstv').textContent = dur(left);
-			$('second').textContent = 'Sunset in'; $('secondv').textContent = dur(left + dayLen);
-		}
+		Object.assign(clock, { sun: sun, rise: rise, set: set, dx: dx, nx: nx, dayLen: dayLen, nightLen: nightLen, readAt: s.readAt });
+		showClock();
 
 		if (data.week) {
 			$('speak').textContent = data.week.peak; $('savg').textContent = data.week.average.toFixed(data.week.average < 1 ? 2 : 1);
@@ -319,51 +363,65 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		});
 	}
 
-	// drawSky draws the sky circle: the horizon across the middle, the sun's
-	// path through the game day (rising on the left, setting on the right),
-	// the sun at its height now, and the moon directly opposite it. Heights
-	// come from the same date and latitude as sunrise and sunset.
-	function drawSky(sun, t) {
-		var svg = $('skysvg'), ns = 'http://www.w3.org/2000/svg';
-		svg.textContent = '';
-		var box = $('sky');
-		if (!isFinite(t) || !sun.date) { box.title = ''; return; }
-		var r = Math.PI / 180, lat = sun.latitude, doy = sun.dayOfYear;
-		var decl = -23.44 * Math.cos(2 * Math.PI / 365 * (doy + 10));
-		var alt = function (h, dc) { return Math.asin(Math.sin(lat * r) * Math.sin(dc * r) + Math.cos(lat * r) * Math.cos(dc * r) * Math.cos((h - 12) * 15 * r)) / r; };
-		var R = 78, C = 90;
-		// Across by the hour (noon in the middle, midnight at the edges), up by the height.
-		var pos = function (h, dc) { var ha = (h - 12) * 15 * r; return [C + R * 0.92 * Math.sin(ha / 2), C - R * 0.92 * alt(h, dc) / 90]; };
-		var sunAlt = alt(t, decl), moonT = (t + 12) % 24, moonAlt = alt(moonT, -decl), up = sunAlt > -0.833;
-		var add = function (parent, tag, a) { var e = document.createElementNS(ns, tag); for (var k in a) e.setAttribute(k, a[k]); parent.append(e); return e; };
-		var defs = add(svg, 'defs', {});
-		add(add(defs, 'clipPath', { id: 'skydome' }), 'circle', { cx: C, cy: C, r: R });
-		var g = add(defs, 'linearGradient', { id: 'skyfill', x1: 0, y1: 0, x2: 0, y2: 1 });
-		add(g, 'stop', { offset: 0, 'stop-color': up ? '#7fd3ee' : '#1d2340' });
-		add(g, 'stop', { offset: 1, 'stop-color': up ? '#cfeffa' : '#2a2f55' });
-		var dome = add(svg, 'g', { 'clip-path': 'url(#skydome)' });
-		add(dome, 'rect', { x: 0, y: 0, width: 180, height: C, fill: 'url(#skyfill)' });
-		add(dome, 'rect', { x: 0, y: C, width: 180, height: C, fill: '#15171c' });
-		var d = '';
-		for (var i = 0; i <= 96; i++) { var p = pos(i / 4, decl); d += (i ? ' L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }
-		add(dome, 'path', { d: d, fill: 'none', stroke: up ? '#3b6f84' : '#8a8fb0', 'stroke-width': 1, 'stroke-dasharray': '2 3' });
-		add(dome, 'line', { x1: 0, x2: 180, y1: C, y2: C, stroke: '#d6935a', 'stroke-width': 1.5 });
-		var m = pos(moonT, -decl), mg = add(dome, 'g', { opacity: moonAlt > 0 ? 1 : 0.35 });
-		add(mg, 'circle', { cx: m[0], cy: m[1], r: 8, fill: '#e8e6d9' });
-		add(mg, 'circle', { cx: m[0] + 4, cy: m[1] - 2, r: 7, fill: moonAlt > 0 ? (up ? '#7fd3ee' : '#1d2340') : '#15171c' });
-		var sp = pos(t, decl), sg = add(dome, 'g', { opacity: up ? 1 : 0.45 });
-		add(sg, 'circle', { cx: sp[0], cy: sp[1], r: 13, fill: '#fdd663', opacity: 0.25 });
-		add(sg, 'circle', { cx: sp[0], cy: sp[1], r: 8, fill: '#fdd663' });
-		add(svg, 'circle', { cx: C, cy: C, r: R, fill: 'none', stroke: '#444' });
-		var lbl = function (x, text) { var e = add(svg, 'text', { x: x, y: C - 4, fill: '#d6935a', 'font-size': 9, 'font-family': 'ui-monospace, Consolas, monospace' }); e.textContent = text; };
-		lbl(C - R + 4, 'E');
-		lbl(C + R - 10, 'W');
-		var deg = function (a) { return Math.abs(a).toFixed(1) + '\u00b0 ' + (a >= -0.05 ? 'above' : 'below'); };
-		var one = function (a) { return (Math.abs(a) < 0.05 ? 0 : a).toFixed(1); };
-		box.title = 'Sun ' + deg(sunAlt) + ' the horizon (highest today ' + one(alt(12, decl)) + '\u00b0 at 12:00) \u00b7 moon ' + deg(moonAlt);
+	// drawSky draws the sky dial: the sky's colour follows the sun's height
+	// (night blue, an orange glow at dawn and dusk, daylight blue); the sun
+	// and moon go round one path, opposite each other, crossing the horizon at
+	// sunrise and sunset. The path is a circle at the equator and flattens
+	// towards the horizon further from it (height x cos(latitude)). The sun
+	// fades out as it sets and the moon fades in, and the other way round;
+	// fixed stars fade in at night. South of the equator it is mirrored: you
+	// face north to watch the sun, so east is on the right.
+	var STARS = (function () {
+		var out = [], seed = 7, rnd = function () { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+		for (var i = 0; i < 90; i++) { var a = (rnd() * 176 - 88) * Math.PI / 180, d = 6 + rnd() * 70; out.push([Math.sin(a) * d, Math.cos(a) * d, 0.35 + rnd() * rnd() * 1.1]); }
+		return out;
+	})();
+	function drawSky(sun, t, rise, set) {
+		var svg = $('skysvg'), box = $('sky');
+		if (!isFinite(t) || !sun.dayOfYear) { svg.textContent = ''; box.title = ''; return; }
+		var r = Math.PI / 180, lat = sun.latitude, decl = -23.44 * Math.cos(2 * Math.PI / 365 * (sun.dayOfYear + 10));
+		var alt = function (h) { return Math.asin(Math.sin(lat * r) * Math.sin(decl * r) + Math.cos(lat * r) * Math.cos(decl * r) * Math.cos((h - 12) * 15 * r)) / r; };
+		var mix = function (a, b, f) { f = Math.max(0, Math.min(1, f)); return a.map(function (v, i) { return Math.round(v + (b[i] - v) * f); }); };
+		var rgb = function (c) { return 'rgb(' + c.join(',') + ')'; };
+		var a = alt(t);
+		// 1 in full day, 0 in full night, twilight between -8 and +6 degrees.
+		var day = Math.max(0, Math.min(1, (a + 8) / 14)), glow = Math.max(0, 1 - Math.abs(a + 1) / 7);
+		var NT = [18, 22, 44], NB = [36, 40, 74], DT = [58, 52, 96], DB = [224, 122, 74], LT = [96, 190, 232], LB = [196, 236, 250];
+		var top = day > 0.5 ? mix(DT, LT, (day - 0.5) * 2) : mix(NT, DT, day * 2);
+		var bot = day > 0.5 ? mix(DB, LB, (day - 0.5) * 2) : mix(NB, DB, Math.min(1, day * 2 + glow * 0.4));
+		// Where on the path: sunrise on the left horizon, noon at the top, sunset
+		// on the right; day and night each take half the path in their own time.
+		var th;
+		if (sun.polar === 'day') th = (t - 12) * 15;
+		else if (sun.polar === 'night') th = 180 + (t - 12) * 15;
+		else if (t >= rise && t <= set) th = -90 + 180 * (t - rise) / (set - rise);
+		else th = 90 + 180 * ((t > set ? t - set : t + 24 - set) / (24 - set + rise));
+		th *= r;
+		var A = 56, B = 56 * Math.abs(Math.cos(lat * r));
+		var sx = 90 + A * Math.sin(th), sy = 90 - B * Math.cos(th), mx = 90 - A * Math.sin(th), my = 90 + B * Math.cos(th);
+		var sunOp = Math.max(0, Math.min(1, (a + 4) / 6)), starOp = Math.max(0, Math.min(1, (-a - 2) / 8));
+		var south = lat < 0, dawnSide = (t < 12) !== south ? 0.08 : 0.92;
+		var html = '<defs><clipPath id="skydome"><circle cx="90" cy="90" r="78"/></clipPath>' +
+			'<linearGradient id="skyfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + rgb(top) + '"/><stop offset="0.5" stop-color="' + rgb(bot) + '"/></linearGradient>' +
+			'<radialGradient id="skyglow" cx="' + dawnSide + '" cy="0.5" r="0.6"><stop offset="0" stop-color="rgb(255,170,90)" stop-opacity="' + (glow * 0.55).toFixed(2) + '"/><stop offset="1" stop-color="rgb(255,170,90)" stop-opacity="0"/></radialGradient>' +
+			'<radialGradient id="moonglow"><stop offset="0" stop-color="#fff" stop-opacity="0.55"/><stop offset="0.4" stop-color="#fff" stop-opacity="0.22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>' +
+			'<radialGradient id="sunglow"><stop offset="0" stop-color="#fff3b0"/><stop offset="0.45" stop-color="#fdd663"/><stop offset="1" stop-color="#fdd663" stop-opacity="0"/></radialGradient></defs>' +
+			'<g' + (south ? ' transform="translate(180 0) scale(-1 1)"' : '') + '><g clip-path="url(#skydome)">' +
+			'<rect x="0" y="0" width="180" height="180" fill="url(#skyfill)"/><rect x="0" y="0" width="180" height="180" fill="url(#skyglow)"/>' +
+			STARS.map(function (st) { return '<circle cx="' + (90 + st[0]).toFixed(1) + '" cy="' + (90 - st[1]).toFixed(1) + '" r="' + st[2].toFixed(2) + '" fill="#fff" opacity="' + (starOp * 0.9).toFixed(2) + '"/>'; }).join('') +
+			'<ellipse cx="90" cy="90" rx="' + A + '" ry="' + B.toFixed(1) + '" fill="none" stroke="#fff" stroke-opacity="0.12" stroke-dasharray="2 3"/>' +
+			'<g opacity="' + sunOp.toFixed(2) + '"><circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="22" fill="url(#sunglow)"/><circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="9" fill="#fdd663"/></g>' +
+			'<g opacity="' + (1 - sunOp).toFixed(2) + '"><circle cx="' + mx.toFixed(1) + '" cy="' + my.toFixed(1) + '" r="20" fill="url(#moonglow)"/><circle cx="' + mx.toFixed(1) + '" cy="' + my.toFixed(1) + '" r="8" fill="#f1efe6"/></g>' +
+			'<rect x="0" y="90" width="180" height="90" fill="#15171c" opacity="0.94"/>' +
+			'<line x1="0" x2="180" y1="90" y2="90" stroke="#d6935a" stroke-width="1.5"/></g></g>' +
+			'<circle cx="90" cy="90" r="78" fill="none" stroke="#444"/>' +
+			'<text x="16" y="86" fill="#d6935a" font-size="9" font-family="ui-monospace, Consolas, monospace">' + (south ? 'W' : 'E') + '</text>' +
+			'<text x="158" y="86" fill="#d6935a" font-size="9" font-family="ui-monospace, Consolas, monospace">' + (south ? 'E' : 'W') + '</text>';
+		svg.innerHTML = html;
+		var deg = function (v) { return Math.abs(v).toFixed(1) + '° ' + (v >= -0.05 ? 'above' : 'below'); };
+		box.title = 'Sun ' + deg(a) + ' the horizon (highest today ' + Math.max(0, alt(12)).toFixed(1) + '° at 12:00)';
 	}
 
-	// Population: a step line of players over the range, from the sessions.
 	// The graph is a smooth line (see below), drawn at the card's real width
 	// (not stretched) so its
 	// labels keep their shape; it is redrawn when the window is resized.
