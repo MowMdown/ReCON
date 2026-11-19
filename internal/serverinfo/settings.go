@@ -87,8 +87,8 @@ func SaveSettings(s Settings) (Config, error) {
 	}
 	state.Lock()
 	if state.cfg.QueryPort != c.QueryPort {
-		// Another server: forget the last answer and the public IP Steam gave.
-		state.snap, state.steamIP, state.steamIPFor = Snapshot{}, "", 0
+		// Another server: forget the last answer.
+		state.snap = Snapshot{}
 	}
 	state.cfg, saved = c, s
 	state.Unlock()
@@ -120,12 +120,4 @@ func loadSettings() {
 	state.Lock()
 	state.cfg, saved = c, s
 	state.Unlock()
-}
-
-// SteamIP is the public IP Steam gave for the server's Steam ID ("" when it
-// wasn't asked or didn't say).
-func SteamIP() string {
-	state.Lock()
-	defer state.Unlock()
-	return state.steamIP
 }

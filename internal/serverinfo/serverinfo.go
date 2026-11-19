@@ -24,8 +24,7 @@ import (
 )
 
 // Config is where to ask, and what the page needs that the query can't
-// tell: the in-game date and latitude, for sunrise and sunset. The server's
-// public IP comes from Steam only (SteamIP).
+// tell: the in-game date and latitude, for sunrise and sunset.
 type Config struct {
 	QueryPort int
 	// ServerTime is serverDZ.cfg's serverTime: "2000/8/31/06/00"
@@ -93,11 +92,6 @@ var state struct {
 	upID      int64
 	up        bool
 	upFlushed time.Time
-	// The public IP Steam gave for the server's Steam ID (the only source of
-	// it), and when it was asked.
-	steamIP      string
-	steamIPFor   uint64
-	steamIPAsked time.Time
 	// The Workshop IDs last checked with Steam, and when.
 	modsChecked    map[uint64]bool
 	modsCheckedAt  time.Time
@@ -161,10 +155,9 @@ func Refresh() Snapshot {
 	host := queryHost()
 	state.Lock()
 	if host != state.host {
-		// Another server (RCON Settings changed): forget the last answer and
-		// the public IP Steam gave for it.
+		// Another server (RCON Settings changed): forget the last answer.
 		if state.host != "" {
-			state.snap, state.steamIP, state.steamIPFor = Snapshot{}, "", 0
+			state.snap = Snapshot{}
 		}
 		state.host = host
 	}
@@ -195,9 +188,6 @@ func Refresh() Snapshot {
 	state.snap = snap
 	state.Unlock()
 	recordUptime(snap.Answered, now)
-	if snap.Answered {
-		lookUpPublicIP(snap.Info.SteamID, now)
-	}
 	if snap.ModsKnown {
 		checkMods(snap.Mods, now)
 	}
@@ -249,35 +239,6 @@ func FlushUptime(now time.Time) {
 		log.Printf("serverinfo: uptime: %v", err)
 	}
 	state.upFlushed = now
-}
-
-// serverAddress asks Steam for a server's public IP (a var for the tests).
-var serverAddress = steam.ServerAddress
-
-// lookUpPublicIP asks Steam for the public IP of the server with this Steam
-// ID, once (again after an hour if it failed, or if the ID changes).
-func lookUpPublicIP(id uint64, now time.Time) {
-	if id == 0 || steam.APIKey == "" {
-		return
-	}
-	state.Lock()
-	due := state.steamIPFor != id || (state.steamIP == "" && now.Sub(state.steamIPAsked) >= time.Hour)
-	if due {
-		state.steamIPFor, state.steamIPAsked = id, now
-	}
-	state.Unlock()
-	if !due {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	ip, err := serverAddress(ctx, id)
-	if err != nil {
-		log.Printf("serverinfo: public IP from Steam: %v (needs STEAM_API_KEY)", err)
-	}
-	state.Lock()
-	state.steamIP = ip
-	state.Unlock()
 }
 
 // workshopItems asks Steam about mods (a var for the tests).

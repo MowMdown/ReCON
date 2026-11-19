@@ -39,16 +39,6 @@
 .pills { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 .bar { height: 6px; background: #2a2a2a; border-radius: 3px; margin-top: 8px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: #81c995; }
-img.flag { display: inline-block; width: 28px; height: 21px; vertical-align: -2px; margin-right: 6px; border-radius: 2px; }
-/* A plain block like the other boxes (the theme centres flex .card boxes) */
-.card.conn { display: block; }
-.conn .big { font-size: 24px; }
-.conn.copy { cursor: pointer; transition: border-color .15s; }
-.conn.copy:hover { border-color: #8ab4f8; }
-.conn .cp { margin-left: auto; font-weight: 400; letter-spacing: 0; text-transform: none; color: #777; opacity: 0; transition: opacity .15s; }
-.conn.copy.done .cp { opacity: 1; }
-.conn.copy.done { border-color: #81c995; }
-.conn.copy.done .cp { color: #81c995; }
 .daybar { position: relative; height: 10px; border-radius: 5px; margin: 30px 0 42px; }
 /* Sunrise and sunset: a tick through the bar, labelled above it */
 .daybar .tick { position: absolute; top: -4px; width: 2px; height: 18px; background: #ddd; }
@@ -109,7 +99,6 @@ svg.chart { width: 100%; height: 200px; display: block; }
 .empty { color: #888; font-size: 13px; }
 html[data-theme]:not([data-theme="default"]) .card, html[data-theme]:not([data-theme="default"]) .mods a:not(.upd),
 html[data-theme]:not([data-theme="default"]) .seg, html[data-theme]:not([data-theme="default"]) .pill { border-color: var(--color-divider); }
-html[data-theme]:not([data-theme="default"]) .conn.copy:hover { border-color: var(--color-accent); }
 html[data-theme]:not([data-theme="default"]) .bar i { background: var(--color-accent); }
 html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-text, #fff); }
 </style>
@@ -154,20 +143,11 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	</div>
 	<div class="gisub" id="ssub"></div>
 
-	<div class="row r4">
+	<div class="row r3">
 		<div class="card"><h3>Players</h3><div class="big" id="players">-</div><div class="bar"><i id="pbar" style="width:0"></i></div><div class="note" id="queue"></div></div>
 		<div class="card"><h3>In-game time</h3><div class="big" id="gtime">-</div><div class="note" id="gtimenote"></div>
 			<div class="pills"><span class="pill" title="Day speed (serverTimeAcceleration)" id="dayx"></span><span class="pill" id="nightx"></span></div></div>
-		<div class="card"><h3>Server location</h3><div class="big m" id="loc">-</div><div class="note" id="locnote"></div></div>
 		<div class="card"><h3>Uptime</h3><div class="big" id="uptime">-</div><div class="note" id="uptimenote"></div></div>
-	</div>
-
-	<div class="card"><h3>Connect</h3>
-		<div class="row r3">
-			<div class="card conn" id="cip"><div><h3>IP address <span class="cp"></span></h3><div class="big">-</div></div></div>
-			<div class="card conn" id="cgame"><div><h3>Game port <span class="cp"></span></h3><div class="big">-</div></div></div>
-			<div class="card conn" id="cquery"><div><h3>Query port <span class="cp"></span></h3><div class="big">-</div></div></div>
-		</div>
 	</div>
 
 	<div class="card"><h3>Day &amp; night <span class="r note" id="sunnote"></span></h3>
@@ -210,25 +190,6 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	function day(unix) { var d = new Date(unix * 1000); return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 	function ago(iso) { var s = (Date.now() - Date.parse(iso)) / 1000; return s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; }
 	function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-	var countryNames = null;
-	try { countryNames = new Intl.DisplayNames(undefined, { type: 'region' }); } catch (e) { }
-
-	function copyTile(id, value) {
-		var c = $(id);
-		c.querySelector('.big').textContent = value || '-';
-		c.classList.toggle('copy', !!value);
-		c.dataset.copy = value || '';
-	}
-	document.querySelectorAll('.conn').forEach(function (c) {
-		c.addEventListener('click', function () {
-			var v = c.dataset.copy, cp = c.querySelector('.cp');
-			if (!v) return;
-			var done = function () { c.classList.add('done'); cp.textContent = 'copied'; setTimeout(function () { c.classList.remove('done'); cp.textContent = ''; }, 1200); };
-			if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(v).then(done, done);
-			else { var t = document.createElement('textarea'); t.value = v; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); done(); }
-		});
-	});
-
 	function render() {
 		var s = data.server, info = s.info || {}, k = s.keywords || {};
 		var known = !!info.name;
@@ -266,21 +227,6 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		$('nightx').textContent = '☾ ×' + nightSpeed;
 		$('nightx').title = 'Night speed: ×' + dx + ' (serverTimeAcceleration) × ×' + nx + ' (serverNightTimeAcceleration)';
 
-		// Location from GeoIP on the public IP.
-		var loc = $('loc');
-		loc.textContent = '';
-		if (data.country) {
-			var img = el('img', 'flag'); img.src = 'assets/flags/' + data.country + '.svg'; img.alt = '';
-			// The full name, as on the Players page's Steam tab; the code if the browser can't name it.
-			var cname = '';
-			try { cname = countryNames ? countryNames.of(data.country.toUpperCase()) : ''; } catch (e) { }
-			loc.append(img, cname || data.country.toUpperCase());
-			$('locnote').textContent = 'GeoIP on ' + data.connect.ip;
-		} else {
-			loc.textContent = '-';
-			$('locnote').textContent = data.connect.ip ? 'Not in the GeoIP database' : 'Waiting for Steam to give the public IP';
-		}
-
 		if (data.uptime) {
 			$('uptime').innerHTML = '';
 			$('uptime').append(document.createTextNode(data.uptime.percent >= 99.95 ? '100' : data.uptime.percent.toFixed(1).replace(/\.0$/, '')), el('small', '', '%'));
@@ -290,10 +236,6 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			$('uptimenote').textContent = (data.uptime.seenSeconds >= week - 3600 ? 'last 7 days' : 'over ' + span(data.uptime.seenSeconds) + ' so far') +
 				' · down ' + span(data.uptime.downSeconds);
 		} else { $('uptime').textContent = '-'; $('uptimenote').textContent = 'not measured yet'; }
-
-		copyTile('cip', data.connect.ip);
-		copyTile('cgame', data.connect.gamePort ? String(data.connect.gamePort) : '');
-		copyTile('cquery', String(data.connect.queryPort));
 
 		// Day and night: 24 game hours, sunrise and sunset ticks, the time marker.
 		var bar = $('daybar');

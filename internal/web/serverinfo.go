@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/MowMdown/ReCON/internal/geoip"
 	"github.com/MowMdown/ReCON/internal/serverinfo"
 )
 
@@ -28,8 +27,6 @@ func handleServerInfo(w http.ResponseWriter, r *http.Request) {
 	snap, cfg := serverinfo.Current()
 	now := time.Now()
 	out := map[string]any{"ok": true, "server": snap,
-		"connect":   map[string]any{"ip": serverinfo.SteamIP(), "gamePort": snap.Info.GamePort, "queryPort": cfg.QueryPort},
-		"country":   geoip.Country(serverinfo.SteamIP()),
 		"sun":       serverinfo.SunFor(cfg, snap.Info.Map, now),
 		"modsKnown": snap.ModsKnown,
 	}

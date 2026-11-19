@@ -67,28 +67,3 @@ func WorkshopItems(ctx context.Context, ids []uint64) (map[uint64]WorkshopItem, 
 	}
 	return out, nil
 }
-
-// ServerAddress asks Steam for a game server's public address ("1.2.3.4"),
-// by the Steam ID it gives in its query answer. Needs STEAM_API_KEY.
-func ServerAddress(ctx context.Context, serverSteamID uint64) (string, error) {
-	if APIKey == "" {
-		return "", fmt.Errorf("no STEAM_API_KEY")
-	}
-	var out struct {
-		Response struct {
-			Servers []struct {
-				Addr string `json:"addr"`
-			} `json:"servers"`
-		} `json:"response"`
-	}
-	q := url.Values{"server_steamids": {strconv.FormatUint(serverSteamID, 10)}}
-	if err := callSteamAPI(ctx, "/IGameServersService/GetServerIPsBySteamID/v1/", q, &out); err != nil {
-		return "", err
-	}
-	for _, s := range out.Response.Servers {
-		if host, _, ok := strings.Cut(s.Addr, ":"); ok && host != "" {
-			return host, nil
-		}
-	}
-	return "", fmt.Errorf("steam doesn't list server %d", serverSteamID)
-}

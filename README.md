@@ -149,8 +149,7 @@ The picker at the top right sets the look: **Default** (the plain look, what a b
 The page ReCON opens on. Every 5 seconds ReCON asks the game server what it tells Steam's server browser (the query port, `QUERY_PORT`), so it shows the same things a server list does, and adds what ReCON has recorded itself:
 
 - **The server:** name, map, 1PP or 3PP, version, BattlEye, and whether it is answering (a red dot and "Not answering" when it isn't, with the last answer still shown).
-- **Players** and the queue, **in-game time** with the day and night speeds (☀ ×2, and ☾ ×8: the night speed is the day speed times `serverNightTimeAcceleration`), the server's **location** (GeoIP on its public IP, which Steam gives for the Steam ID in the query's answer; needs `STEAM_API_KEY`) and **uptime** over the last 7 days (of the time ReCON was running).
-- **Connect:** the IP, game port and query port. Click one to copy it (it shows "copied").
+- **Players** and the queue, **in-game time** with the day and night speeds (☀ ×2, and ☾ ×8: the night speed is the day speed times `serverNightTimeAcceleration`) and **uptime** over the last 7 days (of the time ReCON was running).
 - **Day & night:** a bar of the 24 in-game hours (marked every hour, labelled every 4) with sunrise, sunset and the current time; how long until sunset and sunrise in real time, and how long a day and a night last. Beside it, a **sky** circle: the horizon, the sun's path through the game day, the sun at its height now and the moon opposite it (hover for the angles). DayZ multiplies the night speed by the day speed, so a 10-hour night at ×2 and ×4 lasts 1h 15m. Sunrise and sunset are worked out from the date in `SERVER_TIME` (as in `serverDZ.cfg`) and the map's latitude, with the standard sunrise equation; the in-game date moves on as days pass, but sunrise only shifts a few minutes a week. For a map other than Chernarus, set `SERVER_LATITUDE` (it defaults to 45°N). Near the poles it shows midnight sun or polar night.
 - **Population:** players online over the last day, 7 days, 2 weeks, month or all time, as a smooth line (the average in short slices of time), with the peak, average, different players and sessions over 7 days. It comes from the session history, so it is exact, and it has history from the first day ReCON recorded.
 - **Peak hours:** the average number of players for each weekday and hour over the last 4 weeks, in your browser's time zone.
@@ -158,7 +157,7 @@ The page ReCON opens on. Every 5 seconds ReCON asks the game server what it tell
 
 The page is live: ReCON asks the server every 5 seconds and the page updates as often; the graphs every minute.
 
-**Settings** (under the title) sets the same things as the container's `QUERY_PORT`, `SERVER_TIME` and `SERVER_LATITUDE`. Empty fields use the container's values, shown greyed out. The query always goes to the RCON host, and the public IP always comes from Steam. **Save** checks the values (nothing changes if one is wrong), keeps them in the database so they survive restarts, and asks the server at once: the top of the dialog says whether it answers on that port.
+**Settings** (under the title) sets the same things as the container's `QUERY_PORT`, `SERVER_TIME` and `SERVER_LATITUDE`. Empty fields use the container's values, shown greyed out. The query always goes to the RCON host. **Save** checks the values (nothing changes if one is wrong), keeps them in the database so they survive restarts, and asks the server at once: the top of the dialog says whether it answers on that port.
 
 ### Players: `/players`
 
@@ -596,7 +595,7 @@ curl -X POST http://<host>:8080/api/flows/3/run \
 
 | Method | Path | Body | Description |
 | ------ | ---- | ---- | ----------- |
-| GET  | `/api/server` | | The server's latest answer (name, map, players, keywords, mods), connect details, uptime, 7-day stats, mods with Steam's updates |
+| GET  | `/api/server` | | The server's latest answer (name, map, players, keywords, mods), sunrise and sunset, uptime, 7-day stats, mods with Steam's updates |
 | POST | `/api/server/refresh` | | Ask the server now, then the same as `GET /api/server` |
 | GET  | `/api/server/population` | `?range=1d`, `7d`, `2w`, `1m` or `all` | Players online over time, as steps |
 | GET  | `/api/server/busiest` | `?tz=America/New_York` | Average players per weekday and hour over the last 4 weeks |
