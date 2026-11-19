@@ -29,8 +29,8 @@ func handleServerInfo(w http.ResponseWriter, r *http.Request) {
 	snap, cfg := serverinfo.Current()
 	now := time.Now()
 	out := map[string]any{"ok": true, "server": snap,
-		"connect":   map[string]any{"ip": cfg.PublicIP, "gamePort": snap.Info.GamePort, "queryPort": cfg.QueryPort},
-		"country":   geoip.Country(cfg.PublicIP),
+		"connect":   map[string]any{"ip": serverinfo.SteamIP(), "gamePort": snap.Info.GamePort, "queryPort": cfg.QueryPort},
+		"country":   geoip.Country(serverinfo.SteamIP()),
 		"sun":       serverinfo.SunFor(cfg, snap.Info.Map, now),
 		"modsKnown": snap.ModsKnown,
 	}
@@ -163,19 +163,10 @@ func serverSettingsView() map[string]any {
 	if !math.IsNaN(def.Latitude) {
 		lat = strconv.FormatFloat(def.Latitude, 'f', -1, 64)
 	}
-	// An empty Public IP uses the container's, else the one Steam gave for
-	// the server; until Steam has answered, say that is where it comes from.
-	ip := def.PublicIP
-	if ip == "" {
-		ip = serverinfo.SteamIP()
-	}
-	if ip == "" {
-		ip = "Queried from Steam"
-	}
 	snap, cfg := serverinfo.Current()
 	return map[string]any{"ok": true, "settings": serverinfo.SavedSettings(),
 		"defaults": map[string]any{"queryHost": def.QueryHost, "queryPort": strconv.Itoa(def.QueryPort),
-			"publicIp": ip, "serverTime": def.ServerTime, "latitude": lat},
+			"serverTime": def.ServerTime, "latitude": lat},
 		"address": net.JoinHostPort(cfg.QueryHost, strconv.Itoa(cfg.QueryPort)), "answered": snap.Answered, "error": snap.Error}
 }
 
@@ -185,7 +176,7 @@ func handleServerSettingsGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleServerSettingsSave serves POST /api/server/settings {queryHost,
-// queryPort, publicIp, serverTime, latitude}: empty fields use the
+// queryPort, serverTime, latitude}: empty fields use the
 // container's values. It saves them (nothing changes if one is wrong) and
 // asks the server at once, so the answer says whether it replies.
 func handleServerSettingsSave(w http.ResponseWriter, r *http.Request) {

@@ -271,21 +271,17 @@ func TestBusiest(t *testing.T) {
 }
 
 func TestConfigFromEnv(t *testing.T) {
-	for _, k := range []string{"QUERY_HOST", "QUERY_PORT", "SERVER_IP", "SERVER_TIME", "SERVER_LATITUDE"} {
+	for _, k := range []string{"QUERY_HOST", "QUERY_PORT", "SERVER_TIME", "SERVER_LATITUDE"} {
 		t.Setenv(k, "")
 	}
 	c := ConfigFromEnv("127.0.0.1")
-	if c.QueryHost != "127.0.0.1" || c.QueryPort != 27016 || c.PublicIP != "" || c.ServerTime != "SystemTime" || !math.IsNaN(c.Latitude) {
+	if c.QueryHost != "127.0.0.1" || c.QueryPort != 27016 || c.ServerTime != "SystemTime" || !math.IsNaN(c.Latitude) {
 		t.Errorf("defaults: %+v", c)
 	}
-	if c := ConfigFromEnv("173.27.253.74"); c.PublicIP != "173.27.253.74" {
-		t.Errorf("a public RCON host isn't the public IP: %+v", c)
-	}
 	t.Setenv("QUERY_PORT", "27017")
-	t.Setenv("SERVER_IP", "203.0.113.5")
 	t.Setenv("SERVER_TIME", "2000/8/31/06/00")
 	t.Setenv("SERVER_LATITUDE", "66.5")
-	if c := ConfigFromEnv("127.0.0.1"); c.QueryPort != 27017 || c.PublicIP != "203.0.113.5" || c.ServerTime != "2000/8/31/06/00" || c.Latitude != 66.5 {
+	if c := ConfigFromEnv("127.0.0.1"); c.QueryPort != 27017 || c.ServerTime != "2000/8/31/06/00" || c.Latitude != 66.5 {
 		t.Errorf("set: %+v", c)
 	}
 	t.Setenv("SERVER_TIME", "2000/2/31/06/00")
@@ -361,16 +357,16 @@ func TestSettings(t *testing.T) {
 	if _, c := Current(); c.QueryPort != 27016 {
 		t.Errorf("a refused save changed the port to %d", c.QueryPort)
 	}
-	for _, bad := range []Settings{{PublicIP: "nope"}, {ServerTime: "2000/13/1/06/00"}, {Latitude: "95"}, {QueryHost: "a b"}} {
+	for _, bad := range []Settings{{ServerTime: "2000/13/1/06/00"}, {Latitude: "95"}, {QueryHost: "a b"}} {
 		if _, err := SaveSettings(bad); err == nil {
 			t.Errorf("%+v accepted", bad)
 		}
 	}
-	if _, err := SaveSettings(Settings{QueryPort: "27017", PublicIP: "173.27.253.74", ServerTime: "2000/12/21/08/00", Latitude: "66.56"}); err != nil {
+	if _, err := SaveSettings(Settings{QueryPort: "27017", ServerTime: "2000/12/21/08/00", Latitude: "66.56"}); err != nil {
 		t.Fatal(err)
 	}
 	_, c := Current()
-	if c.QueryHost != "10.0.1.174" || c.QueryPort != 27017 || c.PublicIP != "173.27.253.74" || c.ServerTime != "2000/12/21/08/00" || c.Latitude != 66.56 {
+	if c.QueryHost != "10.0.1.174" || c.QueryPort != 27017 || c.ServerTime != "2000/12/21/08/00" || c.Latitude != 66.56 {
 		t.Errorf("after saving: %+v", c)
 	}
 	// A restart: the container's config again, then what was saved.
@@ -388,8 +384,8 @@ func TestSettings(t *testing.T) {
 	}
 }
 
-// TestPublicIPFromSteam checks that with no public IP set, the one Steam
-// gives for the server's Steam ID is used, and only asked for once.
+// TestPublicIPFromSteam checks that the public IP is the one Steam gives for
+// the server's Steam ID, asked for once.
 func TestPublicIPFromSteam(t *testing.T) {
 	asked := 0
 	serverAddress = func(ctx context.Context, id uint64) (string, error) { asked++; return "173.27.253.74", nil }
@@ -403,7 +399,7 @@ func TestPublicIPFromSteam(t *testing.T) {
 	state.cfg = Config{QueryHost: "10.0.1.174", QueryPort: 27016}
 	lookUpPublicIP(90297760921309191, time.Now())
 	lookUpPublicIP(90297760921309191, time.Now())
-	if _, c := Current(); c.PublicIP != "173.27.253.74" || SteamIP() != "173.27.253.74" || asked != 1 {
-		t.Errorf("public IP %q, Steam asked %d times", c.PublicIP, asked)
+	if SteamIP() != "173.27.253.74" || asked != 1 {
+		t.Errorf("public IP %q, Steam asked %d times", SteamIP(), asked)
 	}
 }
