@@ -5,6 +5,13 @@
 #   pre-release v1.3.0-rc1             ->  :v1.3.0-rc1, :testing and :<commit sha>
 #   ("Set as a pre-release" ticked)
 #
+# A second image has recon-mod's Live Map built in (--build-arg
+# RECON_MOD=true, from ReCON-Mod's main), when the release's code can take
+# it (cmd/recon/_mod exists):
+#
+#   release v1.2.0                     ->  :v1.2.0-mod and :mod
+#   pre-release v1.3.0-rc1             ->  :v1.3.0-rc1-mod and :testing-mod
+#
 # Releases whose tag doesn't start with "v" (table-v1 and the like) are skipped.
 
 name: Build and Publish Docker Image
@@ -45,6 +52,15 @@ jobs:
               echo "${image}:latest"
             fi
             echo "EOF"
+            echo "MOD_TAGS<<EOF"
+            echo "${image}:${TAG}-mod"
+            if [ "$PRERELEASE" = "true" ]; then
+              echo "${image}:testing-mod"
+            else
+              echo "${image}:mod"
+            fi
+            echo "EOF"
+            if [ -f cmd/recon/_mod/recon_mod.go ]; then echo "WITH_MOD=true"; else echo "WITH_MOD=false"; fi
           } >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
@@ -63,3 +79,13 @@ jobs:
           context: .
           push: true
           tags: ${{ env.TAGS }}
+
+      - name: Build and publish the image with recon-mod
+        if: env.WITH_MOD == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          build-args: |
+            RECON_MOD=true
+          tags: ${{ env.MOD_TAGS }}

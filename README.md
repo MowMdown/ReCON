@@ -98,6 +98,8 @@ docker build --build-arg RECON_MOD=true -t recon:mod .
 docker build --build-arg RECON_MOD=true --build-arg RECON_MOD_REF=v0.1.0 -t recon:mod .
 ```
 
+Published images: a release builds plain ReCON (`:v1.2.0`, `:latest`; a pre-release `:testing`) and, when its code has the add-on hook, ReCON with recon-mod (`:v1.2.0-mod`, `:mod`; a pre-release `:testing-mod`).
+
 Without Docker: `cp cmd/recon/_mod/recon_mod.go cmd/recon/ && go get github.com/MowMdown/ReCON-Mod@latest && go build ./cmd/recon` (don't commit the copy or the go.mod change). The mod's setup, the page and its API are in ReCON-Mod's README.
 
 ### Updating
