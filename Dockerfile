@@ -11,6 +11,17 @@ COPY go.sum* ./
 COPY cmd ./cmd
 COPY internal ./internal
 
+# --build-arg RECON_MOD=true builds in recon-mod's panel (the Live Map page
+# and the API the DayZ mod talks to, github.com/MowMdown/ReCON-Mod), from
+# RECON_MOD_REF (a branch, tag or commit). Without it ReCON has none of it.
+ARG RECON_MOD=false
+ARG RECON_MOD_REF=main
+RUN if [ "$RECON_MOD" = "true" ]; then \
+      apk add --no-cache git && \
+      cp cmd/recon/_mod/recon_mod.go cmd/recon/ && \
+      go get github.com/MowMdown/ReCON-Mod@"$RECON_MOD_REF"; \
+    fi
+
 RUN go mod tidy
 
 RUN CGO_ENABLED=0 GOOS=linux \

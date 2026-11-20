@@ -195,7 +195,7 @@ html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { backgrou
 {{template "theme" .}}
 </head>
 <body>
-<nav><a href="/server">Server Info</a><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav>{{template "navlinks" "players"}}<a href="#" id="resetCols">Reset columns</a></nav>
 {{template "statusbar" .}}
 <div class="top">
 	<h1>DayZ Players</h1>
@@ -1810,6 +1810,16 @@ document.addEventListener('keydown', (e) => {
 
 refresh();
 setInterval(refresh, 5000);
+
+// /players#details=<guid> opens that player's Details (links from other
+// pages, such as an add-on's).
+(function () {
+	let m = /^#details=([0-9a-fA-F]{32})$/.exec(location.hash);
+	if (m) {
+		history.replaceState(null, '', location.pathname + location.search);
+		openDetails(m[1].toLowerCase());
+	}
+})();
 </script>
 {{template "reorder" .}}
 </body>

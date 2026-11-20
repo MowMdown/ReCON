@@ -61,7 +61,7 @@ html[data-theme]:not([data-theme="default"]) table.vars th, html[data-theme]:not
 {{template "theme" .}}
 </head>
 <body>
-<nav><a href="/server">Server Info</a><a href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a></nav>
+<nav>{{template "navlinks" ""}}</nav>
 {{template "statusbar" .}}
 <div class="top"><h1>Developer</h1></div>
 <p class="devnote">Every player and everything ReCON holds about them, raw: <b>flow</b> is what each flow {variable} would be right now, <b>memory</b> is what ReCON keeps while it runs, <b>db</b> is every row in players.db, <b>ext</b> is the Steam cache and GeoIP. Nothing is trimmed. Read only; press Refresh to read it again.</p>

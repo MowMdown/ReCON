@@ -88,6 +88,18 @@ Then open `http://<host>:8080` (it goes to the Players page).
 
 Run one ReCON container per game server. Copy the service and give each copy its own service and container name, `RCON_PORT`, password, data folder and host port. Each container keeps its own database.
 
+### With recon-mod (optional)
+
+[ReCON-Mod](https://github.com/MowMdown/ReCON-Mod) is a DayZ server-side mod that sends ReCON every player's live state (position, health, stats) every second and runs actions on them and on the weather and time. ReCON shows it on a **Live Map** page. None of it is in a plain build: build with `RECON_MOD=true` to add it.
+
+```bash
+docker build --build-arg RECON_MOD=true -t recon:mod .
+# a branch, tag or commit of ReCON-Mod other than main:
+docker build --build-arg RECON_MOD=true --build-arg RECON_MOD_REF=v0.1.0 -t recon:mod .
+```
+
+Without Docker: `cp cmd/recon/_mod/recon_mod.go cmd/recon/ && go get github.com/MowMdown/ReCON-Mod@latest && go build ./cmd/recon` (don't commit the copy or the go.mod change). The mod's setup, the page and its API are in ReCON-Mod's README.
+
 ### Updating
 
 The Go code is compiled into the image, so pull the new code and rebuild:
@@ -603,29 +615,6 @@ curl -X POST http://<host>:8080/api/flows/3/run \
 | POST | `/api/server/settings` | `{"queryPort", "serverTime", "latitude"}` | Save them (empty: the container's value) and ask the server |
 | POST | `/api/server/mods/<workshop id>/ack` | | Acknowledge a mod's update on Steam |
 
-### recon-mod
-
-[ReCON-Mod](https://github.com/MowMdown/ReCON-Mod) is a DayZ server-side mod, built on CF. Every second it posts every online player's live state to ReCON: position, health, blood, shock, food, water, heat, bleeding, illnesses, the item in hand, the vehicle they're in, and their kills and deaths. ReCON's reply carries the actions to run. The mod proves it is your server with the RCON password, which it reads from BattlEye's config or from its own settings. ReCON stores every death the mod reports, and while the mod is connected, Server Info takes the in-game date from it rather than from `SERVER_TIME`.
-
-| Method | Path | Body | Description |
-| ------ | ---- | ---- | ----------- |
-| POST | `/api/mod/sync` | the mod's sync | Used by the mod only: player data in, commands out (403 with the wrong password) |
-| GET  | `/api/mod/players` | | `mod` (`connected`, `lastSync`, `world`, in-game `date`), every online player's live state with their `guid`, and the recent commands |
-| GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills`, and the commands sent to them |
-| POST | `/api/mod/players/<guid>/<action>` | see below | Queue an action. The mod runs it on its next sync; its `status` (`queued`, `sent`, `done`, `failed`, `expired`) shows in the commands |
-| POST | `/api/mod/world/<action>` | see below | Queue a weather or time change, the same way |
-
-Actions: `heal` (full health, blood, shock, food and water; stops bleeding, cures illnesses, mends broken legs), `kill`, `teleport` `{"x", "z", "y"}` (`y` 0 = ground level), `teleportTo` `{"target": "<guid>"}`, `set` `{"stat": "health|blood|shock|water|energy|stamina|heatBuffer", "value"}`, `message` `{"text", "title", "seconds"}`. A command the mod hasn't answered within 30 seconds expires.
-
-World actions, modelled on Community Online Tools' weather module (`mod.weather` in `/api/mod/players` shows the weather now and where it is heading):
-
-- `weather` `{"stat", "value", "transition", "hold"}`: `stat` is `overcast`, `rain`, `fog`, `snow` (0 to 1), `windSpeed` (m/s) or `windDir` (degrees). It changes to `value` over `transition` seconds and stays at least `hold` seconds.
-- `weatherMode` `{"text"}`: `world` (the map's weather rules), `forecast` (only what was set) or `static` (frozen as it is).
-- `storm` `{"value", "min", "hold"}`: lightning density (0 to 1), the overcast it starts at, and the seconds between strikes.
-- `rainThresholds` `{"min", "max", "transition"}`: the overcast range rain falls in, and the seconds it takes to stop.
-- `date` `{"year", "month", "day", "hour", "minute"}`: the in-game date and time.
-- `freezeTime` `{"value"}`: 1 stops the in-game clock, 0 starts it again.
-
 ### Status
 
 `GET /health` returns `{"ok": true}`. `GET /api/status` returns the RCON state the pages show: `{"ok": true, "rcon": "connected"}` (or `retrying` / `unavailable`, with `"waiting": true` while ReCON waits for the server to answer its login, otherwise `retryInMs` until the next try).
@@ -647,7 +636,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 
 | Path | Contents |
 | ---- | -------- |
-| `cmd/recon/` | Startup (wiring the packages together) and the command-line tool |
+| `cmd/recon/` | Startup (wiring the packages together) and the command-line tool; `addons.go` starts the add-ons built in, and `_mod/` holds recon-mod's, copied in only for a build with it (Go skips folders starting with `_`) |
 | `internal/battleye/` | The BattlEye RCON protocol: packets, login, sessions, parsing server messages and replies, kickall |
 | `internal/game/` | The live game server and what ReCON mirrors from it: the web session, RCON settings, the console log and the server watch (`session.go`); who is online and their sessions, kept across a server restart for players back from the same IP within 5 minutes, and chat history (`players.go`); the ban list kept in step with BattlEye's, placing bans, export/import (`bans.go`) |
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
@@ -655,7 +644,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/geoip/` | Where an IP is (country for the flags, city and point for the IP map), from MaxMind's GeoLite2-City database, and downloading it |
 | `internal/serverinfo/` | The Server Info page's data: Steam's server query (A2S) and DayZ's keywords and mod list, uptime, population and peak hours, and mod updates from the Steam Workshop |
 | `internal/store/` | The SQLite database: every SQL statement |
-| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), the favicons and app icons (`assets/icons/`) and the country flags (`assets/flags/`), both embedded into the binary at build time |
+| `internal/web/` | HTTP routes, the JSON API and page rendering (`addons.go`: the hooks an add-on adds its pages, routes and nav links with); `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), the favicons and app icons (`assets/icons/`) and the country flags (`assets/flags/`), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |
 | `examples/flows.json` | Example flows to import |
 | `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |

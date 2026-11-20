@@ -105,7 +105,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 {{template "theme" .}}
 </head>
 <body>
-<nav><a class="active" href="/server">Server Info</a><a href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a></nav>
+<nav>{{template "navlinks" "server"}}</nav>
 {{template "statusbar" .}}
 <div class="top"><h1>Server Info</h1></div>
 <div class="toolbar">
