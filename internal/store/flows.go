@@ -13,8 +13,7 @@ import (
 //
 // Columns: script holds the steps as JSON, cancel the When stopped steps,
 // timer the delay before step 1, schedule the trigger ("manual", "on-join",
-// "on-chat" or a cron expression; see the flows package), and
-// counter_threshold the flow's {threshold}.
+// "on-chat" or a cron expression; see the flows package).
 const flowsTableSQL = `CREATE TABLE %s (
 	id INTEGER PRIMARY KEY,
 	name TEXT NOT NULL UNIQUE,
@@ -23,8 +22,7 @@ const flowsTableSQL = `CREATE TABLE %s (
 	timer TEXT NOT NULL DEFAULT '',
 	schedule TEXT NOT NULL DEFAULT '',
 	schedule_enabled INTEGER NOT NULL DEFAULT 0,
-	position INTEGER NOT NULL DEFAULT 0,
-	counter_threshold INTEGER NOT NULL DEFAULT 0
+	position INTEGER NOT NULL DEFAULT 0
 )`
 
 // EnsureFlowsTable creates the flows table if it doesn't exist yet (a new
@@ -42,8 +40,8 @@ func (db *Database) EnsureFlowsTable() error {
 		return err
 	}
 	if !strings.Contains(strings.ToUpper(existing), "AUTOINCREMENT") {
-		if !strings.Contains(existing, "counter_threshold") { // added with flow counters
-			_, err = db.Exec("ALTER TABLE flows ADD COLUMN counter_threshold INTEGER NOT NULL DEFAULT 0")
+		if strings.Contains(existing, "counter_threshold") { // flow counters, since removed
+			_, err = db.Exec("ALTER TABLE flows DROP COLUMN counter_threshold")
 		}
 		return err
 	}
@@ -71,22 +69,21 @@ func (db *Database) EnsureFlowsTable() error {
 // and When stopped steps as JSON; Schedule is "manual", "on-join",
 // "on-chat" or a cron expression; Delay is the time before step 1 as typed.
 type FlowRecord struct {
-	ID               int64
-	Name             string
-	Script, Cancel   string
-	Delay            string
-	Schedule         string
-	Enabled          bool
-	CounterThreshold int
+	ID             int64
+	Name           string
+	Script, Cancel string
+	Delay          string
+	Schedule       string
+	Enabled        bool
 }
 
 // flowColumns and scanFlow read one flows row.
-const flowColumns = "id, name, script, cancel, timer, schedule, schedule_enabled, counter_threshold"
+const flowColumns = "id, name, script, cancel, timer, schedule, schedule_enabled"
 
 func scanFlow(sc interface{ Scan(...any) error }) (FlowRecord, error) {
 	var r FlowRecord
 	var en int
-	err := sc.Scan(&r.ID, &r.Name, &r.Script, &r.Cancel, &r.Delay, &r.Schedule, &en, &r.CounterThreshold)
+	err := sc.Scan(&r.ID, &r.Name, &r.Script, &r.Cancel, &r.Delay, &r.Schedule, &en)
 	r.Enabled = en != 0
 	return r, err
 }
@@ -125,24 +122,23 @@ func (db *Database) SaveStoredFlow(r FlowRecord, isNew bool) (int64, error) {
 	if isNew {
 		// One statement, so two flows saved at once can't take the same number.
 		res, err := db.Exec(`
-			INSERT INTO flows (id, name, script, cancel, timer, schedule, schedule_enabled, position, counter_threshold)
+			INSERT INTO flows (id, name, script, cancel, timer, schedule, schedule_enabled, position)
 			VALUES (
 				(SELECT CASE
 					WHEN NOT EXISTS (SELECT 1 FROM flows WHERE id = 0) THEN 0
 					ELSE (SELECT MIN(f.id) + 1 FROM flows f WHERE NOT EXISTS (SELECT 1 FROM flows g WHERE g.id = f.id + 1))
 				END),
 				?, ?, ?, ?, ?, ?,
-				(SELECT COALESCE(MAX(position), 0) + 1 FROM flows),
-				?
+				(SELECT COALESCE(MAX(position), 0) + 1 FROM flows)
 			)`,
-			r.Name, r.Script, r.Cancel, r.Delay, r.Schedule, en, r.CounterThreshold)
+			r.Name, r.Script, r.Cancel, r.Delay, r.Schedule, en)
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
-	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, schedule = ?, schedule_enabled = ?, counter_threshold = ? WHERE id = ?",
-		r.Name, r.Script, r.Cancel, r.Delay, r.Schedule, en, r.CounterThreshold, r.ID)
+	res, err := db.Exec("UPDATE flows SET name = ?, script = ?, cancel = ?, timer = ?, schedule = ?, schedule_enabled = ? WHERE id = ?",
+		r.Name, r.Script, r.Cancel, r.Delay, r.Schedule, en, r.ID)
 	if err != nil {
 		return 0, err
 	}

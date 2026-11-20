@@ -71,9 +71,6 @@ type Flow struct {
 	Delay  string `json:"delay"`
 	Steps  []Step `json:"steps"`
 	OnStop []Step `json:"onStop"`
-	// CounterThreshold is {threshold}: what the flow's per-player
-	// counters are compared to (1 to maxCounterThreshold), or 0 for none.
-	CounterThreshold int `json:"counterThreshold"`
 	// ScheduleEnabled turns the trigger on (schedule, join and chat flows).
 	ScheduleEnabled bool   `json:"scheduleEnabled"`
 	NextRun         string `json:"nextRun,omitempty"` // for the page, not stored
@@ -146,7 +143,7 @@ func flowFromRow(f *Flow, script, cancel string) {
 // flowFromRecord turns a flows row into a Flow (see flowFromRow).
 func flowFromRecord(r store.FlowRecord) Flow {
 	f := Flow{ID: r.ID, Name: r.Name, Delay: r.Delay, Schedule: r.Schedule,
-		ScheduleEnabled: r.Enabled, CounterThreshold: r.CounterThreshold}
+		ScheduleEnabled: r.Enabled}
 	flowFromRow(&f, r.Script, r.Cancel)
 	return f
 }
@@ -247,10 +244,7 @@ func checkFlowDefinition(f Flow) error {
 	if _, err := flowDelaySeconds(f); err != nil {
 		return err
 	}
-	if f.CounterThreshold < 0 || f.CounterThreshold > maxCounterThreshold {
-		return fmt.Errorf("Counter threshold: leave it empty, or enter a whole number from 1 to %d", maxCounterThreshold)
-	}
-	return checkFlowSteps(f.Trigger, f.CounterThreshold, f.Steps, f.OnStop)
+	return checkFlowSteps(f.Trigger, f.Steps, f.OnStop)
 }
 
 // Init creates the flows table (empty on a new database) and logs any
@@ -349,7 +343,7 @@ func Save(f Flow, isNew bool) (int64, error) {
 	f.Schedule = storedScheduleText(f)
 	f.ScheduleEnabled = !isNew && f.Trigger != triggerManual && old.ScheduleEnabled
 	id, err := database.SaveStoredFlow(store.FlowRecord{ID: f.ID, Name: f.Name, Script: stepsJSON(f.Steps), Cancel: stepsJSON(f.OnStop),
-		Delay: f.Delay, Schedule: f.Schedule, Enabled: f.ScheduleEnabled, CounterThreshold: f.CounterThreshold}, isNew)
+		Delay: f.Delay, Schedule: f.Schedule, Enabled: f.ScheduleEnabled}, isNew)
 	if err != nil {
 		return 0, errors.New("could not save (is the name already used?)")
 	}
@@ -434,10 +428,7 @@ func (c *stepChecker) fail(msg string) error { return fmt.Errorf("%s %d: %s", c.
 func (c *stepChecker) tokensOK(text string) error {
 	for _, m := range tokenRe.FindAllStringSubmatch(text, -1) {
 		need, ok := flowTokens[m[1]]
-		if need == needThreshold && !c.has[need] {
-			return c.fail(m[0] + " " + needText[need])
-		}
-		if ok && need != needNothing && need != needThreshold && !c.has[need] {
+		if ok && need != needNothing && !c.has[need] {
 			return c.fail(m[0] + " " + needText[need])
 		}
 	}
@@ -521,7 +512,7 @@ func (c *stepChecker) checkForEach(s *Step, depth int) error {
 		return c.fail("pick what For each goes through: player or message")
 	}
 	outer := c.has
-	c.has = map[string]bool{needNothing: true, needPlayer: true, needChat: true, needThreshold: outer[needThreshold]}
+	c.has = map[string]bool{needNothing: true, needPlayer: true, needChat: true}
 	c.inLoop = true
 	err := c.checkStepList(s.Steps, depth+1)
 	c.has, c.inLoop = outer, false
@@ -553,10 +544,6 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 			return fmt.Errorf("%s %d: pick an operator", c.where, num)
 		}
 		switch {
-		case sub.kind == "num" && strings.TrimSpace(b.Value) == counterThresholdToken:
-			if !c.has[needThreshold] {
-				return fmt.Errorf("%s %d: %s %s", c.where, num, counterThresholdToken, needText[needThreshold])
-			}
 		case sub.kind == "num" || first == "player_id":
 			if _, err := strconv.Atoi(strings.TrimSpace(b.Value)); err != nil {
 				return fmt.Errorf("%s %d: Enter a whole number", c.where, num)
@@ -575,18 +562,6 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 			}
 		}
 	}
-	counters := []string{s.ElseCounter}
-	for _, b := range s.Branches {
-		counters = append(counters, b.Counter)
-	}
-	for _, op := range counters {
-		if _, ok := counterOps[op]; !ok {
-			return fmt.Errorf("%s %d: pick what the counter does: 0, ++, -- or reset", c.where, num)
-		}
-		if op != "" && !c.has[needPlayer] {
-			return fmt.Errorf("%s %d: the counter is kept for each player, so it needs a player: use it inside a For each, or with the On join or Player message trigger", c.where, num)
-		}
-	}
 	for _, l := range branchLists(s) {
 		if err := c.checkStepList(l, depth+1); err != nil {
 			return err
@@ -596,9 +571,9 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 }
 
 // checkFlowSteps validates a flow's steps and its When stopped steps for its
-// trigger and Counter threshold (0: none). When stopped takes every kind of
+// trigger. When stopped takes every kind of
 // step, with the same rules. Errors name the step as the page numbers them.
-func checkFlowSteps(trigger string, threshold int, steps, onStop []Step) error {
+func checkFlowSteps(trigger string, steps, onStop []Step) error {
 	if len(steps) == 0 {
 		return errors.New("add at least one step")
 	}
@@ -606,7 +581,6 @@ func checkFlowSteps(trigger string, threshold int, steps, onStop []Step) error {
 		return fmt.Errorf("a flow can have %d steps at most", maxSteps)
 	}
 	c := &stepChecker{has: triggerHas(trigger), where: "Step"}
-	c.has[needThreshold] = threshold > 0
 	if err := c.checkStepList(steps, 0); err != nil {
 		return err
 	}
@@ -614,7 +588,6 @@ func checkFlowSteps(trigger string, threshold int, steps, onStop []Step) error {
 		return errors.New("only Schedule and Manual flows have When stopped steps")
 	}
 	s := &stepChecker{has: triggerHas(trigger), where: "When stopped, step"}
-	s.has[needThreshold] = threshold > 0
 	return s.checkStepList(onStop, 0)
 }
 
@@ -656,8 +629,6 @@ func (x *job) placeholderValue(name string) (string, bool) {
 	switch name {
 	case "players_online":
 		return strconv.Itoa(len(onlineNow())), true
-	case "threshold":
-		return strconv.Itoa(x.run.counterThreshold), true
 	}
 	if x.p == nil {
 		return "", false
@@ -680,8 +651,6 @@ func (x *job) placeholderValue(name string) (string, bool) {
 		return RoleName(x.p.role), true
 	case "message":
 		return x.p.message, true
-	case "counter":
-		return strconv.Itoa(x.run.counterOf(x.p.GUID)), true
 	case "player_vac_bans", "player_game_bans", "player_days_since_last_ban":
 		b, ok := steamBanRecord(x.ctx, x.p.GUID)
 		switch {
@@ -849,11 +818,7 @@ func (x *job) execFlowSteps(list []Step) bool {
 			ran := false
 			for k, b := range s.Branches {
 				v, _ := x.ifSubjectValue(b.Subject)
-				cmp := b
-				if strings.TrimSpace(cmp.Value) == counterThresholdToken {
-					cmp.Value = strconv.Itoa(x.run.counterThreshold)
-				}
-				ok := evaluateIfCondition(cmp, v)
+				ok := evaluateIfCondition(b, v)
 				word := "If "
 				if k > 0 {
 					word = "Else if "
@@ -864,7 +829,6 @@ func (x *job) execFlowSteps(list []Step) bool {
 					x.run.logf("%s (#%d): %s%s", battleye.BareName(x.p.Name), x.p.ID, word, describeIfCondition(b))
 				}
 				if ok {
-					x.changeCounter(b.Counter)
 					if !x.execFlowSteps(b.Steps) {
 						return false
 					}
@@ -878,7 +842,6 @@ func (x *job) execFlowSteps(list []Step) bool {
 				} else {
 					x.run.logf("Else")
 				}
-				x.changeCounter(s.ElseCounter)
 				if !x.execFlowSteps(*s.Else) {
 					return false
 				}
@@ -886,41 +849,6 @@ func (x *job) execFlowSteps(list []Step) bool {
 		}
 	}
 	return true
-}
-
-// counterOf is a player's counter in this run (0 until a branch changes it).
-func (r *flowRun) counterOf(guid string) int {
-	r.counterMu.Lock()
-	defer r.counterMu.Unlock()
-	return r.counters[strings.ToLower(guid)]
-}
-
-// changeCounter applies an If branch's or Else's counter change (see
-// Branch.Counter) to the player, and logs the new value when it changes.
-func (x *job) changeCounter(op string) {
-	if op == "" || x.p == nil {
-		return
-	}
-	r, g := x.run, strings.ToLower(x.p.GUID)
-	r.counterMu.Lock()
-	if r.counters == nil {
-		r.counters = map[string]int{}
-	}
-	old := r.counters[g]
-	n := old
-	switch op {
-	case "inc":
-		n++
-	case "dec":
-		n = max(n-1, 0)
-	case "reset":
-		n = 0
-	}
-	r.counters[g] = n
-	r.counterMu.Unlock()
-	if n != old {
-		r.logf("%s (#%d): counter %s, now %d/%d", battleye.BareName(x.p.Name), x.p.ID, counterOps[op], n, r.counterThreshold)
-	}
 }
 
 // forEachMarks is, per flow, the Seq of the last server event its previous
@@ -1082,11 +1010,6 @@ type flowRun struct {
 		set      bool
 		from, to int64
 	}
-	// counters is each player's counter (by lower-case GUID) for this run,
-	// all 0 when it starts; counterThreshold is the flow's threshold.
-	counterMu        sync.Mutex
-	counters         map[string]int
-	counterThreshold int
 	// polled makes the run's first For each poll `players` once, for fresh
 	// pings and anyone the console log missed (game.PollNow).
 	polled   sync.Once
@@ -1243,7 +1166,7 @@ func launchFlowRun(f Flow, start time.Time, source string, p *flowPlayer) error 
 	if !active {
 		ctx, cancel := context.WithCancel(context.Background())
 		run = &flowRun{flowID: f.ID, name: f.Name, status: "running", active: true,
-			onStop: f.OnStop, ctx: ctx, cancel: cancel, counterThreshold: f.CounterThreshold}
+			onStop: f.OnStop, ctx: ctx, cancel: cancel}
 		if old := flowRuns.byFlow[f.ID]; old != nil && p != nil {
 			run.log = old.log // join and chat flows keep one running log
 		}
@@ -1384,9 +1307,7 @@ func fmtDur(secs int) string {
 //	kickAll     Reason
 //	command     Cmd: any RCON command
 //	stop        ends the run
-//	if          Branches (the If, then any Else ifs) and Else. Each branch,
-//	            and the Else (ElseCounter), can change the player's counter
-//	            when it runs (see Branch.Counter)
+//	if          Branches (the If, then any Else ifs) and Else
 //	forEach     Of (player | message) and Steps. player: the steps run once
 //	            for every player online, as "the player", with {message} their
 //	            latest chat line this session. message: once for every chat
@@ -1406,8 +1327,6 @@ type Step struct {
 	Else     *[]Step  `json:"else,omitempty"`  // nil: no Else
 	Steps    []Step   `json:"steps,omitempty"` // forEach: the steps run for each player or message
 	Of       string   `json:"of,omitempty"`    // forEach: "player" or "message"
-	// ElseCounter is what the Else does to the player's counter, like Branch.Counter.
-	ElseCounter string `json:"elseCounter,omitempty"`
 }
 
 // Branch is the If or one Else if: a condition and the steps it runs. Every
@@ -1417,21 +1336,7 @@ type Branch struct {
 	Op      string `json:"op"`
 	Value   string `json:"value"`
 	Steps   []Step `json:"steps"`
-	// Counter is what this branch does to the player's counter for this
-	// run when it is the one that runs, before its steps: "" nothing,
-	// "inc" +1, "dec" -1 (not below 0) or "reset" back to 0.
-	Counter string `json:"counter,omitempty"`
 }
-
-// Counter changes an If branch or Else can make (Branch.Counter).
-var counterOps = map[string]string{"": "", "inc": "++", "dec": "--", "reset": "reset"}
-
-// maxCounterThreshold is the highest flow counter threshold. 0 means the
-// flow has none, and then {threshold} can't be used.
-const maxCounterThreshold = 1000
-
-// counterThresholdToken is the one placeholder a number If may compare to.
-const counterThresholdToken = "{threshold}"
 
 // What a For each goes through.
 const (
@@ -1473,16 +1378,12 @@ func normalizeFlowSteps(list []Step) []Step {
 		for j := range s.Branches {
 			b := &s.Branches[j]
 			b.Subject, b.Op, b.Value = strings.TrimSpace(b.Subject), strings.TrimSpace(b.Op), battleye.CleanReason(b.Value)
-			b.Counter = strings.TrimSpace(b.Counter)
 			b.Steps = normalizeFlowSteps(b.Steps)
 		}
 		if s.Else != nil {
 			e := normalizeFlowSteps(*s.Else)
 			s.Else = &e
-		} else {
-			s.ElseCounter = ""
 		}
-		s.ElseCounter = strings.TrimSpace(s.ElseCounter)
 		if s.Type == "forEach" {
 			s.Steps = normalizeFlowSteps(s.Steps)
 			if s.Of = strings.TrimSpace(s.Of); s.Of == "" {

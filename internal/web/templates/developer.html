@@ -162,7 +162,7 @@ html[data-theme]:not([data-theme="default"]) table.vars th, html[data-theme]:not
 		t.append(h);
 		vars.forEach(function (v) {
 			var r = el('tr');
-			r.append(el('td', 'mono', '{' + v.name + '}' + (v.flow ? ' · ' + v.flow : '')));
+			r.append(el('td', 'mono', '{' + v.name + '}'));
 			// The value; an unknown one is what a step would show: "?" for the
 			// Steam ones, the placeholder left as typed for the rest.
 			var val = el('td', 'mono v');
