@@ -210,3 +210,50 @@ func TestKillsAndSteamIDsStored(t *testing.T) {
 		t.Errorf("recent %+v %v", recent, err)
 	}
 }
+
+func TestWorldCommands(t *testing.T) {
+	setup(t)
+	now := time.Now()
+	req := syncReq()
+	req.Weather = World{Overcast: 0.4, Rain: 0.1, Mode: "world"}
+	Sync(req, now)
+	if st, _ := Current(now); st.Weather.Overcast != 0.4 || st.Weather.Mode != "world" {
+		t.Fatalf("weather %+v", st.Weather)
+	}
+	for _, c := range []Command{
+		{Action: "weather", Stat: "overcast", Value: 0.9, Transition: 60, Hold: 1800},
+		{Action: "weather", Stat: "windDir", Value: 270},
+		{Action: "weatherMode", Text: "static"},
+		{Action: "storm", Value: 1, Min: 0.7, Hold: 25},
+		{Action: "rainThresholds", Min: 0, Max: 1, Transition: 30},
+		{Action: "date", Year: 2026, Month: 2, Day: 28, Hour: 23, Minute: 59},
+		{Action: "freezeTime", Value: 1},
+	} {
+		if _, err := QueueWorld(c, now); err != nil {
+			t.Errorf("%+v: %v", c, err)
+		}
+	}
+	for _, c := range []Command{
+		{Action: "heal"},
+		{Action: "weather", Stat: "hail", Value: 1},
+		{Action: "weather", Stat: "rain", Value: 2},
+		{Action: "weather", Stat: "fog", Value: 0.5, Transition: -1},
+		{Action: "weatherMode", Text: "sunny"},
+		{Action: "storm", Value: 1, Min: 0.5},
+		{Action: "rainThresholds", Min: 0.8, Max: 0.2},
+		{Action: "date", Year: 2026, Month: 2, Day: 30, Hour: 12},
+		{Action: "date", Year: 2026, Month: 1, Day: 1, Hour: 24},
+		{Action: "freezeTime", Value: 2},
+	} {
+		if _, err := QueueWorld(c, now); err == nil {
+			t.Errorf("%+v accepted", c)
+		}
+	}
+	reply, _ := Sync(syncReq(), now.Add(time.Second))
+	if len(reply.Commands) != 7 || reply.Commands[0].Action != "weather" || reply.Commands[0].Hold != 1800 {
+		t.Fatalf("commands %+v", reply.Commands)
+	}
+	if _, err := QueueWorld(Command{Action: "freezeTime"}, now.Add(time.Hour)); err == nil {
+		t.Error("queued while the mod is gone")
+	}
+}

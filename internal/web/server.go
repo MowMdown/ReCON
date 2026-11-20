@@ -141,6 +141,7 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/mod/players", handleModPlayers)                 // every online player's live state
 	mux.HandleFunc("GET /api/mod/players/{guid}", handleModPlayer)           // one player's live state, kills, commands
 	mux.HandleFunc("POST /api/mod/players/{guid}/{action}", handleModAction) // heal | kill | teleport | teleportTo | set | message
+	mux.HandleFunc("POST /api/mod/world/{action}", handleModWorld)           // weather | weatherMode | storm | rainThresholds | date | freezeTime
 
 	mux.HandleFunc("GET /api/chat-commands", handleChatCommandsGet)
 	mux.HandleFunc("POST /api/chat-commands", handleChatCommandsSave) // {settings: {...}}

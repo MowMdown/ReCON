@@ -79,3 +79,22 @@ func handleModAction(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "command": cs})
 }
+
+// handleModWorld serves POST /api/mod/world/{action}: queue a weather or
+// time change for the mod. Body: weather {stat, value, transition, hold};
+// weatherMode {text}; storm {value, min, hold}; rainThresholds {min, max,
+// transition}; date {year, month, day, hour, minute}; freezeTime {value}.
+func handleModWorld(w http.ResponseWriter, r *http.Request) {
+	var c modlink.Command
+	if err := decodeBody(w, r, &c); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	c.Action = r.PathValue("action")
+	cs, err := modlink.QueueWorld(c, time.Now())
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "command": cs})
+}

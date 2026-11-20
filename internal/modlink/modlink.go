@@ -48,6 +48,7 @@ type SyncRequest struct {
 	Day     int           `json:"day"`
 	Hour    int           `json:"hour"`
 	Minute  int           `json:"minute"`
+	Weather World         `json:"weather"`
 	Players []PlayerState `json:"players"`
 	Events  []Event       `json:"events"`
 	Results []Result      `json:"results"`
@@ -84,6 +85,24 @@ type PlayerState struct {
 	Vehicle         string  `json:"vehicle"`
 	Kills           int     `json:"kills"`
 	Deaths          int     `json:"deaths"`
+}
+
+// World is the weather now and where each part is heading (ReCON_World).
+type World struct {
+	Overcast        float64 `json:"overcast"` // 0-1
+	Rain            float64 `json:"rain"`
+	Fog             float64 `json:"fog"`
+	Snow            float64 `json:"snow"`
+	WindSpeed       float64 `json:"windSpeed"` // m/s
+	WindDir         float64 `json:"windDir"`   // degrees
+	OvercastTarget  float64 `json:"overcastTarget"`
+	RainTarget      float64 `json:"rainTarget"`
+	FogTarget       float64 `json:"fogTarget"`
+	SnowTarget      float64 `json:"snowTarget"`
+	WindSpeedTarget float64 `json:"windSpeedTarget"`
+	WindDirTarget   float64 `json:"windDirTarget"`
+	Mode            string  `json:"mode"` // world, forecast or static
+	TimeFrozen      bool    `json:"timeFrozen"`
 }
 
 // Event is something that happened between syncs (ReCON_Event).
@@ -123,6 +142,16 @@ type Command struct {
 	Text    string  `json:"text"`
 	Title   string  `json:"title"`
 	Seconds float64 `json:"seconds"`
+	// World actions (QueueWorld).
+	Transition float64 `json:"transition"`
+	Hold       float64 `json:"hold"`
+	Min        float64 `json:"min"`
+	Max        float64 `json:"max"`
+	Year       int     `json:"year"`
+	Month      int     `json:"month"`
+	Day        int     `json:"day"`
+	Hour       int     `json:"hour"`
+	Minute     int     `json:"minute"`
 }
 
 // SyncReply is ReCON's answer (ReCON_Reply).
@@ -155,7 +184,8 @@ var state struct {
 	lastSync time.Time
 	mod      string
 	world    string
-	date     [5]int            // year, month, day, hour, minute
+	date     [5]int // year, month, day, hour, minute
+	weather  World
 	players  map[string]Player // by GUID
 	nextID   int
 	commands []*CommandStatus // oldest first: queued and sent ones, then the last keepResults finished
@@ -215,6 +245,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	}
 	state.lastSync, state.mod, state.world, state.players = now, req.Mod, req.World, players
 	state.date = [5]int{req.Year, req.Month, req.Day, req.Hour, req.Minute}
+	state.weather = req.Weather
 
 	// Results of what was sent.
 	byID := map[int]*CommandStatus{}
@@ -332,6 +363,7 @@ type Status struct {
 	Mod       string    `json:"mod,omitempty"`
 	World     string    `json:"world,omitempty"`
 	Date      [5]int    `json:"date"` // in-game year, month, day, hour, minute
+	Weather   World     `json:"weather"`
 }
 
 // Current is the mod's connection and every online player's state (none
@@ -339,7 +371,7 @@ type Status struct {
 func Current(now time.Time) (Status, []Player) {
 	state.Lock()
 	defer state.Unlock()
-	st := Status{LastSync: state.lastSync, Mod: state.mod, World: state.world, Date: state.date}
+	st := Status{LastSync: state.lastSync, Mod: state.mod, World: state.world, Date: state.date, Weather: state.weather}
 	st.Connected = !state.lastSync.IsZero() && now.Sub(state.lastSync) <= staleAfter
 	out := []Player{}
 	if st.Connected {
@@ -355,7 +387,7 @@ func Current(now time.Time) (Status, []Player) {
 func PlayerOf(guid string, now time.Time) (Player, bool) {
 	state.Lock()
 	defer state.Unlock()
-	if state.lastSync.IsZero() || now.Sub(state.lastSync) > staleAfter {
+	if !connected(now) {
 		return Player{}, false
 	}
 	p, ok := state.players[strings.ToLower(guid)]
@@ -416,7 +448,7 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 	guid = strings.ToLower(guid)
 	state.Lock()
 	defer state.Unlock()
-	if state.lastSync.IsZero() || now.Sub(state.lastSync) > staleAfter {
+	if !connected(now) {
 		return CommandStatus{}, errors.New("recon-mod isn't connected")
 	}
 	p, ok := state.players[guid]
@@ -431,11 +463,92 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 		}
 		c.Target = t.SteamID
 	}
+	return add(c, guid, now), nil
+}
+
+// connected reports whether the mod synced lately (state is locked).
+func connected(now time.Time) bool {
+	return !state.lastSync.IsZero() && now.Sub(state.lastSync) <= staleAfter
+}
+
+// add queues a checked command (state is locked).
+func add(c Command, guid string, now time.Time) CommandStatus {
 	state.nextID++
 	c.ID = state.nextID
 	cs := &CommandStatus{Command: c, GUID: guid, Status: "queued", Queued: now}
 	state.commands = append(state.commands, cs)
-	return *cs, nil
+	return *cs
+}
+
+// WorldActions are the commands on the world rather than a player.
+var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true}
+
+// weatherMax is each weather part's largest value.
+var weatherMax = map[string]float64{"overcast": 1, "rain": 1, "fog": 1, "snow": 1, "windSpeed": 50, "windDir": 360}
+
+// QueueWorld adds a command on the weather or the in-game time. Errors are
+// user-facing.
+func QueueWorld(c Command, now time.Time) (CommandStatus, error) {
+	if err := checkWorld(&c); err != nil {
+		return CommandStatus{}, err
+	}
+	state.Lock()
+	defer state.Unlock()
+	if !connected(now) {
+		return CommandStatus{}, errors.New("recon-mod isn't connected")
+	}
+	return add(c, "", now), nil
+}
+
+func checkWorld(c *Command) error {
+	if !WorldActions[c.Action] {
+		return errors.New("unknown action")
+	}
+	c.SteamID, c.Target = "", ""
+	switch c.Action {
+	case "weather":
+		max, ok := weatherMax[c.Stat]
+		if !ok {
+			return errors.New("the weather is overcast, rain, fog, snow, windSpeed or windDir")
+		}
+		if c.Value < 0 || c.Value > max {
+			return errors.New(c.Stat + " is from 0 to " + strconv.FormatFloat(max, 'f', -1, 64))
+		}
+		if c.Transition < 0 || c.Transition > 3600 {
+			return errors.New("the change takes 0 to 3600 seconds")
+		}
+		if c.Hold < 0 || c.Hold > 7*24*3600 {
+			return errors.New("it holds for 0 seconds to 7 days")
+		}
+	case "weatherMode":
+		if c.Text != "world" && c.Text != "forecast" && c.Text != "static" {
+			return errors.New("the weather mode is world, forecast or static")
+		}
+	case "storm":
+		if c.Value < 0 || c.Value > 1 || c.Min < 0 || c.Min > 1 {
+			return errors.New("the storm's density and overcast are from 0 to 1")
+		}
+		if c.Hold < 1 {
+			return errors.New("lightning needs at least 1 second between strikes")
+		}
+	case "rainThresholds":
+		if c.Min < 0 || c.Max > 1 || c.Min > c.Max {
+			return errors.New("rain's overcast range is from 0 to 1, lowest first")
+		}
+		if c.Transition < 0 {
+			return errors.New("the time it takes rain to stop can't be negative")
+		}
+	case "date":
+		t := time.Date(c.Year, time.Month(c.Month), c.Day, c.Hour, c.Minute, 0, 0, time.UTC)
+		if c.Year < 1 || t.Year() != c.Year || int(t.Month()) != c.Month || t.Day() != c.Day || t.Hour() != c.Hour || t.Minute() != c.Minute {
+			return errors.New("that isn't a date and time")
+		}
+	case "freezeTime":
+		if c.Value != 0 && c.Value != 1 {
+			return errors.New("freezeTime is 1 (frozen) or 0")
+		}
+	}
+	return nil
 }
 
 // reset forgets everything (tests).
