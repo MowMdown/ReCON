@@ -603,6 +603,19 @@ curl -X POST http://<host>:8080/api/flows/3/run \
 | POST | `/api/server/settings` | `{"queryPort", "serverTime", "latitude"}` | Save them (empty: the container's value) and ask the server |
 | POST | `/api/server/mods/<workshop id>/ack` | | Acknowledge a mod's update on Steam |
 
+### recon-mod
+
+[ReCON-Mod](https://github.com/MowMdown/ReCON-Mod) is a DayZ server-side mod, built on CF. Every second it posts every online player's live state to ReCON: position, health, blood, shock, food, water, heat, bleeding, illnesses, the item in hand, the vehicle they're in, and their kills and deaths. ReCON's reply carries the actions to run. The mod proves it is your server with the RCON password, which it reads from BattlEye's config or from its own settings. ReCON stores every death the mod reports, and while the mod is connected, Server Info takes the in-game date from it rather than from `SERVER_TIME`.
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| POST | `/api/mod/sync` | the mod's sync | Used by the mod only: player data in, commands out (403 with the wrong password) |
+| GET  | `/api/mod/players` | | `mod` (`connected`, `lastSync`, `world`, in-game `date`), every online player's live state with their `guid`, and the recent commands |
+| GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills`, and the commands sent to them |
+| POST | `/api/mod/players/<guid>/<action>` | see below | Queue an action. The mod runs it on its next sync; its `status` (`queued`, `sent`, `done`, `failed`, `expired`) shows in the commands |
+
+Actions: `heal` (full health, blood, shock, food and water; stops bleeding, cures illnesses, mends broken legs), `kill`, `teleport` `{"x", "z", "y"}` (`y` 0 = ground level), `teleportTo` `{"target": "<guid>"}`, `set` `{"stat": "health|blood|shock|water|energy", "value"}`, `message` `{"text", "title", "seconds"}`. A command the mod hasn't answered within 30 seconds expires.
+
 ### Status
 
 `GET /health` returns `{"ok": true}`. `GET /api/status` returns the RCON state the pages show: `{"ok": true, "rcon": "connected"}` (or `retrying` / `unavailable`, with `"waiting": true` while ReCON waits for the server to answer its login, otherwise `retryInMs` until the next try).

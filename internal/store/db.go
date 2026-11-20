@@ -131,6 +131,23 @@ func OpenPlayerDatabase(filepath string) (*Database, error) {
 		steam_updated INTEGER NOT NULL DEFAULT 0,
 		acked_updated INTEGER NOT NULL DEFAULT 0
 	);
+	-- Deaths recon-mod reported: who died, who or what killed them (killer_guid
+	-- '' for the environment, an infected or an animal; the victim's own GUID
+	-- for a suicide), with what, and from how far.
+	CREATE TABLE IF NOT EXISTS mod_kills (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		at DATETIME NOT NULL,
+		victim_guid TEXT NOT NULL,
+		victim_name TEXT NOT NULL,
+		killer_guid TEXT NOT NULL,
+		killer_name TEXT NOT NULL,
+		weapon TEXT NOT NULL,
+		distance REAL NOT NULL,
+		x REAL NOT NULL,
+		z REAL NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_mod_kills_victim ON mod_kills(victim_guid);
+	CREATE INDEX IF NOT EXISTS idx_mod_kills_killer ON mod_kills(killer_guid);
 	CREATE INDEX IF NOT EXISTS idx_session_history_guid
 		ON session_history(guid);
 	CREATE INDEX IF NOT EXISTS idx_session_history_disconnected

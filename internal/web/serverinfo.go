@@ -1,11 +1,13 @@
 package web
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/MowMdown/ReCON/internal/modlink"
 	"github.com/MowMdown/ReCON/internal/serverinfo"
 )
 
@@ -26,6 +28,10 @@ type serverMod struct {
 func handleServerInfo(w http.ResponseWriter, r *http.Request) {
 	snap, cfg := serverinfo.Current()
 	now := time.Now()
+	// recon-mod knows the in-game date: better than SERVER_TIME's.
+	if st, _ := modlink.Current(now); st.Connected && st.Date[0] > 0 {
+		cfg.ServerTime = fmt.Sprintf("%d/%d/%d/%02d/%02d", st.Date[0], st.Date[1], st.Date[2], st.Date[3], st.Date[4])
+	}
 	out := map[string]any{"ok": true, "server": snap,
 		"sun":       serverinfo.SunFor(cfg, snap.Info.Map, now),
 		"modsKnown": snap.ModsKnown,

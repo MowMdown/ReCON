@@ -136,6 +136,12 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/developer/players/{guid}", handleDevPlayer) // everything ReCON holds about one
 
 	// Built-in chat commands (!help, !shout, ...): their settings, edited on the Flows page.
+	// recon-mod, the DayZ server-side mod: its syncs, and the live player data.
+	mux.HandleFunc("POST /api/mod/sync", handleModSync)                      // the mod's player data in, commands out
+	mux.HandleFunc("GET /api/mod/players", handleModPlayers)                 // every online player's live state
+	mux.HandleFunc("GET /api/mod/players/{guid}", handleModPlayer)           // one player's live state, kills, commands
+	mux.HandleFunc("POST /api/mod/players/{guid}/{action}", handleModAction) // heal | kill | teleport | teleportTo | set | message
+
 	mux.HandleFunc("GET /api/chat-commands", handleChatCommandsGet)
 	mux.HandleFunc("POST /api/chat-commands", handleChatCommandsSave) // {settings: {...}}
 
@@ -147,17 +153,21 @@ var quietPaths = map[string]bool{
 	"/health": true, "/favicon.ico": true, "/server": true, "/api/server": true, "/players": true, "/bans": true, "/flows": true,
 	"/api/players": true, "/api/bans": true, "/api/flows": true, "/api/status": true,
 	"/api/console": true, "/developer": true, "/api/developer/players": true,
+	"/api/mod/players": true,
 }
 
 // isQuiet reports whether a request is a routine read: a quietPaths GET, a
 // theme file (/assets/...), the Developer page's reads, or the Message and Details dialogs reading one
 // player (/api/players/<guid>/chat, /details, /steam).
 func isQuiet(r *http.Request) bool {
+	if r.Method == http.MethodPost && r.URL.Path == "/api/mod/sync" {
+		return true // recon-mod, every second
+	}
 	if r.Method != http.MethodGet {
 		return false
 	}
 	p := r.URL.Path
-	return quietPaths[p] || strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/api/developer/") || (strings.HasPrefix(p, "/api/players/") &&
+	return quietPaths[p] || strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/api/developer/") || strings.HasPrefix(p, "/api/mod/players/") || (strings.HasPrefix(p, "/api/players/") &&
 		(strings.HasSuffix(p, "/chat") || strings.HasSuffix(p, "/details") || strings.HasSuffix(p, "/steam")))
 }
 

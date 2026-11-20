@@ -23,6 +23,7 @@ import (
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
 	"github.com/MowMdown/ReCON/internal/geoip"
+	"github.com/MowMdown/ReCON/internal/modlink"
 	"github.com/MowMdown/ReCON/internal/serverinfo"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
@@ -59,6 +60,7 @@ func main() {
 	steam.SetDatabase(db)
 	serverinfo.SetDatabase(db)
 	web.SetDatabase(db)
+	modlink.SetDatabase(db)
 
 	address, password := game.Settings{}.Effective()
 	game.SetTarget(address, password)
@@ -105,6 +107,11 @@ func main() {
 		return addr
 	})
 	serverinfo.Start(serverinfo.ConfigFromEnv()) // the Server Info page: Steam query, uptime, mod updates
+	// recon-mod proves it is the game server with the RCON password.
+	modlink.SetKeySource(func() string {
+		_, pw := game.Target()
+		return pw
+	})
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	log.Printf("listening on %s -> RCON %s", addr, address)
