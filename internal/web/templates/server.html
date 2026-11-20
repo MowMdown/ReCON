@@ -370,8 +370,9 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 	// drawSky draws the sky dial: the sky's colour follows the sun's height
 	// (night blue, an orange glow at dawn and dusk, daylight blue); the sun
 	// and moon go round one path, opposite each other, crossing the horizon at
-	// sunrise and sunset. The path is a circle at the equator and flattens
-	// towards the horizon further from it (height x cos(latitude)). The sun
+	// sunrise and sunset. The path's height follows the sun's noon height for
+	// the date and latitude: a full circle with the sun overhead, flat when it
+	// barely rises. The sun
 	// fades out as it sets and the moon fades in, and the other way round;
 	// fixed stars fade in at night. South of the equator it is mirrored: you
 	// face north to watch the sun, so east is on the right.
@@ -401,7 +402,10 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		else if (t >= rise && t <= set) th = -90 + 180 * (t - rise) / (set - rise);
 		else th = 90 + 180 * ((t > set ? t - set : t + 24 - set) / (24 - set + rise));
 		th *= r;
-		var A = 56, B = 56 * Math.abs(Math.cos(lat * r));
+		// The path's height follows the sun's height at noon on this date at this
+		// latitude (as a height on a dome: sin), so a winter sun stays low and a
+		// summer one climbs; it still crosses the horizon at sunrise and sunset.
+		var A = 56, B = 56 * Math.max(0.06, Math.sin(Math.max(0, alt(12)) * r));
 		var sx = 90 + A * Math.sin(th), sy = 90 - B * Math.cos(th), mx = 90 - A * Math.sin(th), my = 90 + B * Math.cos(th);
 		var sunOp = Math.max(0, Math.min(1, (a + 4) / 6)), starOp = Math.max(0, Math.min(1, (-a - 2) / 8));
 		var south = lat < 0, dawnSide = (t < 12) !== south ? 0.08 : 0.92;
