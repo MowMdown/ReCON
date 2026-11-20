@@ -55,30 +55,35 @@ type SyncRequest struct {
 
 // PlayerState is one player as the mod reads them (ReCON_PlayerState).
 type PlayerState struct {
-	SteamID     string  `json:"steamId"`
-	Name        string  `json:"name"`
-	X           float64 `json:"x"`
-	Y           float64 `json:"y"`
-	Z           float64 `json:"z"`
-	Heading     float64 `json:"heading"`
-	Alive       bool    `json:"alive"`
-	Health      float64 `json:"health"`
-	Blood       float64 `json:"blood"`
-	Shock       float64 `json:"shock"`
-	Water       float64 `json:"water"`
-	Energy      float64 `json:"energy"`
-	Heat        float64 `json:"heat"`
-	Wet         int     `json:"wet"`
-	Stamina     float64 `json:"stamina"`
-	Bleeding    int     `json:"bleeding"`
-	Agents      int     `json:"agents"`
-	BrokenLegs  int     `json:"brokenLegs"`
-	Unconscious bool    `json:"unconscious"`
-	Restrained  bool    `json:"restrained"`
-	Hands       string  `json:"hands"`
-	Vehicle     string  `json:"vehicle"`
-	Kills       int     `json:"kills"`
-	Deaths      int     `json:"deaths"`
+	SteamID string  `json:"steamId"`
+	Name    string  `json:"name"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+	Z       float64 `json:"z"`
+	Heading float64 `json:"heading"`
+	Alive   bool    `json:"alive"`
+	Health  float64 `json:"health"`
+	Blood   float64 `json:"blood"`
+	Shock   float64 `json:"shock"`
+	Water   float64 `json:"water"`
+	Energy  float64 `json:"energy"`
+	Heat    float64 `json:"heat"`
+	// The heat buff, shown as "comfort": 0 (none) to HeatBufferMax.
+	HeatBuffer      float64 `json:"heatBuffer"`
+	HeatBufferMax   float64 `json:"heatBufferMax"`
+	HeatBufferCap   float64 `json:"heatBufferCap"`   // the share their clothes allow, 0.35 to 1
+	HeatBufferStage int     `json:"heatBufferStage"` // the HUD's buff icon: 0 none, 1 to 3
+	Wet             int     `json:"wet"`
+	Stamina         float64 `json:"stamina"`
+	Bleeding        int     `json:"bleeding"`
+	Agents          int     `json:"agents"`
+	BrokenLegs      int     `json:"brokenLegs"`
+	Unconscious     bool    `json:"unconscious"`
+	Restrained      bool    `json:"restrained"`
+	Hands           string  `json:"hands"`
+	Vehicle         string  `json:"vehicle"`
+	Kills           int     `json:"kills"`
+	Deaths          int     `json:"deaths"`
 }
 
 // Event is something that happened between syncs (ReCON_Event).
