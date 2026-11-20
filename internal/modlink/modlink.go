@@ -381,7 +381,7 @@ func Commands(guid string) []CommandStatus {
 // with their largest values.
 var (
 	Actions  = map[string]bool{"heal": true, "kill": true, "teleport": true, "teleportTo": true, "set": true, "message": true}
-	StatMaxs = map[string]float64{"health": 100, "blood": 5000, "shock": 100, "water": 5000, "energy": 5000}
+	StatMaxs = map[string]float64{"health": 100, "blood": 5000, "shock": 100, "water": 5000, "energy": 5000, "stamina": 100, "heatBuffer": 30}
 )
 
 // Queue adds a command for an online player (guid); c.SteamID and, for
@@ -395,7 +395,7 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 	case "set":
 		max, ok := StatMaxs[c.Stat]
 		if !ok {
-			return CommandStatus{}, errors.New("stat is health, blood, shock, water or energy")
+			return CommandStatus{}, errors.New("stat is health, blood, shock, water, energy, stamina or heatBuffer")
 		}
 		if c.Value < 0 || c.Value > max {
 			return CommandStatus{}, errors.New(c.Stat + " is from 0 to " + strconv.FormatFloat(max, 'f', -1, 64))

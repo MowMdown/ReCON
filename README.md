@@ -614,7 +614,7 @@ curl -X POST http://<host>:8080/api/flows/3/run \
 | GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills`, and the commands sent to them |
 | POST | `/api/mod/players/<guid>/<action>` | see below | Queue an action. The mod runs it on its next sync; its `status` (`queued`, `sent`, `done`, `failed`, `expired`) shows in the commands |
 
-Actions: `heal` (full health, blood, shock, food and water; stops bleeding, cures illnesses, mends broken legs), `kill`, `teleport` `{"x", "z", "y"}` (`y` 0 = ground level), `teleportTo` `{"target": "<guid>"}`, `set` `{"stat": "health|blood|shock|water|energy", "value"}`, `message` `{"text", "title", "seconds"}`. A command the mod hasn't answered within 30 seconds expires.
+Actions: `heal` (full health, blood, shock, food and water; stops bleeding, cures illnesses, mends broken legs), `kill`, `teleport` `{"x", "z", "y"}` (`y` 0 = ground level), `teleportTo` `{"target": "<guid>"}`, `set` `{"stat": "health|blood|shock|water|energy|stamina|heatBuffer", "value"}`, `message` `{"text", "title", "seconds"}`. A command the mod hasn't answered within 30 seconds expires.
 
 ### Status
 
