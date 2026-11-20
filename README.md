@@ -222,7 +222,7 @@ See [Flows](#4-flows) below. **Commands** (right of the buttons above the list) 
 
 A page for troubleshooting. No menu item links to it: type `/developer` after the address. Anyone who can open the web GUI can open it. The list on the left is every player, with a search (name, GUID, any IP they used, SteamID) and All / Online / Offline / Banned filters. Pick one to see everything ReCON holds about them, raw and untrimmed, in sections you can fold:
 
-- **flow**: what each [placeholder](#placeholders) would be for them right now, and where it is read from. `{counter}` and `{threshold}` get a row per flow.
+- **flow**: what each [placeholder](#placeholders) would be for them right now, and where it is read from.
 - **memory**: the player tracker's entry (online, or held over a server restart), the online list as the pages see it, each flow's current or last run, a timed ban, and the ban list's state.
 - **db**: every row of every table in `players.db` for their GUID: `players`, `active_sessions`, `session_history`, `player_ips`, `chat_messages`, `player_notes`, `bans`.
 - **ext**: the Steam cache (profile, ban record, SteamID search) and GeoIP's country for each of their IPs.

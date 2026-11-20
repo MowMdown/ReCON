@@ -26,19 +26,16 @@ func RoleName(r int) string {
 }
 
 // What a placeholder or If subject needs: nothing (any trigger), "player"
-// (On join or Player message) or "chat" (Player message only), or, for
-// {threshold}, a flow with a Counter threshold.
+// (On join or Player message) or "chat" (Player message only).
 const (
-	needNothing   = ""
-	needPlayer    = "player"
-	needChat      = "chat"
-	needThreshold = "threshold"
+	needNothing = ""
+	needPlayer  = "player"
+	needChat    = "chat"
 )
 
 var needText = map[string]string{
-	needPlayer:    "needs a player: put it inside a For each, or use the On join or Player message trigger",
-	needChat:      "needs the Player message trigger",
-	needThreshold: "needs a Counter threshold: enter one (1 or more) next to the delay",
+	needPlayer: "needs a player: put it inside a For each, or use the On join or Player message trigger",
+	needChat:   "needs the Player message trigger",
 }
 
 // flowTokens are the placeholders steps can use, and what each needs.
@@ -46,7 +43,6 @@ var flowTokens = map[string]string{
 	"player_name": needPlayer, "player_id": needPlayer, "player_ping": needPlayer,
 	"player_ip": needPlayer, "player_guid": needPlayer, "player_role": needPlayer,
 	"message": needChat, "players_online": needNothing,
-	"counter": needPlayer, "threshold": needThreshold,
 	"player_vac_bans": needPlayer, "player_game_bans": needPlayer, "player_days_since_last_ban": needPlayer,
 }
 
@@ -73,8 +69,6 @@ var condSubjects = map[string]condSubject{
 	// How many players are online (the player tracker, package players). Works on
 	// every trigger: "If {players_online} > 0, Kick everyone, else Shut down".
 	"players_online": {"num", needNothing},
-	// The player's counter in this run of the flow (see Branch.Counter).
-	"counter": {"num", needPlayer},
 	// The player's Steam ban record (steamBanSubjects). An If on one of these
 	// is skipped, Else included, when the record can't be had.
 	"player_vac_bans":            {"num", needPlayer},
