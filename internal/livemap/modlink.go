@@ -357,6 +357,8 @@ var state struct {
 	// The map's dynamic events (with the vehicles), and its place names
 	// (placesFor: the world they are of; asked for once a connection).
 	worldEvents []WorldEvent
+	// The map whose vehicles.json was looked for this connection.
+	vehFileFor string
 	// The predators as last sent (nil: never, so a mod before 0.0.1l).
 	predators []Predator
 	places    []Place
@@ -400,7 +402,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		// The server may have restarted with other mods: fetch the item list again.
 		state.catalog, state.catalogTotal, state.catalogTypes = nil, 0, nil
 		state.places, state.placesFor = nil, ""
-		state.predators = nil
+		state.predators, state.vehFileFor = nil, ""
 	}
 	takeCatalog(req)
 	if req.VehiclesSent {
@@ -1078,7 +1080,7 @@ func reset() {
 	state.nextID, state.commands, state.steamSaved, state.refused = 0, nil, nil, ""
 	state.watch, state.inventory, state.previous = nil, nil, nil
 	state.catalog, state.catalogTotal, state.catalogTypes = nil, 0, nil
-	state.predators = nil
+	state.predators, state.vehFileFor = nil, ""
 }
 
 // battlEyeGUID is the BattlEye GUID of a SteamID64: md5("BE" + the ID as 8

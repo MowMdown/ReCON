@@ -46,6 +46,7 @@ func Start(h Host) error {
 		return fmt.Errorf("recon-mod: creating its table: %w", err)
 	}
 	keySource, saveSteamID = h.RCONPassword, h.SaveSteamID
+	dataDir = h.DataDir
 
 	page, err := fs.Sub(templateFiles, "templates")
 	if err != nil {

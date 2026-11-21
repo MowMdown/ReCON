@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -229,4 +231,101 @@ func CatalogClass(class string, now time.Time) (CatalogItem, bool) {
 		}
 	}
 	return CatalogItem{}, false
+}
+
+// dataDir is ReCON's data folder (Start sets it); each map's file is in
+// its maps folder.
+var dataDir string
+
+func vehicleFilePath(world string) string {
+	return filepath.Join(dataDir, "maps", strings.ToLower(world), "vehicles.json")
+}
+
+// maybeWriteVehicleFile writes the map's first vehicles.json once the mod
+// is connected and its item list is in, if the map has none. It looks once
+// a connection and map; an existing file is never touched, and without the
+// mod nothing is made at all.
+func maybeWriteVehicleFile(now time.Time) {
+	if dataDir == "" {
+		return
+	}
+	st, _ := Current(now)
+	world := strings.ToLower(st.World)
+	items, complete := Catalog(now)
+	if !st.Connected || !complete || world == "" {
+		return
+	}
+	state.Lock()
+	done := state.vehFileFor == world
+	state.vehFileFor = world
+	state.Unlock()
+	if done {
+		return
+	}
+	p := vehicleFilePath(world)
+	if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	f := GenerateVehicleFile(items)
+	data, err := json.MarshalIndent(f, "", "  ")
+	if err == nil {
+		err = os.MkdirAll(filepath.Dir(p), 0o755)
+	}
+	if err == nil {
+		tmp := p + ".tmp"
+		if err = os.WriteFile(tmp, append(data, '\n'), 0o644); err == nil {
+			err = os.Rename(tmp, p)
+		}
+	}
+	if err != nil {
+		log.Printf("recon-mod: writing vehicles.json for %s: %v", world, err)
+		return
+	}
+	log.Printf("recon-mod: vehicles.json for %s written: %d vehicles", world, f.Count())
+}
+
+// VehicleChoices is the current map's vehicles.json and the map's name.
+// Its errors are said to the player as they are.
+func VehicleChoices(now time.Time) (VehicleFile, string, error) {
+	st, _ := Current(now)
+	if !st.Connected {
+		return nil, "", errors.New("recon-mod isn't running on this server")
+	}
+	if _, complete := Catalog(now); !complete {
+		return nil, "", errors.New("the item list hasn't come in from the mod yet")
+	}
+	world := strings.ToLower(st.World)
+	if dataDir == "" {
+		return nil, world, fmt.Errorf("there's no vehicles.json for %s yet", world)
+	}
+	f, err := LoadVehicleFile(vehicleFilePath(world), world)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, world, fmt.Errorf("there's no vehicles.json for %s yet", world)
+	}
+	return f, world, err
+}
+
+// UnlistedVehicles is the item list's vehicles that the current map's
+// vehicles.json doesn't name anywhere (none without a file or the mod).
+func UnlistedVehicles(now time.Time) []CatalogItem {
+	f, _, err := VehicleChoices(now)
+	if err != nil {
+		return []CatalogItem{}
+	}
+	listed := map[string]bool{}
+	for _, names := range f {
+		for _, colours := range names {
+			for _, class := range colours {
+				listed[strings.ToLower(class)] = true
+			}
+		}
+	}
+	items, _ := Catalog(now)
+	out := []CatalogItem{}
+	for _, it := range items {
+		if it.Kind == "vehicle" && !listed[strings.ToLower(it.Type)] {
+			out = append(out, it)
+		}
+	}
+	return out
 }

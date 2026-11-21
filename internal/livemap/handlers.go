@@ -44,6 +44,11 @@ func handleModSync(w http.ResponseWriter, r *http.Request) {
 		code = http.StatusBadRequest
 	}
 	writeJSON(w, code, reply)
+	// The map's first vehicles.json, once the item list is in (after the
+	// reply, so the mod isn't kept waiting).
+	if err == nil {
+		maybeWriteVehicleFile(time.Now())
+	}
 }
 
 // handleModPlayers serves GET /api/mod/players: whether the mod is

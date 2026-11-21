@@ -132,3 +132,90 @@ func TestCatalogClassIgnoresCase(t *testing.T) {
 		t.Error("found Nope")
 	}
 }
+
+// syncCatalog syncs world with the whole item list at once.
+func syncCatalog(world string, items []CatalogItem, now time.Time) {
+	r := syncReq()
+	r.World = world
+	r.CatalogTotal, r.CatalogAt, r.Catalog = len(items), 0, items
+	Sync(r, now)
+}
+
+func TestWritesVehicleFileOnce(t *testing.T) {
+	setup(t)
+	dataDir = t.TempDir()
+	now := time.Now()
+	syncCatalog("DeerIsle", deerisle, now)
+	maybeWriteVehicleFile(now)
+	p := filepath.Join(dataDir, "maps", "deerisle", "vehicles.json")
+	f, err := LoadVehicleFile(p, "deerisle")
+	if err != nil || f.Count() != 13 {
+		t.Fatalf("written: %v %d", err, f.Count())
+	}
+	if data, _ := os.ReadFile(p); !strings.Contains(string(data), "\n  \"boat\": {") {
+		t.Errorf("not 2-space indented:\n%s", data)
+	}
+	edited := `{"car":{"x":{"default":"CivilianSedan"}}}`
+	writeFile(t, p, edited)
+	maybeWriteVehicleFile(now)
+	if data, _ := os.ReadFile(p); string(data) != edited {
+		t.Errorf("rewrote the admin's file:\n%s", data)
+	}
+	// A reconnect on another map writes that map's, and leaves deerisle's.
+	later := now.Add(time.Hour)
+	syncCatalog("chernarusplus", deerisle, later)
+	maybeWriteVehicleFile(later)
+	if _, err := os.Stat(filepath.Join(dataDir, "maps", "chernarusplus", "vehicles.json")); err != nil {
+		t.Errorf("chernarusplus: %v", err)
+	}
+	if data, _ := os.ReadFile(p); string(data) != edited {
+		t.Error("deerisle's file changed")
+	}
+}
+
+func TestNoVehicleFileWithoutMod(t *testing.T) {
+	setup(t)
+	dataDir = t.TempDir()
+	now := time.Now()
+	maybeWriteVehicleFile(now)
+	if _, err := os.Stat(filepath.Join(dataDir, "maps")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("maps folder made without the mod: %v", err)
+	}
+	if _, _, err := VehicleChoices(now); err == nil || err.Error() != "recon-mod isn't running on this server" {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestVehicleChoicesAndUnlisted(t *testing.T) {
+	setup(t)
+	dataDir = t.TempDir()
+	now := time.Now()
+	r := syncReq()
+	r.World = "deerisle"
+	r.CatalogTotal, r.CatalogAt, r.Catalog = len(deerisle)+1, 0, deerisle
+	Sync(r, now) // one short: the list isn't complete
+	if _, _, err := VehicleChoices(now); err == nil || err.Error() != "the item list hasn't come in from the mod yet" {
+		t.Errorf("incomplete: %v", err)
+	}
+	setup(t)
+	dataDir = t.TempDir()
+	syncCatalog("deerisle", deerisle, now)
+	if _, _, err := VehicleChoices(now); err == nil || err.Error() != "there's no vehicles.json for deerisle yet" {
+		t.Errorf("no file: %v", err)
+	}
+	maybeWriteVehicleFile(now)
+	f, world, err := VehicleChoices(now)
+	if err != nil || world != "deerisle" || f["car"]["olga"] == nil {
+		t.Fatalf("got %v %q %v", f, world, err)
+	}
+	writeFile(t, filepath.Join(dataDir, "maps", "deerisle", "vehicles.json"), `{"car":{"olga":{"default":"civiliansedan"}}}`)
+	un := UnlistedVehicles(now)
+	if len(un) != 41 {
+		t.Errorf("unlisted %d, want 41", len(un))
+	}
+	for _, it := range un {
+		if it.Type == "CivilianSedan" {
+			t.Error("CivilianSedan listed as missing")
+		}
+	}
+}
