@@ -429,7 +429,7 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 		<div class="form stats" id="fSpawn">
 			<div class="inl"><input id="spFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
 				<select id="spKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
-					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="item">Other items</option></select></div>
+					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="animal">Animals</option><option value="item">Other items</option></select></div>
 			<div class="spaz" id="spAZ" role="group" aria-label="Jump to a letter"></div>
 			<div class="splist" id="spList"></div>
 			<div class="setfoot"><span class="muted" id="spPick"></span><span class="grow"></span>
@@ -466,7 +466,7 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 		<div class="form stats">
 			<div class="inl"><input id="sFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
 				<select id="sKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
-					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="item">Other items</option></select></div>
+					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="animal">Animals</option><option value="item">Other items</option></select></div>
 			<div class="splist" id="sList"></div>
 			<div class="setfoot"><span class="muted" id="sPick"></span><span class="grow"></span>
 				<span>Count</span><input id="sCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
@@ -2139,7 +2139,7 @@ document.getElementById('pTabs').addEventListener('click', e => {
 // ---- Spawn item: every item the server has loaded, on the ground --------
 
 let catalog = null, catalogBy = {}, spSel = null;
-const KIND_TEXT = { weapon: 'Weapon', magazine: 'Magazine', ammo: 'Ammo', clothing: 'Clothing', vehicle: 'Vehicle', item: 'Item' };
+const KIND_TEXT = { weapon: 'Weapon', magazine: 'Magazine', ammo: 'Ammo', clothing: 'Clothing', vehicle: 'Vehicle', animal: 'Animal', item: 'Item' };
 function catName(it) { return it.name && it.name[0] !== '$' ? it.name : item(it.type); }
 // fetchCatalog loads the item list once the mod has sent all of it.
 async function fetchCatalog() {
@@ -2191,16 +2191,16 @@ document.getElementById('spAZ').addEventListener('click', e => {
 });
 function renderPick() {
 	const it = spSel && catalogBy[spSel];
-	const vehicle = it && it.kind === 'vehicle';
-	const whereEl = document.getElementById('spWhere'), where = vehicle ? 'ground' : whereEl.value;
+	const vehicle = it && it.kind === 'vehicle', animal = it && it.kind === 'animal';
+	const whereEl = document.getElementById('spWhere'), where = vehicle || animal ? 'ground' : whereEl.value;
 	const WHERE_TEXT = { ground: ', on the ground in front of them', inventory: ', into their inventory (what doesn\'t fit goes on the ground)', hands: ', into their hands (they must be empty)' };
 	document.getElementById('spPick').textContent = it
-		? catName(it) + (vehicle ? ', whole (parts and fluids), 8 m in front of them' : WHERE_TEXT[where])
+		? catName(it) + (vehicle ? ', whole (parts and fluids), 8 m in front of them' : animal ? ', on the ground 4 m in front of them' : WHERE_TEXT[where])
 		: (catalog ? catalog.length.toLocaleString() + ' items · pick one' : '');
-	// A vehicle goes in front of them, and it and anything for their hands
-	// come one at a time.
-	if (vehicle) whereEl.value = 'ground';
-	whereEl.disabled = !!vehicle;
+	// A vehicle or an animal goes in front of them; a vehicle and anything
+	// for their hands come one at a time.
+	if (vehicle || animal) whereEl.value = 'ground';
+	whereEl.disabled = !!(vehicle || animal);
 	const one = vehicle || where === 'hands', cnt = document.getElementById('spCount');
 	if (one) cnt.value = 1;
 	cnt.disabled = one;

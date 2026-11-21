@@ -126,7 +126,7 @@ type Vehicle struct {
 type CatalogItem struct {
 	Type string `json:"type"`
 	Name string `json:"name"`
-	Kind string `json:"kind"` // weapon, magazine, ammo, clothing, vehicle or item
+	Kind string `json:"kind"` // weapon, magazine, ammo, clothing, vehicle, animal or item
 }
 
 // PlayerState is one player as the mod reads them (ReCON_PlayerState).
@@ -885,8 +885,11 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 		if !ok {
 			return CommandStatus{}, errors.New(c.Text + " isn't an item the server can spawn")
 		}
-		if it.Kind == "vehicle" {
+		switch it.Kind {
+		case "vehicle":
 			c.Value, c.Stat = 1, "" // whole, one at a time, in front of them
+		case "animal":
+			c.Stat = "" // on the ground in front of them
 		}
 	case "back":
 		prev, ok := state.previous[guid]
