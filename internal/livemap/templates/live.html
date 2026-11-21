@@ -196,7 +196,7 @@ table.dt a { color: #8ab4f8; text-decoration: none; cursor: pointer; }
 /* Spawn item: the list takes the height the dialog has left, and grows
    and shrinks with it; below 120 px the tab scrolls instead. */
 .pbox .ppane[data-ppane="spawn"]:not([hidden]) { display: flex; flex-direction: column; }
-.pbox #fSpawn { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.pbox #fSpawn { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; flex: 1; min-height: 0; }
 .pbox #fSpawn .splist { flex: 1; min-height: 120px; max-height: none; }
 .pbox .killhead { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
 .pbox table.kills td.where { white-space: nowrap; color: #aaa; }
