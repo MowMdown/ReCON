@@ -645,3 +645,29 @@ func TestDeathsSince(t *testing.T) {
 		t.Errorf("%+v %v", ks, err)
 	}
 }
+
+func TestPredators(t *testing.T) {
+	setup(t)
+	now := time.Now()
+	req := syncReq()
+	Sync(req, now)
+	if _, sent := Predators(now); sent {
+		t.Fatal("predators before the mod sent any")
+	}
+	req.PredatorsSent = true
+	req.Predators = []Predator{{ID: 4, Type: "Animal_UrsusArctos", Kind: "bear", X: 10, Z: 20, Heading: 90}}
+	Sync(req, now)
+	if ps, sent := Predators(now); !sent || len(ps) != 1 || ps[0].Kind != "bear" {
+		t.Errorf("predators %+v %v", ps, sent)
+	}
+	// None alive is sent as none, not as "not sent".
+	req.Predators = nil
+	Sync(req, now.Add(time.Second))
+	if ps, sent := Predators(now.Add(time.Second)); !sent || len(ps) != 0 {
+		t.Errorf("after none: %+v %v", ps, sent)
+	}
+	// Once the mod stops syncing, there are none.
+	if _, sent := Predators(now.Add(time.Hour)); sent {
+		t.Error("predators while the mod isn't connected")
+	}
+}

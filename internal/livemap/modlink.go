@@ -70,6 +70,10 @@ type SyncRequest struct {
 	VehicleDetails []VehicleDetail `json:"vehicleDetails"`
 	// The map's dynamic events, sent with the vehicles.
 	WorldEvents []WorldEvent `json:"worldEvents"`
+	// The bears, wolves and guard dogs alive on the server, every sync
+	// (mod 0.0.1l on: PredatorsSent).
+	PredatorsSent Flag       `json:"predatorsSent"`
+	Predators     []Predator `json:"predators"`
 	// The map's place names, when the reply asked for them (WantPlaces).
 	PlacesSent Flag    `json:"placesSent"`
 	Places     []Place `json:"places"`
@@ -83,6 +87,16 @@ type WorldEvent struct {
 	X      float64 `json:"x"`
 	Z      float64 `json:"z"`
 	Radius float64 `json:"radius"` // an area's, in metres
+}
+
+// Predator is a bear, wolf or guard dog (ReCON_Predator).
+type Predator struct {
+	ID      int     `json:"id"`
+	Type    string  `json:"type"`
+	Kind    string  `json:"kind"` // bear, wolf or dog
+	X       float64 `json:"x"`
+	Z       float64 `json:"z"`
+	Heading float64 `json:"heading"` // degrees, 0 = north, clockwise
 }
 
 // Place is one of the map's place names (ReCON_Place).
@@ -343,10 +357,12 @@ var state struct {
 	// The map's dynamic events (with the vehicles), and its place names
 	// (placesFor: the world they are of; asked for once a connection).
 	worldEvents []WorldEvent
-	places      []Place
-	placesFor   string
-	nextID      int
-	commands    []*CommandStatus // oldest first: queued and sent ones, then the last keepResults finished
+	// The predators as last sent (nil: never, so a mod before 0.0.1l).
+	predators []Predator
+	places    []Place
+	placesFor string
+	nextID    int
+	commands  []*CommandStatus // oldest first: queued and sent ones, then the last keepResults finished
 	// SteamIDs saved to the players table this run (one write per player).
 	steamSaved map[string]bool
 	refused    string // the last refusal logged, so it isn't logged every second
@@ -384,6 +400,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		// The server may have restarted with other mods: fetch the item list again.
 		state.catalog, state.catalogTotal, state.catalogTypes = nil, 0, nil
 		state.places, state.placesFor = nil, ""
+		state.predators = nil
 	}
 	takeCatalog(req)
 	if req.VehiclesSent {
@@ -394,6 +411,12 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		state.worldEvents = req.WorldEvents
 		if state.worldEvents == nil {
 			state.worldEvents = []WorldEvent{}
+		}
+	}
+	if req.PredatorsSent {
+		state.predators = req.Predators
+		if state.predators == nil {
+			state.predators = []Predator{}
 		}
 	}
 	if req.PlacesSent {
@@ -601,6 +624,17 @@ func Vehicles(now time.Time) (vs []Vehicle, at time.Time, sent bool) {
 		return []Vehicle{}, time.Time{}, false
 	}
 	return state.vehicles, state.vehiclesAt, true
+}
+
+// Predators is the bears, wolves and guard dogs as the mod last sent them
+// (sent false: it hasn't, as a mod before 0.0.1l doesn't).
+func Predators(now time.Time) (ps []Predator, sent bool) {
+	state.Lock()
+	defer state.Unlock()
+	if !connected(now) || state.predators == nil {
+		return []Predator{}, false
+	}
+	return state.predators, true
 }
 
 // WorldEvents is the map's dynamic events as the mod last sent them (sent
@@ -1044,6 +1078,7 @@ func reset() {
 	state.nextID, state.commands, state.steamSaved, state.refused = 0, nil, nil, ""
 	state.watch, state.inventory, state.previous = nil, nil, nil
 	state.catalog, state.catalogTotal, state.catalogTypes = nil, 0, nil
+	state.predators = nil
 }
 
 // battlEyeGUID is the BattlEye GUID of a SteamID64: md5("BE" + the ID as 8

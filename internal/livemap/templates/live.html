@@ -56,6 +56,9 @@
 .mapbar button.on { border-color: #8ab4f8; color: #fff; }
 /* Vehicles on the map, and the popup a click on one opens. */
 .vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
+.amark svg { position: absolute; left: -6px; top: -6px; overflow: visible; }
+/* The animal's name, beside its dot. */
+.amark span { position: absolute; left: 9px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #1e1e1e; color: #ddd; border: 1px solid #444; box-shadow: 0 2px 10px rgba(0,0,0,.5); }
 .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; min-width: 210px; }
 .leaflet-container a.leaflet-popup-close-button { color: #aaa; }
@@ -64,7 +67,9 @@
 .vpop .row { display: flex; justify-content: space-between; gap: 12px; }
 .vpop .row span:first-child { color: #999; }
 .vpop .acts { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
-.vpop .acts button { margin: 0; }
+/* The popup's Info button: the popup's own look, not the page theme's. */
+.vpop .acts button { margin: 0; padding: 4px 10px; font: inherit; font-size: 12.5px; color: #ddd; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; cursor: pointer; }
+.vpop .acts button:hover { background: #2a2f36; border-color: #8ab4f8; color: #fff; }
 .vpop .st { font-size: 12px; }
 /* Town names: bigger for bigger places; zoomed out only the cities
    (#map's data-zb is far, mid or near). */
@@ -87,7 +92,7 @@
 /* The map's right-click menu. */
 .ctx { position: absolute; z-index: 800; min-width: 200px; max-width: 280px; background: #1e1e1e; border: 1px solid #444; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.6); padding: 6px; font-size: 13px; }
 .ctx[hidden] { display: none; }
-.ctx .hd { color: #aaa; font-size: 12px; padding: 2px 6px 6px; border-bottom: 1px solid #333; margin-bottom: 4px; }
+.ctx .hd { user-select: text; cursor: text; color: #aaa; font-size: 12px; padding: 2px 6px 6px; border-bottom: 1px solid #333; margin-bottom: 4px; }
 .ctx .lbl { color: #888; font-size: 11.5px; padding: 6px 6px 2px; }
 .ctx button { display: block; width: 100%; text-align: left; margin: 0; padding: 5px 8px; background: transparent; border: 0; border-radius: 4px; color: #ddd; font: inherit; cursor: pointer; }
 .ctx button:hover { background: #2a2f36; color: #fff; }
@@ -100,7 +105,8 @@
 .mapbar button[hidden] { display: none; }
 #map.picking, #map.picking .leaflet-interactive { cursor: crosshair; }
 .ctx .muted { padding: 2px 8px; }
-#sModal .splist { max-height: min(420px, 50vh); }
+#sModal .box { width: min(900px, 96vw); }
+#sModal .splist { max-height: min(640px, 62vh); }
 .mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: rgba(34,34,34,.92); color: #ddd; border: 1px solid #555; border-radius: 4px; }
 /* The vehicle dialog: its facts, then parts, damage and cargo side by
    side, each scrolling on its own; one under the other on a narrow screen. */
@@ -353,11 +359,12 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 	</div>
 	<div class="mapwrap">
 		<div id="map"></div>
-		<div class="ctx" id="ctx" hidden role="menu"></div>
+		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
 		<div class="mapbar">
 			<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
 			<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
 			<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
+			<button type="button" id="predBtn" onclick="togglePredators()" title="Show the bears, wolves and guard dogs">Predators</button>
 			<button type="button" id="deathBtn" onclick="toggleDeaths()" title="Show where players died">Deaths</button>
 			<select id="deathHours" aria-label="Deaths in the last" hidden><option value="1">last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select>
 			<button type="button" id="trackBtn" class="on" hidden onclick="setTrack(null)" title="Stop following"></button>
@@ -467,6 +474,7 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 			<div class="inl"><input id="sFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
 				<select id="sKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
 					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="animal">Animals</option><option value="item">Other items</option></select></div>
+			<div class="spaz" id="sAZ" role="group" aria-label="Jump to a letter"></div>
 			<div class="splist" id="sList"></div>
 			<div class="setfoot"><span class="muted" id="sPick"></span><span class="grow"></span>
 				<span>Count</span><input id="sCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
@@ -989,9 +997,9 @@ function deleteButton(v) {
 }
 function renderVehicle() {
 	const v = vehicles.find(x => x.id === vehOpen);
-	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop"><h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
+	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop" data-noicon><h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
 		vehFacts(v).map(([k, x]) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>').join('') +
-		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage and cargo">Info…</button>' + deleteButton(v) + vehDeleteState(v) + '</div></div>');
+		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage, cargo and Delete">Info…</button></div></div>');
 	renderVehicleInfo();
 }
 // renderVehicleInfo draws the dialog: the facts, then parts, damage and
@@ -1112,6 +1120,45 @@ function drawEvents() {
 }
 setInterval(loadEvents, 10000);
 
+// Predators: the bears, wolves and guard dogs alive on the server, every
+// 2 s (recon-mod 0.0.1l on). A marker points the way the animal faces.
+let predOn = layerPref('predators', '0') === '1', predators = [], predSent = true, predMarkers = {};
+const predLayer = L.layerGroup();
+const PRED = { bear: ['Bear', '#d08b5b'], wolf: ['Wolf', '#f28b82'], dog: ['Dog', '#fdd663'] };
+function togglePredators() { predOn = !predOn; setLayerPref('predators', predOn ? '1' : '0'); drawPredators(); loadPredators(); }
+async function loadPredators() {
+	if (!predOn) return;
+	try {
+		const d = await api('GET', '/api/mod/predators');
+		predators = d.predators || []; predSent = !!d.sent;
+	} catch (e) { return; }
+	drawPredators();
+}
+function predSVG(a) {
+	const [name, c] = PRED[a.kind] || [item(a.type), '#ccc'];
+	return '<svg width="12" height="12" viewBox="-6 -6 12 12"><g transform="rotate(' + Math.round(a.heading || 0) + ')"><path d="M0 -9 L3.5 -4.5 L-3.5 -4.5 Z" fill="' + c + '" stroke="#111" stroke-width="1"/></g>' +
+		'<circle r="4.5" fill="' + c + '" stroke="#111" stroke-width="1.2"/></svg><span style="color:' + c + '">' + esc(name) + '</span>';
+}
+function drawPredators() {
+	const n = {};
+	for (const a of predators) n[a.kind] = (n[a.kind] || 0) + 1;
+	layerButton('predBtn', predOn, 'Predators' + (predOn && predSent ? ' ' + predators.length : ''),
+		predOn && !predSent ? 'recon-mod doesn\'t send predators: it needs 0.0.1l or later'
+			: predOn ? (n.bear || 0) + ' bears · ' + (n.wolf || 0) + ' wolves · ' + (n.dog || 0) + ' dogs' : 'Show the bears, wolves and guard dogs');
+	if (!predOn) { predLayer.remove(); predLayer.clearLayers(); predMarkers = {}; return; }
+	if (!map.hasLayer(predLayer)) predLayer.addTo(map);
+	const seen = {};
+	for (const a of predators) {
+		seen[a.id] = true;
+		const icon = L.divIcon({ className: 'amark', html: predSVG(a), iconSize: [0, 0] }), tip = esc((PRED[a.kind] || [item(a.type)])[0] + ' · ' + grid(a.x, a.z));
+		let m = predMarkers[a.id];
+		if (!m) m = predMarkers[a.id] = L.marker([a.z, a.x], { icon, keyboard: false }).bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(predLayer);
+		else { m.setLatLng([a.z, a.x]); m.setIcon(icon); m.setTooltipContent(tip); }
+	}
+	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
+}
+setInterval(loadPredators, 2000);
+
 // Deaths: a red X where each death in the time picked was, every 30 s.
 let deathsOn = layerPref('deaths', '0') === '1', deathHours = +layerPref('deathHours', '24') || 24, deathList = [];
 const deathLayer = L.layerGroup();
@@ -1185,27 +1232,23 @@ async function ctxRun(text, path, body) {
 		setTimeout(() => { if (ctxAt === at) closeCtx(); }, 900);
 	} catch (err) { ctxMsg(err.message, true); }
 }
-async function ctxCopy(x, z) {
-	const t = Math.round(x) + ', ' + Math.round(z);
-	try { await navigator.clipboard.writeText(t); ctxMsg('Copied ' + t); } catch (err) { ctxMsg(t); }
-}
 document.getElementById('ctx').addEventListener('click', e => {
 	const b = e.target.closest('[data-a]');
 	if (b && ctxHandle) ctxHandle(b.dataset.a);
 });
 document.addEventListener('mousedown', e => { if (ctxAt && !e.target.closest('#ctx')) closeCtx(); });
 
-// On the map: teleport a player here, spawn here, copy the position.
+// On the map: teleport a player here, spawn here. The header's position
+// can be selected and copied.
 function showCtx(e) {
 	const x = e.latlng.lng, z = e.latlng.lat;
 	if (!(x > 0 && z > 0) || (size && (x > size || z > size))) { closeCtx(); return; }
 	openCtx(e.containerPoint, { x, z },
 		'<div class="hd">' + Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z) + '</div>' + ctxTeleportList('Teleport here') +
-		'<div class="lbl">This spot</div>' + ctxItem('spawn', 'Spawn an item here…') + ctxItem('copy', 'Copy the position'),
+		'<div class="lbl">This spot</div>' + ctxItem('spawn', 'Spawn an item here…'),
 		a => {
 			if (a.startsWith('tp:')) { const p = byGuid[a.slice(3)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(3) + '/teleport', { x, z, y: 0 }); }
 			else if (a === 'spawn') { closeCtx(); openSpawnAt(x, z); }
-			else if (a === 'copy') ctxCopy(x, z);
 		});
 }
 
@@ -1218,8 +1261,7 @@ function showPlayerCtx(guid, e) {
 	openCtx(e.containerPoint, { guid },
 		'<div class="hd">' + esc(p.name) + ' · ' + grid(p.x, p.z) + (p.alive ? '' : ' · dead') + '</div>' +
 		ctxItem('open', 'Open') + ctxItem('inv', 'Inventory') + ctxItem('spawn', 'Spawn an item for them…') +
-		'<div class="lbl">Map</div>' + ctxItem('follow', following ? 'Stop following' : 'Follow on the map') + ctxItem('send', 'Send to a spot… (click the map)') +
-		ctxItem('copy', 'Copy their position') +
+		'<div class="lbl">Map</div>' + ctxItem('follow', following ? 'Stop following' : 'Follow Player') + ctxItem('send', 'Teleport to…') +
 		'<div class="lbl">Actions</div>' + ctxItem('heal', 'Heal') + ctxItem('dry', 'Dry') + ctxItem('message', 'Message…') + ctxItem('kill', 'Kill', 'bad'),
 		a => {
 			const tab = t => { closeCtx(); openPlayer(guid); showPTab(t); };
@@ -1229,7 +1271,6 @@ function showPlayerCtx(guid, e) {
 			else if (a === 'message') { tab('stats'); showForm('message'); }
 			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'player', id: guid }); }
 			else if (a === 'send') { closeCtx(); startPick(guid); }
-			else if (a === 'copy') ctxCopy(p.x, p.z);
 			else if (a === 'heal') ctxRun('Healing ' + p.name, '/api/mod/players/' + guid + '/heal');
 			else if (a === 'dry') ctxRun('Drying ' + p.name, '/api/mod/players/' + guid + '/dry');
 			else if (a === 'kill') { if (confirm('Kill ' + p.name + '? Their character dies and they start again fresh.')) ctxRun('Killing ' + p.name, '/api/mod/players/' + guid + '/kill'); }
@@ -1243,12 +1284,11 @@ function showVehicleCtx(id, e) {
 	const following = track && track.kind === 'vehicle' && track.id === id;
 	openCtx(e.containerPoint, { id },
 		'<div class="hd">' + esc(catLabel(v)) + ' · ' + grid(v.x, v.z) + '</div>' +
-		ctxItem('info', 'Info…') + ctxItem('follow', following ? 'Stop following' : 'Follow on the map') + ctxItem('copy', 'Copy its position') +
+		ctxItem('info', 'Info…') + ctxItem('follow', following ? 'Stop following' : 'Follow Vehicle') +
 		ctxTeleportList('Teleport a player beside it') + '<div class="lbl">Vehicle</div>' + ctxItem('delete', 'Delete', 'bad'),
 		a => {
 			if (a === 'info') { closeCtx(); openVehicleInfo(id); }
 			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'vehicle', id }); }
-			else if (a === 'copy') ctxCopy(v.x, v.z);
 			// Beside it (3 m east), not on top of it.
 			else if (a.startsWith('tp:')) { const p = byGuid[a.slice(3)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(3) + '/teleport', { x: v.x + 3, z: v.z, y: 0 }); }
 			else if (a === 'delete') { closeCtx(); deleteVehicle(id); }
@@ -1318,19 +1358,17 @@ async function openSpawnAt(x, z) {
 	if (!catalog) { await fetchCatalog(); renderSpawnAt(); }
 }
 function closeSpawnAt() { document.getElementById('sModal').style.display = 'none'; sAt = null; }
-// renderSpawnAt lists the first 300 matches (narrow the search for more).
+// renderSpawnAt lists every match, with the A-Z bar, like Spawn item.
 function renderSpawnAt() {
 	const list = document.getElementById('sList');
-	if (!catalog) { list.innerHTML = '<div class="empty">The item list is still coming in from recon-mod…</div>'; renderSpawnPick(); return; }
+	if (!catalog) { list.innerHTML = '<div class="empty">The item list is still coming in from recon-mod…</div>'; document.getElementById('sAZ').innerHTML = ''; renderSpawnPick(); return; }
 	const words = document.getElementById('sFind').value.toLowerCase().split(/\s+/).filter(Boolean);
 	const kind = document.getElementById('sKind').value;
 	const hits = catalog.filter(it => (!kind || it.kind === kind) && words.every(w => it.find.includes(w)));
-	list.innerHTML = hits.length ? hits.slice(0, 300).map(it =>
-		'<button type="button" class="sprow' + (it.type === sSel ? ' sel' : '') + '" data-type="' + esc(it.type) + '">' +
-		'<span class="nm">' + esc(catName(it)) + '<small>' + esc(it.type) + '</small></span><span class="kd">' + KIND_TEXT[it.kind] + '</span></button>').join('') +
-		(hits.length > 300 ? '<div class="empty">' + (hits.length - 300).toLocaleString() + ' more: narrow the search.</div>' : '')
-		: '<div class="empty">No item matches.</div>';
+	const seen = {};
+	list.innerHTML = hits.length ? itemRows(hits, sSel, seen) : '<div class="empty">No item matches.</div>';
 	list.scrollTop = 0;
+	document.getElementById('sAZ').innerHTML = azBar(seen);
 	renderSpawnPick();
 }
 function renderSpawnPick() {
@@ -1928,7 +1966,7 @@ document.getElementById('pKills').addEventListener('click', e => {
 // It follows the player until it is dragged (pan) or zoomed with the
 // wheel away from them; Recenter zooms back to 500 m across (MINI_HOME)
 // on the player and follows them again. Each wheel notch zooms
-// 100 m in or out (no closer than 100 m across). A click that isn't a
+// 200 m in or out (no closer than 100 m across). A click that isn't a
 // drag picks a teleport spot.
 const MINI = 260;
 const MINI_HOME = 500; // metres across, when it opens and on Recenter
@@ -2088,7 +2126,7 @@ function calPick(at) {
 document.getElementById('miniCalReset').addEventListener('click', () => {
 	if (confirm('Forget this map\'s calibration and draw its picture over the whole map again?')) saveCal([], 'Calibration reset.');
 });
-// The wheel: 100 m per notch (a trackpad's small steps add up to notches).
+// The wheel: 200 m per notch (a trackpad's small steps add up to notches).
 let miniWheel = 0;
 miniEl.addEventListener('wheel', e => {
 	e.preventDefault();
@@ -2096,7 +2134,7 @@ miniEl.addEventListener('wheel', e => {
 	const notches = Math.trunc(miniWheel / 100) || (Math.abs(e.deltaY) >= 50 && e.deltaMode === 0 ? Math.sign(e.deltaY) : 0);
 	if (!notches) return;
 	miniWheel = 0;
-	const span = Math.max(100, Math.min(miniMax(), mini.span + 100 * notches));
+	const span = Math.max(100, Math.min(miniMax(), mini.span + 200 * notches));
 	if (span === mini.span) return;
 	if (!mini.follow) {
 		// Zoom around the point under the pointer, so it stays put.
@@ -2175,19 +2213,28 @@ function renderItems() {
 	// Every match, in name order; the first item of each letter is marked
 	// for the A-Z bar.
 	const seen = {};
-	list.innerHTML = hits.length ? hits.map(it => {
-		const first = !seen[it.letter]; seen[it.letter] = true;
-		return '<button type="button" class="sprow' + (it.type === spSel ? ' sel' : '') + '" data-type="' + esc(it.type) + '"' + (first ? ' data-first="' + it.letter + '"' : '') + '>' +
-			'<span class="nm">' + esc(catName(it)) + '<small>' + esc(it.type) + '</small></span><span class="kd">' + KIND_TEXT[it.kind] + '</span></button>';
-	}).join('') : '<div class="empty">No item matches.</div>';
+	list.innerHTML = hits.length ? itemRows(hits, spSel, seen) : '<div class="empty">No item matches.</div>';
 	list.scrollTop = 0;
-	az.innerHTML = AZ.map(l => '<button type="button" data-az="' + l + '"' + (seen[l] ? '' : ' disabled') + ' title="' + (l === '#' ? 'Digits and symbols' : l) + '">' + l + '</button>').join('');
+	az.innerHTML = azBar(seen);
 	renderPick();
 }
-document.getElementById('spAZ').addEventListener('click', e => {
+// itemRows is the item list's rows, sel highlighted; the first item of each
+// letter is marked (and noted in seen) for the A-Z bar.
+function itemRows(hits, sel, seen) {
+	return hits.map(it => {
+		const first = !seen[it.letter]; seen[it.letter] = true;
+		return '<button type="button" class="sprow' + (it.type === sel ? ' sel' : '') + '" data-type="' + esc(it.type) + '"' + (first ? ' data-first="' + it.letter + '"' : '') + '>' +
+			'<span class="nm">' + esc(catName(it)) + '<small>' + esc(it.type) + '</small></span><span class="kd">' + KIND_TEXT[it.kind] + '</span></button>';
+	}).join('');
+}
+function azBar(seen) {
+	return AZ.map(l => '<button type="button" data-az="' + l + '"' + (seen[l] ? '' : ' disabled') + ' title="' + (l === '#' ? 'Digits and symbols' : l) + '">' + l + '</button>').join('');
+}
+// The A-Z bars (Spawn item, Spawn here) scroll their list to that letter.
+for (const [bar, lst] of [['spAZ', 'spList'], ['sAZ', 'sList']]) document.getElementById(bar).addEventListener('click', e => {
 	const b = e.target.closest('[data-az]');
 	if (!b || b.disabled) return;
-	const list = document.getElementById('spList'), row = list.querySelector('[data-first="' + b.dataset.az + '"]');
+	const list = document.getElementById(lst), row = list.querySelector('[data-first="' + b.dataset.az + '"]');
 	if (row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
 });
 function renderPick() {
@@ -2439,6 +2486,7 @@ loadVehicles();
 zoomBand();
 drawTowns(); loadPlaces();
 drawEvents(); loadEvents();
+drawPredators(); loadPredators();
 drawDeaths(); loadDeaths();
 poll();
 setInterval(poll, 1000);

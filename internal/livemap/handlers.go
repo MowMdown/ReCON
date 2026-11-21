@@ -79,6 +79,13 @@ func handleModWorldEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "events": es, "sent": sent})
 }
 
+// handleModPredators serves GET /api/mod/predators: the bears, wolves and
+// guard dogs as the mod last sent them.
+func handleModPredators(w http.ResponseWriter, r *http.Request) {
+	ps, sent := Predators(time.Now())
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "predators": ps, "sent": sent})
+}
+
 // handleModPlaces serves GET /api/mod/places: the map's place names.
 func handleModPlaces(w http.ResponseWriter, r *http.Request) {
 	ps, world, sent := Places(time.Now())

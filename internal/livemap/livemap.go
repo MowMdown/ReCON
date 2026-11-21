@@ -60,6 +60,7 @@ func Start(h Host) error {
 	h.AddRoute("POST /api/mod/sync", handleModSync)                                // the mod's player data in, commands out
 	h.AddRoute("GET /api/mod/vehicles", handleModVehicles)                         // every vehicle on the server
 	h.AddRoute("GET /api/mod/worldevents", handleModWorldEvents)                   // helicopter crashes and toxic zones
+	h.AddRoute("GET /api/mod/predators", handleModPredators)                       // bears, wolves and guard dogs
 	h.AddRoute("GET /api/mod/places", handleModPlaces)                             // the map's place names
 	h.AddRoute("GET /api/mod/deaths", handleModDeaths)                             // every death in the last ?hours=
 	h.AddRoute("GET /api/mod/vehicles/{id}", handleModVehicle)                     // one, with its damage zones, parts and cargo

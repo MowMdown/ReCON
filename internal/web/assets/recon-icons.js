@@ -25,7 +25,7 @@
     return null;
   }
   function decorate(el, kind) {
-    if (el.closest('.menu')) { el.classList.remove('rc-primary', 'rc-danger'); var o = el.querySelector(':scope > i.ph'); if (o) o.remove(); return; }
+    if (el.closest('.menu, [data-noicon]')) { el.classList.remove('rc-primary', 'rc-danger'); var o = el.querySelector(':scope > i.ph'); if (o) o.remove(); return; }
     var label = el.textContent;
     if (!label.trim()) return;
     // Primary/danger by label, also for buttons with their own icon (Commands,
