@@ -137,19 +137,19 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
 /* The vehicle dialog: its facts, then parts, damage and cargo side by
    side, each scrolling on its own; one under the other on a narrow screen. */
-#vModal .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
-#vModal .vfacts .k { color: var(--lm-muted); font-size: 12px; grid-row: 1; }
-#vModal .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-#vModal .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
-#vModal .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
-#vModal .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
-#vModal .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#vModal .part .lv { font-size: 12px; white-space: nowrap; }
-#vModal .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-#vModal .acts { display: flex; align-items: center; gap: 8px; }
-#vModal .acts button { margin: 0; }
-#vModal .st { font-size: 12.5px; }
-@media (max-width: 760px) { #vModal .vcols { grid-template-columns: minmax(0, 1fr); } #vModal .vcols > div { max-height: none; } #vModal .vfacts { grid-template-columns: auto auto; } #vModal .vfacts .k { grid-row: auto; } }
+:is(#vModal, #oModal) .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
+:is(#vModal, #oModal) .vfacts .k { color: var(--lm-muted); font-size: 12px; grid-row: 1; }
+:is(#vModal, #oModal) .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+:is(#vModal, #oModal) .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
+:is(#vModal, #oModal) .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
+:is(#vModal, #oModal) .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
+:is(#vModal, #oModal) .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(#vModal, #oModal) .part .lv { font-size: 12px; white-space: nowrap; }
+:is(#vModal, #oModal) .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+:is(#vModal, #oModal) .acts { display: flex; align-items: center; gap: 8px; }
+:is(#vModal, #oModal) .acts button { margin: 0; }
+:is(#vModal, #oModal) .st { font-size: 12.5px; }
+@media (max-width: 760px) { :is(#vModal, #oModal) .vcols { grid-template-columns: minmax(0, 1fr); } :is(#vModal, #oModal) .vcols > div { max-height: none; } :is(#vModal, #oModal) .vfacts { grid-template-columns: auto auto; } :is(#vModal, #oModal) .vfacts .k { grid-row: auto; } }
 /* The weather and in-game time, beside Time & Weather above the map. */
 .worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .worldbar .badge { font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; padding: 3px 8px; color: var(--lm-text); }
@@ -173,6 +173,12 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar .ovmenu button.on::before { background: var(--lm-accent); border-color: var(--lm-accent);
 	box-shadow: inset 0 0 0 2px var(--lm-surface); }
 .mapbar .ovmenu button:hover { background: var(--lm-sel); }
+/* A layer's own filter (Placed objects' kinds), indented under it. */
+.ovmenu .ovsub { display: flex; flex-direction: column; gap: 1px; padding-left: 18px; }
+.ovmenu .ovsub[hidden] { display: none; }
+.mapbar .ovmenu .ovsub button { padding: 3px 8px; font-size: 12px; }
+/* A placed object: a small square in the colour of its condition. */
+.omark svg { position: absolute; left: -5px; top: -5px; overflow: visible; cursor: pointer; }
 /* The grid's lines: the theme's border colour lit with its accent, so they
    stand out on the map's picture; the map's edge a step stronger. */
 .leaflet-overlay-pane path.gridline { stroke: color-mix(in srgb, var(--lm-accent) 45%, var(--lm-line2)); stroke-opacity: .85; }
@@ -434,6 +440,8 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 					<button type="button" id="plyBtn" onclick="togglePlayers()" title="Show the players on the map">Players</button>
 					<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
 					<button type="button" id="predBtn" onclick="togglePredators()" title="Show the bears, wolves and guard dogs">Predators</button>
+					<button type="button" id="placedBtn" onclick="togglePlaced()" title="Show what players placed: bases, tents, storage, traps">Placed objects</button>
+					<div class="ovsub" id="placedKinds" hidden></div>
 					<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
 					<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
 					<button type="button" id="gridBtn" onclick="toggleGrid()" title="Show the 1 km grid and its numbers">Grid</button>
@@ -533,6 +541,15 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="sub" id="vType"></span></div>
 		<div id="vBody"></div>
 		<div class="dfoot"><div class="acts" id="vActs"></div><button type="button" onclick="closeVehicleInfo()">Close</button></div>
+	</div>
+</div>
+
+<!-- A placed object's details and Remove (Info on its popup) -->
+<div id="oModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="oTitle" style="width:min(1000px, 95vw)">
+		<div class="dlg-head"><h2 id="oTitle">Placed object</h2><span class="sub" id="oType"></span></div>
+		<div id="oBody"></div>
+		<div class="dfoot"><div class="acts" id="oActs"></div><button type="button" onclick="closePlacedInfo()">Close</button></div>
 	</div>
 </div>
 
@@ -1141,7 +1158,7 @@ function layerButton(id, on, text, title) {
 // The Overlays button says how many layers are on; its menu opens below it
 // and closes with a click anywhere else.
 function renderOvBtn() {
-	const n = document.querySelectorAll('#ovMenu button.on').length;
+	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length; // not a layer's own filter
 	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
 }
 function toggleOvMenu(open) {
@@ -1281,6 +1298,139 @@ function drawPredators() {
 	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
 }
 setInterval(loadPredators, 2000);
+
+// Placed objects: what players placed (recon-mod 1.0.1 on), every 30 s,
+// filtered by kind. Thousands are possible, so markers are drawn only for
+// what's in view, and only from mid zoom in.
+const PLACED_KINDS = [['base', 'Base building'], ['tent', 'Tents & shelters'], ['storage', 'Storage'], ['trap', 'Traps'], ['other', 'Other']];
+const PLACED_MIN_ZOOM = -2;
+let placedOn = layerPref('placed', '0') === '1', placedList = [], placedSent = true, placedMarkers = {}, placedOpen = null;
+const placedKindOn = Object.fromEntries(PLACED_KINDS.map(([k]) => [k, layerPref('placed.' + k, '1') === '1']));
+const plcPopup = L.popup({ autoPan: false, offset: [0, -4] });
+function togglePlaced() { placedOn = !placedOn; setLayerPref('placed', placedOn ? '1' : '0'); drawPlaced(); loadPlaced(); }
+function togglePlacedKind(k) { placedKindOn[k] = !placedKindOn[k]; setLayerPref('placed.' + k, placedKindOn[k] ? '1' : '0'); drawPlaced(); }
+async function loadPlaced() {
+	if (!placedOn) return;
+	try {
+		const d = await api('GET', '/api/mod/placed');
+		placedList = d.placed || []; placedSent = !!d.sent;
+	} catch (e) { return; }
+	drawPlaced();
+}
+function placedKind(o) { return PLACED_KINDS.some(([k]) => k === o.kind) ? o.kind : 'other'; }
+function placedName(o) { return o.name && o.name[0] !== '$' ? o.name : item(o.type); }
+function drawPlaced() {
+	const count = {};
+	for (const o of placedList) count[placedKind(o)] = (count[placedKind(o)] || 0) + 1;
+	const shown = PLACED_KINDS.reduce((n, [k]) => n + (placedKindOn[k] ? count[k] || 0 : 0), 0);
+	const zoomedOut = map.getZoom() < PLACED_MIN_ZOOM;
+	layerButton('placedBtn', placedOn, 'Placed objects' + (placedOn && placedSent ? ' ' + shown : ''),
+		placedOn && !placedSent ? 'recon-mod doesn\'t send placed objects: it needs 1.0.1'
+			: placedOn && zoomedOut ? 'Zoom in to see placed objects' : 'Show what players placed: bases, tents, storage, traps');
+	const sub = document.getElementById('placedKinds');
+	sub.hidden = !placedOn;
+	sub.innerHTML = PLACED_KINDS.map(([k, label]) => '<button type="button" class="' + (placedKindOn[k] ? 'on' : '') + '" onclick="togglePlacedKind(\'' + k + '\')">' +
+		label + (placedSent ? ' ' + (count[k] || 0) : '') + '</button>').join('');
+	const want = {};
+	if (placedOn && !zoomedOut) {
+		const b = map.getBounds().pad(0.2);
+		for (const o of placedList) if (placedKindOn[placedKind(o)] && b.contains([o.z, o.x])) want[o.id] = o;
+	}
+	for (const id in placedMarkers) if (!want[id]) { placedMarkers[id].remove(); delete placedMarkers[id]; }
+	for (const id in want) {
+		const o = want[id], [, c] = vehCondition(o.health);
+		const icon = L.divIcon({ className: 'omark', html: '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + c + '" stroke="#111" stroke-width="1"/></svg>', iconSize: [0, 0] });
+		let m = placedMarkers[id];
+		if (!m) {
+			m = placedMarkers[id] = L.marker([o.z, o.x], { pane: 'vehicles', icon, keyboard: false, title: placedName(o) }).addTo(map);
+			m.on('click', () => openPlacedPopup(o.id));
+		} else { m.setLatLng([o.z, o.x]); m.setIcon(icon); }
+	}
+	if (placedOpen != null) { if (placedList.some(o => o.id === placedOpen)) renderPlacedPopup(); else map.closePopup(plcPopup); }
+	renderPlacedInfo();
+}
+function placedBy(o) { return o.placer ? esc(o.placer) : '<span class="muted">unknown</span>'; }
+function openPlacedPopup(id) {
+	placedOpen = id;
+	renderPlacedPopup();
+	plcPopup.options.autoPan = true; plcPopup.openOn(map); plcPopup.options.autoPan = false;
+}
+function renderPlacedPopup() {
+	const o = placedList.find(x => x.id === placedOpen);
+	if (!o) return;
+	const [cn, cc] = vehCondition(o.health);
+	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
+	plcPopup.setLatLng([o.z, o.x]).setContent('<div class="vpop" data-noicon><h4>' + esc(placedName(o)) + '</h4><div class="ty">' + grid(o.x, o.z) + '</div>' +
+		row('Condition', '<span style="color:' + cc + '">' + cn + '</span>') + row('Placed by', placedBy(o)) +
+		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openPlacedInfo(' + o.id + ')" title="What is in and on it, and Remove">Info</button></div></div>');
+}
+// The Info dialog: its facts, then attachments, damage and contents (asked
+// of the mod once, like a vehicle's), and Remove.
+let placedInfo = null, placedDetail = null, placedAsk = 0;
+function openPlacedInfo(id) {
+	map.closePopup(plcPopup);
+	placedInfo = id;
+	document.getElementById('oModal').style.display = 'flex';
+	askPlaced();
+}
+function closePlacedInfo() { document.getElementById('oModal').style.display = 'none'; placedInfo = null; placedDetail = null; placedAsk++; }
+async function askPlaced() {
+	if (placedInfo == null) return;
+	const id = placedInfo, ask = ++placedAsk;
+	placedDetail = null;
+	renderPlacedInfo();
+	for (let i = 0; i < 15 && id === placedInfo && ask === placedAsk; i++) {
+		try {
+			const d = await api('GET', '/api/mod/placed/' + id + (i === 0 ? '?ask=1' : ''));
+			if (id !== placedInfo || ask !== placedAsk) return;
+			if (d.detail) { placedDetail = d.detail; break; }
+		} catch (e) { break; }
+		await new Promise(r => setTimeout(r, 1000));
+	}
+	if (id === placedInfo && ask === placedAsk) {
+		if (!placedDetail) placedDetail = { failed: true };
+		renderPlacedInfo();
+	}
+}
+function renderPlacedInfo() {
+	if (placedInfo == null) return;
+	const o = placedList.find(x => x.id === placedInfo), body = document.getElementById('oBody');
+	if (!o) { body.innerHTML = '<div class="empty">That isn\'t on the server any more.</div>'; document.getElementById('oActs').innerHTML = ''; return; }
+	document.getElementById('oTitle').textContent = placedName(o);
+	document.getElementById('oType').textContent = o.type;
+	const tops = [...body.querySelectorAll('.vcols > div')].map(c => c.scrollTop);
+	const [cn, cc] = vehCondition(o.health), kind = (PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1];
+	const facts = [['Kind', kind], ['Where', grid(o.x, o.z) + ' <span class="muted">' + Math.round(o.x) + ', ' + Math.round(o.z) + '</span>'],
+		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'], ['Placed by', placedBy(o)],
+		['Placed', o.placedAt ? new Date(o.placedAt * 1000).toLocaleString() : '<span class="muted">unknown</span>']];
+	let h = '<div class="vfacts">' + facts.map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
+	const d = placedDetail;
+	if (!d) h += '<div class="muted">Asking recon-mod what is in and on it…</div>';
+	else if (d.failed) h += '<div class="muted">recon-mod didn\'t send what is in it (it needs 1.0.1 or later).</div>';
+	else {
+		const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
+		const att = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
+		h += '<div class="vcols"><div><h5>Attachments · ' + att.length + '</h5>' +
+			(att.length ? att.map(it => partRow(itemName(it), it.healthLevel | 0)).join('') : '<div class="muted">None</div>') +
+			'</div><div><h5>Damage</h5>' +
+			(d.zones.length ? d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('') : '<div class="muted">No zones</div>') +
+			'</div><div><h5>Contents · ' + cargo.length + '</h5>' +
+			(cargo.length ? cargo.map(it => { const n = countIn(it); return partRow(itemName(it), it.healthLevel | 0, n ? n + (n === 1 ? ' item inside' : ' items inside') : qty(it)); }).join('') : '<div class="muted">Empty</div>') + '</div></div>';
+	}
+	body.innerHTML = h;
+	body.querySelectorAll('.vcols > div').forEach((c, i) => { c.scrollTop = tops[i] || 0; });
+	document.getElementById('oActs').innerHTML = '<button type="button" onclick="askPlaced()" title="Read what is in and on it again">Refresh</button>' +
+		'<button type="button" class="bad" onclick="removePlaced(' + o.id + ')" title="Remove it, and everything in it">Remove</button>';
+}
+async function removePlaced(id) {
+	const o = placedList.find(x => x.id === id);
+	if (!o || !confirm('Remove this ' + placedName(o) + ' and everything in it? It can\'t be undone.')) return;
+	try { await api('POST', '/api/mod/world/removeEntity', { text: o.pid, stat: o.type }); }
+	catch (e) { alert('Not removed: ' + e.message); return; }
+	closePlacedInfo();
+	poll();
+}
+setInterval(loadPlaced, 30000);
 
 // Deaths: a red X where each death in the time picked was, every 30 s.
 let deathsOn = layerPref('deaths', '0') === '1', deathHours = +layerPref('deathHours', '24') || 24, deathList = [];
@@ -2081,6 +2231,7 @@ function cmdText(c) {
 		case 'date': return 'In-game time ' + c.year + '-' + pad(c.month) + '-' + pad(c.day) + ' ' + pad(c.hour) + ':' + pad(c.minute);
 		case 'freezeTime': return c.value ? 'Freeze time' : 'Unfreeze time';
 		case 'deleteVehicle': return 'Delete a vehicle';
+		case 'removeEntity': return 'Remove ' + esc(c.stat ? item(c.stat) : 'an object');
 		case 'spawnAt': return 'Spawn ' + (c.value > 1 ? c.value + ' × ' : '') + esc(catalogBy[c.text] ? catName(catalogBy[c.text]) : c.text) + ' at ' + Math.round(c.x) + ', ' + Math.round(c.z);
 	}
 	return esc(c.action);
@@ -2706,22 +2857,25 @@ document.addEventListener('keydown', e => {
 	if (pickSend) { endPick(); return; }
 	if (document.getElementById('sModal').style.display === 'flex') { closeSpawnAt(); return; }
 	if (document.getElementById('vModal').style.display === 'flex') { closeVehicleInfo(); return; }
+	if (document.getElementById('oModal').style.display === 'flex') { closePlacedInfo(); return; }
 	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
 	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
-for (const id of ['pModal', 'wModal', 'sModal', 'vModal']) document.getElementById(id).addEventListener('mousedown', e => {
-	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else closeWorld(); }
+for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'oModal']) document.getElementById(id).addEventListener('mousedown', e => {
+	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'oModal') closePlacedInfo(); else closeWorld(); }
 });
 
 initMap();
-map.on('popupclose', e => { if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
+map.on('popupclose', e => { if (e.popup === plcPopup) placedOpen = null; if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
 buildWorld();
 drawVehicles();
 loadVehicles();
 zoomBand();
 drawPlayersToggle();
 drawGridToggle();
+drawPlaced(); loadPlaced();
+map.on('moveend zoomend', drawPlaced);
 drawTowns(); loadPlaces();
 drawEvents(); loadEvents();
 drawPredators(); loadPredators();
