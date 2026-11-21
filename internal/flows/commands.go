@@ -26,6 +26,7 @@ type chatCommandDef struct {
 	Announce bool        `json:"announce"` // has the Announce setting
 	Length   bool        `json:"length"`   // has the vote length setting
 	Warn     bool        `json:"warn"`     // has the warning threshold and the Kick/Ban setting
+	NeedsMod bool        `json:"needsMod"` // works only with recon-mod on the server (hidden from !help without it)
 	Help     string      `json:"help"`     // what !help !<cmd> sends
 	Fields   []chatField `json:"fields"`
 }
@@ -71,6 +72,21 @@ var ChatCommandDefs = []chatCommandDef{
 			{"limit_staff", "At the threshold: notice (to each mod and admin online, always)", "{target_name} reached {warn_count} warnings and has been {action}: {reason}", []string{"target_name", "player_name", "reason", "warn_count", "action"}},
 			{"limit_announce", "At the threshold: announcement (to everyone, when Announce is on)", "{target_name} has been {action}", []string{"target_name", "reason", "action"}},
 		}},
+	vehicleDef("car", "that car"),
+	vehicleDef("truck", "that truck"),
+	vehicleDef("boat", "that boat"),
+	vehicleDef("vehicle", "that vehicle (bikes, ATVs, helicopters and the rest)"),
+}
+
+// vehicleDef is !car, !truck, !boat or !vehicle: spawn one from the map's
+// vehicles.json (see vehicles.go).
+func vehicleDef(cmd, what string) chatCommandDef {
+	return chatCommandDef{Cmd: cmd, Role: roleMod, Cool: "0", NeedsMod: true,
+		Help: "!" + cmd + " <name> [colour] spawns " + what + " in front of you. !" + cmd + " alone lists the names.",
+		Fields: []chatField{
+			{"spawned", "Spawned (to the player)", "Spawning {vehicle} ({colour})", []string{"vehicle", "colour"}},
+			{"list", "List (to the player, for !" + cmd + " alone or a name it doesn't have)", "{category}: {names}", []string{"category", "names"}},
+		}}
 }
 
 // Defaults for !warning: kick or ban at the second warning.
@@ -374,6 +390,11 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 	if !set.On || !def.allowedFor(role) {
 		return
 	}
+	// Only staff can use these, so say why instead of a silent nothing.
+	if def.NeedsMod && !modConnected() {
+		chatSay(p, false, "recon-mod isn't running on this server")
+		return
+	}
 	rest := strings.TrimSpace(text[len(fields[0]):])
 	args := fields[1:]
 	name := battleye.BareName(p.Name)
@@ -385,7 +406,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 		if len(args) == 0 {
 			var names []string
 			for _, d := range ChatCommandDefs {
-				if all[d.Cmd].On && d.allowedFor(role) { // only what their role may use
+				if all[d.Cmd].On && d.allowedFor(role) && (!d.NeedsMod || modConnected()) { // only what their role may use
 					names = append(names, "!"+d.Cmd)
 				}
 			}
@@ -395,7 +416,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 			return
 		}
 		d := chatDef(strings.ToLower(strings.TrimPrefix(args[0], "!")))
-		if d == nil || !all[d.Cmd].On || !d.allowedFor(role) {
+		if d == nil || !all[d.Cmd].On || !d.allowedFor(role) || (d.NeedsMod && !modConnected()) {
 			return
 		}
 		if chatSay(p, false, d.Help) {
@@ -476,6 +497,9 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 
 	case "warning":
 		runWarningCommand(p, role, set, args)
+
+	case "car", "truck", "boat", "vehicle":
+		runVehicleCommand(cmd, p, set, args)
 	}
 }
 
