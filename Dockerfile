@@ -14,8 +14,11 @@ COPY internal ./internal
 # --build-arg RECON_MOD=true builds in recon-mod's panel (the Live Map page
 # and the API the DayZ mod talks to, github.com/MowMdown/ReCON-Mod), from
 # RECON_MOD_REF (a branch, tag or commit). Without it ReCON has none of it.
+# GOPRIVATE fetches ReCON-Mod straight from GitHub, not through the Go module
+# proxy, which can serve a stale "main" for a while after a push.
 ARG RECON_MOD=false
 ARG RECON_MOD_REF=main
+ENV GOPRIVATE=github.com/MowMdown/ReCON-Mod
 RUN if [ "$RECON_MOD" = "true" ]; then \
       apk add --no-cache git && \
       cp cmd/recon/_mod/recon_mod.go cmd/recon/ && \
