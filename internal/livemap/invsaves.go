@@ -233,11 +233,7 @@ func RestoreSaved(id int64, itemIDs []int, now time.Time) (CommandStatus, error)
 	if len(tree) == 0 {
 		return CommandStatus{}, errors.New("none of those items are in that saved inventory")
 	}
-	data, err := json.Marshal(noNulls(tree))
-	if err != nil {
-		return CommandStatus{}, err
-	}
-	c, err := Queue(s.GUID, Command{Action: "restore", Text: string(data)}, now)
+	c, err := Queue(s.GUID, Command{Action: "restore", Items: noNulls(tree)}, now)
 	if err != nil {
 		return c, err
 	}

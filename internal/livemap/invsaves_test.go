@@ -1,6 +1,7 @@
 package livemap
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -87,11 +88,14 @@ func TestRestoreRecords(t *testing.T) {
 	Sync(syncReq(a), now)
 	id := InventorySaves(guid(steamA))[0].ID
 	c, err := RestoreSaved(id, []int{1, 2}, now)
-	if err != nil || c.Action != "restore" || c.Text == "" {
+	// The items go as a list in the command, not JSON packed in a string
+	// (the mod's JSON reader broke on that: "Missing a closing quotation mark").
+	if err != nil || c.Action != "restore" || c.Text != "" || len(c.Items) != 1 || c.Items[0].ID != 1 || len(c.Items[0].Cargo) != 1 {
 		t.Fatalf("%+v %v", c, err)
 	}
-	if strings.Contains(c.Text, "null") {
-		t.Errorf("the mod's JSON reader gets null for a list: %s", c.Text)
+	sent, _ := json.Marshal(c.Command)
+	if strings.Contains(string(sent), "null") {
+		t.Errorf("the mod's JSON reader gets null for a list: %s", sent)
 	}
 	s, _ := InventorySave(id)
 	if !reflect.DeepEqual(s.RestoredIDs, []int{1, 2}) || s.Restored != 2 {
