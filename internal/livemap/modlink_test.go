@@ -308,6 +308,9 @@ func openTestDB(t *testing.T) {
 	if err := openKills(d); err != nil {
 		t.Fatal(err)
 	}
+	if err := openChatCars(d); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // md5("BE" + the SteamID64 as 8 little-endian bytes), worked out apart

@@ -42,6 +42,9 @@ func Start(h Host) error {
 	if h.DB == nil || h.RCONPassword == nil || h.AddRoute == nil || h.Page == nil {
 		return errors.New("recon-mod: ReCON didn't give the Live Map its database, RCON password, routes or pages")
 	}
+	if err := openChatCars(h.DB); err != nil {
+		return fmt.Errorf("recon-mod: creating its chat_vehicles table: %w", err)
+	}
 	if err := openKills(h.DB); err != nil {
 		return fmt.Errorf("recon-mod: creating its table: %w", err)
 	}

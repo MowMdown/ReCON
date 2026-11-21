@@ -21,7 +21,7 @@ var (
 	modConnected   = func() bool { s, _ := livemap.Current(time.Now()); return s.Connected }
 	vehicleChoices = func() (livemap.VehicleFile, string, error) { return livemap.VehicleChoices(time.Now()) }
 	// spawnVehicle queues one whole vehicle of class in front of the player
-	// (guid) and returns its display name. The class may be spelled in any
+	// (guid), replacing their previous chat car, and returns its display name. The class may be spelled in any
 	// case; the mod gets the item list's spelling.
 	spawnVehicle = func(guid, class string) (string, error) {
 		now := time.Now()
@@ -29,7 +29,8 @@ var (
 		if !ok {
 			return "", errors.New(class + " isn't an item the server can spawn")
 		}
-		if _, err := livemap.Queue(guid, livemap.Command{Action: "spawn", Text: it.Type, Value: 1}, now); err != nil {
+		// Replaces their last chat car (livemap/chatcars.go).
+		if _, err := livemap.SpawnChatVehicle(guid, it.Type, now); err != nil {
 			return "", err
 		}
 		if it.Name == "" || strings.HasPrefix(it.Name, "$") {

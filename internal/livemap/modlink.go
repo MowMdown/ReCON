@@ -254,6 +254,9 @@ type Result struct {
 	ID    int    `json:"id"`
 	OK    Flag   `json:"ok"`
 	Error string `json:"error"`
+	// A vehicle spawn's new vehicle, by persistent ID (b1:b2:b3:b4), from
+	// mod 0.0.1m; "" otherwise.
+	Entity string `json:"entity"`
 }
 
 // Command is an action for the mod to run (ReCON_Command). Every field is
@@ -269,6 +272,9 @@ type Command struct {
 	Stat    string  `json:"stat"`
 	Value   float64 `json:"value"`
 	Text    string  `json:"text"`
+	// spawn: the vehicle to delete once the new one exists (persistent
+	// ID), for a chat car (chatcars.go); mod 0.0.1m on.
+	Replace string  `json:"replace,omitempty"`
 	Title   string  `json:"title"`
 	Seconds float64 `json:"seconds"`
 	// World actions (QueueWorld).
@@ -323,7 +329,8 @@ type CommandStatus struct {
 	// previous spot once the mod has run it), and whether it was "back".
 	From     *Position `json:"from,omitempty"`
 	Back     bool      `json:"back,omitempty"`
-	Status   string    `json:"status"` // queued, sent, done, failed, expired
+	ChatCar  bool      `json:"chatCar,omitempty"` // a vehicle chat command's spawn (chatcars.go)
+	Status   string    `json:"status"`            // queued, sent, done, failed, expired
 	Error    string    `json:"error,omitempty"`
 	Queued   time.Time `json:"queued"`
 	Finished time.Time `json:"finished,omitempty"`
@@ -396,6 +403,8 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	}
 	players := make(map[string]Player, len(req.Players))
 	var newSteam [][2]string
+	var chatCars []chatCarResult // chat cars the results reported, kept after the lock
+	untracked := false
 	state.Lock()
 	if state.lastSync.IsZero() || now.Sub(state.lastSync) > staleAfter {
 		log.Printf("recon-mod: the mod (version %s) connected (%s, %d players)", req.Mod, req.World, len(req.Players))
@@ -488,6 +497,13 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 			continue
 		}
 		c.Status, c.Error, c.Finished = "done", "", now
+		if bool(r.OK) && c.ChatCar {
+			if r.Entity != "" {
+				chatCars = append(chatCars, chatCarResult{c.GUID, r.Entity, c.Text})
+			} else {
+				untracked = true
+			}
+		}
 		if !r.OK {
 			c.Status, c.Error = "failed", r.Error
 		} else if c.From != nil {
@@ -542,6 +558,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	trimCommands()
 	state.Unlock()
 
+	keepChatCars(chatCars, untracked, now)
 	if saveSteamID != nil {
 		for _, g := range newSteam {
 			if err := saveSteamID(g[0], g[1]); err != nil {
