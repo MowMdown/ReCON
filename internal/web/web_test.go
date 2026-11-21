@@ -747,3 +747,24 @@ func TestChatCommandsGetHasVehicleFields(t *testing.T) {
 		}
 	}
 }
+
+// TestStatusHasVersions checks GET /api/status says ReCON's version (set at
+// build time) and the connected mod's (empty while it isn't connected), for
+// the version line at the bottom right of every page.
+func TestStatusHasVersions(t *testing.T) {
+	old := Version
+	Version = "v9.9.9-test"
+	t.Cleanup(func() { Version = old })
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	var out struct {
+		Version *string `json:"version"`
+		Mod     *string `json:"mod"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Version == nil || *out.Version != "v9.9.9-test" || out.Mod == nil || *out.Mod != "" {
+		t.Errorf("got %s", rec.Body.String())
+	}
+}

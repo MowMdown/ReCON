@@ -39,6 +39,10 @@ td.act button:last-child { margin-right: 0; }
 .top h1 { margin: 0; }
 .top button { margin-right: 0; }
 .statusbar b { font-weight: 600; }
+/* ReCON's and recon-mod's versions, small and grey in the bottom right
+   corner of every page (filled from /api/status). */
+.verline { position: fixed; right: 10px; bottom: 6px; z-index: 900; font-size: 11px; color: #777; opacity: .75; pointer-events: none; white-space: nowrap; }
+html[data-theme]:not([data-theme="default"]) .verline { color: var(--color-neutral-500); }
 .st.connected { color: #81c995; }
 .st.retrying { color: #fdd663; }
 .st.unavailable { color: #f28b82; }
@@ -81,6 +85,7 @@ td.act button:last-child { margin-right: 0; }
 	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
 </div>
+<div class="verline" id="verLine" aria-label="Versions"></div>
 <script>
 // Status bar shown on every page. RCON is the game server as ReCON's
 // 5-second player check last saw it (GET /api/status): Connected, or
@@ -137,6 +142,7 @@ var setStatusCount;
 			waiting = !!d.waiting;
 			show('webStatus', 'connected');
 			show('rconStatus', d.rcon);
+			document.getElementById('verLine').textContent = 'ReCON ' + (d.version || '?') + ' · recon-mod ' + (d.mod || '—');
 		} catch (e) {
 			fails++;
 			retryAt = 0;

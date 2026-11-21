@@ -13,8 +13,11 @@ COPY internal ./internal
 
 RUN go mod tidy
 
+# The release tag (the image workflow passes it), shown at the bottom right
+# of every page.
+ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux \
-    go build -ldflags="-s -w" -o /recon ./cmd/recon
+    go build -ldflags="-s -w -X github.com/MowMdown/ReCON/internal/web.Version=${VERSION}" -o /recon ./cmd/recon
 
 
 # --- Stage 2: Runtime ---

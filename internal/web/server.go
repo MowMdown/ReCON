@@ -20,8 +20,13 @@ import (
 
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/livemap"
 	"github.com/MowMdown/ReCON/internal/store"
 )
+
+// Version is ReCON's version, set when the image is built (-ldflags -X
+// .../internal/web.Version=v3.0.25-dev); "dev" in a build without it.
+var Version = "dev"
 
 // Serve serves every route (routes) until the listener fails.
 func Serve(addr string) error {
@@ -59,8 +64,13 @@ func buildWebRoutes() *http.ServeMux {
 	// "unavailable"}, and while not connected either "waiting": true (a
 	// login was sent and ReCON is waiting for the server to answer it) or
 	// "retryInMs": time until the next check of the game server.
+	// Also "version" (ReCON's) and "mod" (recon-mod's on the game server,
+	// "" while it isn't connected), for the version line on every page.
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
-		st := map[string]any{"ok": true, "rcon": game.Status()}
+		st := map[string]any{"ok": true, "rcon": game.Status(), "version": Version, "mod": ""}
+		if ms, _ := livemap.Current(time.Now()); ms.Connected {
+			st["mod"] = ms.Mod
+		}
 		if st["rcon"] != "connected" {
 			if game.WaitingForLogin() {
 				st["waiting"] = true

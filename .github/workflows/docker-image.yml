@@ -76,3 +76,4 @@ jobs:
           context: .
           push: true
           tags: ${{ env.TAGS }}
+          build-args: VERSION=${{ github.event.release.tag_name }}
