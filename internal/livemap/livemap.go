@@ -55,6 +55,8 @@ func Start(h Host) error {
 	h.AddRoute("GET /api/mod/map/{world}", mapImage(h.DataDir))                    // maps/<world>.jpg|png|webp from the data folder
 	h.AddRoute("GET /api/mod/map/{world}/tiles", mapTileList(h.DataDir))           // maps/<world>/tiles.json: the tiles' levels and size
 	h.AddRoute("GET /api/mod/map/{world}/tile/{level}/{file}", mapTile(h.DataDir)) // one of them: maps/<world>/<level>/<column>_<row>.jpg
+	h.AddRoute("GET /api/mod/map/{world}/calibration", calibration(h.DataDir))     // maps/<world>/calibration.json: {"points"}
+	h.AddRoute("POST /api/mod/map/{world}/calibration", setCalibration(h.DataDir)) // {"points"}: set them (none: not calibrated)
 	h.AddRoute("POST /api/mod/sync", handleModSync)                                // the mod's player data in, commands out
 	h.AddRoute("GET /api/mod/items", handleModItems)                               // every item the server can spawn
 	h.AddRoute("GET /api/mod/players", handleModPlayers)                           // every online player's live state, the weather

@@ -47,10 +47,16 @@
 .empty { color: #888; font-size: 13px; line-height: 1.5; }
 .mapwrap { position: relative; border: 1px solid #333; border-radius: 6px; overflow: hidden; background: #161a17; min-height: 420px; }
 #map { position: absolute; inset: 0; background: #161a17; }
+/* Full screen: the map covers the browser's window (not the monitor);
+   the dialogs still open over it. */
+.live .mapwrap.full { position: fixed; inset: 0; z-index: 900; border: none; border-radius: 0; height: auto; min-height: 0; max-height: none; aspect-ratio: auto; order: 0; }
 .leaflet-container { font: inherit; }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .mapbar > * { pointer-events: auto; }
-.mapbar .badge { font-size: 12px; background: rgba(20,20,20,.85); border: 1px solid #444; border-radius: 4px; padding: 3px 8px; color: #ccc; }
+/* The weather and in-game time, beside Time & Weather above the map. */
+.worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.worldbar .badge { font-size: 12px; background: #1a1a1a; border: 1px solid #444; border-radius: 4px; padding: 3px 8px; color: #ccc; }
+.worldbar .badge[hidden] { display: none; }
 .mapbar .sp { flex: 1; }
 .mapbar button { margin: 0; background: rgba(34,34,34,.92); color: #ddd; border: 1px solid #555; }
 .mapbar button:hover { border-color: #8ab4f8; color: #fff; }
@@ -125,6 +131,11 @@
 .minihud .sp { flex: 1; }
 .minihud button { pointer-events: auto; margin: 0; padding: 3px 8px; font-size: 11.5px; background: rgba(34,34,34,.92); color: #ddd; border: 1px solid #555; border-radius: 4px; }
 .minihud button:hover { border-color: #8ab4f8; color: #fff; }
+.minical { position: absolute; left: 6px; right: 6px; bottom: 24px; display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 11.5px; color: #e8eee9; background: rgba(17,17,17,.85); border: 1px solid #8ab4f8; border-radius: 4px; }
+.minical[hidden] { display: none; }
+.minical .sp { flex: 1; }
+.minical button { margin: 0; padding: 2px 8px; font-size: 11.5px; background: #222; color: #ddd; border: 1px solid #555; border-radius: 4px; }
+.minihud button.on { border-color: #8ab4f8; color: #fff; }
 .miniscale { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: #6b786d; pointer-events: none; }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0 14px; }
 .tile { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 10px 12px; }
@@ -182,7 +193,13 @@ table.dt a { color: #8ab4f8; text-decoration: none; cursor: pointer; }
 .pbox .dfoot { margin-top: auto; padding-top: 10px; }
 .pbox .statgrid { grid-template-columns: minmax(0, 1fr) 390px; }
 .pbox #mini { width: 390px; height: 390px; }
-.pbox .splist { max-height: 420px; }
+/* Spawn item: the list takes the height the dialog has left, and grows
+   and shrinks with it; below 120 px the tab scrolls instead. */
+.pbox .ppane[data-ppane="spawn"]:not([hidden]) { display: flex; flex-direction: column; }
+.pbox #fSpawn { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.pbox #fSpawn .splist { flex: 1; min-height: 120px; max-height: none; }
+.pbox .killhead { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.pbox table.kills td.where { white-space: nowrap; color: #aaa; }
 /* The stats fill the height beside the mini-map: taller bars, more room. */
 .pbox .bars { gap: 12.5px; padding-top: 4px; }
 .pbox .bar { grid-template-columns: 84px minmax(0, 1fr) 150px; font-size: 14.5px; }
@@ -192,7 +209,9 @@ table.dt a { color: #8ab4f8; text-decoration: none; cursor: pointer; }
 .pbox .track .handle { width: 18px; height: 18px; margin: -9px 0 0 -9px; }
 .pbox .track .tip { bottom: 20px; }
 .pbox .draghint { margin-top: 12px; }
-.pbox .chips { margin-top: 16px; }
+.pbox .ailrow { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; }
+.pbox .ailrow .chips { flex: 1; margin-top: 0; }
+.pbox .ailrow button { margin: 0; flex: none; }
 @media (max-width: 900px) { .pbox .statgrid { grid-template-columns: minmax(0, 1fr); } .pbox #mini { width: 100%; height: auto; aspect-ratio: 1; } }
 .ppane > h4:first-child { margin-top: 0; }
 html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-divider); }
@@ -239,14 +258,15 @@ html[data-theme]:not([data-theme="default"]) .irow, html[data-theme]:not([data-t
 .wnote { margin-top: 8px; font-size: 12.5px; color: #fdd663; line-height: 1.5; }
 html[data-theme]:not([data-theme="default"]) .prow, html[data-theme]:not([data-theme="default"]) .tile,
 html[data-theme]:not([data-theme="default"]) .form, html[data-theme]:not([data-theme="default"]) .mapwrap,
-html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-theme="default"]) .chip { border-color: var(--color-divider); }
+html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-theme="default"]) .chip,
+html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: var(--color-divider); }
 </style>
 {{template "theme" .}}
 </head>
 <body>
 <nav>{{template "navlinks" "live"}}</nav>
 {{template "statusbar" .}}
-<div class="top"><h1>Live Map</h1><button type="button" id="worldBtn" onclick="openWorld()" disabled title="Change the in-game time and weather">Time &amp; Weather</button></div>
+<div class="top"><h1>Live Map</h1><div class="worldbar"><span class="badge" id="wxBadge" hidden></span><span class="badge" id="timeBadge" hidden></span><button type="button" id="worldBtn" onclick="openWorld()" disabled title="Change the in-game time and weather">Time &amp; Weather</button></div></div>
 <div class="live">
 	<div class="side">
 		<div class="modline"><span class="dot off" id="modDot"></span><span id="modLine">Waiting for recon-mod...</span></div>
@@ -256,10 +276,10 @@ html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-t
 	<div class="mapwrap">
 		<div id="map"></div>
 		<div class="mapbar">
-			<span class="badge" id="wxBadge" hidden></span>
-			<span class="badge" id="timeBadge" hidden></span>
 			<span class="sp"></span>
 			<button type="button" onclick="fitAll()" title="Show the whole map">Fit</button>
+			<button type="button" onclick="fillWidth()" title="Zoom so the map's width fills the view, edge to edge">Fill</button>
+			<button type="button" id="fullBtn" onclick="toggleFull()" title="Make the map fill the window (Esc to go back)">Full screen</button>
 		</div>
 	</div>
 </div>
@@ -276,17 +296,19 @@ html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-t
 			<button type="button" role="tab" data-ptab="stats">Stats</button>
 			<button type="button" role="tab" data-ptab="inventory">Inventory</button>
 			<button type="button" role="tab" data-ptab="spawn">Spawn item</button>
+			<button type="button" role="tab" data-ptab="kills">Kills &amp; deaths</button>
 		</div>
 		<div class="ppane" data-ppane="stats">
 		<div class="statgrid">
 			<div>
 				<div class="bars" id="pBars"></div>
 				<div id="pSave"></div>
-				<div class="chips" id="pChips"></div>
+				<div class="ailrow"><div class="chips" id="pChips"></div><button type="button" class="go" onclick="act('heal')" title="Full health, blood, shock, food, water and stamina; stops bleeding, cures illnesses, mends broken legs and wakes them">Heal</button></div>
 			</div>
 			<div class="miniwrap">
 				<canvas id="miniCv" aria-hidden="true"></canvas><svg id="mini" viewBox="0 0 260 260" role="img" aria-label="The map around the player: drag to move, scroll to zoom, click to pick a teleport spot, double-click to teleport there"><g id="miniG"></g></svg>
-				<div class="minihud"><span id="miniXY"></span><span class="sp"></span><button type="button" id="miniFollow" hidden title="Zoom back to 500 m across on the player and follow them again">Recenter</button></div>
+				<div class="minihud"><span id="miniXY"></span><span class="sp"></span><button type="button" id="miniFollow" hidden title="Zoom back to 500 m across on the player and follow them again">Recenter</button><button type="button" id="miniCal" hidden title="If the map's picture is off: stand somewhere you can tell on it, then click where you really are">Calibrate</button></div>
+				<div class="minical" id="miniCalBox" hidden><span id="miniCalMsg"></span><span class="sp"></span><button type="button" id="miniCalReset" hidden title="Forget this map's calibration">Reset</button></div>
 				<div class="miniscale" id="miniScale"></div>
 			</div>
 		</div>
@@ -296,7 +318,6 @@ html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-t
 			<div class="tile"><div class="k">Kills / deaths</div><div class="v" id="tKD"></div><div class="s" id="tKDall"></div></div>
 		</div>
 		<div class="acts">
-			<button type="button" class="go" onclick="act('heal')">Heal</button>
 			<button type="button" id="bMessage" onclick="showForm('message')">Message…</button>
 			<span class="sp"></span>
 			<button type="button" class="bad" onclick="killPlayer()">Kill</button>
@@ -313,8 +334,6 @@ html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-t
 			<input id="msgText" class="grow" maxlength="500" placeholder="Message, shown on their screen" aria-label="Message">
 			<button type="button" class="go" onclick="doMessage()">Send</button><button type="button" onclick="showForm('')">Cancel</button>
 		</div>
-		<h4>Kills and deaths</h4>
-		<table class="dt"><tbody id="pKills"></tbody></table>
 		</div>
 		<div class="ppane" data-ppane="inventory" hidden>
 		<h4>Inventory <span class="muted" id="invWhen"></span></h4>
@@ -332,6 +351,10 @@ html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-t
 				<span>Count</span><input id="spCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
 				<button type="button" class="go" onclick="doSpawn()">Spawn</button></div>
 		</div>
+		</div>
+		<div class="ppane" data-ppane="kills" hidden>
+		<h4 class="killhead">Kills and deaths <span class="muted" id="pKillSum"></span></h4>
+		<table class="dt kills"><tbody id="pKills"></tbody></table>
 		</div>
 		<div class="dlg-err" id="pErr"></div>
 		<div class="lastact" id="pLast"></div>
@@ -360,9 +383,7 @@ html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-t
 			<div class="inl" style="margin-top:12px">Change over <input id="wTrans" size="4" value="0" inputmode="numeric" aria-label="Seconds"> seconds, then hold for at least
 				<input id="wHold" size="4" value="0" inputmode="numeric" aria-label="Minutes"> minutes
 				<span style="flex:1"></span><button type="button" class="go" onclick="applyWeather()">Apply</button></div>
-			<div class="muted" style="margin-top:8px">Only the sliders you moved are sent. Rain only falls while overcast is in the map's rain range (60% to 100% by default):
-				<a href="#" onclick="toggleRainRange(event)" style="color:#8ab4f8">change it</a>.</div>
-			<div class="inl" id="rainRange" hidden style="margin-top:10px">Rain falls between <input id="rMin" size="3" value="60" inputmode="numeric" aria-label="Lowest overcast %">% and
+			<div class="inl" id="rainRange" style="margin-top:12px">Rain falls between <input id="rMin" size="3" value="60" inputmode="numeric" aria-label="Lowest overcast %">% and
 				<input id="rMax" size="3" value="100" inputmode="numeric" aria-label="Highest overcast %">% overcast, and stops within <input id="rStop" size="3" value="30" inputmode="numeric" aria-label="Seconds"> seconds
 				<button type="button" class="go" onclick="setRainRange()">Set</button></div>
 		</div>
@@ -492,6 +513,33 @@ function srcLoaded(url) {
 	return im && im.complete && im.naturalWidth ? im : null;
 }
 
+// calPoints are the map's calibration points, oldest first: where a player
+// was (x, z, as the mod reported) and where on the picture they really
+// were (u from its west edge, v from its north edge, 0 to 1).
+let calPoints = [];
+const CAL_MIN = 1000; // metres two points must be apart to set the picture's size
+// placement is where the map's picture lies: its north-west corner at
+// (W, N), L metres across. Not calibrated, it covers the map (see L0); one point
+// moves it so that spot on it is where the player was; two at least
+// CAL_MIN apart set its size too.
+function placement() {
+	const S = size || 15360, p = calPoints;
+	// A picture within 2% of the map's size is taken as 1 px a metre from
+	// the map's north-west corner (Deer Isle's is 16512 px for 16384 m).
+	const px = pic && (pic.px || (pic.img && pic.img.naturalWidth));
+	const L0 = px && Math.abs(px - S) <= S * 0.02 ? px : S;
+	if (!p.length) return { W: 0, N: S, L: L0 };
+	let L = L0, use = [p[p.length - 1]];
+	if (p.length >= 2) {
+		const a = p[p.length - 2], b = p[p.length - 1];
+		const dw = Math.hypot(b.x - a.x, b.z - a.z), dp = Math.hypot(b.u - a.u, b.v - a.v);
+		if (dw >= CAL_MIN && dp > 0) { L = dw / dp; use = [a, b]; }
+	}
+	let W = 0, N = 0;
+	for (const q of use) { W += q.x - q.u * L; N += q.z + q.v * L; }
+	return { W: W / use.length, N: N / use.length, L };
+}
+
 // drawPicture draws the map's picture from (x0, z0), span metres across,
 // onto all of the canvas cv (north up); again() is called when a tile it
 // needed has loaded, to draw it again.
@@ -499,7 +547,7 @@ function drawPicture(cv, x0, z0, span, again) {
 	const ctx = cv.getContext('2d');
 	ctx.clearRect(0, 0, cv.width, cv.height);
 	if (!pic || !span) return;
-	const S = size || 15360, f = cv.width / span; // canvas px a metre
+	const P = placement(), f = cv.width / span; // canvas px a metre
 	ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
 	// put draws image im, covering the map from (ix, iTop) w × h metres
 	// (iTop its north edge), clipped to the canvas and to the box
@@ -512,30 +560,30 @@ function drawPicture(cv, x0, z0, span, again) {
 		ctx.drawImage(im, (vx0 - ix) * kx, (iTop - vt) * ky, (vx1 - vx0) * kx, (vt - vb) * ky,
 			(vx0 - x0) * f, (z0 + span - vt) * f, (vx1 - vx0) * f + 0.5, (vt - vb) * f + 0.5);
 	};
-	if (pic.img) { put(pic.img, 0, S, S, S); return; }
+	if (pic.img) { put(pic.img, P.W, P.N, P.L, P.L); return; }
 	// At level k a tile pixel is m(k) metres; pick the first level whose
 	// pixels are no bigger than the canvas's.
-	const N = pic.levels - 1, m = k => Math.pow(2, N - k) * S / pic.px;
+	const top = pic.levels - 1, m = k => Math.pow(2, top - k) * P.L / pic.px;
 	let k = 0;
-	while (k < N && m(k) > 1 / f) k++;
+	while (k < top && m(k) > 1 / f) k++;
 	// drawTile draws level k's tile (c, r) if it has loaded (loading it
 	// when load), clipped to the box; true if it drew.
 	const drawTile = (k, c, r, load, box = []) => {
 		const url = pic.url(k, c, r), im = load ? srcImage(url, again) : srcLoaded(url);
 		if (!im) return false;
 		const T = pic.tile * m(k);
-		put(im, c * T, S - r * T, im.naturalWidth * m(k), im.naturalHeight * m(k), ...box);
+		put(im, P.W + c * T, P.N - r * T, im.naturalWidth * m(k), im.naturalHeight * m(k), ...box);
 		return true;
 	};
-	const T = pic.tile * m(k), n = Math.ceil(pic.px / Math.pow(2, N - k) / pic.tile);
-	const c0 = Math.max(0, Math.floor(x0 / T)), c1 = Math.min(n - 1, Math.floor((x0 + span) / T));
-	const r0 = Math.max(0, Math.floor((S - z0 - span) / T)), r1 = Math.min(n - 1, Math.floor((S - z0) / T));
+	const T = pic.tile * m(k), n = Math.ceil(pic.px / Math.pow(2, top - k) / pic.tile);
+	const c0 = Math.max(0, Math.floor((x0 - P.W) / T)), c1 = Math.min(n - 1, Math.floor((x0 + span - P.W) / T));
+	const r0 = Math.max(0, Math.floor((P.N - z0 - span) / T)), r1 = Math.min(n - 1, Math.floor((P.N - z0) / T));
 	for (let r = r0; r <= r1; r++) {
 		for (let c = c0; c <= c1; c++) {
 			if (drawTile(k, c, r, true)) continue;
 			// Not loaded yet: draw its area from the nearest coarser level
 			// that has (level 0, the whole map, is loaded first).
-			const box = [c * T, (c + 1) * T, S - (r + 1) * T, S - r * T];
+			const box = [P.W + c * T, P.W + (c + 1) * T, P.N - (r + 1) * T, P.N - r * T];
 			for (let j = k - 1; j >= 0; j--) {
 				const d = Math.pow(2, k - j);
 				if (drawTile(j, Math.floor(c / d), Math.floor(r / d), j === 0, box)) break;
@@ -566,14 +614,18 @@ const PictureLayer = L.GridLayer.extend({
 // (never both: the whole picture is too big to load when there are tiles).
 function loadPicture() {
 	if (imageLayer) { imageLayer.remove(); imageLayer = null; }
-	pic = null; srcCache.clear();
-	const w = world, bounds = [[0, 0], [size, size]];
+	pic = null; srcCache.clear(); calPoints = [];
+	const w = world;
 	const show = p => {
 		if (w !== world) return;
 		pic = p;
-		imageLayer = new PictureLayer({ bounds }).addTo(map); imageLayer.bringToBack();
-		redrawMini();
+		placePicture();
 	};
+	api('GET', '/api/mod/map/' + encodeURIComponent(w) + '/calibration').then(d => {
+		if (w !== world) return;
+		calPoints = d.points || [];
+		placePicture();
+	}).catch(() => { });
 	api('GET', '/api/mod/map/' + encodeURIComponent(w) + '/tiles').then(t => {
 		const base = '/api/mod/map/' + encodeURIComponent(w) + '/tile/';
 		const url = (k, c, r) => base + k + '/' + c + '_' + r + '.' + t.ext + '?v=' + t.version;
@@ -589,6 +641,17 @@ function loadPicture() {
 		img.onload = () => show({ img });
 		img.src = '/api/mod/map/' + encodeURIComponent(w);
 	});
+}
+// placePicture (re)draws the map's picture where placement() puts it.
+function placePicture() {
+	if (imageLayer) { imageLayer.remove(); imageLayer = null; }
+	if (pic) {
+		const P = placement();
+		imageLayer = new PictureLayer({ bounds: [[P.N - P.L, P.W], [P.N, P.W + P.L]] }).addTo(map);
+		imageLayer.bringToBack();
+	}
+	redrawMini();
+	calUI();
 }
 let miniSoon = 0;
 function redrawMiniSoon() { if (!miniSoon) miniSoon = setTimeout(() => { miniSoon = 0; redrawMini(); }, 50); }
@@ -659,6 +722,32 @@ function drawMarkers() {
 function fitAll() {
 	const s = size || 15360;
 	map.fitBounds([[0, 0], [s, s]]);
+}
+// toggleFull makes the map fill the browser's window, or puts it back.
+function toggleFull(on) {
+	const wrap = document.querySelector('.mapwrap');
+	on = on === undefined ? !wrap.classList.contains('full') : on;
+	const c = map.getCenter();
+	wrap.classList.toggle('full', on);
+	document.body.style.overflow = on ? 'hidden' : '';
+	const b = document.getElementById('fullBtn');
+	b.textContent = on ? 'Exit full screen' : 'Full screen';
+	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
+	map.invalidateSize({ pan: false });
+	map.panTo(c, { animate: false });
+}
+// fillWidth zooms so the map's width is exactly the view's, keeping the
+// part north to south in view (but not past the map's top or bottom edge).
+function fillWidth() {
+	const s = size || 15360, view = map.getSize();
+	const z = Math.log2(view.x / s), h = view.y / Math.pow(2, z); // metres the view is high
+	const c = map.getCenter();
+	const north = h >= s ? s / 2 : Math.min(s - h / 2, Math.max(h / 2, c.lat));
+	// Exactly that zoom, not the nearest zoomSnap step.
+	const snap = map.options.zoomSnap;
+	map.options.zoomSnap = 0;
+	map.setView([north, s / 2], z, { animate: false });
+	map.options.zoomSnap = snap;
 }
 
 // ---- The page -----------------------------------------------------------
@@ -744,8 +833,10 @@ document.getElementById('find').addEventListener('input', renderList);
 
 function openPlayer(guid) {
 	resetMini();
+	calMode = false; calNote = '';
 	drag = null; pending = {}; staged = {};
 	selGuid = guid;
+	calUI();
 	clearTeleport();
 	detail = null;
 	invSel = null;
@@ -760,6 +851,7 @@ function openPlayer(guid) {
 	loadDetail();
 }
 function closePlayer() {
+	calMode = false; calNote = '';
 	document.getElementById('pModal').style.display = 'none';
 	selGuid = null;
 	render();
@@ -1105,6 +1197,10 @@ function renderLast() {
 function renderKills() {
 	const tb = document.getElementById('pKills');
 	const ks = detail && detail.recentKills || [];
+	const sum = document.getElementById('pKillSum');
+	sum.textContent = detail && detail.kills != null
+		? detail.kills + (detail.kills === 1 ? ' kill, ' : ' kills, ') + detail.deaths + (detail.deaths === 1 ? ' death' : ' deaths') + ' all time' + (ks.length >= 100 ? ' · the latest 100' : '')
+		: '';
 	if (!ks.length) { tb.innerHTML = '<tr><td class="muted">None recorded.</td></tr>'; return; }
 	const link = (g, n) => g ? '<a data-guid="' + g + '">' + esc(n) + '</a>' : esc(n);
 	tb.innerHTML = ks.map(k => {
@@ -1115,7 +1211,8 @@ function renderKills() {
 		else if (k.killerGuid === selGuid) t = 'Killed ' + link(k.victimGuid, k.victimName || 'someone') + ' with ' + esc(w) + far;
 		else if (k.killerGuid) t = 'Killed by ' + link(k.killerGuid, k.killerName) + ' with ' + esc(w) + far;
 		else t = 'Died' + (k.weapon ? ' (' + esc(w) + ')' : '');
-		return '<tr><td class="t">' + when + '</td><td>' + t + '</td></tr>';
+		const where = k.x || k.z ? grid(k.x, k.z) + ' <span class="muted">' + Math.round(k.x) + ', ' + Math.round(k.z) + '</span>' : '';
+		return '<tr><td class="t">' + when + '</td><td>' + t + '</td><td class="where">' + where + '</td></tr>';
 	}).join('');
 }
 document.getElementById('pKills').addEventListener('click', e => {
@@ -1210,6 +1307,7 @@ function endMiniDrag(e, pick) {
 	miniDrag = null;
 	miniEl.classList.remove('panning');
 	if (moved || !pick) return;
+	if (calMode) { calPick(miniAt(e)); return; }
 	// A click: pick that spot to teleport to.
 	const at = miniAt(e);
 	tpPick = [at.x, at.z];
@@ -1224,12 +1322,67 @@ miniEl.addEventListener('pointerup', e => endMiniDrag(e, true));
 miniEl.addEventListener('dblclick', e => {
 	e.preventDefault();
 	if (miniDragged) return; // two quick drags, not a double-click
+	if (calMode || Date.now() - calPicked < 1000) return; // a calibration click, not a teleport
 	const at = miniAt(e);
 	if (!(at.x > 0) || !(at.z > 0) || (size && (at.x > size || at.z > size))) { document.getElementById('pErr').textContent = 'That spot is off the map.'; return; }
 	document.getElementById('tpTo').value = '';
 	act('teleport', { x: at.x, z: at.z, y: 0 }, true).then(ok => { if (ok) clearTeleport(); });
 });
 miniEl.addEventListener('pointercancel', e => endMiniDrag(e, false));
+
+// Calibrating: with Calibrate on, a click on the mini-map is where the
+// player really is on the map's picture, which then moves (and with two
+// points far enough apart, resizes) to put it under them.
+let calMode = false, calPicked = 0, calNote = '';
+function calUI() {
+	const b = document.getElementById('miniCal'), box = document.getElementById('miniCalBox');
+	b.hidden = !pic;
+	if (!pic) calMode = false;
+	b.textContent = calMode ? 'Cancel' : 'Calibrate';
+	b.classList.toggle('on', calMode);
+	const p = byGuid[selGuid], n = calPoints.length;
+	let msg = calNote;
+	if (calMode) msg = 'Click where ' + (p ? p.name : 'they') + ' really are' + (n ? ' (' + (n === 1 ? '1 point so far' : '2 points so far') + ')' : '');
+	box.hidden = !msg;
+	document.getElementById('miniCalMsg').textContent = msg;
+	document.getElementById('miniCalReset').hidden = !calMode || !n;
+}
+function setCalMode(on) {
+	calMode = on; calNote = '';
+	if (on) { mini.follow = true; redrawMini(); }
+	calUI();
+}
+document.getElementById('miniCal').addEventListener('click', () => setCalMode(!calMode));
+// saveCal saves the map's points; note is said once it has.
+function saveCal(points, note) {
+	const w = world;
+	return api('POST', '/api/mod/map/' + encodeURIComponent(w) + '/calibration', { points }).then(d => {
+		if (w !== world) return;
+		calPoints = d.points || [];
+		calMode = false; calNote = note;
+		placePicture();
+		setTimeout(() => { if (calNote === note) { calNote = ''; calUI(); } }, 8000);
+	}).catch(err => { calNote = 'Not saved: ' + err.message; calUI(); });
+}
+// calPick adds the point: the player's position, and the spot at on the
+// picture. A point within CAL_MIN of one already there replaces it;
+// otherwise it replaces the oldest of two.
+function calPick(at) {
+	const p = byGuid[selGuid];
+	if (!p) return;
+	calPicked = Date.now();
+	const P = placement();
+	const pt = { x: p.x, z: p.z, u: (at.x - P.W) / P.L, v: (P.N - at.z) / P.L };
+	let pts = calPoints.filter(q => Math.hypot(q.x - pt.x, q.z - pt.z) >= CAL_MIN);
+	if (pts.length >= 2) pts = pts.slice(-1);
+	pts.push(pt);
+	saveCal(pts, pts.length === 1
+		? 'Moved the picture. To fix its size too, calibrate again 1 km or more away (the farther the better).'
+		: 'Moved and resized the picture from 2 points ' + (Math.hypot(pts[1].x - pts[0].x, pts[1].z - pts[0].z) / 1000).toFixed(1) + ' km apart.');
+}
+document.getElementById('miniCalReset').addEventListener('click', () => {
+	if (confirm('Forget this map\'s calibration and draw its picture over the whole map again?')) saveCal([], 'Calibration reset.');
+});
 // The wheel: 100 m per notch (a trackpad's small steps add up to notches).
 let miniWheel = 0;
 miniEl.addEventListener('wheel', e => {
@@ -1260,7 +1413,7 @@ function showForm(name) {
 	if (name === 'message') document.getElementById('msgText').focus();
 }
 
-// ---- The dialog's tabs: Stats, Inventory, and Spawn item -----------------
+// ---- The dialog's tabs: Stats, Inventory, Spawn item, Kills & deaths -----
 
 // pTab stays as it is from one player to the next (Prev / Next).
 let pTab = 'stats';
@@ -1534,7 +1687,6 @@ async function applyWeather() {
 	moved = {}; lightningMoved = false;
 	document.querySelectorAll('#wRows .val').forEach(v => v.classList.remove('moved'));
 }
-function toggleRainRange(e) { e.preventDefault(); const r = document.getElementById('rainRange'); r.hidden = !r.hidden; }
 function setRainRange() {
 	const lo = parseFloat(document.getElementById('rMin').value), hi = parseFloat(document.getElementById('rMax').value), stop = parseFloat(document.getElementById('rStop').value);
 	if (!(lo >= 0 && hi <= 100 && lo <= hi && stop >= 0)) { document.getElementById('wErr').textContent = 'The range is 0 to 100%, lowest first.'; return; }
@@ -1546,6 +1698,7 @@ document.addEventListener('keydown', e => {
 	if (drag) { endDrag(false); return; }
 	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
 	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
+	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
 for (const id of ['pModal', 'wModal']) document.getElementById(id).addEventListener('mousedown', e => {
 	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else closeWorld(); }

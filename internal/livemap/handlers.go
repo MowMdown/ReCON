@@ -82,7 +82,7 @@ func handleModPlayer(w http.ResponseWriter, r *http.Request) {
 	if kills, deaths, err := killCounts(guid); err == nil {
 		out["kills"], out["deaths"] = kills, deaths
 	}
-	if recent, err := killsOf(guid, 20); err == nil {
+	if recent, err := killsOf(guid, 100); err == nil {
 		out["recentKills"] = recent
 	}
 	writeJSON(w, http.StatusOK, out)

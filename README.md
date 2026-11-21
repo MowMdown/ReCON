@@ -245,19 +245,23 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
   illness, knocked out and restrained. A search box filters the list.
 - **Right:** the map, with each player as an arrow showing their heading,
   updated every second. Drag to pan, scroll to zoom; **Fit** shows the
-  whole map. It is a 1 km grid with the map's coordinates, over the
+  whole map, **Fill** zooms until its width fills the view, edge to edge; **Full screen** makes the map fill the browser's window (Esc puts it back). It is a 1 km grid with the map's coordinates, over the
   map's picture if there is one ([Map pictures](#map-pictures)). Above
-  the map: the weather and the in-game time.
+  the map, beside **Time & Weather**: the weather and the in-game time.
 - **Clicking a player** opens their stats. Drag Health, Blood, Water, Food or
   Comfort left or right to set it (shock, stamina and temperature are read
   only). They show health, blood, water and food in
   DayZ's HUD colours (white, yellow, red, blinking red at the same
   thresholds as the game), shock, stamina, temperature (the game's hot and
   cold colours) and comfort (the heat buff, with its +/++/+++ stage and the
-  most their clothes allow), conditions, a mini-map of the 1 km around them,
-  what's in hand, vehicle, kills and deaths, and the actions: Heal,
-  Teleport (to a spot, a mini-map click or another player), Message and
-  Kill. Each action's result shows below them.
+  most their clothes allow), conditions with **Heal** beside them, a
+  mini-map of the 1 km around them, what's in hand, vehicle, kills and
+  deaths, and the actions: Teleport (to a spot, a mini-map click or
+  another player), Message and Kill. Each action's result shows below
+  them. The other tabs: **Inventory**, **Spawn item** (its list fits the
+  dialog's height) and **Kills & deaths**, the latest 100 they were in
+  (when, who with what and how far, and where), with their all-time
+  totals.
 - **World…** sets the in-game date and time, freezes the clock, and sets the
   weather: overcast, rain, fog, snow, wind speed and direction, and
   lightning, with presets (Clear, Cloudy, Rain, Thunderstorm, Fog, Snow),
@@ -273,6 +277,8 @@ from it (for sunrise and sunset) rather than from `SERVER_TIME`.
 The page draws a 1 km grid with the map's coordinates; to draw the terrain under it, put the map's picture in the data folder's `maps` folder (with Docker, the `maps` folder next to the database): `maps/<world>.jpg` (or `.png`, `.webp`; square, north up) and its tiles, `maps/<world>/`. `<world>` is the world name the mod reports (`chernarusplus`, `enoch`, `sakhal`, `namalsk`, ...). The pictures come from the game's or the map mod's files, so they can't be shared: [satmap](https://github.com/MowMdown/satmap) makes them from your own copy of the game. Use one only if you have the right to: many DayZ map images online belong to their makers.
 
 The tiles are levels: `maps/<world>/0/` is the whole map in one tile, each level after it has twice the columns and rows (`<column>_<row>.jpg`, column 0 at the west edge, row 0 at the north) and the last has the picture's own pixels; `maps/<world>/tiles.json` (`px`, `tile`, `levels`, `ext`) describes them. Whatever the zoom, the page loads only the few tiles in view, from the least detailed level sharp enough, and draws a coarser one under any still loading. When there are tiles it never loads `maps/<world>.jpg`: a big whole picture (15360 px is about 1 GB once a browser decodes it) can crash the page, on a phone especially.
+
+**Calibrating.** If players aren't drawn where they are on the picture, calibrate it: stand somewhere you can pick out on the picture (a crossroads, a pier), open yourself on the Live Map, click **Calibrate** on the mini-map and click where you really are. One point moves the picture; do it again at a second spot 1 km or more away (the farther the better, such as across the map) and it is resized too. Calibrating near a point replaces it, and **Reset** (shown while calibrating) forgets them. The points are saved in `maps/<world>/calibration.json`, so the `maps` folder must be writable by ReCON (user 1001 in the container; don't mount it `:ro`). Re-slicing the map with satmap keeps the file, and it still fits: the points are where on the picture, not which tile. With several servers sharing one `maps` folder, each calibrates its own map. A picture within 2% of the map's size is taken as 1 px a metre from the map's north-west corner until it is calibrated (Deer Isle's picture is 16512 px for its 16384 m), any other is stretched over the whole map.
 
 The HUD colours and thresholds for health, blood, water, food and temperature are DayZ's, from its scripts (Bohemia Interactive, [DayZ Public License](https://www.bohemia.net/en/licenses/dayz-public-license-dpl)).
 ---
@@ -657,7 +663,7 @@ ReCON stores every death the mod reports (its own `mod_kills` table) and the Ste
 | ------ | ---- | ---- | ----------- |
 | POST | `/api/mod/sync` | the mod's sync | Used by the mod only: player data in, commands out (403 with the wrong password) |
 | GET  | `/api/mod/players` | | `mod` (`connected`, `lastSync`, `world`, in-game `date`), every online player's live state with their `guid`, and the recent commands |
-| GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills`, and the commands sent to them |
+| GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills` (the latest 100), and the commands sent to them |
 | POST | `/api/mod/players/<guid>/<action>` | see below | Queue an action. The mod runs it on its next sync; its `status` (`queued`, `sent`, `done`, `failed`, `expired`) shows in the commands |
 | POST | `/api/mod/world/<action>` | see below | Queue a weather or time change, the same way |
 
@@ -671,6 +677,8 @@ World actions, modelled on Community Online Tools' weather module (`mod.weather`
 - `rainThresholds` `{"min", "max", "transition"}`: the overcast range rain falls in, and the seconds it takes to stop.
 - `date` `{"year", "month", "day", "hour", "minute"}`: the in-game date and time.
 - `freezeTime` `{"value"}`: 1 stops the in-game clock, 0 starts it again.
+
+Calibration: `GET /api/mod/map/<world>/calibration` returns the map's `points` (`x`, `z`: where a player was; `u`, `v`: where they were on the picture, 0 to 1 from its west and north edges); `POST` the same with `{"points": [...]}` (at most 2, none to reset) sets them.
 
 The tiles: `GET /api/mod/map/<world>` (the whole picture), `GET /api/mod/map/<world>/tiles` (`tiles.json` and a `version`) and `GET /api/mod/map/<world>/tile/<level>/<column>_<row>.jpg`.
 
