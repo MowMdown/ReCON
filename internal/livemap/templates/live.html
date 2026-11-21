@@ -191,6 +191,8 @@ table.dt a { color: #8ab4f8; text-decoration: none; cursor: pointer; }
 .box.pbox { width: min(1290px, 96vw); height: min(1025px, 92vh); display: flex; flex-direction: column; margin-bottom: 0; }
 .pbox .ppane { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
 .pbox .dfoot { margin-top: auto; padding-top: 10px; }
+/* The error and last-action lines take no room until they have something to say. */
+.pbox .dlg-err:empty, .pbox .lastact:empty { min-height: 0; margin-top: 0; }
 .pbox .statgrid { grid-template-columns: minmax(0, 1fr) 390px; }
 .pbox #mini { width: 390px; height: 390px; }
 /* Spawn item: the list takes the height the dialog has left, and grows
@@ -340,7 +342,6 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 		<div class="inv"><div class="ilist" id="iList"></div><div class="idet" id="iDet"></div></div>
 		</div>
 		<div class="ppane" data-ppane="spawn" hidden>
-		<h4>Spawn an item <span class="muted">on the ground in front of them</span></h4>
 		<div class="form stats" id="fSpawn">
 			<div class="inl"><input id="spFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
 				<select id="spKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
@@ -1356,20 +1357,23 @@ document.getElementById('miniCal').addEventListener('click', () => setCalMode(!c
 // saveCal saves the map's points; note is said once it has.
 function saveCal(points, note) {
 	const w = world;
+	// Out of calibrating at once, so what happens next (saved, or why not)
+	// shows in its place.
+	calMode = false; calNote = 'Saving…'; calUI();
 	return api('POST', '/api/mod/map/' + encodeURIComponent(w) + '/calibration', { points }).then(d => {
 		if (w !== world) return;
 		calPoints = d.points || [];
 		calMode = false; calNote = note;
 		placePicture();
 		setTimeout(() => { if (calNote === note) { calNote = ''; calUI(); } }, 8000);
-	}).catch(err => { calNote = 'Not saved: ' + err.message; calUI(); });
+	}).catch(err => { if (w === world) { calNote = 'Not saved: ' + err.message; calUI(); } });
 }
 // calPick adds the point: the player's position, and the spot at on the
 // picture. A point within CAL_MIN of one already there replaces it;
 // otherwise it replaces the oldest of two.
 function calPick(at) {
 	const p = byGuid[selGuid];
-	if (!p) return;
+	if (!p) { calMode = false; calNote = "Not saved: the player isn't online."; calUI(); return; }
 	calPicked = Date.now();
 	const P = placement();
 	const pt = { x: p.x, z: p.z, u: (at.x - P.W) / P.L, v: (P.N - at.z) / P.L };
