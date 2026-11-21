@@ -16,6 +16,7 @@ type NavLink struct {
 	Key   string // the page's name, which marks it active ("live")
 	Label string
 	Href  string
+	Icon  string // a Phosphor icon name ("map-trifold"), shown before the label
 }
 
 var addons struct {

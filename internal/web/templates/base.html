@@ -60,7 +60,7 @@ td.act button:last-child { margin-right: 0; }
 
 {{define "navlinks"}}{{/* The page links in every page's nav; the dot is the page
    shown ("server", "players", "bans", "flows", or "" for none). Add-ons'
-   pages (navExtra) come after Server Info. */}}<a{{if eq . "server"}} class="active"{{end}} href="/server">Server Info</a>{{range navExtra}}<a{{if eq $ .Key}} class="active"{{end}} href="{{.Href}}">{{.Label}}</a>{{end}}<a{{if eq . "players"}} class="active"{{end}} href="/players">Players</a><a{{if eq . "bans"}} class="active"{{end}} href="/bans">Server Bans</a><a{{if eq . "flows"}} class="active"{{end}} href="/flows">Flows</a>{{end}}
+   pages (navExtra) come after Server Info. */}}<a{{if eq . "server"}} class="active"{{end}} href="/server">Server Info</a>{{range navExtra}}<a{{if eq $ .Key}} class="active"{{end}} href="{{.Href}}">{{with .Icon}}<i class="ph ph-{{.}}" aria-hidden="true"></i>{{end}}{{.Label}}</a>{{end}}<a{{if eq . "players"}} class="active"{{end}} href="/players">Players</a><a{{if eq . "bans"}} class="active"{{end}} href="/bans">Server Bans</a><a{{if eq . "flows"}} class="active"{{end}} href="/flows">Flows</a>{{end}}
 
 {{define "icons"}}{{/* The browser tab icon, the iOS home-screen icon and the manifest (the
    icon and name when the page is installed as an app). Files in assets/icons/. */}}<link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">

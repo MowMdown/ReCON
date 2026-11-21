@@ -35,7 +35,7 @@ func init() {
 			SaveSteamID: db.SetSteamID,
 			AddRoute:    web.AddRoute,
 			AddNavLink: func(key, label, href string) {
-				web.AddNavLink(web.NavLink{Key: key, Label: label, Href: href})
+				web.AddNavLink(web.NavLink{Key: key, Label: label, Href: href, Icon: "map-trifold"})
 			},
 			AddQuiet:    web.AddQuiet,
 			Page:        func(files fs.FS, name string) http.HandlerFunc { return web.AddonPage(files, name) },
