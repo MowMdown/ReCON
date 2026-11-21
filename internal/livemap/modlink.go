@@ -72,8 +72,13 @@ type SyncRequest struct {
 	WorldEvents []WorldEvent `json:"worldEvents"`
 	// The bears, wolves and guard dogs alive on the server, every sync
 	// (mod 0.0.1l on: PredatorsSent).
-	PredatorsSent Flag       `json:"predatorsSent"`
-	Predators     []Predator `json:"predators"`
+	// The objects players placed, every 30 s (mod 1.0.1 on: PlacedSent), and
+	// what is in the ones the reply's WatchPlaced asked about.
+	PlacedSent    Flag           `json:"placedSent"`
+	Placed        []Placed       `json:"placed"`
+	PlacedDetails []PlacedDetail `json:"placedDetails"`
+	PredatorsSent Flag           `json:"predatorsSent"`
+	Predators     []Predator     `json:"predators"`
 	// The map's place names, when the reply asked for them (WantPlaces).
 	PlacesSent Flag    `json:"placesSent"`
 	Places     []Place `json:"places"`
@@ -302,6 +307,8 @@ type SyncReply struct {
 	// Vehicle ids whose parts and cargo to send (left out when none, for a
 	// mod before 0.0.1i).
 	WatchVehicles []int `json:"watchVehicles,omitempty"`
+	// Placed objects (ids) to send the contents of (placed.go).
+	WatchPlaced []int `json:"watchPlaced,omitempty"`
 	// WantPlaces asks for the map's place names (once a connection; left
 	// out when false, for a mod before 0.0.1i).
 	WantPlaces bool `json:"wantPlaces,omitempty"`
@@ -579,6 +586,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	trimCommands()
 	state.Unlock()
 
+	reply.WatchPlaced = takePlaced(req, now)
 	keepChatCars(chatCars, untracked, now)
 	for _, g := range forgetCars {
 		forgetChatCar(g)
@@ -1135,6 +1143,7 @@ func reset() {
 	state.watch, state.inventory, state.previous = nil, nil, nil
 	state.catalog, state.catalogTotal, state.catalogTypes = nil, 0, nil
 	state.predators, state.vehFileFor, state.lastWorld = nil, "", ""
+	resetPlaced()
 }
 
 // battlEyeGUID is the BattlEye GUID of a SteamID64: md5("BE" + the ID as 8
