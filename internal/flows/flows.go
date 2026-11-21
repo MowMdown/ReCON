@@ -549,8 +549,8 @@ func (c *stepChecker) checkIfStep(s *Step, depth int) error {
 				return fmt.Errorf("%s %d: Enter a whole number", c.where, num)
 			}
 		case sub.kind == "role":
-			if n, err := strconv.Atoi(strings.TrimSpace(b.Value)); err != nil || n < RolePlayer || n > RoleAdmin {
-				return fmt.Errorf("%s %d: pick Player, Mod or Admin", c.where, num)
+			if n, err := strconv.Atoi(strings.TrimSpace(b.Value)); err != nil || n < RolePlayer || n > RoleMax {
+				return fmt.Errorf("%s %d: pick Player, Vehicles, Mod or Admin", c.where, num)
 			}
 		case first == "player_guid":
 			if !battleye.GUIDPattern.MatchString(strings.TrimSpace(b.Value)) {
@@ -673,7 +673,8 @@ func (x *job) placeholderValue(name string) (string, bool) {
 var steamBanRecord = steam.BanRecord
 
 // ifSubjectValue is what an If compares: the same as value, except that a role
-// is its number (0 Player, 1 Mod, 2 Admin) so "is at least Mod" can work.
+// is its number (0 Player, 1 Mod, 2 Admin, 3 Vehicles), compared by rank
+// (evaluateIfCondition) so "is at least Mod" can work.
 func (x *job) ifSubjectValue(name string) (string, bool) {
 	if name == "player_role" && x.p != nil {
 		return strconv.Itoa(x.p.role), true

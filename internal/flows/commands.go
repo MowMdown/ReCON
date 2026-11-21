@@ -21,7 +21,7 @@ import (
 // default wording and the placeholders it may use).
 type chatCommandDef struct {
 	Cmd      string      `json:"cmd"`
-	Role     int         `json:"role"`     // the lowest role that may use it: RolePlayer (everyone), roleMod or RoleAdmin
+	Role     int         `json:"role"`     // the lowest role that may use it: RolePlayer (everyone), RoleVehicles, roleMod or RoleAdmin (compared by RoleRank)
 	Cool     string      `json:"cool"`     // default cooldown
 	Announce bool        `json:"announce"` // has the Announce setting
 	Length   bool        `json:"length"`   // has the vote length setting
@@ -81,7 +81,7 @@ var ChatCommandDefs = []chatCommandDef{
 // vehicleDef is !car, !truck, !boat or !vehicle: spawn one from the map's
 // vehicles.json (see vehicles.go).
 func vehicleDef(cmd, what string) chatCommandDef {
-	return chatCommandDef{Cmd: cmd, Role: roleMod, Cool: "0", NeedsMod: true,
+	return chatCommandDef{Cmd: cmd, Role: RoleVehicles, Cool: "0", NeedsMod: true,
 		Help: "!" + cmd + " <name> [colour] spawns " + what + " in front of you. !" + cmd + " alone lists the names.",
 		Fields: []chatField{
 			{"spawned", "Spawned (to the player)", "Spawning {vehicle} ({colour})", []string{"vehicle", "colour"}},
@@ -98,7 +98,7 @@ const (
 
 // allowedFor reports whether a player with role may use the command, and so
 // whether !help lists it for them.
-func (d *chatCommandDef) allowedFor(role int) bool { return role >= d.Role }
+func (d *chatCommandDef) allowedFor(role int) bool { return RoleRank(role) >= RoleRank(d.Role) }
 
 func chatDef(cmd string) *chatCommandDef {
 	for i := range ChatCommandDefs {
@@ -345,7 +345,7 @@ func listOnlineStaff() []battleye.Player {
 	}
 	var out []battleye.Player
 	for _, p := range onlineNow() {
-		if roles[strings.ToLower(p.GUID)] >= roleMod {
+		if RoleRank(roles[strings.ToLower(p.GUID)]) >= RoleRank(roleMod) { // Vehicles players aren't staff
 			out = append(out, p)
 		}
 	}
@@ -592,7 +592,7 @@ func findChatTarget(arg string, offline bool) (t battleye.Player, online, ok boo
 // chatTargetAllowed reports whether p (of role) may punish t: nobody can
 // punish themselves, or anyone of their own rank or higher, from chat.
 func chatTargetAllowed(p battleye.Player, role int, t battleye.Player) bool {
-	return !strings.EqualFold(t.GUID, p.GUID) && lookupPlayerRole(t.GUID) < role
+	return !strings.EqualFold(t.GUID, p.GUID) && RoleRank(lookupPlayerRole(t.GUID)) < RoleRank(role)
 }
 
 // runPunishCommand handles !kick and !ban <code or player number> [reason].

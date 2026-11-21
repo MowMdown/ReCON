@@ -308,8 +308,8 @@ func handleSetRole(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, `send {"role": 0, 1 or 2}`)
 		return
 	}
-	if *req.Role < flows.RolePlayer || *req.Role > flows.RoleAdmin {
-		fail(w, http.StatusBadRequest, "role must be 0 (Player), 1 (Mod) or 2 (Admin)")
+	if *req.Role < flows.RolePlayer || *req.Role > flows.RoleMax {
+		fail(w, http.StatusBadRequest, "role must be 0 (Player), 1 (Mod), 2 (Admin) or 3 (Vehicles)")
 		return
 	}
 	found, err := database.SetPlayerRole(guid, *req.Role)

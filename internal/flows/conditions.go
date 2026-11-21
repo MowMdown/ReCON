@@ -9,14 +9,32 @@ import (
 	"unicode/utf8"
 )
 
-// Roles, by number: what is stored in players.role.
+// Roles, by number: what is stored in players.role. Vehicles came later, so
+// its number is 3 though it ranks between Player and Mod: compare roles with
+// RoleRank, never by number.
 const (
-	RolePlayer = 0
-	roleMod    = 1
-	RoleAdmin  = 2
+	RolePlayer   = 0
+	roleMod      = 1
+	RoleAdmin    = 2
+	RoleVehicles = 3
+	RoleMax      = 3
 )
 
-var roleNames = []string{"Player", "Mod", "Admin"}
+var roleNames = []string{"Player", "Mod", "Admin", "Vehicles"}
+
+// RoleRank orders the roles, each including the ones below it: Player 0,
+// Vehicles 1, Mod 2, Admin 3 (an unknown number ranks as Player).
+func RoleRank(r int) int {
+	switch r {
+	case RoleVehicles:
+		return 1
+	case roleMod:
+		return 2
+	case RoleAdmin:
+		return 3
+	}
+	return 0
+}
 
 func RoleName(r int) string {
 	if r < 0 || r >= len(roleNames) {
@@ -219,11 +237,15 @@ func evaluateIfCondition(b Branch, v string) bool {
 		}
 		return same == (b.Op == "eq")
 	}
-	// num and role: role values are compared as 0 Player, 1 Mod, 2 Admin.
+	// num and role: roles are compared by rank (Player < Vehicles < Mod <
+	// Admin), though stored as 0 Player, 1 Mod, 2 Admin, 3 Vehicles.
 	a, err1 := strconv.Atoi(v)
 	c, err2 := strconv.Atoi(strings.TrimSpace(b.Value))
 	if err1 != nil || err2 != nil {
 		return false
+	}
+	if condSubjects[b.Subject].kind == "role" {
+		a, c = RoleRank(a), RoleRank(c)
 	}
 	switch b.Op {
 	case "eq":
