@@ -420,7 +420,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 <div class="top"><h1>Live Map</h1><div class="worldbar"><span class="badge" id="wxBadge" hidden></span><span class="badge" id="timeBadge" hidden></span><button type="button" id="worldBtn" onclick="openWorld()" disabled title="Change the in-game time and weather">Time &amp; Weather</button></div></div>
 <div class="live">
 	<div class="side">
-		<div class="modline"><span class="dot off" id="modDot"></span><span id="modLine">Waiting for recon-mod...</span></div>
+		<div class="modline"><span class="dot off" id="modDot"></span><span id="modLine">No Connection to DayZ Server</span></div>
 		<input id="find" type="search" placeholder="Find a player" aria-label="Find a player" autocomplete="off">
 		<div class="plist" id="plist"></div>
 	</div>
@@ -1569,13 +1569,15 @@ function render() {
 	if (!connected) {
 		dot.className = 'dot off';
 		const last = mod && mod.lastSync && !mod.lastSync.startsWith('0001') ? new Date(mod.lastSync) : null;
-		line.textContent = last ? 'recon-mod stopped sending at ' + last.toLocaleTimeString() : "recon-mod isn't connected";
+		line.textContent = 'No Connection to DayZ Server';
+		line.title = last ? 'recon-mod last sent at ' + last.toLocaleTimeString() : 'recon-mod hasn\'t connected';
 		document.getElementById('worldBtn').disabled = true;
 		document.getElementById('wxBadge').hidden = document.getElementById('timeBadge').hidden = true;
 	} else {
 		dot.className = 'dot';
 		const w = (mod.world || '').toLowerCase();
-		line.textContent = 'recon-mod connected · ' + (NAMES[w] || mod.world) + ' · ' + players.length + ' online';
+		line.textContent = 'Connected to Server';
+		line.title = 'recon-mod ' + (mod.mod || '') + ' · ' + (NAMES[w] || mod.world) + ' · ' + players.length + ' online';
 		document.getElementById('worldBtn').disabled = false;
 		let s = SIZES[w];
 		if (!s) s = Math.max(size || 0, Math.ceil(Math.max(1, ...players.map(p => Math.max(p.x, p.z))) / 1024) * 1024);
