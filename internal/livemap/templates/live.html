@@ -1115,7 +1115,9 @@ function vehDeleteState(v) {
 	return '';
 }
 function deleteButton(v) {
-	return '<button type="button" class="bad" onclick="event.stopPropagation(); deleteVehicle(' + v.id + ')"' + (v.crew ? ' disabled title="Someone is in it"' : '') + '>Delete</button>';
+	// Allowed with people in it: the mod puts them out first (mod 1.0.1).
+	return '<button type="button" class="bad" onclick="event.stopPropagation(); deleteVehicle(' + v.id + ')"' +
+		(v.crew ? ' title="' + v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they get out first"' : '') + '>Delete</button>';
 }
 function renderVehicle() {
 	const v = vehicles.find(x => x.id === vehOpen);
@@ -1156,7 +1158,8 @@ function renderVehicleInfo() {
 }
 async function deleteVehicle(id) {
 	const v = vehicles.find(x => x.id === id);
-	if (!v || !confirm('Delete this ' + catLabel(v) + ' and everything in it? It can\'t be undone.')) return;
+	const inIt = v && v.crew ? ' ' + v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they\'ll be put out first.' : '';
+	if (!v || !confirm('Delete this ' + catLabel(v) + ' and everything in it?' + inIt + ' It can\'t be undone.')) return;
 	try {
 		const d = await api('POST', '/api/mod/world/deleteVehicle', { text: String(id) });
 		if (d.command) vehPending[id] = d.command.id;
