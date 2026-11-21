@@ -9,10 +9,11 @@
 <link rel="stylesheet" href="assets/leaflet/leaflet.css">
 <script src="assets/leaflet/leaflet.js"></script>
 <style>
-/* The page's colours, as variables: these are the Default theme's; the
-   other themes (data-theme) map them onto their own palette below. */
+/* The page's colours, as variables: these are the Default theme's, black
+   and white (its accent is a light grey, not a colour); the other themes
+   (data-theme) map them onto their own palette below. */
 :root {
-	--lm-accent: #8ab4f8; --lm-surface: #1a1a1a; --lm-raised: #222; --lm-ground: #111; --lm-sel: #1b2433;
+	--lm-accent: #e0e0e0; --lm-surface: #1a1a1a; --lm-raised: #222; --lm-ground: #111; --lm-sel: #383838;
 	--lm-line: #333; --lm-line2: #555; --lm-text: #ddd; --lm-text-hi: #fff; --lm-muted: #999; --lm-faint: #666;
 	--lm-overlay: rgba(25,25,25,.9);
 }
@@ -263,7 +264,8 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .acts button { margin: 0; }
 .acts .sp { flex: 1; }
-button.go { color: #81c995; border-color: #3e6b4a; }
+/* The main button of a row: plain in Default, the theme's accent in the others. */
+html[data-theme]:not([data-theme="default"]) button.go { color: var(--color-accent); border-color: var(--color-accent); }
 button.bad { color: #f28b82; border-color: #8c3b36; }
 button.on { color: var(--lm-accent); border-color: var(--lm-accent); }
 .form { margin-top: 10px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 12px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
