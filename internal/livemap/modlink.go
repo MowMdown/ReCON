@@ -252,6 +252,9 @@ type Event struct {
 	Y          float64 `json:"y"`
 	Z          float64 `json:"z"`
 	At         int     `json:"at"`
+	// A player victim's inventory as they died (mod 1.0.1 on), kept for a
+	// restore (invsaves.go).
+	Inventory []Item `json:"inventory"`
 }
 
 // Result is how a command went (ReCON_Result).
@@ -610,8 +613,14 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 				Weapon: e.Weapon, Cause: e.Cause, Agents: e.Agents, Distance: e.Distance, X: e.X, Z: e.Z}
 			k.VictimGUID = guidOf(e.Victim)
 			k.KillerGUID = guidOf(e.Killer)
-			if err := addKill(k); err != nil {
+			id, err := addKill(k)
+			if err != nil {
 				log.Printf("recon-mod: saving a kill: %v", err)
+			}
+			if k.VictimGUID != "" && len(e.Inventory) > 0 {
+				if err := saveDeath(k.VictimGUID, id, e.Inventory, now); err != nil {
+					log.Printf("recon-mod: saving %s's inventory at death: %v", k.VictimName, err)
+				}
 			}
 		}
 	}

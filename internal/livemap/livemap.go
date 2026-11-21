@@ -42,6 +42,15 @@ func Start(h Host) error {
 	if h.DB == nil || h.RCONPassword == nil || h.AddRoute == nil || h.Page == nil {
 		return errors.New("recon-mod: ReCON didn't give the Live Map its database, RCON password, routes or pages")
 	}
+	if err := openInvSaves(h.DB); err != nil {
+		return fmt.Errorf("recon-mod: creating its inventory_saves table: %w", err)
+	}
+	go func() { // old saved inventories go, hourly
+		for {
+			cleanupSaves(time.Now())
+			time.Sleep(time.Hour)
+		}
+	}()
 	if err := openMapState(h.DB); err != nil {
 		return fmt.Errorf("recon-mod: creating its live_map_state table: %w", err)
 	}
@@ -68,6 +77,8 @@ func Start(h Host) error {
 	h.AddRoute("POST /api/mod/sync", handleModSync)                                // the mod's player data in, commands out
 	h.AddRoute("GET /api/mod/vehicles", handleModVehicles)                         // every vehicle on the server
 	h.AddRoute("GET /api/mod/worldevents", handleModWorldEvents)                   // helicopter crashes and toxic zones
+	h.AddRoute("GET /api/mod/players/{guid}/saves", handleModSaves)                // their inventories saved at death
+	h.AddRoute("GET /api/mod/saves/{id}", handleModSave)                           // one, with its items
 	h.AddRoute("GET /api/mod/placed", handleModPlaced)                             // the objects players placed
 	h.AddRoute("GET /api/mod/placed/{id}", handleModPlacedOne)                     // one, with what is in it (?ask=1)
 	h.AddRoute("GET /api/mod/predators", handleModPredators)                       // bears, wolves and guard dogs
