@@ -90,7 +90,8 @@ html[data-theme]:not([data-theme="default"]) {
 /* A player's popup: their stats two to a line (label, value, label, value). */
 .vpop .stats2 { display: grid; grid-template-columns: auto 1fr auto auto 1fr; gap: 1px 8px; align-items: baseline; }
 .vpop .stats2 .k { color: var(--lm-muted); }
-.vpop .stats2 .v { text-align: right; }
+/* Room for "100%" always, digits all one width: 99% doesn't shift the row. */
+.vpop .stats2 .v { text-align: right; min-width: 4.5ch; font-variant-numeric: tabular-nums; }
 .vpop .stats2 .sep { color: var(--lm-faint); }
 /* A player's popup: their stats, then what they wear and hold. */
 .vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--lm-line); }
