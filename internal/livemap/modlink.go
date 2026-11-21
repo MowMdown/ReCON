@@ -934,7 +934,7 @@ func add(c Command, guid string, now time.Time) CommandStatus {
 }
 
 // WorldActions are the commands on the world rather than a player.
-var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true, "deleteVehicle": true}
+var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true, "deleteVehicle": true, "spawnAt": true}
 
 // weatherMax is each weather part's largest value.
 var weatherMax = map[string]float64{"overcast": 1, "rain": 1, "fog": 1, "snow": 1, "windSpeed": 50, "windDir": 360}
@@ -950,6 +950,18 @@ func QueueWorld(c Command, now time.Time) (CommandStatus, error) {
 	if !connected(now) {
 		return CommandStatus{}, errors.New("recon-mod isn't connected")
 	}
+	if c.Action == "spawnAt" {
+		if state.catalogTypes == nil {
+			return CommandStatus{}, errors.New("the item list hasn't come in from the mod yet")
+		}
+		it, ok := state.catalogTypes[c.Text]
+		if !ok {
+			return CommandStatus{}, errors.New(c.Text + " isn't an item the server can spawn")
+		}
+		if it.Kind == "vehicle" {
+			c.Value = 1 // whole, one at a time
+		}
+	}
 	return add(c, "", now), nil
 }
 
@@ -963,6 +975,18 @@ func checkWorld(c *Command) error {
 		// Text is the vehicle's id (Vehicle.ID).
 		if _, err := strconv.Atoi(c.Text); err != nil {
 			return errors.New("pick a vehicle")
+		}
+	case "spawnAt":
+		// Text is the class, Value how many, X and Z where (mod 0.0.1j on).
+		c.Text = strings.TrimSpace(c.Text)
+		if c.Text == "" {
+			return errors.New("pick an item to spawn")
+		}
+		if c.X <= 0 || c.Z <= 0 {
+			return errors.New("pick where to spawn it")
+		}
+		if c.Value != float64(int(c.Value)) || c.Value < 1 || c.Value > maxSpawn {
+			return errors.New("spawn 1 to " + strconv.Itoa(maxSpawn) + " at a time")
 		}
 	case "weather":
 		max, ok := weatherMax[c.Stat]

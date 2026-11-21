@@ -67,7 +67,7 @@ func Start(h Host) error {
 	h.AddRoute("GET /api/mod/players", handleModPlayers)                           // every online player's live state, the weather
 	h.AddRoute("GET /api/mod/players/{guid}", handleModPlayer)                     // one player's live state, kills, commands
 	h.AddRoute("POST /api/mod/players/{guid}/{action}", handleModAction)           // heal | kill | teleport | teleportTo | back | set | message | spawn
-	h.AddRoute("POST /api/mod/world/{action}", handleModWorld)                     // weather | weatherMode | storm | rainThresholds | date | freezeTime | deleteVehicle
+	h.AddRoute("POST /api/mod/world/{action}", handleModWorld)                     // weather | weatherMode | storm | rainThresholds | date | freezeTime | deleteVehicle | spawnAt
 	if h.AddNavLink != nil {
 		h.AddNavLink("live", "Live Map", "/live")
 	}

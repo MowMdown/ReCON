@@ -84,13 +84,39 @@
 .dmark svg { left: -6px; top: -6px; }
 .leaflet-tooltip { background: #1e1e1e; color: #ddd; border: 1px solid #444; box-shadow: 0 2px 8px rgba(0,0,0,.5); font-size: 12px; }
 .leaflet-tooltip-top:before { border-top-color: #444; }
+/* The map's right-click menu. */
+.ctx { position: absolute; z-index: 800; min-width: 200px; max-width: 280px; background: #1e1e1e; border: 1px solid #444; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.6); padding: 6px; font-size: 13px; }
+.ctx[hidden] { display: none; }
+.ctx .hd { color: #aaa; font-size: 12px; padding: 2px 6px 6px; border-bottom: 1px solid #333; margin-bottom: 4px; }
+.ctx .lbl { color: #888; font-size: 11.5px; padding: 6px 6px 2px; }
+.ctx button { display: block; width: 100%; text-align: left; margin: 0; padding: 5px 8px; background: transparent; border: 0; border-radius: 4px; color: #ddd; font: inherit; cursor: pointer; }
+.ctx button:hover { background: #2a2f36; color: #fff; }
+.ctx .plist { max-height: 200px; overflow-y: auto; }
+.ctx .msg { padding: 4px 8px; font-size: 12px; }
+.ctx .msg:empty { display: none; }
+.ctx button.bad { color: #f28b82; }
+.mapbar .pick { font-size: 12px; background: #1b2433; border: 1px solid #8ab4f8; border-radius: 4px; padding: 4px 9px; color: #e8eaed; }
+.mapbar .pick[hidden] { display: none; }
+.mapbar button[hidden] { display: none; }
+#map.picking, #map.picking .leaflet-interactive { cursor: crosshair; }
+.ctx .muted { padding: 2px 8px; }
+#sModal .splist { max-height: min(420px, 50vh); }
 .mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: rgba(34,34,34,.92); color: #ddd; border: 1px solid #555; border-radius: 4px; }
-.vpop h5 { margin: 8px 0 3px; font-size: 12px; color: #ccc; font-weight: 600; }
-.vpop .scroll { max-height: min(260px, 40vh); overflow-y: auto; margin-top: 4px; padding-right: 4px; }
-.vpop .part { display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 1px 0; }
-.vpop .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vpop .part .lv { font-size: 11.5px; white-space: nowrap; }
-.vpop .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+/* The vehicle dialog: its facts, then parts, damage and cargo side by
+   side, each scrolling on its own; one under the other on a narrow screen. */
+#vModal .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
+#vModal .vfacts .k { color: #999; font-size: 12px; grid-row: 1; }
+#vModal .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+#vModal .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 8px 10px; }
+#vModal .vcols h5 { margin: 0 0 6px; font-size: 12px; color: #ccc; font-weight: 600; }
+#vModal .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
+#vModal .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#vModal .part .lv { font-size: 12px; white-space: nowrap; }
+#vModal .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+#vModal .acts { display: flex; align-items: center; gap: 8px; }
+#vModal .acts button { margin: 0; }
+#vModal .st { font-size: 12.5px; }
+@media (max-width: 760px) { #vModal .vcols { grid-template-columns: minmax(0, 1fr); } #vModal .vcols > div { max-height: none; } #vModal .vfacts { grid-template-columns: auto auto; } #vModal .vfacts .k { grid-row: auto; } }
 /* The weather and in-game time, beside Time & Weather above the map. */
 .worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .worldbar .badge { font-size: 12px; background: #1a1a1a; border: 1px solid #444; border-radius: 4px; padding: 3px 8px; color: #ccc; }
@@ -327,12 +353,15 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 	</div>
 	<div class="mapwrap">
 		<div id="map"></div>
+		<div class="ctx" id="ctx" hidden role="menu"></div>
 		<div class="mapbar">
 			<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
 			<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
 			<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
 			<button type="button" id="deathBtn" onclick="toggleDeaths()" title="Show where players died">Deaths</button>
 			<select id="deathHours" aria-label="Deaths in the last" hidden><option value="1">last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select>
+			<button type="button" id="trackBtn" class="on" hidden onclick="setTrack(null)" title="Stop following"></button>
+			<span class="badge pick" id="pickBanner" hidden></span>
 			<span class="sp"></span>
 			<button type="button" onclick="fitAll()" title="Show the whole map">Fit</button>
 			<button type="button" onclick="fillWidth()" title="Zoom so the map's width fills the view, edge to edge">Fill</button>
@@ -421,6 +450,33 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 </div>
 
 <!-- The weather and the in-game time -->
+<!-- A vehicle's parts, damage and cargo (Info… on its popup) -->
+<div id="vModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="vTitle" style="width:min(1000px, 95vw)">
+		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="sub" id="vType"></span></div>
+		<div id="vBody"></div>
+		<div class="dfoot"><div class="acts" id="vActs"></div><button type="button" onclick="closeVehicleInfo()">Close</button></div>
+	</div>
+</div>
+
+<!-- Spawn an item at a spot on the map (the map's right-click menu) -->
+<div id="sModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="sTitle">
+		<div class="dlg-head"><h2 id="sTitle">Spawn here</h2><span class="badge" id="sWhere"></span></div>
+		<div class="form stats">
+			<div class="inl"><input id="sFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
+				<select id="sKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
+					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="item">Other items</option></select></div>
+			<div class="splist" id="sList"></div>
+			<div class="setfoot"><span class="muted" id="sPick"></span><span class="grow"></span>
+				<span>Count</span><input id="sCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
+				<button type="button" class="go" onclick="doSpawnAt()">Spawn</button></div>
+		</div>
+		<div class="dlg-err" id="sErr"></div>
+		<div class="dfoot"><span class="muted" id="sLast"></span><button type="button" onclick="closeSpawnAt()">Close</button></div>
+	</div>
+</div>
+
 <div id="wModal" class="modal">
 	<div class="box wide" role="dialog" aria-labelledby="wTitle">
 		<div class="dlg-head"><h2 id="wTitle">Time &amp; Weather</h2><span class="badge" id="wWorld"></span></div>
@@ -539,6 +595,10 @@ function initMap() {
 	labelLayer = L.layerGroup().addTo(map);
 	map.on('moveend zoomend', drawLabels);
 	map.on('zoomend', zoomBand);
+	map.on('contextmenu', showCtx);
+	map.on('dragstart zoomstart', closeCtx);
+	map.on('dragstart', () => { if (track) setTrack(null); });
+	map.on('click', pickClick);
 	map.setView([7680, 7680], -5);
 }
 
@@ -762,6 +822,7 @@ function drawMarkers() {
 			const guid = p.guid;
 			m = L.marker([p.z, p.x], { icon: L.divIcon({ className: 'pmark', html: arrowSVG(colorOf(guid)) + '<span></span>', iconSize: [0, 0] }), keyboard: false });
 			m.on('click', () => openPlayer(guid));
+			m.on('contextmenu', e => showPlayerCtx(guid, e));
 			m.addTo(map);
 			markers[guid] = m;
 		}
@@ -775,6 +836,7 @@ function drawMarkers() {
 		}
 	});
 	for (const g in markers) if (!seen[g]) { markers[g].remove(); delete markers[g]; }
+	if (track && track.kind === 'player') followTrack();
 }
 
 // fitAll shows the whole map in the window.
@@ -842,6 +904,8 @@ function drawVehicles() {
 		if (!m) {
 			m = vehMarkers[v.id] = L.marker([v.z, v.x], { icon, keyboard: false, title: catLabel(v) }).addTo(vehLayer);
 			m.on('click', () => openVehicle(v.id));
+			const vid = v.id;
+			m.on('contextmenu', e => showVehicleCtx(vid, e));
 		} else {
 			m.setLatLng([v.z, v.x]);
 			m.setIcon(icon);
@@ -851,8 +915,11 @@ function drawVehicles() {
 	if (vehOpen != null) {
 		if (seen[vehOpen]) renderVehicle(); else map.closePopup(vehPopup);
 	}
+	renderVehicleInfo();
+	if (track && track.kind === 'vehicle') followTrack();
 }
 function catLabel(v) { return v.name && v.name[0] !== '$' ? v.name : item(v.type); }
+// openVehicle opens the popup on the map: what the vehicle list says.
 function openVehicle(id) {
 	vehOpen = id;
 	renderVehicle();
@@ -860,28 +927,35 @@ function openVehicle(id) {
 	vehPopup.options.autoPan = true;
 	vehPopup.openOn(map);
 	vehPopup.options.autoPan = false;
+}
+// The vehicle dialog (Info…): its parts, damage and cargo, asked of the
+// mod when it opens and on Refresh, not otherwise.
+let vehInfo = null, vehAsk = 0;
+function openVehicleInfo(id) {
+	vehInfo = id;
+	document.getElementById('vModal').style.display = 'flex';
 	askVehicle();
 }
-// askVehicle asks the mod, once, for what is in the open vehicle (its
-// damage zones, parts and cargo), then reads it as soon as it has come
-// (a sync or two): no more asking after that, until Refresh.
-let vehAsk = 0;
+function closeVehicleInfo() { document.getElementById('vModal').style.display = 'none'; vehInfo = null; vehDetail = null; vehAsk++; }
+// askVehicle asks the mod, once, for what is in the vehicle in the dialog
+// (its damage zones, parts and cargo), then reads it as soon as it has
+// come (a sync or two): no more asking after that, until Refresh.
 async function askVehicle() {
-	if (vehOpen == null) return;
-	const id = vehOpen, ask = ++vehAsk;
+	if (vehInfo == null) return;
+	const id = vehInfo, ask = ++vehAsk;
 	vehDetail = null;
-	renderVehicle();
-	for (let i = 0; i < 15 && id === vehOpen && ask === vehAsk; i++) {
+	renderVehicleInfo();
+	for (let i = 0; i < 15 && id === vehInfo && ask === vehAsk; i++) {
 		try {
 			const d = await api('GET', '/api/mod/vehicles/' + id + (i === 0 ? '?ask=1' : ''));
-			if (id !== vehOpen || ask !== vehAsk) return;
+			if (id !== vehInfo || ask !== vehAsk) return;
 			if (d.detail) { vehDetail = d.detail; break; }
 		} catch (e) { break; }
 		await new Promise(r => setTimeout(r, 1000));
 	}
-	if (id === vehOpen && ask === vehAsk) {
+	if (id === vehInfo && ask === vehAsk) {
 		if (!vehDetail) vehDetail = { failed: true };
-		renderVehicle();
+		renderVehicleInfo();
 	}
 }
 // zoneName makes a damage zone's name readable: FuelTank → Fuel tank.
@@ -891,43 +965,62 @@ function partRow(name, level, extra) {
 	return '<div class="part"><span class="dot" style="background:' + cc + '"></span><span class="nm">' + esc(name) + '</span>' +
 		'<span class="lv" style="color:' + cc + '">' + cn + (extra ? ' · ' + extra : '') + '</span></div>';
 }
-function vehInside() {
-	const d = vehDetail;
-	if (!d) return '<h5>Parts and cargo</h5><div class="muted">Asking recon-mod…</div>';
-	if (d.failed) return '<h5>Parts and cargo</h5><div class="muted">recon-mod didn\'t send them (it needs 0.0.1i or later).</div>';
-	const lvl = h => h > 0.7 ? 0 : h > 0.5 ? 1 : h > 0.3 ? 2 : h > 0 ? 3 : 4;
-	let h = '<div class="scroll">';
-	if (d.zones.length) h += '<h5>Damage</h5>' + d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('');
-	const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
-	h += '<h5>Parts · ' + parts.length + '</h5>' + (parts.length ? parts.map(it => partRow(itemName(it), it.healthLevel | 0)).join('') : '<div class="muted">None fitted</div>');
-	h += '<h5>Cargo · ' + cargo.length + '</h5>' + (cargo.length ? cargo.map(it => {
-		const n = countIn(it);
-		return partRow(itemName(it), it.healthLevel | 0, n ? n + (n === 1 ? ' item inside' : ' items inside') : qty(it));
-	}).join('') : '<div class="muted">Empty</div>');
-	return h + '</div>';
-}
 function vehCondition(h) { return CONDITION[h > 0.7 ? 0 : h > 0.5 ? 1 : h > 0.3 ? 2 : h > 0 ? 3 : 4]; }
-function renderVehicle() {
-	const v = vehicles.find(x => x.id === vehOpen);
-	if (!v) return;
+// vehFacts is what the vehicle list says about v, as label/value rows.
+function vehFacts(v) {
 	const [cn, cc] = vehCondition(v.health);
-	const cmd = vehPending[v.id] && commands.find(c => c.id === vehPending[v.id]);
-	let st = '';
-	if (cmd && (cmd.status === 'queued' || cmd.status === 'sent')) st = '<span class="st" style="color:#fdd663">Deleting…</span>';
-	else if (cmd && cmd.status !== 'done') st = '<span class="st" style="color:#f28b82">Not deleted: ' + esc(cmd.error || cmd.status) + '</span>';
-	const rows = [['Where', grid(v.x, v.z) + ' <span class="muted">' + Math.round(v.x) + ', ' + Math.round(v.z) + '</span>'],
+	return [['Where', grid(v.x, v.z) + ' <span class="muted">' + Math.round(v.x) + ', ' + Math.round(v.z) + '</span>'],
 		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'],
 		['Fuel', v.fuel >= 0 ? Math.round(v.fuel * 100) + '%' : '—'],
 		['Inside', v.crew ? v.crew + (v.crew === 1 ? ' person' : ' people') : 'Nobody'],
 		['Engine', v.engine ? 'Running' : 'Off']];
-	// Redrawn every few seconds: keep where its list was scrolled to.
-	const old = vehPopup.getElement() && vehPopup.getElement().querySelector('.vpop .scroll');
-	const top = old ? old.scrollTop : 0;
-	vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop"><h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
-		rows.map(([k, x]) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>').join('') + vehInside() +
-		'<div class="acts"><button type="button" onclick="askVehicle()" title="Read its parts, cargo and damage again">Refresh</button><button type="button" class="bad" onclick="deleteVehicle(' + v.id + ')"' + (v.crew ? ' disabled title="Someone is in it"' : '') + '>Delete</button>' + st + '</div></div>');
-	const now = vehPopup.getElement() && vehPopup.getElement().querySelector('.vpop .scroll');
-	if (now) now.scrollTop = top;
+}
+// vehDeleteState is how deleting v went, if it was asked.
+function vehDeleteState(v) {
+	const cmd = vehPending[v.id] && commands.find(c => c.id === vehPending[v.id]);
+	if (cmd && (cmd.status === 'queued' || cmd.status === 'sent')) return '<span class="st" style="color:#fdd663">Deleting…</span>';
+	if (cmd && cmd.status !== 'done') return '<span class="st" style="color:#f28b82">Not deleted: ' + esc(cmd.error || cmd.status) + '</span>';
+	return '';
+}
+function deleteButton(v) {
+	return '<button type="button" class="bad" onclick="event.stopPropagation(); deleteVehicle(' + v.id + ')"' + (v.crew ? ' disabled title="Someone is in it"' : '') + '>Delete</button>';
+}
+function renderVehicle() {
+	const v = vehicles.find(x => x.id === vehOpen);
+	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop"><h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
+		vehFacts(v).map(([k, x]) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>').join('') +
+		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage and cargo">Info…</button>' + deleteButton(v) + vehDeleteState(v) + '</div></div>');
+	renderVehicleInfo();
+}
+// renderVehicleInfo draws the dialog: the facts, then parts, damage and
+// cargo side by side (each column keeps where it was scrolled to).
+function renderVehicleInfo() {
+	if (vehInfo == null) return;
+	const v = vehicles.find(x => x.id === vehInfo), body = document.getElementById('vBody');
+	if (!v) { body.innerHTML = '<div class="empty">That vehicle isn\'t on the server any more.</div>'; document.getElementById('vActs').innerHTML = ''; return; }
+	document.getElementById('vTitle').textContent = catLabel(v);
+	document.getElementById('vType').textContent = v.type;
+	const tops = [...body.querySelectorAll('.vcols > div')].map(c => c.scrollTop);
+	let h = '<div class="vfacts">' + vehFacts(v).map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
+	const d = vehDetail;
+	if (!d) h += '<div class="muted">Asking recon-mod for its parts, damage and cargo…</div>';
+	else if (d.failed) h += '<div class="muted">recon-mod didn\'t send its parts, damage and cargo (it needs 0.0.1i or later).</div>';
+	else {
+		const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
+		const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
+		h += '<div class="vcols"><div><h5>Parts · ' + parts.length + '</h5>' +
+			(parts.length ? parts.map(it => partRow(itemName(it), it.healthLevel | 0)).join('') : '<div class="muted">None fitted</div>') +
+			'</div><div><h5>Damage</h5>' +
+			(d.zones.length ? d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('') : '<div class="muted">No zones</div>') +
+			'</div><div><h5>Cargo · ' + cargo.length + '</h5>' +
+			(cargo.length ? cargo.map(it => {
+				const n = countIn(it);
+				return partRow(itemName(it), it.healthLevel | 0, n ? n + (n === 1 ? ' item inside' : ' items inside') : qty(it));
+			}).join('') : '<div class="muted">Empty</div>') + '</div></div>';
+	}
+	body.innerHTML = h;
+	body.querySelectorAll('.vcols > div').forEach((c, i) => { c.scrollTop = tops[i] || 0; });
+	document.getElementById('vActs').innerHTML = '<button type="button" onclick="askVehicle()" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + vehDeleteState(v);
 }
 async function deleteVehicle(id) {
 	const v = vehicles.find(x => x.id === id);
@@ -1055,6 +1148,220 @@ function drawDeaths() {
 	}
 }
 setInterval(loadDeaths, 30000);
+
+// ---- Right-click menus: on the map, a player or a vehicle -------------
+// One menu (#ctx) at the click, its items' data-a handled by the one that
+// opened it; it closes with Esc, a click elsewhere, or dragging or zooming
+// the map.
+
+let ctxAt = null, ctxHandle = null;
+function closeCtx() { document.getElementById('ctx').hidden = true; ctxAt = null; ctxHandle = null; }
+function openCtx(pt, at, html, handle) {
+	const el = document.getElementById('ctx');
+	ctxAt = at; ctxHandle = handle;
+	el.innerHTML = html + '<div class="msg" id="ctxMsg"></div>';
+	el.hidden = false;
+	const wrap = document.querySelector('.mapwrap').getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
+	el.style.left = Math.max(4, Math.min(pt.x, wrap.width - w - 4)) + 'px';
+	el.style.top = Math.max(4, Math.min(pt.y, wrap.height - h - 4)) + 'px';
+}
+function ctxMsg(text, bad) { const m = document.getElementById('ctxMsg'); if (m) { m.style.color = bad ? '#f28b82' : ''; m.textContent = text; } }
+function ctxItem(a, text, cls) { return '<button type="button" data-a="' + a + '"' + (cls ? ' class="' + cls + '"' : '') + '>' + text + '</button>'; }
+// ctxTeleportList is a button per online player, to send them there.
+function ctxTeleportList(label, except) {
+	const alive = players.filter(p => p.alive && p.guid !== except).sort((a, b) => a.name.localeCompare(b.name));
+	return '<div class="lbl">' + label + '</div><div class="plist">' + (alive.length
+		? alive.map(p => ctxItem('tp:' + p.guid, esc(p.name))).join('') : '<div class="muted">Nobody is online.</div>') + '</div>';
+}
+// ctxRun sends an action, says so in the menu, and closes it a moment later.
+async function ctxRun(text, path, body) {
+	const at = ctxAt;
+	ctxMsg(text + '…');
+	try {
+		await api('POST', path, body || {});
+		poll();
+		setTimeout(() => { if (ctxAt === at) closeCtx(); }, 900);
+	} catch (err) { ctxMsg(err.message, true); }
+}
+async function ctxCopy(x, z) {
+	const t = Math.round(x) + ', ' + Math.round(z);
+	try { await navigator.clipboard.writeText(t); ctxMsg('Copied ' + t); } catch (err) { ctxMsg(t); }
+}
+document.getElementById('ctx').addEventListener('click', e => {
+	const b = e.target.closest('[data-a]');
+	if (b && ctxHandle) ctxHandle(b.dataset.a);
+});
+document.addEventListener('mousedown', e => { if (ctxAt && !e.target.closest('#ctx')) closeCtx(); });
+
+// On the map: teleport a player here, spawn here, copy the position.
+function showCtx(e) {
+	const x = e.latlng.lng, z = e.latlng.lat;
+	if (!(x > 0 && z > 0) || (size && (x > size || z > size))) { closeCtx(); return; }
+	openCtx(e.containerPoint, { x, z },
+		'<div class="hd">' + Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z) + '</div>' + ctxTeleportList('Teleport here') +
+		'<div class="lbl">This spot</div>' + ctxItem('spawn', 'Spawn an item here…') + ctxItem('copy', 'Copy the position'),
+		a => {
+			if (a.startsWith('tp:')) { const p = byGuid[a.slice(3)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(3) + '/teleport', { x, z, y: 0 }); }
+			else if (a === 'spawn') { closeCtx(); openSpawnAt(x, z); }
+			else if (a === 'copy') ctxCopy(x, z);
+		});
+}
+
+// On a player: open them (a tab), follow them, send them to a spot, and
+// the quick actions.
+function showPlayerCtx(guid, e) {
+	const p = byGuid[guid];
+	if (!p) return;
+	const following = track && track.kind === 'player' && track.id === guid;
+	openCtx(e.containerPoint, { guid },
+		'<div class="hd">' + esc(p.name) + ' · ' + grid(p.x, p.z) + (p.alive ? '' : ' · dead') + '</div>' +
+		ctxItem('open', 'Open') + ctxItem('inv', 'Inventory') + ctxItem('spawn', 'Spawn an item for them…') +
+		'<div class="lbl">Map</div>' + ctxItem('follow', following ? 'Stop following' : 'Follow on the map') + ctxItem('send', 'Send to a spot… (click the map)') +
+		ctxItem('copy', 'Copy their position') +
+		'<div class="lbl">Actions</div>' + ctxItem('heal', 'Heal') + ctxItem('dry', 'Dry') + ctxItem('message', 'Message…') + ctxItem('kill', 'Kill', 'bad'),
+		a => {
+			const tab = t => { closeCtx(); openPlayer(guid); showPTab(t); };
+			if (a === 'open') tab('stats');
+			else if (a === 'inv') tab('inventory');
+			else if (a === 'spawn') tab('spawn');
+			else if (a === 'message') { tab('stats'); showForm('message'); }
+			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'player', id: guid }); }
+			else if (a === 'send') { closeCtx(); startPick(guid); }
+			else if (a === 'copy') ctxCopy(p.x, p.z);
+			else if (a === 'heal') ctxRun('Healing ' + p.name, '/api/mod/players/' + guid + '/heal');
+			else if (a === 'dry') ctxRun('Drying ' + p.name, '/api/mod/players/' + guid + '/dry');
+			else if (a === 'kill') { if (confirm('Kill ' + p.name + '? Their character dies and they start again fresh.')) ctxRun('Killing ' + p.name, '/api/mod/players/' + guid + '/kill'); }
+		});
+}
+
+// On a vehicle: its info, follow it, bring a player to it, delete it.
+function showVehicleCtx(id, e) {
+	const v = vehicles.find(x => x.id === id);
+	if (!v) return;
+	const following = track && track.kind === 'vehicle' && track.id === id;
+	openCtx(e.containerPoint, { id },
+		'<div class="hd">' + esc(catLabel(v)) + ' · ' + grid(v.x, v.z) + '</div>' +
+		ctxItem('info', 'Info…') + ctxItem('follow', following ? 'Stop following' : 'Follow on the map') + ctxItem('copy', 'Copy its position') +
+		ctxTeleportList('Teleport a player beside it') + '<div class="lbl">Vehicle</div>' + ctxItem('delete', 'Delete', 'bad'),
+		a => {
+			if (a === 'info') { closeCtx(); openVehicleInfo(id); }
+			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'vehicle', id }); }
+			else if (a === 'copy') ctxCopy(v.x, v.z);
+			// Beside it (3 m east), not on top of it.
+			else if (a.startsWith('tp:')) { const p = byGuid[a.slice(3)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(3) + '/teleport', { x: v.x + 3, z: v.z, y: 0 }); }
+			else if (a === 'delete') { closeCtx(); deleteVehicle(id); }
+		});
+}
+
+// ---- Following a player or vehicle on the map ----------------------------
+// The map keeps them in the middle (a player every second, a vehicle
+// every 5 s) until Stop, or the map is dragged.
+
+let track = null; // { kind: 'player' | 'vehicle', id }
+function trackPos() {
+	if (!track) return null;
+	return track.kind === 'player' ? byGuid[track.id] : vehicles.find(v => v.id === track.id);
+}
+function setTrack(t) {
+	track = t;
+	followTrack();
+	renderTrack();
+}
+function followTrack() {
+	if (!track) return;
+	const p = trackPos();
+	if (!p) { track = null; renderTrack(); return; }
+	map.panTo([p.z, p.x], { animate: true, duration: 0.4 });
+}
+function renderTrack() {
+	const b = document.getElementById('trackBtn'), p = trackPos();
+	b.hidden = !track;
+	if (track) b.textContent = 'Following ' + (track.kind === 'player' ? (p ? p.name : '') : (p ? catLabel(p) : '')) + ' ✕';
+}
+
+// ---- Send a player to a spot: the next click on the map ------------------
+
+let pickSend = null; // the GUID of the player to send
+function startPick(guid) {
+	pickSend = guid;
+	document.getElementById('map').classList.add('picking');
+	const b = document.getElementById('pickBanner'), p = byGuid[guid];
+	b.hidden = false;
+	b.textContent = 'Click where to send ' + (p ? p.name : 'them') + ' · Esc cancels';
+}
+function endPick() {
+	pickSend = null;
+	document.getElementById('map').classList.remove('picking');
+	document.getElementById('pickBanner').hidden = true;
+}
+async function pickClick(e) {
+	if (!pickSend) return;
+	const guid = pickSend, x = e.latlng.lng, z = e.latlng.lat, b = document.getElementById('pickBanner');
+	if (!(x > 0 && z > 0) || (size && (x > size || z > size))) { b.textContent = 'That spot is off the map: click on it · Esc cancels'; return; }
+	endPick();
+	try { await api('POST', '/api/mod/players/' + guid + '/teleport', { x, z, y: 0 }); poll(); }
+	catch (err) { alert('Not sent: ' + err.message); }
+}
+
+// Spawn at a spot: the item list, searched, and how many.
+let sAt = null, sSel = null;
+async function openSpawnAt(x, z) {
+	sAt = { x, z }; sSel = null;
+	document.getElementById('sWhere').textContent = Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z);
+	document.getElementById('sErr').textContent = '';
+	document.getElementById('sLast').textContent = '';
+	document.getElementById('sModal').style.display = 'flex';
+	document.getElementById('sFind').focus();
+	renderSpawnAt();
+	if (!catalog) { await fetchCatalog(); renderSpawnAt(); }
+}
+function closeSpawnAt() { document.getElementById('sModal').style.display = 'none'; sAt = null; }
+// renderSpawnAt lists the first 300 matches (narrow the search for more).
+function renderSpawnAt() {
+	const list = document.getElementById('sList');
+	if (!catalog) { list.innerHTML = '<div class="empty">The item list is still coming in from recon-mod…</div>'; renderSpawnPick(); return; }
+	const words = document.getElementById('sFind').value.toLowerCase().split(/\s+/).filter(Boolean);
+	const kind = document.getElementById('sKind').value;
+	const hits = catalog.filter(it => (!kind || it.kind === kind) && words.every(w => it.find.includes(w)));
+	list.innerHTML = hits.length ? hits.slice(0, 300).map(it =>
+		'<button type="button" class="sprow' + (it.type === sSel ? ' sel' : '') + '" data-type="' + esc(it.type) + '">' +
+		'<span class="nm">' + esc(catName(it)) + '<small>' + esc(it.type) + '</small></span><span class="kd">' + KIND_TEXT[it.kind] + '</span></button>').join('') +
+		(hits.length > 300 ? '<div class="empty">' + (hits.length - 300).toLocaleString() + ' more: narrow the search.</div>' : '')
+		: '<div class="empty">No item matches.</div>';
+	list.scrollTop = 0;
+	renderSpawnPick();
+}
+function renderSpawnPick() {
+	const it = sSel && catalogBy[sSel], vehicle = it && it.kind === 'vehicle', cnt = document.getElementById('sCount');
+	document.getElementById('sPick').textContent = it ? catName(it) + (vehicle ? ', whole (parts and fluids), facing north' : ', on the ground here')
+		: (catalog ? catalog.length.toLocaleString() + ' items · pick one' : '');
+	if (vehicle) cnt.value = 1;
+	cnt.disabled = !!vehicle;
+}
+document.getElementById('sFind').addEventListener('input', renderSpawnAt);
+document.getElementById('sKind').addEventListener('change', renderSpawnAt);
+document.getElementById('sList').addEventListener('click', e => {
+	const t = e.target.closest('[data-type]');
+	if (!t) return;
+	sSel = t.getAttribute('data-type');
+	document.querySelectorAll('#sList .sprow.sel').forEach(r => r.classList.remove('sel'));
+	t.classList.add('sel');
+	renderSpawnPick();
+});
+async function doSpawnAt() {
+	const err = document.getElementById('sErr');
+	err.textContent = '';
+	if (!sAt) return;
+	if (!sSel) { err.textContent = 'Pick an item to spawn.'; return; }
+	const n = parseInt(document.getElementById('sCount').value, 10);
+	if (!(n >= 1 && n <= 20)) { err.textContent = 'Spawn 1 to 20 at a time.'; return; }
+	try {
+		await api('POST', '/api/mod/world/spawnAt', { text: sSel, value: n, x: sAt.x, z: sAt.z });
+		const it = catalogBy[sSel];
+		document.getElementById('sLast').textContent = 'Sent: ' + (n > 1 ? n + ' × ' : '') + (it ? catName(it) : sSel) + ' · ' + new Date().toLocaleTimeString();
+		poll();
+	} catch (e) { err.textContent = e.message; }
+}
 
 // fillWidth zooms so the map's width is exactly the view's, keeping the
 // part north to south in view (but not past the map's top or bottom edge).
@@ -1515,6 +1822,7 @@ function cmdText(c) {
 		case 'date': return 'In-game time ' + c.year + '-' + pad(c.month) + '-' + pad(c.day) + ' ' + pad(c.hour) + ':' + pad(c.minute);
 		case 'freezeTime': return c.value ? 'Freeze time' : 'Unfreeze time';
 		case 'deleteVehicle': return 'Delete a vehicle';
+		case 'spawnAt': return 'Spawn ' + (c.value > 1 ? c.value + ' × ' : '') + esc(catalogBy[c.text] ? catName(catalogBy[c.text]) : c.text) + ' at ' + Math.round(c.x) + ', ' + Math.round(c.z);
 	}
 	return esc(c.action);
 }
@@ -1833,8 +2141,9 @@ document.getElementById('pTabs').addEventListener('click', e => {
 let catalog = null, catalogBy = {}, spSel = null;
 const KIND_TEXT = { weapon: 'Weapon', magazine: 'Magazine', ammo: 'Ammo', clothing: 'Clothing', vehicle: 'Vehicle', item: 'Item' };
 function catName(it) { return it.name && it.name[0] !== '$' ? it.name : item(it.type); }
-async function loadItems() {
-	if (catalog) { renderItems(); return; }
+// fetchCatalog loads the item list once the mod has sent all of it.
+async function fetchCatalog() {
+	if (catalog) return;
 	try {
 		const d = await api('GET', '/api/mod/items');
 		if (d.complete) {
@@ -1844,6 +2153,10 @@ async function loadItems() {
 			catalogBy = Object.fromEntries(catalog.map(it => [it.type, it]));
 		}
 	} catch (e) { }
+}
+async function loadItems() {
+	if (catalog) { renderItems(); return; }
+	await fetchCatalog();
 	renderItems();
 	// Still coming in from the mod: look again while the tab is open.
 	if (!catalog) setTimeout(() => { if (pTab === 'spawn' && document.getElementById('pModal').style.display === 'flex') loadItems(); }, 2000);
@@ -2105,16 +2418,20 @@ function setRainRange() {
 document.addEventListener('keydown', e => {
 	if (e.key !== 'Escape') return;
 	if (drag) { endDrag(false); return; }
+	if (ctxAt) { closeCtx(); return; }
+	if (pickSend) { endPick(); return; }
+	if (document.getElementById('sModal').style.display === 'flex') { closeSpawnAt(); return; }
+	if (document.getElementById('vModal').style.display === 'flex') { closeVehicleInfo(); return; }
 	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
 	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
-for (const id of ['pModal', 'wModal']) document.getElementById(id).addEventListener('mousedown', e => {
-	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else closeWorld(); }
+for (const id of ['pModal', 'wModal', 'sModal', 'vModal']) document.getElementById(id).addEventListener('mousedown', e => {
+	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else closeWorld(); }
 });
 
 initMap();
-map.on('popupclose', e => { if (e.popup === vehPopup) { vehOpen = null; vehDetail = null; vehAsk++; } });
+map.on('popupclose', e => { if (e.popup === vehPopup) vehOpen = null; });
 buildWorld();
 drawVehicles();
 loadVehicles();

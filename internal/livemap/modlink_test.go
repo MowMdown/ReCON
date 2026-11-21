@@ -490,6 +490,18 @@ func TestCatalogPagesAndSpawn(t *testing.T) {
 	if _, err := Queue(guid(steamA), Command{Action: "spawn", Text: "Apple", Value: 1, Stat: "pocket"}, now); err == nil {
 		t.Error("spawned somewhere unknown")
 	}
+	if cs, err := QueueWorld(Command{Action: "spawnAt", Text: "OffroadHatchback", Value: 3, X: 100, Z: 200}, now); err != nil || cs.Value != 1 || cs.X != 100 {
+		t.Errorf("a vehicle at a spot: %+v, %v; want one", cs, err)
+	}
+	if cs, err := QueueWorld(Command{Action: "spawnAt", Text: "Apple", Value: 4, X: 100, Z: 200}, now); err != nil || cs.Value != 4 {
+		t.Errorf("apples at a spot: %+v, %v", cs, err)
+	}
+	for _, bad := range []Command{{Text: "Apple", Value: 1}, {Text: "Banana", Value: 1, X: 1, Z: 1}, {Text: "Apple", Value: 0, X: 1, Z: 1}} {
+		bad.Action = "spawnAt"
+		if _, err := QueueWorld(bad, now); err == nil {
+			t.Errorf("spawnAt %+v accepted", bad)
+		}
+	}
 	if _, err := Queue(guid(steamA), Command{Action: "dry"}, now); err != nil {
 		t.Errorf("dry: %v", err)
 	}
