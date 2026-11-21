@@ -440,6 +440,8 @@ function esc(s) {
 // they rank and are listed in.
 const ROLE_NAMES = ['Player', 'Mod', 'Admin', 'Vehicles'];
 const ROLE_ORDER = [0, 3, 1, 2];
+// How the Permissions note says the role they now have, by number.
+const ROLE_SAVED = ['a Player', 'a Mod', 'an Admin', 'a Vehicles player'];
 
 // countryName is a country's name from its ISO code ("gb" -> "United
 // Kingdom"), in the browser's own country names; the code itself if the
@@ -1285,7 +1287,7 @@ async function setRole(v) {
 		if (!d.ok) throw new Error(d.error || 'not saved');
 		if (det && det.guid === guid) det.player.role = d.role;
 		st.className = 'saved';
-		st.textContent = 'Saved: ' + name + ' is now ' + (v === 0 ? 'a Player' : v === 1 ? 'a Mod' : 'an Admin');
+		st.textContent = 'Saved: ' + name + ' is now ' + ROLE_SAVED[v];
 		refresh();
 	} catch (e) {
 		st.className = 'bad';
