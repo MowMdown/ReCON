@@ -285,9 +285,12 @@ type Command struct {
 	Replace string `json:"replace,omitempty"`
 	// ...and its class: the mod deletes it only if both match, so an ID
 	// the game ever gave to another vehicle can't take that one with it.
-	ReplaceType string  `json:"replaceType,omitempty"`
-	Title       string  `json:"title"`
-	Seconds     float64 `json:"seconds"`
+	ReplaceType string `json:"replaceType,omitempty"`
+	// restore: the items to give back, as a list (in the inventory's shape),
+	// not JSON in Text: the mod's JSON reader broke on nested JSON.
+	Items   []Item  `json:"items,omitempty"`
+	Title   string  `json:"title"`
+	Seconds float64 `json:"seconds"`
 	// World actions (QueueWorld).
 	Transition float64 `json:"transition"`
 	Hold       float64 `json:"hold"`
@@ -922,8 +925,8 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 			return CommandStatus{}, errors.New("pick where to teleport them")
 		}
 	case "restore":
-		// Text is the items to give back, as JSON (invsaves.go; mod 1.0.1 on).
-		if strings.TrimSpace(c.Text) == "" {
+		// Items are what to give back (invsaves.go; mod 1.0.2 on).
+		if len(c.Items) == 0 {
 			return CommandStatus{}, errors.New("pick the items to give back")
 		}
 	case "spawn":
