@@ -27,6 +27,7 @@ services:
       # SERVER_LATITUDE: "45"
     volumes:
       - /mnt/user/appdata/recon/deerisle:/data
+      - /mnt/user/appdata/recon/maps:/data/maps:ro  # shared map pictures: maps/<world>.jpg
     ports:
       - "9996:8080"
 
@@ -58,6 +59,7 @@ services:
       # SERVER_LATITUDE: "45"
     volumes:
       - /mnt/user/appdata/recon/namalsk:/data
+      - /mnt/user/appdata/recon/maps:/data/maps:ro  # shared map pictures: maps/<world>.jpg
     ports:
       - "9997:8080"
 
@@ -89,6 +91,7 @@ services:
       # SERVER_LATITUDE: "45"
     volumes:
       - /mnt/user/appdata/recon/nasdara:/data
+      - /mnt/user/appdata/recon/maps:/data/maps:ro  # shared map pictures: maps/<world>.jpg
     ports:
       - "9998:8080"
 
