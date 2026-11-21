@@ -1504,7 +1504,8 @@ document.getElementById('find').addEventListener('input', renderList);
 
 // ---- A player's popup on the map ------------------------------------------
 // A click on a player opens their basic stats and what they wear and hold;
-// Info… opens their dialog. While it's open their gear is read every 2 s
+// Info opens their dialog, Teleport and Spawn as on their right-click menu.
+// While it's open their gear is read every 2 s
 // (which also keeps ReCON asking the mod for it).
 
 const plPopup = L.popup({ autoPan: false, offset: [0, -6] });
@@ -1527,6 +1528,13 @@ async function loadPlayerPopup() {
 	} catch (e) { }
 }
 setInterval(() => { if (plOpen) loadPlayerPopup(); }, 2000);
+// playerPopupAct is the popup's Teleport (pick a spot on the map) and
+// Spawn (their Spawn item tab), as on their right-click menu.
+function playerPopupAct(guid, a) {
+	map.closePopup(plPopup);
+	if (a === 'send') startPick(guid);
+	else { openPlayer(guid); showPTab('spawn'); }
+}
 function renderPlayerPopup() {
 	const p = plOpen && byGuid[plOpen];
 	if (!plOpen) return;
@@ -1543,7 +1551,11 @@ function renderPlayerPopup() {
 	const worn = plInv && (plInv.items || []).filter(it => it.slot).sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99));
 	if (worn) h += worn.length ? worn.map(it => row(slotLabel(it.slot), esc(itemName(it)))).join('') : '<div class="muted">Nothing worn or held</div>';
 	else h += (p.handsName || p.hands ? row('Hands', esc(p.handsName || item(p.hands))) : '') + '<div class="muted">Reading their gear…</div>';
-	h += '</div><div class="acts"><button type="button" onclick="event.stopPropagation(); openPlayer(\'' + p.guid + '\')" title="Their stats, inventory, spawning and actions">Info…</button></div></div>';
+	const g = '\'' + p.guid + '\'';
+	h += '</div><div class="acts">' +
+		'<button type="button" onclick="event.stopPropagation(); openPlayer(' + g + ')" title="Their stats, inventory, spawning and actions">Info</button>' +
+		'<button type="button" onclick="event.stopPropagation(); playerPopupAct(' + g + ', \'send\')" title="Click a place on the map to move them there">Teleport</button>' +
+		'<button type="button" onclick="event.stopPropagation(); playerPopupAct(' + g + ', \'spawn\')" title="Spawn an item for them">Spawn</button></div></div>';
 	// Keep where the gear list was scrolled to across the redraws.
 	const old = plPopup.getElement() && plPopup.getElement().querySelector('.gear'), top = old ? old.scrollTop : 0;
 	plPopup.setLatLng([p.z, p.x]).setContent(h);
