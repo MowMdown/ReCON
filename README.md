@@ -267,7 +267,7 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
   fluids, one at a time, 8 m in front of them; the list fits the dialog's
   height) and **Kills & deaths**, the latest 100 they were in
   (when, who with what and how far, and where), with their all-time
-  totals, and **Kill**. A death whose inventory was saved (recon-mod 1.0.1 on: the mod sends what they had as they died; kept 7 days, `INVENTORY_KEEP_DAYS` to change) has **Restore…**: their items as a tree of tick boxes, none ticked at first, with **Select all** and **Deselect all**; ticking a container or weapon ticks what's in and on it. **Restore selected** gives only those back (while they're online): into their slots and containers, else their inventory, else the ground at their feet. Items given back are marked, so they aren't given twice by accident. Each death says what killed them (a player, an infected, an
+  totals, and **Kill**. A death whose inventory was saved (recon-mod 1.0.1 on: the mod sends what they had as they died; kept 7 days, `INVENTORY_KEEP_DAYS` to change) has **Restore…**: their items as a tree of tick boxes, none ticked at first, with **Select all** and **Deselect all**; ticking a container or weapon ticks what's in and on it. **Restore** gives only those back (while they're online): into their slots and containers, else their inventory, else the ground at their feet. Items given back are marked, so they aren't given twice by accident. Each death says what killed them (a player, an infected, an
   animal, the environment: a fall, fire, drowning, cold, a vehicle, an
   explosion or a trap; an ailment: bleeding out, thirst, hunger or
   illness; a suicide or ReCON's Kill), with buttons to show only one kind.

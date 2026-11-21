@@ -196,6 +196,8 @@ html[data-theme]:not([data-theme="default"]) {
 #rModal label.rn .ex { color: var(--lm-muted); font-size: 12px; }
 #rModal label.rn .done { color: var(--lm-faint); font-size: 11px; border: 1px solid var(--lm-line); border-radius: 4px; padding: 0 5px; }
 #pKills button.rs { margin: 0; padding: 2px 8px; font-size: 12px; }
+#rModal .rfoot { justify-content: flex-end; gap: 8px; }
+#rModal .rfoot button { margin: 0; }
 /* A placed object: a small square in the colour of its condition. */
 .omark svg { position: absolute; left: -5px; top: -5px; overflow: visible; cursor: pointer; }
 /* The grid's lines: the theme's border colour lit with its accent, so they
@@ -570,8 +572,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div class="rbar"><button type="button" id="rAll">Select all</button><button type="button" id="rNone">Deselect all</button><span class="sp"></span><span class="muted" id="rCount"></span></div>
 		<div class="rtree" id="rTree"></div>
 		<div class="dlg-err" id="rErr"></div>
-		<div class="dfoot"><span class="muted">Only the ticked items are given back: into their slots and containers, or their inventory, or on the ground at their feet.</span>
-			<span><button type="button" class="go" id="rGo">Restore selected</button><button type="button" onclick="closeRestore()">Close</button></span></div>
+		<div class="dfoot rfoot"><button type="button" class="go" id="rGo">Restore</button><button type="button" onclick="closeRestore()">Cancel</button></div>
 	</div>
 </div>
 
