@@ -88,19 +88,11 @@ Then open `http://<host>:8080` (it goes to the Players page).
 
 Run one ReCON container per game server. Copy the service and give each copy its own service and container name, `RCON_PORT`, password, data folder and host port. Each container keeps its own database.
 
-### With recon-mod (optional)
+### With recon-mod
 
-[ReCON-Mod](https://github.com/MowMdown/ReCON-Mod) is a DayZ server-side mod that sends ReCON every player's live state (position, health, stats) every second and runs actions on them and on the weather and time. ReCON shows it on a **Live Map** page. None of it is in a plain build: build with `RECON_MOD=true` to add it.
+[ReCON-Mod](https://github.com/MowMdown/ReCON-Mod) is a DayZ server-side mod that sends ReCON every player's live state (position, health, stats) every second and runs actions on them and on the weather and time. ReCON shows it on the [Live Map](#live-map-live) page. Install the mod on the game server (see its README); ReCON needs nothing more, but for the map's terrain put its pictures in the data folder's `maps` folder (see [Map pictures](#map-pictures)).
 
-```bash
-docker build --build-arg RECON_MOD=true -t recon:mod .
-# a branch, tag or commit of ReCON-Mod other than main:
-docker build --build-arg RECON_MOD=true --build-arg RECON_MOD_REF=v0.1.0 -t recon:mod .
-```
-
-Published images: a release builds plain ReCON (`:v1.2.0`, `:latest`; a pre-release `:testing`) and, when its code has the add-on hook, ReCON with recon-mod (`:v1.2.0-mod`, `:mod`; a pre-release `:testing-mod`).
-
-Without Docker: `cp cmd/recon/_mod/recon_mod.go cmd/recon/ && go get github.com/MowMdown/ReCON-Mod@latest && go build ./cmd/recon` (don't commit the copy or the go.mod change). The mod's setup, the page and its API are in ReCON-Mod's README.
+The published images `:mod` and `:testing-mod` (and `:v1.2.0-mod`) are the same as `:latest` and `:testing`: they were a separate build with the Live Map in, which every image has now.
 
 ### Updating
 
@@ -243,6 +235,46 @@ A page for troubleshooting. No menu item links to it: type `/developer` after th
 
 **Copy all as JSON** copies the lot. The page only reads and never asks Steam for anything. It doesn't refresh by itself, so nothing moves while you read: **Refresh** reads the list and the player again. Linking to `/developer#<guid>` opens that player.
 
+
+### Live Map: `/live`
+
+It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the game server, it says "recon-mod isn't connected".
+
+- **Left:** every online player, with their map grid square, what's in their
+  hands or the vehicle they're in, a health bar, and chips for bleeding,
+  illness, knocked out and restrained. A search box filters the list.
+- **Right:** the map, with each player as an arrow showing their heading,
+  updated every second. Drag to pan, scroll to zoom; **Fit** shows the
+  whole map. It is a 1 km grid with the map's coordinates, over the
+  map's picture if there is one ([Map pictures](#map-pictures)). Above
+  the map: the weather and the in-game time.
+- **Clicking a player** opens their stats. Drag Health, Blood, Water, Food or
+  Comfort left or right to set it (shock, stamina and temperature are read
+  only). They show health, blood, water and food in
+  DayZ's HUD colours (white, yellow, red, blinking red at the same
+  thresholds as the game), shock, stamina, temperature (the game's hot and
+  cold colours) and comfort (the heat buff, with its +/++/+++ stage and the
+  most their clothes allow), conditions, a mini-map of the 1 km around them,
+  what's in hand, vehicle, kills and deaths, and the actions: Heal,
+  Teleport (to a spot, a mini-map click or another player), Message and
+  Kill. Each action's result shows below them.
+- **World…** sets the in-game date and time, freezes the clock, and sets the
+  weather: overcast, rain, fog, snow, wind speed and direction, and
+  lightning, with presets (Clear, Cloudy, Rain, Thunderstorm, Fog, Snow),
+  over how many seconds the change happens and how long it holds; whether
+  the weather follows the map's rules, only what was set, or is frozen; and
+  the overcast range rain falls in.
+
+While the mod is connected, ReCON's Server Info page takes the in-game date
+from it (for sunrise and sunset) rather than from `SERVER_TIME`.
+
+#### Map pictures
+
+The page draws a 1 km grid with the map's coordinates; to draw the terrain under it, put the map's picture in the data folder's `maps` folder (with Docker, the `maps` folder next to the database): `maps/<world>.jpg` (or `.png`, `.webp`; square, north up) and its tiles, `maps/<world>/`. `<world>` is the world name the mod reports (`chernarusplus`, `enoch`, `sakhal`, `namalsk`, ...). The pictures come from the game's or the map mod's files, so they can't be shared: [satmap](https://github.com/MowMdown/satmap) makes them from your own copy of the game. Use one only if you have the right to: many DayZ map images online belong to their makers.
+
+The tiles are levels: `maps/<world>/0/` is the whole map in one tile, each level after it has twice the columns and rows (`<column>_<row>.jpg`, column 0 at the west edge, row 0 at the north) and the last has the picture's own pixels; `maps/<world>/tiles.json` (`px`, `tile`, `levels`, `ext`) describes them. Whatever the zoom, the page loads only the few tiles in view, from the least detailed level sharp enough, and draws a coarser one under any still loading. When there are tiles it never loads `maps/<world>.jpg`: a big whole picture (15360 px is about 1 GB once a browser decodes it) can crash the page, on a phone especially.
+
+The HUD colours and thresholds for health, blood, water, food and temperature are DayZ's, from its scripts (Bohemia Interactive, [DayZ Public License](https://www.bohemia.net/en/licenses/dayz-public-license-dpl)).
 ---
 
 ## 4. Flows
@@ -617,6 +649,31 @@ curl -X POST http://<host>:8080/api/flows/3/run \
 | POST | `/api/server/settings` | `{"queryPort", "serverTime", "latitude"}` | Save them (empty: the container's value) and ask the server |
 | POST | `/api/server/mods/<workshop id>/ack` | | Acknowledge a mod's update on Steam |
 
+### Live Map
+
+ReCON stores every death the mod reports (its own `mod_kills` table) and the SteamIDs it reports.
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| POST | `/api/mod/sync` | the mod's sync | Used by the mod only: player data in, commands out (403 with the wrong password) |
+| GET  | `/api/mod/players` | | `mod` (`connected`, `lastSync`, `world`, in-game `date`), every online player's live state with their `guid`, and the recent commands |
+| GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills`, and the commands sent to them |
+| POST | `/api/mod/players/<guid>/<action>` | see below | Queue an action. The mod runs it on its next sync; its `status` (`queued`, `sent`, `done`, `failed`, `expired`) shows in the commands |
+| POST | `/api/mod/world/<action>` | see below | Queue a weather or time change, the same way |
+
+Actions: `heal` (full health, blood, shock, food and water; stops bleeding, cures illnesses, mends broken legs), `kill`, `teleport` `{"x", "z", "y"}` (`y` 0 = ground level), `teleportTo` `{"target": "<guid>"}`, `set` `{"stat": "health|blood|water|energy|heatBuffer", "value"}` (shock, stamina and temperature are read only), `message` `{"text", "title", "seconds"}`. A command the mod hasn't answered within 30 seconds expires.
+
+World actions, modelled on Community Online Tools' weather module (`mod.weather` in `/api/mod/players` shows the weather now and where it is heading):
+
+- `weather` `{"stat", "value", "transition", "hold"}`: `stat` is `overcast`, `rain`, `fog`, `snow` (0 to 1), `windSpeed` (m/s) or `windDir` (degrees). It changes to `value` over `transition` seconds and stays at least `hold` seconds.
+- `weatherMode` `{"text"}`: `world` (the map's weather rules), `forecast` (only what was set) or `static` (frozen as it is).
+- `storm` `{"value", "min", "hold"}`: lightning density (0 to 1), the overcast it starts at, and the seconds between strikes.
+- `rainThresholds` `{"min", "max", "transition"}`: the overcast range rain falls in, and the seconds it takes to stop.
+- `date` `{"year", "month", "day", "hour", "minute"}`: the in-game date and time.
+- `freezeTime` `{"value"}`: 1 stops the in-game clock, 0 starts it again.
+
+The tiles: `GET /api/mod/map/<world>` (the whole picture), `GET /api/mod/map/<world>/tiles` (`tiles.json` and a `version`) and `GET /api/mod/map/<world>/tile/<level>/<column>_<row>.jpg`.
+
 ### Status
 
 `GET /health` returns `{"ok": true}`. `GET /api/status` returns the RCON state the pages show: `{"ok": true, "rcon": "connected"}` (or `retrying` / `unavailable`, with `"waiting": true` while ReCON waits for the server to answer its login, otherwise `retryInMs` until the next try).
@@ -638,7 +695,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 
 | Path | Contents |
 | ---- | -------- |
-| `cmd/recon/` | Startup (wiring the packages together) and the command-line tool; `addons.go` starts the add-ons built in, and `_mod/` holds recon-mod's, copied in only for a build with it (Go skips folders starting with `_`) |
+| `cmd/recon/` | Startup (wiring the packages together) and the command-line tool; `addons.go` starts the add-ons, and `livemap.go` the Live Map |
 | `internal/battleye/` | The BattlEye RCON protocol: packets, login, sessions, parsing server messages and replies, kickall |
 | `internal/game/` | The live game server and what ReCON mirrors from it: the web session, RCON settings, the console log and the server watch (`session.go`); who is online and their sessions, kept across a server restart for players back from the same IP within 5 minutes, and chat history (`players.go`); the ban list kept in step with BattlEye's, placing bans, export/import (`bans.go`) |
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
@@ -646,6 +703,7 @@ go test ./...                   # test every package (tests are the *_test.go fi
 | `internal/geoip/` | Where an IP is (country for the flags, city and point for the IP map), from MaxMind's GeoLite2-City database, and downloading it |
 | `internal/serverinfo/` | The Server Info page's data: Steam's server query (A2S) and DayZ's keywords and mod list, uptime, population and peak hours, and mod updates from the Steam Workshop |
 | `internal/store/` | The SQLite database: every SQL statement |
+| `internal/livemap/` | The Live Map and recon-mod's side: the API the mod syncs with, the command queue, its `mod_kills` table, the map pictures and tiles, and the page (`templates/live.html`) |
 | `internal/web/` | HTTP routes, the JSON API and page rendering (`addons.go`: the hooks an add-on adds its pages, routes and nav links with); `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), the favicons and app icons (`assets/icons/`) and the country flags (`assets/flags/`), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |
 | `examples/flows.json` | Example flows to import |

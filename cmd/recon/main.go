@@ -105,7 +105,7 @@ func main() {
 		return addr
 	})
 	serverinfo.Start(serverinfo.ConfigFromEnv()) // the Server Info page: Steam query, uptime, mod updates
-	startAddons(db)                              // add-ons built in on request (cmd/recon/_mod); none by default
+	startAddons(db)                              // the add-ons: the Live Map (livemap.go)
 
 	addr := environmentOrDefault("LISTEN_ADDR", ":8080")
 	log.Printf("listening on %s -> RCON %s", addr, address)

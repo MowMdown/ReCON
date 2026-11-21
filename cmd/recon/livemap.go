@@ -1,15 +1,7 @@
 package main
 
-// recon_mod.go builds recon-mod's panel (the Live Map page and the API the
-// DayZ mod talks to, github.com/MowMdown/ReCON-Mod) into ReCON. It is only
-// built when copied next to main.go: Go skips folders starting with "_",
-// so a plain build has none of it, and ReCON's go.mod doesn't need
-// ReCON-Mod. The Dockerfile copies it with --build-arg RECON_MOD=true;
-// by hand:
-//
-//	cp cmd/recon/_mod/recon_mod.go cmd/recon/
-//	go get github.com/MowMdown/ReCON-Mod@latest
-//	go build ./cmd/recon
+// livemap.go starts the Live Map page and the API recon-mod, the DayZ
+// server-side mod (github.com/MowMdown/ReCON-Mod), talks to.
 
 import (
 	"io/fs"
@@ -17,16 +9,15 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"github.com/MowMdown/ReCON-Mod/panel"
-
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/livemap"
 	"github.com/MowMdown/ReCON/internal/store"
 	"github.com/MowMdown/ReCON/internal/web"
 )
 
 func init() {
 	addonStarters = append(addonStarters, func(db *store.Database) {
-		err := panel.Start(panel.Host{
+		err := livemap.Start(livemap.Host{
 			DB: db.DB,
 			RCONPassword: func() string {
 				_, pw := game.Target()
@@ -45,6 +36,6 @@ func init() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("recon-mod: the Live Map page is at /live")
+		log.Printf("the Live Map page is at /live")
 	})
 }
