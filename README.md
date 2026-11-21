@@ -484,6 +484,7 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 | `!ban <code or number> <reason>` | Mods, Admins | Bans that player permanently; by code, even if they've left |
 | `!warning <code or number> <reason>` | Mods, Admins | Warns that player (see below) |
 | `!car`, `!truck`, `!boat`, `!vehicle <name> [colour]` | Vehicles, Mods, Admins | Spawns that vehicle whole in front of them (needs recon-mod; see below). Alone, lists the names |
+| `!remove` | Vehicles, Mods, Admins | Removes the vehicle their last vehicle command spawned (anyone in it gets out first; needs recon-mod 1.0.1) |
 
 - **Code or number:** a player's code is the last 6 characters of their GUID (they can type `!code`); their number is the one `!players` shows (`12` or `#12`).
 - **Roles** are set on the Players page, under **Details → Role**, and are stored with the player's GUID, so they survive a name change. Each includes everything below it: **Player** < **Vehicles** (adds `!car`, `!truck`, `!boat`, `!vehicle`) < **Mod** (adds `!kick`, `!ban`, `!warning`) < **Admin**. New players are Players.

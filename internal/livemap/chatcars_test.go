@@ -102,3 +102,46 @@ func TestLiveMapSpawnNotTracked(t *testing.T) {
 		t.Error("a Live Map spawn was tracked")
 	}
 }
+
+func TestRemoveChatVehicleQueues(t *testing.T) {
+	now, sync := chatCarSetup(t)
+	if err := saveChatCar(guid(steamA), "1:2:3:4", "Hatchback_02", now); err != nil {
+		t.Fatal(err)
+	}
+	c, class, err := RemoveChatVehicle(guid(steamA), now)
+	if err != nil || class != "Hatchback_02" || c.Action != "removeEntity" || c.Text != "1:2:3:4" || c.Stat != "Hatchback_02" || c.RemoveFor == "" {
+		t.Fatalf("%+v %q %v", c, class, err)
+	}
+	reply := sync()
+	if len(reply.Commands) == 0 || reply.Commands[len(reply.Commands)-1].Action != "removeEntity" {
+		t.Errorf("not sent: %+v", reply.Commands)
+	}
+}
+
+func TestRemoveChatVehicleNone(t *testing.T) {
+	now, _ := chatCarSetup(t)
+	if _, _, err := RemoveChatVehicle(guid(steamA), now); err != ErrNoChatVehicle {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestRemoveForgetsOnResult(t *testing.T) {
+	for _, tc := range []struct {
+		res    Result
+		forget bool
+	}{
+		{Result{OK: true}, true},
+		{Result{OK: false, Error: "it's already gone"}, true},
+		{Result{OK: false, Error: "it is a Boat_01_Blue, not the Hatchback_02 that was spawned"}, false},
+	} {
+		now, sync := chatCarSetup(t)
+		saveChatCar(guid(steamA), "1:2:3:4", "Hatchback_02", now)
+		c, _, _ := RemoveChatVehicle(guid(steamA), now)
+		sync()
+		tc.res.ID = c.ID
+		sync(tc.res)
+		if _, ok := ChatVehicleOf(guid(steamA)); ok == tc.forget {
+			t.Errorf("%+v: still tracked %v, want forgotten %v", tc.res, ok, tc.forget)
+		}
+	}
+}

@@ -28,7 +28,7 @@ func TestVehiclesRoleCommands(t *testing.T) {
 	typ(RoleVehicles, "!kick 5 rude")
 	eq(t, "!kick said", vt.said)
 	typ(RoleVehicles, "!help")
-	eq(t, "!help", vt.said, "Commands: !help, !shout, !whisper, !players, !vote, !code, !car, !truck, !boat, !vehicle. Type !help !<command> for details.")
+	eq(t, "!help", vt.said, "Commands: !help, !shout, !whisper, !players, !vote, !code, !car, !truck, !boat, !vehicle, !remove. Type !help !<command> for details.")
 }
 
 func TestVehiclesRoleNotStaff(t *testing.T) {

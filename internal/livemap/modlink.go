@@ -330,13 +330,15 @@ type CommandStatus struct {
 	GUID string `json:"guid"`
 	// Teleports: where the player was when it was queued (it becomes their
 	// previous spot once the mod has run it), and whether it was "back".
-	From     *Position `json:"from,omitempty"`
-	Back     bool      `json:"back,omitempty"`
-	ChatCar  bool      `json:"chatCar,omitempty"` // a vehicle chat command's spawn (chatcars.go)
-	Status   string    `json:"status"`            // queued, sent, done, failed, expired
-	Error    string    `json:"error,omitempty"`
-	Queued   time.Time `json:"queued"`
-	Finished time.Time `json:"finished,omitempty"`
+	From    *Position `json:"from,omitempty"`
+	Back    bool      `json:"back,omitempty"`
+	ChatCar bool      `json:"chatCar,omitempty"` // a vehicle chat command's spawn (chatcars.go)
+	// !remove: the player whose chat car this removeEntity is (chatcars.go).
+	RemoveFor string    `json:"removeFor,omitempty"`
+	Status    string    `json:"status"` // queued, sent, done, failed, expired
+	Error     string    `json:"error,omitempty"`
+	Queued    time.Time `json:"queued"`
+	Finished  time.Time `json:"finished,omitempty"`
 }
 
 var state struct {
@@ -411,6 +413,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	var newSteam [][2]string
 	var chatCars []chatCarResult // chat cars the results reported, kept after the lock
 	untracked := false
+	var forgetCars []string // chat cars !remove got rid of, forgotten after the lock
 	saveWorld := ""
 	state.Lock()
 	if w := strings.ToLower(req.World); w != "" && w != state.lastWorld {
@@ -507,6 +510,14 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 			continue
 		}
 		c.Status, c.Error, c.Finished = "done", "", now
+		if c.RemoveFor != "" {
+			switch {
+			case bool(r.OK), r.Error == "it's already gone":
+				forgetCars = append(forgetCars, c.RemoveFor)
+			case strings.HasPrefix(r.Error, "unknown action"):
+				oldRemoveOnce.Do(func() { log.Printf("recon-mod: !remove needs recon-mod 1.0.1") })
+			}
+		}
 		if bool(r.OK) && c.ChatCar {
 			if r.Entity != "" {
 				chatCars = append(chatCars, chatCarResult{c.GUID, r.Entity, c.Text})
@@ -569,6 +580,9 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	state.Unlock()
 
 	keepChatCars(chatCars, untracked, now)
+	for _, g := range forgetCars {
+		forgetChatCar(g)
+	}
 	if saveWorld != "" {
 		saveLastWorld(saveWorld)
 	}
@@ -1006,7 +1020,7 @@ func add(c Command, guid string, now time.Time) CommandStatus {
 }
 
 // WorldActions are the commands on the world rather than a player.
-var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true, "deleteVehicle": true, "spawnAt": true}
+var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true, "deleteVehicle": true, "spawnAt": true, "removeEntity": true}
 
 // weatherMax is each weather part's largest value.
 var weatherMax = map[string]float64{"overcast": 1, "rain": 1, "fog": 1, "snow": 1, "windSpeed": 50, "windDir": 360}
@@ -1043,6 +1057,13 @@ func checkWorld(c *Command) error {
 	}
 	c.SteamID, c.Target = "", ""
 	switch c.Action {
+	case "removeEntity":
+		// Text is the object's persistent ID, Stat its class: the mod removes
+		// it only if both match (mod 1.0.1 on).
+		c.Text, c.Stat = strings.TrimSpace(c.Text), strings.TrimSpace(c.Stat)
+		if c.Text == "" || c.Stat == "" {
+			return errors.New("pick what to remove")
+		}
 	case "deleteVehicle":
 		// Text is the vehicle's id (Vehicle.ID).
 		if _, err := strconv.Atoi(c.Text); err != nil {
