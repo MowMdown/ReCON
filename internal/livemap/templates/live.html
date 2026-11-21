@@ -1100,6 +1100,13 @@ function layerButton(id, on, text, title) {
 let townsOn = layerPref('towns', '0') === '1', places = null, placesWorld = '';
 const townLayer = L.layerGroup();
 const TOWN_TYPES = { Capital: 1, City: 1, Village: 1, Local: 1, Marine: 1, Camp: 1, Ruin: 1, RailroadStation: 1 };
+// townType is a place's type the way Chernarus names it: other maps (Deer
+// Isle) say NameCityCapital, NameCity, NameVillage, NameLocal...; an
+// airfield shows like a local name.
+function townType(t) {
+	t = String(t || '').replace(/^Name/, '');
+	return t === 'CityCapital' ? 'Capital' : t === 'Airport' ? 'Local' : t;
+}
 function toggleTowns() { townsOn = !townsOn; setLayerPref('towns', townsOn ? '1' : '0'); drawTowns(); loadPlaces(); }
 async function loadPlaces() {
 	if (!townsOn || (places && placesWorld === world)) return;
@@ -1110,8 +1117,9 @@ async function loadPlaces() {
 	} catch (e) { return; }
 	townLayer.clearLayers();
 	for (const p of places) {
-		if (!TOWN_TYPES[p.type]) continue;
-		L.marker([p.z, p.x], { icon: L.divIcon({ className: 'town t-' + p.type.toLowerCase(), html: '<span>' + esc(p.name) + '</span>', iconSize: null }),
+		const ty = townType(p.type);
+		if (!TOWN_TYPES[ty]) continue;
+		L.marker([p.z, p.x], { icon: L.divIcon({ className: 'town t-' + ty.toLowerCase(), html: '<span>' + esc(p.name) + '</span>', iconSize: null }),
 			interactive: false, keyboard: false }).addTo(townLayer);
 	}
 	drawTowns();
