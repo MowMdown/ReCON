@@ -157,7 +157,23 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar button { margin: 0; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); }
 .mapbar button:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .mapbar button:disabled { opacity: .45; }
-.gridlbl { color: var(--lm-faint); font-size: 10px; white-space: nowrap; }
+/* Overlays: one button, its menu of layers to switch on and off (a box,
+   ticked when on), Deaths with how far back beside it. */
+.ovwrap { position: relative; }
+.ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 5px;
+	background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+.ovmenu[hidden] { display: none; }
+.ovmenu .ovrow { display: flex; gap: 6px; align-items: center; }
+.ovmenu .ovrow button { flex: 1; }
+.mapbar .ovmenu button { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; text-align: left; border-color: transparent; background: transparent; padding: 5px 8px; }
+.mapbar .ovmenu button::before { content: ''; flex: none; width: 11px; height: 11px; border: 1px solid var(--lm-line2); border-radius: 3px; }
+.mapbar .ovmenu button.on::before { background: var(--lm-accent); border-color: var(--lm-accent);
+	box-shadow: inset 0 0 0 2px var(--lm-surface); }
+.mapbar .ovmenu button:hover { background: var(--lm-sel); }
+/* The grid's numbers: a small bubble, like a button that isn't one. */
+.gridlbl span { display: inline-block; white-space: nowrap; font-size: 10.5px; line-height: 1.3; padding: 1px 5px; color: var(--lm-text);
+	background: var(--lm-overlay); border: 1px solid var(--lm-line2); border-radius: 4px; }
+html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(--color-divider); border-radius: var(--radius-md, 4px); font-family: var(--font-body, inherit); }
 .pmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
 .pmark span { position: absolute; left: 11px; top: -8px; white-space: nowrap; font-size: 12px; color: var(--lm-text); cursor: pointer; text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
 .pmark.sel svg circle { display: block !important; }
@@ -404,12 +420,17 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div id="map"></div>
 		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
 		<div class="mapbar">
-			<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
-			<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
-			<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
-			<button type="button" id="predBtn" onclick="togglePredators()" title="Show the bears, wolves and guard dogs">Predators</button>
-			<button type="button" id="deathBtn" onclick="toggleDeaths()" title="Show where players died">Deaths</button>
-			<select id="deathHours" aria-label="Deaths in the last" hidden><option value="1">last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select>
+			<div class="ovwrap">
+				<button type="button" id="ovBtn" onclick="toggleOvMenu()" aria-expanded="false" aria-controls="ovMenu" title="Show or hide what's drawn on the map">Overlays</button>
+				<div class="ovmenu" id="ovMenu" hidden data-noicon role="menu">
+					<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
+					<button type="button" id="predBtn" onclick="togglePredators()" title="Show the bears, wolves and guard dogs">Predators</button>
+					<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
+					<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
+					<div class="ovrow"><button type="button" id="deathBtn" onclick="toggleDeaths()" title="Show where players died">Deaths</button>
+					<select id="deathHours" aria-label="Deaths in the last" hidden><option value="1">last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select></div>
+				</div>
+			</div>
 			<button type="button" id="trackBtn" class="on" hidden onclick="setTrack(null)" title="Stop following"></button>
 			<span class="badge pick" id="pickBanner" hidden></span>
 			<span class="sp"></span>
@@ -457,10 +478,10 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 			<div class="tpopts">
 				<label class="tpopt" title="Or click the mini-map (double-click to go there now)"><input type="radio" name="tpMode" value="spot" checked> Teleport to
 					X: <input id="tpX" size="6" inputmode="decimal" aria-label="X (east)"> Y: <input id="tpZ" size="6" inputmode="decimal" aria-label="Y (north)"></label>
-				<label class="tpopt" title="This player goes to the player picked"><input type="radio" name="tpMode" value="to"> Teleport <b class="tpName"></b> → <select id="tpTo" aria-label="To player"></select></label>
-				<label class="tpopt" title="The player picked comes to this player"><input type="radio" name="tpMode" value="from"> Teleport <b class="tpName"></b> ← <select id="tpFrom" aria-label="Bring player"></select></label>
+				<label class="tpopt" title="This player goes to the player picked"><input type="radio" name="tpMode" value="to"> Teleport <b class="tpName"></b> to <select id="tpTo" aria-label="To player"></select></label>
+				<label class="tpopt" title="The player picked comes to this player"><input type="radio" name="tpMode" value="from"> Teleport <select id="tpFrom" aria-label="Bring player"></select> to <b class="tpName"></b></label>
 			</div>
-			<div class="tpbtns"><button type="button" class="go" onclick="doTeleport()">Teleport</button><button type="button" id="bBack" onclick="act('back')" disabled>Previous</button></div>
+			<div class="tpbtns"><button type="button" class="go" id="bTeleport" onclick="doTeleport()" disabled>Teleport</button><button type="button" id="bBack" onclick="act('back')" disabled>Previous</button></div>
 		</div>
 		<div class="form" id="fMessage">
 			<input id="msgText" class="grow" maxlength="500" placeholder="Message, shown on their screen" aria-label="Message">
@@ -638,6 +659,12 @@ let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, 
 function initMap() {
 	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: 3, zoomSnap: 0.25, attributionControl: false, zoomControl: false });
 	L.control.zoom({ position: 'bottomright' }).addTo(map);
+	// What covers what, top first: players, vehicles and predators, town
+	// names, events and deaths, the grid's numbers; then the grid lines
+	// (overlay pane, 400) and the map's picture. Popups (700) stay on top.
+	for (const [name, z] of [['players', 640], ['vehicles', 630], ['towns', 620], ['events', 610], ['gridlabels', 450]]) map.createPane(name).style.zIndex = z;
+	map.getPane('towns').style.pointerEvents = 'none';
+	map.getPane('gridlabels').style.pointerEvents = 'none';
 	gridLayer = L.layerGroup().addTo(map);
 	labelLayer = L.layerGroup().addTo(map);
 	map.on('moveend zoomend', drawLabels);
@@ -849,12 +876,12 @@ function drawLabels() {
 	if (!labelLayer || !size) return;
 	labelLayer.clearLayers();
 	const b = map.getBounds();
-	const label = (at, text, anchor) => L.marker(at, { interactive: false, keyboard: false,
-		icon: L.divIcon({ className: 'gridlbl', html: text, iconSize: null, iconAnchor: anchor }) }).addTo(labelLayer);
+	const label = (at, text, anchor) => L.marker(at, { interactive: false, keyboard: false, pane: 'gridlabels',
+		icon: L.divIcon({ className: 'gridlbl', html: '<span>' + text + '</span>', iconSize: null, iconAnchor: anchor }) }).addTo(labelLayer);
 	const west = Math.max(0, b.getWest()), east = Math.min(size, b.getEast());
 	const south = Math.max(0, b.getSouth()), north = Math.min(size, b.getNorth());
-	for (let g = Math.ceil(west / 1000) * 1000; g <= east; g += 1000) label([b.getSouth(), g], pad(g / 100, 3), [-3, 16]);
-	for (let g = Math.ceil(south / 1000) * 1000; g <= north; g += 1000) label([g, b.getWest()], pad(g / 100, 3), [-4, 14]);
+	for (let g = Math.ceil(west / 1000) * 1000; g <= east; g += 1000) label([b.getSouth(), g], pad(g / 100, 3), [-3, 24]);
+	for (let g = Math.ceil(south / 1000) * 1000; g <= north; g += 1000) label([g, b.getWest()], pad(g / 100, 3), [-4, 20]);
 }
 
 function arrowSVG(color) {
@@ -869,7 +896,7 @@ function drawMarkers() {
 		let m = markers[p.guid];
 		if (!m) {
 			const guid = p.guid;
-			m = L.marker([p.z, p.x], { icon: L.divIcon({ className: 'pmark', html: arrowSVG(colorOf(guid)) + '<span></span>', iconSize: [0, 0] }), keyboard: false });
+			m = L.marker([p.z, p.x], { pane: 'players', icon: L.divIcon({ className: 'pmark', html: arrowSVG(colorOf(guid)) + '<span></span>', iconSize: [0, 0] }), keyboard: false });
 			m.on('click', () => openPlayerPopup(guid));
 			m.on('contextmenu', e => showPlayerCtx(guid, e));
 			m.addTo(map);
@@ -941,6 +968,7 @@ function drawVehicles() {
 	const btn = document.getElementById('vehBtn');
 	btn.classList.toggle('on', vehOn);
 	btn.textContent = 'Vehicles' + (vehOn && vehSent ? ' ' + vehicles.length : '');
+	renderOvBtn();
 	btn.title = vehOn && !vehSent ? 'The mod on the server doesn\'t send vehicles: it needs recon-mod 0.0.1i or later'
 		: 'Show every car, motorbike and boat on the server';
 	if (!vehLayer) vehLayer = L.layerGroup();
@@ -952,7 +980,7 @@ function drawVehicles() {
 		const icon = L.divIcon({ className: 'vmark', html: vehSVG(v), iconSize: [0, 0] });
 		let m = vehMarkers[v.id];
 		if (!m) {
-			m = vehMarkers[v.id] = L.marker([v.z, v.x], { icon, keyboard: false, title: catLabel(v) }).addTo(vehLayer);
+			m = vehMarkers[v.id] = L.marker([v.z, v.x], { pane: 'vehicles', icon, keyboard: false, title: catLabel(v) }).addTo(vehLayer);
 			m.on('click', () => openVehicle(v.id));
 			const vid = v.id;
 			m.on('contextmenu', e => showVehicleCtx(vid, e));
@@ -1094,7 +1122,22 @@ function layerButton(id, on, text, title) {
 	b.classList.toggle('on', on);
 	b.textContent = text;
 	if (title) b.title = title;
+	renderOvBtn();
 }
+// The Overlays button says how many layers are on; its menu opens below it
+// and closes with a click anywhere else.
+function renderOvBtn() {
+	const n = document.querySelectorAll('#ovMenu button.on').length;
+	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
+}
+function toggleOvMenu(open) {
+	const m = document.getElementById('ovMenu'), b = document.getElementById('ovBtn');
+	open = open === undefined ? m.hidden : open;
+	m.hidden = !open;
+	b.classList.toggle('open', open);
+	b.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+document.addEventListener('mousedown', e => { if (!e.target.closest('.ovwrap')) toggleOvMenu(false); });
 
 // Towns: the map's place names, sent by recon-mod once a connection.
 let townsOn = layerPref('towns', '0') === '1', places = null, placesWorld = '';
@@ -1119,7 +1162,7 @@ async function loadPlaces() {
 	for (const p of places) {
 		const ty = townType(p.type);
 		if (!TOWN_TYPES[ty]) continue;
-		L.marker([p.z, p.x], { icon: L.divIcon({ className: 'town t-' + ty.toLowerCase(), html: '<span>' + esc(p.name) + '</span>', iconSize: null }),
+		L.marker([p.z, p.x], { pane: 'towns', icon: L.divIcon({ className: 'town t-' + ty.toLowerCase(), html: '<span>' + esc(p.name) + '</span>', iconSize: null }),
 			interactive: false, keyboard: false }).addTo(townLayer);
 	}
 	drawTowns();
@@ -1159,11 +1202,11 @@ function drawEvents() {
 	for (const e of worldEvents) {
 		const tip = eventName(e) + (e.radius ? ' · ' + Math.round(e.radius) + ' m across' : '') + ' · ' + grid(e.x, e.z);
 		if (e.kind !== 'crash' && e.radius > 0)
-			L.circle([e.z, e.x], { radius: e.radius, color: '#c5d86d', weight: 1.5, dashArray: '5 4', fillColor: '#c5d86d', fillOpacity: 0.15, interactive: false }).addTo(eventLayer);
+			L.circle([e.z, e.x], { radius: e.radius, color: '#c5d86d', weight: 1.5, dashArray: '5 4', fillColor: '#c5d86d', fillOpacity: 0.15, pane: 'events', interactive: false }).addTo(eventLayer);
 		const html = e.kind === 'crash'
 			? '<svg width="18" height="18" viewBox="-9 -9 18 18"><path d="M0 -8 L8 0 L0 8 L-8 0 Z" fill="#f2a65a" stroke="#111" stroke-width="1.2"/><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="#111" stroke-width="1.8"/></svg>'
 			: '<svg width="18" height="18" viewBox="-9 -9 18 18"><circle r="6.5" fill="#c5d86d" stroke="#111" stroke-width="1.2"/><text y="3.5" text-anchor="middle" font-size="10" font-weight="700" fill="#111">!</text></svg>';
-		L.marker([e.z, e.x], { icon: L.divIcon({ className: 'emark', html, iconSize: [0, 0] }), keyboard: false }).bindTooltip(esc(tip), { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
+		L.marker([e.z, e.x], { pane: 'events', icon: L.divIcon({ className: 'emark', html, iconSize: [0, 0] }), keyboard: false }).bindTooltip(esc(tip), { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
 	}
 }
 setInterval(loadEvents, 10000);
@@ -1200,7 +1243,7 @@ function drawPredators() {
 		seen[a.id] = true;
 		const icon = L.divIcon({ className: 'amark', html: predSVG(a), iconSize: [0, 0] }), tip = esc((PRED[a.kind] || [item(a.type)])[0] + ' · ' + grid(a.x, a.z));
 		let m = predMarkers[a.id];
-		if (!m) m = predMarkers[a.id] = L.marker([a.z, a.x], { icon, keyboard: false }).bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(predLayer);
+		if (!m) m = predMarkers[a.id] = L.marker([a.z, a.x], { pane: 'vehicles', icon, keyboard: false }).bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(predLayer);
 		else { m.setLatLng([a.z, a.x]); m.setIcon(icon); m.setTooltipContent(tip); }
 	}
 	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
@@ -1239,7 +1282,7 @@ function drawDeaths() {
 		'<path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#ea4335" stroke-width="2.4" stroke-linecap="round"/></svg>';
 	for (const k of deathList) {
 		if (!k.x && !k.z) continue;
-		const m = L.marker([k.z, k.x], { icon: L.divIcon({ className: 'dmark', html: x, iconSize: [0, 0] }), keyboard: false })
+		const m = L.marker([k.z, k.x], { pane: 'events', icon: L.divIcon({ className: 'dmark', html: x, iconSize: [0, 0] }), keyboard: false })
 			.bindTooltip(esc(deathText(k)), { direction: 'top', offset: [0, -6] }).addTo(deathLayer);
 		if (k.victimGuid) m.on('click', () => { if (byGuid[k.victimGuid]) openPlayer(k.victimGuid); });
 	}
@@ -1850,6 +1893,7 @@ function renderPlayer() {
 		if (sel.getAttribute('data-opts') !== opts) { sel.innerHTML = opts; sel.setAttribute('data-opts', opts); sel.value = keep; }
 	}
 	document.querySelectorAll('#fTeleport .tpName').forEach(b => { b.textContent = p ? p.name : 'them'; });
+	tpReady(); // a picked player may have left
 	renderLast();
 	// Previous: back to where they were before their last teleport.
 	const prev = detail && detail.previous, bb = document.getElementById('bBack');
@@ -2429,7 +2473,14 @@ function killPlayer() {
 // another (to), or another to this player (from). Typing or picking in one
 // selects it.
 function tpMode() { const r = document.querySelector('#fTeleport input[name=tpMode]:checked'); return r ? r.value : 'spot'; }
-function setTpMode(m) { document.querySelector('#fTeleport input[name=tpMode][value=' + m + ']').checked = true; }
+function setTpMode(m) { document.querySelector('#fTeleport input[name=tpMode][value=' + m + ']').checked = true; tpReady(); }
+// tpReady greys Teleport out until the way picked has what it needs: X and
+// Y typed (or a mini-map click), or a player picked.
+function tpReady() {
+	const m = tpMode(), v = id => document.getElementById(id).value;
+	const ok = m === 'to' ? !!v('tpTo') : m === 'from' ? !!v('tpFrom') : parseFloat(v('tpX')) > 0 && parseFloat(v('tpZ')) > 0;
+	document.getElementById('bTeleport').disabled = !ok;
+}
 function clearTeleport() {
 	tpPick = null;
 	for (const id of ['tpX', 'tpZ', 'tpTo', 'tpFrom']) document.getElementById(id).value = '';
@@ -2439,7 +2490,9 @@ for (const [id, m] of [['tpX', 'spot'], ['tpZ', 'spot'], ['tpTo', 'to'], ['tpFro
 	const el = document.getElementById(id);
 	el.addEventListener('focus', () => setTpMode(m));
 	el.addEventListener('input', () => setTpMode(m));
+	el.addEventListener('change', () => setTpMode(m));
 }
+document.querySelectorAll('#fTeleport input[name=tpMode]').forEach(r => r.addEventListener('change', tpReady));
 function doTeleport() {
 	const err = document.getElementById('pErr'), m = tpMode();
 	if (m === 'to' || m === 'from') {
