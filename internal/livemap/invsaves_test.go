@@ -2,6 +2,7 @@ package livemap
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -88,6 +89,9 @@ func TestRestoreRecords(t *testing.T) {
 	c, err := RestoreSaved(id, []int{1, 2}, now)
 	if err != nil || c.Action != "restore" || c.Text == "" {
 		t.Fatalf("%+v %v", c, err)
+	}
+	if strings.Contains(c.Text, "null") {
+		t.Errorf("the mod's JSON reader gets null for a list: %s", c.Text)
 	}
 	s, _ := InventorySave(id)
 	if !reflect.DeepEqual(s.RestoredIDs, []int{1, 2}) || s.Restored != 2 {

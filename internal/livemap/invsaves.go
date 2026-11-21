@@ -233,7 +233,7 @@ func RestoreSaved(id int64, itemIDs []int, now time.Time) (CommandStatus, error)
 	if len(tree) == 0 {
 		return CommandStatus{}, errors.New("none of those items are in that saved inventory")
 	}
-	data, err := json.Marshal(tree)
+	data, err := json.Marshal(noNulls(tree))
 	if err != nil {
 		return CommandStatus{}, err
 	}
@@ -256,6 +256,17 @@ func RestoreSaved(id int64, itemIDs []int, now time.Time) (CommandStatus, error)
 	}
 	log.Printf("recon-mod: restoring %d items to %s from their inventory saved %s", countItems(tree), s.GUID, s.At.Format(time.DateTime))
 	return c, nil
+}
+
+// noNulls makes every attachments and cargo list [] rather than null (the
+// mod reads them into arrays).
+func noNulls(items []Item) []Item {
+	out := make([]Item, len(items))
+	for i, it := range items {
+		it.Attachments, it.Cargo = noNulls(it.Attachments), noNulls(it.Cargo)
+		out[i] = it
+	}
+	return out
 }
 
 func ids(items []Item) []int {
