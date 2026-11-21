@@ -5,12 +5,9 @@
 #   pre-release v1.3.0-rc1             ->  :v1.3.0-rc1, :testing and :<commit sha>
 #   ("Set as a pre-release" ticked)
 #
-# The Live Map (recon-mod's side) is always built in. The same image is
-# also tagged the way the separate recon-mod image used to be, so
-# containers that pull those tags keep getting updates:
-#
-#   release v1.2.0                     ->  also :v1.2.0-mod and :mod
-#   pre-release v1.3.0-rc1             ->  also :v1.3.0-rc1-mod and :testing-mod
+# The Live Map (recon-mod's side) is always built in. The old :mod,
+# :testing-mod and :vX-mod tags (from when it was a separate image) were last
+# updated at v3.0.0; use :latest and :testing.
 #
 # Releases whose tag doesn't start with "v" (table-v1 and the like) are skipped.
 
@@ -50,12 +47,6 @@ jobs:
               echo "${image}:testing"
             else
               echo "${image}:latest"
-            fi
-            echo "${image}:${TAG}-mod"
-            if [ "$PRERELEASE" = "true" ]; then
-              echo "${image}:testing-mod"
-            else
-              echo "${image}:mod"
             fi
             echo "EOF"
             # ReCON's version on its pages: the tag without a "-release"

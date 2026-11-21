@@ -67,6 +67,7 @@ func openKills(d *sql.DB) error {
 
 // Kill is one death recon-mod reported.
 type Kill struct {
+	ID         int64     `json:"id"`
 	At         time.Time `json:"at"`
 	VictimGUID string    `json:"victimGuid"`
 	VictimName string    `json:"victimName"`
@@ -86,11 +87,14 @@ type Kill struct {
 }
 
 // addKill stores a death.
-func addKill(k Kill) error {
-	_, err := db.Exec(`INSERT INTO mod_kills (at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z)
+func addKill(k Kill) (int64, error) {
+	res, err := db.Exec(`INSERT INTO mod_kills (at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z)
 		VALUES (?, lower(?), ?, lower(?), ?, ?, ?, ?, ?, ?, ?)`,
 		k.At, k.VictimGUID, k.VictimName, k.KillerGUID, k.KillerName, k.Weapon, k.Cause, k.Agents, k.Distance, k.X, k.Z)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }
 
 // killCounts is a player's kills of other players (suicides aside) and deaths.
@@ -103,7 +107,7 @@ func killCounts(guid string) (kills, deaths int, err error) {
 
 // deathsSince is every death since then, newest first (at most limit).
 func deathsSince(since time.Time, limit int) ([]Kill, error) {
-	rows, err := db.Query(`SELECT at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z
+	rows, err := db.Query(`SELECT id, at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z
 		FROM mod_kills ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -112,7 +116,7 @@ func deathsSince(since time.Time, limit int) ([]Kill, error) {
 	out := []Kill{}
 	for rows.Next() {
 		var k Kill
-		if err := rows.Scan(&k.At, &k.VictimGUID, &k.VictimName, &k.KillerGUID, &k.KillerName, &k.Weapon, &k.Cause, &k.Agents, &k.Distance, &k.X, &k.Z); err != nil {
+		if err := rows.Scan(&k.ID, &k.At, &k.VictimGUID, &k.VictimName, &k.KillerGUID, &k.KillerName, &k.Weapon, &k.Cause, &k.Agents, &k.Distance, &k.X, &k.Z); err != nil {
 			return nil, err
 		}
 		if k.At.Before(since) {
@@ -127,7 +131,7 @@ func deathsSince(since time.Time, limit int) ([]Kill, error) {
 // killsOf is the latest limit deaths a player was in, as killer or victim,
 // newest first.
 func killsOf(guid string, limit int) ([]Kill, error) {
-	rows, err := db.Query(`SELECT at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z
+	rows, err := db.Query(`SELECT id, at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z
 		FROM mod_kills WHERE victim_guid = lower(?1) OR killer_guid = lower(?1) ORDER BY id DESC LIMIT ?2`, guid, limit)
 	if err != nil {
 		return nil, err
@@ -136,7 +140,7 @@ func killsOf(guid string, limit int) ([]Kill, error) {
 	out := []Kill{}
 	for rows.Next() {
 		var k Kill
-		if err := rows.Scan(&k.At, &k.VictimGUID, &k.VictimName, &k.KillerGUID, &k.KillerName, &k.Weapon, &k.Cause, &k.Agents, &k.Distance, &k.X, &k.Z); err != nil {
+		if err := rows.Scan(&k.ID, &k.At, &k.VictimGUID, &k.VictimName, &k.KillerGUID, &k.KillerName, &k.Weapon, &k.Cause, &k.Agents, &k.Distance, &k.X, &k.Z); err != nil {
 			return nil, err
 		}
 		k.Illnesses = Illnesses(k.Agents)

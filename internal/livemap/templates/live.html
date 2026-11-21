@@ -87,6 +87,12 @@ html[data-theme]:not([data-theme="default"]) {
 .vpop .acts button { margin: 0; padding: 4px 10px; font: inherit; font-size: 12.5px; color: var(--lm-text); background: var(--lm-raised); border: 1px solid var(--lm-line); border-radius: 4px; cursor: pointer; }
 .vpop .acts button:hover { background: var(--lm-sel); border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vpop .st { font-size: 12px; }
+/* A player's popup: their stats two to a line (label, value, label, value). */
+.vpop .stats2 { display: grid; grid-template-columns: auto 1fr auto auto 1fr; gap: 1px 8px; align-items: baseline; }
+.vpop .stats2 .k { color: var(--lm-muted); }
+/* Room for "100%" always, digits all one width: 99% doesn't shift the row. */
+.vpop .stats2 .v { text-align: right; min-width: 4.5ch; font-variant-numeric: tabular-nums; }
+.vpop .stats2 .sep { color: var(--lm-faint); }
 /* A player's popup: their stats, then what they wear and hold. */
 .vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--lm-line); }
 .vpop .gear .row span:last-child { text-align: right; overflow-wrap: anywhere; }
@@ -112,7 +118,9 @@ html[data-theme]:not([data-theme="default"]) {
 .leaflet-tooltip { background: var(--lm-surface); color: var(--lm-text); border: 1px solid var(--lm-line); box-shadow: 0 2px 8px rgba(0,0,0,.5); font-size: 12px; }
 .leaflet-tooltip-top:before { border-top-color: var(--lm-line); }
 /* The map's right-click menu. */
-.ctx { position: absolute; z-index: 800; min-width: 200px; max-width: 280px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.6); padding: 6px; font-size: 13px; }
+/* Wide enough from the start for a player's name with Confirm and Cancel
+   (a teleport asked), so it doesn't grow when they appear. */
+.ctx { position: absolute; z-index: 800; width: 300px; max-width: calc(100% - 8px); box-sizing: border-box; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.6); padding: 6px; font-size: 13px; }
 .ctx[hidden] { display: none; }
 .ctx .hd { user-select: text; cursor: text; color: var(--lm-muted); font-size: 12px; padding: 2px 6px 6px; border-bottom: 1px solid var(--lm-line); margin-bottom: 4px; }
 .ctx .lbl { color: var(--lm-muted); font-size: 11.5px; padding: 6px 6px 2px; }
@@ -137,19 +145,19 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
 /* The vehicle dialog: its facts, then parts, damage and cargo side by
    side, each scrolling on its own; one under the other on a narrow screen. */
-#vModal .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
-#vModal .vfacts .k { color: var(--lm-muted); font-size: 12px; grid-row: 1; }
-#vModal .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-#vModal .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
-#vModal .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
-#vModal .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
-#vModal .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#vModal .part .lv { font-size: 12px; white-space: nowrap; }
-#vModal .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-#vModal .acts { display: flex; align-items: center; gap: 8px; }
-#vModal .acts button { margin: 0; }
-#vModal .st { font-size: 12.5px; }
-@media (max-width: 760px) { #vModal .vcols { grid-template-columns: minmax(0, 1fr); } #vModal .vcols > div { max-height: none; } #vModal .vfacts { grid-template-columns: auto auto; } #vModal .vfacts .k { grid-row: auto; } }
+:is(#vModal, #oModal) .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
+:is(#vModal, #oModal) .vfacts .k { color: var(--lm-muted); font-size: 12px; grid-row: 1; }
+:is(#vModal, #oModal) .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+:is(#vModal, #oModal) .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
+:is(#vModal, #oModal) .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
+:is(#vModal, #oModal) .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
+:is(#vModal, #oModal) .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(#vModal, #oModal) .part .lv { font-size: 12px; white-space: nowrap; }
+:is(#vModal, #oModal) .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+:is(#vModal, #oModal) .acts { display: flex; align-items: center; gap: 8px; }
+:is(#vModal, #oModal) .acts button { margin: 0; }
+:is(#vModal, #oModal) .st { font-size: 12.5px; }
+@media (max-width: 760px) { :is(#vModal, #oModal) .vcols { grid-template-columns: minmax(0, 1fr); } :is(#vModal, #oModal) .vcols > div { max-height: none; } :is(#vModal, #oModal) .vfacts { grid-template-columns: auto auto; } :is(#vModal, #oModal) .vfacts .k { grid-row: auto; } }
 /* The weather and in-game time, beside Time & Weather above the map. */
 .worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .worldbar .badge { font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; padding: 3px 8px; color: var(--lm-text); }
@@ -173,6 +181,23 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar .ovmenu button.on::before { background: var(--lm-accent); border-color: var(--lm-accent);
 	box-shadow: inset 0 0 0 2px var(--lm-surface); }
 .mapbar .ovmenu button:hover { background: var(--lm-sel); }
+/* A layer's own filter (Placed objects' kinds), indented under it. */
+.ovmenu .ovsub { display: flex; flex-direction: column; gap: 1px; padding-left: 18px; }
+.ovmenu .ovsub[hidden] { display: none; }
+.mapbar .ovmenu .ovsub button { padding: 3px 8px; font-size: 12px; }
+/* Restore: a saved inventory as a tree of tick boxes. */
+#rModal .rbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+#rModal .rbar .sp { flex: 1; }
+#rModal .rtree { max-height: 60vh; overflow-y: auto; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; }
+#rModal .rkids { padding-left: 22px; }
+#rModal label.rn { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; cursor: pointer; }
+#rModal label.rn input { margin: 0; accent-color: var(--lm-accent); }
+#rModal label.rn .sl { color: var(--lm-muted); font-size: 12px; min-width: 64px; }
+#rModal label.rn .ex { color: var(--lm-muted); font-size: 12px; }
+#rModal label.rn .done { color: var(--lm-faint); font-size: 11px; border: 1px solid var(--lm-line); border-radius: 4px; padding: 0 5px; }
+#pKills button.rs { margin: 0; padding: 2px 8px; font-size: 12px; }
+/* A placed object: a small square in the colour of its condition. */
+.omark svg { position: absolute; left: -5px; top: -5px; overflow: visible; cursor: pointer; }
 /* The grid's lines: the theme's border colour lit with its accent, so they
    stand out on the map's picture; the map's edge a step stronger. */
 .leaflet-overlay-pane path.gridline { stroke: color-mix(in srgb, var(--lm-accent) 45%, var(--lm-line2)); stroke-opacity: .85; }
@@ -434,6 +459,8 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 					<button type="button" id="plyBtn" onclick="togglePlayers()" title="Show the players on the map">Players</button>
 					<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
 					<button type="button" id="predBtn" onclick="togglePredators()" title="Show the bears, wolves and guard dogs">Predators</button>
+					<button type="button" id="placedBtn" onclick="togglePlaced()" title="Show what players placed: bases, tents, storage, traps">Placed objects</button>
+					<div class="ovsub" id="placedKinds" hidden></div>
 					<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
 					<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
 					<button type="button" id="gridBtn" onclick="toggleGrid()" title="Show the 1 km grid and its numbers">Grid</button>
@@ -533,6 +560,27 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="sub" id="vType"></span></div>
 		<div id="vBody"></div>
 		<div class="dfoot"><div class="acts" id="vActs"></div><button type="button" onclick="closeVehicleInfo()">Close</button></div>
+	</div>
+</div>
+
+<!-- Give back chosen items from an inventory saved at death (Restore… on a death) -->
+<div id="rModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="rTitle" style="width:min(820px, 95vw)">
+		<div class="dlg-head"><h2 id="rTitle">Restore items</h2><span class="sub" id="rSub"></span></div>
+		<div class="rbar"><button type="button" id="rAll">Select all</button><button type="button" id="rNone">Deselect all</button><span class="sp"></span><span class="muted" id="rCount"></span></div>
+		<div class="rtree" id="rTree"></div>
+		<div class="dlg-err" id="rErr"></div>
+		<div class="dfoot"><span class="muted">Only the ticked items are given back: into their slots and containers, or their inventory, or on the ground at their feet.</span>
+			<span><button type="button" class="go" id="rGo">Restore selected</button><button type="button" onclick="closeRestore()">Close</button></span></div>
+	</div>
+</div>
+
+<!-- A placed object's details and Remove (Info on its popup) -->
+<div id="oModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="oTitle" style="width:min(1000px, 95vw)">
+		<div class="dlg-head"><h2 id="oTitle">Placed object</h2><span class="sub" id="oType"></span></div>
+		<div id="oBody"></div>
+		<div class="dfoot"><div class="acts" id="oActs"></div><button type="button" onclick="closePlacedInfo()">Close</button></div>
 	</div>
 </div>
 
@@ -664,6 +712,10 @@ async function poll() {
 // the players on it.
 const SIZES = { chernarusplus: 15360, enoch: 12800, namalsk: 12800, deerisle: 16384, sakhal: 15360, esseker: 12800, takistanplus: 12800, banov: 15360, chiemsee: 10240, pripyat: 20480, rostow: 14336, iztek: 8192, alteria: 8192, nasdara: 16384 };
 const NAMES = { chernarusplus: 'Chernarus', enoch: 'Livonia', namalsk: 'Namalsk', deerisle: 'Deer Isle', sakhal: 'Sakhal', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', pripyat: 'Pripyat', rostow: 'Rostow', iztek: 'Iztek', alteria: 'Alteria', nasdara: 'Nasdara' };
+// dataMaps: the maps with a picture in ReCON's data folder (for a map to
+// show before the mod has ever said which it is).
+let dataMaps = [];
+api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).catch(() => { });
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
 
 function initMap() {
@@ -1071,7 +1123,9 @@ function vehDeleteState(v) {
 	return '';
 }
 function deleteButton(v) {
-	return '<button type="button" class="bad" onclick="event.stopPropagation(); deleteVehicle(' + v.id + ')"' + (v.crew ? ' disabled title="Someone is in it"' : '') + '>Delete</button>';
+	// Allowed with people in it: the mod puts them out first (mod 1.0.1).
+	return '<button type="button" class="bad" onclick="event.stopPropagation(); deleteVehicle(' + v.id + ')"' +
+		(v.crew ? ' title="' + v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they get out first"' : '') + '>Delete</button>';
 }
 function renderVehicle() {
 	const v = vehicles.find(x => x.id === vehOpen);
@@ -1112,7 +1166,8 @@ function renderVehicleInfo() {
 }
 async function deleteVehicle(id) {
 	const v = vehicles.find(x => x.id === id);
-	if (!v || !confirm('Delete this ' + catLabel(v) + ' and everything in it? It can\'t be undone.')) return;
+	const inIt = v && v.crew ? ' ' + v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they\'ll be put out first.' : '';
+	if (!v || !confirm('Delete this ' + catLabel(v) + ' and everything in it?' + inIt + ' It can\'t be undone.')) return;
 	try {
 		const d = await api('POST', '/api/mod/world/deleteVehicle', { text: String(id) });
 		if (d.command) vehPending[id] = d.command.id;
@@ -1137,7 +1192,7 @@ function layerButton(id, on, text, title) {
 // The Overlays button says how many layers are on; its menu opens below it
 // and closes with a click anywhere else.
 function renderOvBtn() {
-	const n = document.querySelectorAll('#ovMenu button.on').length;
+	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length; // not a layer's own filter
 	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
 }
 function toggleOvMenu(open) {
@@ -1277,6 +1332,199 @@ function drawPredators() {
 	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
 }
 setInterval(loadPredators, 2000);
+
+// ---- Restore: give back chosen items from an inventory saved at death -----
+// Nothing is ticked at first. Ticking a container or a weapon ticks what is
+// in and on it (each can be unticked again); a ticked item without its
+// container comes back on its own. Items given back already are marked, and
+// Select all leaves them out.
+let restoreSave = null;
+async function openRestore(id) {
+	const tree = document.getElementById('rTree');
+	restoreSave = null;
+	document.getElementById('rErr').textContent = '';
+	tree.innerHTML = '<div class="muted">Loading…</div>';
+	document.getElementById('rModal').style.display = 'flex';
+	try { restoreSave = (await api('GET', '/api/mod/saves/' + id)).save; }
+	catch (e) { tree.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; return; }
+	const s = restoreSave, p = byGuid[s.guid];
+	document.getElementById('rSub').textContent = (p ? p.name + ' · ' : '') + 'saved at death ' + new Date(s.at).toLocaleString();
+	const done = new Set(s.restoredIds || []);
+	const node = it => {
+		const kids = (it.attachments || []).concat(it.cargo || []);
+		const extra = qty(it);
+		return '<div class="rnode"><label class="rn"><input type="checkbox" data-id="' + it.id + '"' + (done.has(it.id) ? ' data-done="1"' : '') + '>' +
+			(it.slot ? '<span class="sl">' + esc(slotLabel(it.slot)) + '</span>' : '') + '<span>' + esc(itemName(it)) + '</span>' +
+			(extra ? '<span class="ex">' + esc(extra) + '</span>' : '') + (done.has(it.id) ? '<span class="done">given back</span>' : '') + '</label>' +
+			(kids.length ? '<div class="rkids">' + kids.map(node).join('') + '</div>' : '') + '</div>';
+	};
+	tree.innerHTML = (s.items || []).length ? s.items.map(node).join('') : '<div class="empty">Nothing was saved.</div>';
+	restoreCount();
+}
+function closeRestore() { document.getElementById('rModal').style.display = 'none'; restoreSave = null; }
+function restoreCount() {
+	const all = document.querySelectorAll('#rTree input'), on = document.querySelectorAll('#rTree input:checked');
+	document.getElementById('rCount').textContent = on.length + ' of ' + all.length + ' items selected';
+	document.getElementById('rGo').disabled = !on.length;
+}
+document.getElementById('rTree').addEventListener('change', e => {
+	const box = e.target.closest('input[data-id]');
+	if (!box) return;
+	// What is in and on it follows it.
+	box.closest('.rnode').querySelectorAll('.rkids input').forEach(c => { c.checked = box.checked; });
+	restoreCount();
+});
+document.getElementById('rAll').addEventListener('click', () => { document.querySelectorAll('#rTree input').forEach(c => { c.checked = !c.dataset.done; }); restoreCount(); });
+document.getElementById('rNone').addEventListener('click', () => { document.querySelectorAll('#rTree input').forEach(c => { c.checked = false; }); restoreCount(); });
+document.getElementById('rGo').addEventListener('click', async () => {
+	const s = restoreSave;
+	if (!s) return;
+	const picked = [...document.querySelectorAll('#rTree input:checked')].map(c => +c.dataset.id);
+	const p = byGuid[s.guid], err = document.getElementById('rErr');
+	if (!picked.length || !confirm('Give back ' + picked.length + (picked.length === 1 ? ' item' : ' items') + ' to ' + (p ? p.name : 'them') + '?')) return;
+	err.textContent = '';
+	try { await api('POST', '/api/mod/saves/' + s.id + '/restore', { items: picked }); }
+	catch (e) { err.textContent = e.message; return; }
+	closeRestore();
+	poll();
+	loadDetail();
+});
+
+// Placed objects: what players placed (recon-mod 1.0.1 on), every 30 s,
+// filtered by kind. Thousands are possible, so markers are drawn only for
+// what's in view, and only from mid zoom in.
+const PLACED_KINDS = [['base', 'Base building'], ['tent', 'Tents & shelters'], ['storage', 'Storage'], ['trap', 'Traps'], ['other', 'Other']];
+const PLACED_MIN_ZOOM = -2;
+let placedOn = layerPref('placed', '0') === '1', placedList = [], placedSent = true, placedMarkers = {}, placedOpen = null;
+// Each kind is off until ticked (remembered): switching Placed objects on
+// draws nothing until you pick what to see.
+const placedKindOn = Object.fromEntries(PLACED_KINDS.map(([k]) => [k, layerPref('placed.' + k, '0') === '1']));
+const plcPopup = L.popup({ autoPan: false, offset: [0, -4] });
+function togglePlaced() { placedOn = !placedOn; setLayerPref('placed', placedOn ? '1' : '0'); drawPlaced(); loadPlaced(); }
+function togglePlacedKind(k) { placedKindOn[k] = !placedKindOn[k]; setLayerPref('placed.' + k, placedKindOn[k] ? '1' : '0'); drawPlaced(); }
+async function loadPlaced() {
+	if (!placedOn) return;
+	try {
+		const d = await api('GET', '/api/mod/placed');
+		placedList = d.placed || []; placedSent = !!d.sent;
+	} catch (e) { return; }
+	drawPlaced();
+}
+function placedKind(o) { return PLACED_KINDS.some(([k]) => k === o.kind) ? o.kind : 'other'; }
+function placedName(o) { return o.name && o.name[0] !== '$' ? o.name : item(o.type); }
+function drawPlaced() {
+	const count = {};
+	for (const o of placedList) count[placedKind(o)] = (count[placedKind(o)] || 0) + 1;
+	const shown = PLACED_KINDS.reduce((n, [k]) => n + (placedKindOn[k] ? count[k] || 0 : 0), 0);
+	const zoomedOut = map.getZoom() < PLACED_MIN_ZOOM;
+	layerButton('placedBtn', placedOn, 'Placed objects' + (placedOn && placedSent ? ' ' + shown : ''),
+		placedOn && !placedSent ? 'recon-mod doesn\'t send placed objects: it needs 1.0.1'
+			: placedOn && !PLACED_KINDS.some(([k]) => placedKindOn[k]) ? 'Tick the kinds to show below'
+			: placedOn && zoomedOut ? 'Zoom in to see placed objects' : 'Show what players placed: bases, tents, storage, traps');
+	const sub = document.getElementById('placedKinds');
+	sub.hidden = !placedOn;
+	sub.innerHTML = PLACED_KINDS.map(([k, label]) => '<button type="button" class="' + (placedKindOn[k] ? 'on' : '') + '" onclick="togglePlacedKind(\'' + k + '\')">' +
+		label + (placedSent ? ' ' + (count[k] || 0) : '') + '</button>').join('');
+	const want = {};
+	if (placedOn && !zoomedOut) {
+		const b = map.getBounds().pad(0.2);
+		for (const o of placedList) if (placedKindOn[placedKind(o)] && b.contains([o.z, o.x])) want[o.id] = o;
+	}
+	for (const id in placedMarkers) if (!want[id]) { placedMarkers[id].remove(); delete placedMarkers[id]; }
+	for (const id in want) {
+		const o = want[id], [, c] = vehCondition(o.health);
+		const icon = L.divIcon({ className: 'omark', html: '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + c + '" stroke="#111" stroke-width="1"/></svg>', iconSize: [0, 0] });
+		let m = placedMarkers[id];
+		if (!m) {
+			m = placedMarkers[id] = L.marker([o.z, o.x], { pane: 'vehicles', icon, keyboard: false, title: placedName(o) }).addTo(map);
+			m.on('click', () => openPlacedPopup(o.id));
+		} else { m.setLatLng([o.z, o.x]); m.setIcon(icon); }
+	}
+	if (placedOpen != null) { if (placedList.some(o => o.id === placedOpen)) renderPlacedPopup(); else map.closePopup(plcPopup); }
+	renderPlacedInfo();
+}
+function placedBy(o) { return o.placer ? esc(o.placer) : '<span class="muted">unknown</span>'; }
+function openPlacedPopup(id) {
+	placedOpen = id;
+	renderPlacedPopup();
+	plcPopup.options.autoPan = true; plcPopup.openOn(map); plcPopup.options.autoPan = false;
+}
+function renderPlacedPopup() {
+	const o = placedList.find(x => x.id === placedOpen);
+	if (!o) return;
+	const [cn, cc] = vehCondition(o.health);
+	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
+	plcPopup.setLatLng([o.z, o.x]).setContent('<div class="vpop" data-noicon><h4>' + esc(placedName(o)) + '</h4><div class="ty">' + grid(o.x, o.z) + '</div>' +
+		row('Condition', '<span style="color:' + cc + '">' + cn + '</span>') + row('Placed by', placedBy(o)) +
+		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openPlacedInfo(' + o.id + ')" title="What is in and on it, and Remove">Info</button></div></div>');
+}
+// The Info dialog: its facts, then attachments, damage and contents (asked
+// of the mod once, like a vehicle's), and Remove.
+let placedInfo = null, placedDetail = null, placedAsk = 0;
+function openPlacedInfo(id) {
+	map.closePopup(plcPopup);
+	placedInfo = id;
+	document.getElementById('oModal').style.display = 'flex';
+	askPlaced();
+}
+function closePlacedInfo() { document.getElementById('oModal').style.display = 'none'; placedInfo = null; placedDetail = null; placedAsk++; }
+async function askPlaced() {
+	if (placedInfo == null) return;
+	const id = placedInfo, ask = ++placedAsk;
+	placedDetail = null;
+	renderPlacedInfo();
+	for (let i = 0; i < 15 && id === placedInfo && ask === placedAsk; i++) {
+		try {
+			const d = await api('GET', '/api/mod/placed/' + id + (i === 0 ? '?ask=1' : ''));
+			if (id !== placedInfo || ask !== placedAsk) return;
+			if (d.detail) { placedDetail = d.detail; break; }
+		} catch (e) { break; }
+		await new Promise(r => setTimeout(r, 1000));
+	}
+	if (id === placedInfo && ask === placedAsk) {
+		if (!placedDetail) placedDetail = { failed: true };
+		renderPlacedInfo();
+	}
+}
+function renderPlacedInfo() {
+	if (placedInfo == null) return;
+	const o = placedList.find(x => x.id === placedInfo), body = document.getElementById('oBody');
+	if (!o) { body.innerHTML = '<div class="empty">That isn\'t on the server any more.</div>'; document.getElementById('oActs').innerHTML = ''; return; }
+	document.getElementById('oTitle').textContent = placedName(o);
+	document.getElementById('oType').textContent = o.type;
+	const tops = [...body.querySelectorAll('.vcols > div')].map(c => c.scrollTop);
+	const [cn, cc] = vehCondition(o.health), kind = (PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1];
+	const facts = [['Kind', kind], ['Where', grid(o.x, o.z) + ' <span class="muted">' + Math.round(o.x) + ', ' + Math.round(o.z) + '</span>'],
+		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'], ['Placed by', placedBy(o)],
+		['Placed', o.placedAt ? new Date(o.placedAt * 1000).toLocaleString() : '<span class="muted">unknown</span>']];
+	let h = '<div class="vfacts">' + facts.map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
+	const d = placedDetail;
+	if (!d) h += '<div class="muted">Asking recon-mod what is in and on it…</div>';
+	else if (d.failed) h += '<div class="muted">recon-mod didn\'t send what is in it (it needs 1.0.1 or later).</div>';
+	else {
+		const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
+		const att = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
+		h += '<div class="vcols"><div><h5>Attachments · ' + att.length + '</h5>' +
+			(att.length ? att.map(it => partRow(itemName(it), it.healthLevel | 0)).join('') : '<div class="muted">None</div>') +
+			'</div><div><h5>Damage</h5>' +
+			(d.zones.length ? d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('') : '<div class="muted">No zones</div>') +
+			'</div><div><h5>Contents · ' + cargo.length + '</h5>' +
+			(cargo.length ? cargo.map(it => { const n = countIn(it); return partRow(itemName(it), it.healthLevel | 0, n ? n + (n === 1 ? ' item inside' : ' items inside') : qty(it)); }).join('') : '<div class="muted">Empty</div>') + '</div></div>';
+	}
+	body.innerHTML = h;
+	body.querySelectorAll('.vcols > div').forEach((c, i) => { c.scrollTop = tops[i] || 0; });
+	document.getElementById('oActs').innerHTML = '<button type="button" onclick="askPlaced()" title="Read what is in and on it again">Refresh</button>' +
+		'<button type="button" class="bad" onclick="removePlaced(' + o.id + ')" title="Remove it, and everything in it">Remove</button>';
+}
+async function removePlaced(id) {
+	const o = placedList.find(x => x.id === id);
+	if (!o || !confirm('Remove this ' + placedName(o) + ' and everything in it? It can\'t be undone.')) return;
+	try { await api('POST', '/api/mod/world/removeEntity', { text: o.pid, stat: o.type }); }
+	catch (e) { alert('Not removed: ' + e.message); return; }
+	closePlacedInfo();
+	poll();
+}
+setInterval(loadPlaced, 30000);
 
 // Deaths: a red X where each death in the time picked was, every 30 s.
 let deathsOn = layerPref('deaths', '0') === '1', deathHours = +layerPref('deathHours', '24') || 24, deathList = [];
@@ -1573,6 +1821,10 @@ function render() {
 		line.title = last ? 'recon-mod last sent at ' + last.toLocaleTimeString() : 'recon-mod hasn\'t connected';
 		document.getElementById('worldBtn').disabled = true;
 		document.getElementById('wxBadge').hidden = document.getElementById('timeBadge').hidden = true;
+		// The map's picture and grid don't need the mod: the map it last
+		// reported (ReCON keeps it), or the only map picture in the data folder.
+		const w = ((mod && mod.world) || (dataMaps.length === 1 ? dataMaps[0] : '')).toLowerCase();
+		if (w) setWorld(w, SIZES[w] || (w === world && size) || 15360);
 	} else {
 		dot.className = 'dot';
 		const w = (mod.world || '').toLowerCase();
@@ -1680,7 +1932,9 @@ function renderPlayerPopup() {
 	const state = !p.alive ? 'Dead' : p.unconscious ? 'Unconscious' : p.restrained ? 'Restrained' : '';
 	let h = '<div class="vpop" data-noicon><h4>' + esc(p.name) + '</h4><div class="ty">' + grid(p.x, p.z) + ' · ' + Math.round(p.x) + ', ' + Math.round(p.z) + '</div>' +
 		(state ? row('State', state) : '') +
-		row('Health', pc(p.health, 100)) + row('Blood', pc(p.blood, 5000)) + row('Water', pc(p.water, 5000)) + row('Food', pc(p.energy, 5000)) +
+		// Two to a line: Health | Food, then Blood | Water.
+		'<div class="stats2">' + [[['Health', pc(p.health, 100)], ['Food', pc(p.energy, 5000)]], [['Blood', pc(p.blood, 5000)], ['Water', pc(p.water, 5000)]]]
+			.map(([[k1, v1], [k2, v2]]) => '<span class="k">' + k1 + '</span><span class="v">' + v1 + '</span><span class="sep">|</span><span class="k">' + k2 + '</span><span class="v">' + v2 + '</span>').join('') + '</div>' +
 		(p.bleeding ? row('Bleeding', p.bleeding + (p.bleeding === 1 ? ' cut' : ' cuts')) : '') +
 		(p.vehicleName || p.vehicle ? row('In', esc(p.vehicleName || item(p.vehicle))) : '') +
 		'<div class="gear">';
@@ -2073,6 +2327,8 @@ function cmdText(c) {
 		case 'date': return 'In-game time ' + c.year + '-' + pad(c.month) + '-' + pad(c.day) + ' ' + pad(c.hour) + ':' + pad(c.minute);
 		case 'freezeTime': return c.value ? 'Freeze time' : 'Unfreeze time';
 		case 'deleteVehicle': return 'Delete a vehicle';
+		case 'restore': return 'Restore saved items';
+		case 'removeEntity': return 'Remove ' + esc(c.stat ? item(c.stat) : 'an object');
 		case 'spawnAt': return 'Spawn ' + (c.value > 1 ? c.value + ' × ' : '') + esc(catalogBy[c.text] ? catName(catalogBy[c.text]) : c.text) + ' at ' + Math.round(c.x) + ', ' + Math.round(c.z);
 	}
 	return esc(c.action);
@@ -2158,7 +2414,11 @@ function renderKills() {
 		if (cause !== 'illness' && kind !== 'kill' && k.illnesses && k.illnesses.length) t += ' <span class="muted">· had ' + esc(k.illnesses.join(', ')) + '</span>';
 		const chip = KIND_CHIP[kind];
 		const where = k.x || k.z ? grid(k.x, k.z) + ' <span class="muted">' + Math.round(k.x) + ', ' + Math.round(k.z) + '</span>' : '';
-		return '<tr><td class="t">' + when + '</td><td class="k"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></td><td>' + t + '</td><td class="where">' + where + '</td></tr>';
+		// Their own death with the inventory saved: Restore….
+		const save = k.victimGuid === selGuid && (detail.saves || []).find(sv => sv.killId === k.id);
+		const rs = save ? ' <button type="button" class="rs" data-save="' + save.id + '" title="Give back chosen items from what they had (' + save.items + ' items' +
+			(save.restored ? ', ' + save.restored + ' given back already' : '') + ')">Restore…</button>' : '';
+		return '<tr><td class="t">' + when + '</td><td class="k"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></td><td>' + t + rs + '</td><td class="where">' + where + '</td></tr>';
 	}).join('');
 }
 document.getElementById('pKillKinds').addEventListener('click', e => {
@@ -2168,6 +2428,8 @@ document.getElementById('pKillKinds').addEventListener('click', e => {
 	renderKills();
 });
 document.getElementById('pKills').addEventListener('click', e => {
+	const rb = e.target.closest('[data-save]');
+	if (rb) { openRestore(+rb.dataset.save); return; }
 	const a = e.target.closest('a[data-guid]');
 	if (!a) return;
 	const g = a.getAttribute('data-guid');
@@ -2698,22 +2960,26 @@ document.addEventListener('keydown', e => {
 	if (pickSend) { endPick(); return; }
 	if (document.getElementById('sModal').style.display === 'flex') { closeSpawnAt(); return; }
 	if (document.getElementById('vModal').style.display === 'flex') { closeVehicleInfo(); return; }
+	if (document.getElementById('rModal').style.display === 'flex') { closeRestore(); return; }
+	if (document.getElementById('oModal').style.display === 'flex') { closePlacedInfo(); return; }
 	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
 	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
-for (const id of ['pModal', 'wModal', 'sModal', 'vModal']) document.getElementById(id).addEventListener('mousedown', e => {
-	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else closeWorld(); }
+for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'oModal', 'rModal']) document.getElementById(id).addEventListener('mousedown', e => {
+	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'oModal') closePlacedInfo(); else if (id === 'rModal') closeRestore(); else closeWorld(); }
 });
 
 initMap();
-map.on('popupclose', e => { if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
+map.on('popupclose', e => { if (e.popup === plcPopup) placedOpen = null; if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
 buildWorld();
 drawVehicles();
 loadVehicles();
 zoomBand();
 drawPlayersToggle();
 drawGridToggle();
+drawPlaced(); loadPlaced();
+map.on('moveend zoomend', drawPlaced);
 drawTowns(); loadPlaces();
 drawEvents(); loadEvents();
 drawPredators(); loadPredators();

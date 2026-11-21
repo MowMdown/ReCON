@@ -164,6 +164,8 @@ func handleModPlayer(w http.ResponseWriter, r *http.Request) {
 	if recent, err := killsOf(guid, 100); err == nil {
 		out["recentKills"] = recent
 	}
+	// Their inventories saved at death, for Restore… on those deaths.
+	out["saves"] = InventorySaves(guid)
 	writeJSON(w, http.StatusOK, out)
 }
 

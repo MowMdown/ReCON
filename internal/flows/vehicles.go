@@ -39,6 +39,19 @@ var (
 		return it.Name, nil
 	}
 	pickColour = func(n int) int { return rand.IntN(n) }
+	// removeChatVehicle queues the removal of the player's chat car and
+	// returns its display name (livemap.ErrNoChatVehicle: they have none).
+	removeChatVehicle = func(guid string) (string, error) {
+		now := time.Now()
+		_, class, err := livemap.RemoveChatVehicle(guid, now)
+		if err != nil {
+			return "", err
+		}
+		if it, ok := livemap.CatalogClass(class, now); ok && it.Name != "" && !strings.HasPrefix(it.Name, "$") {
+			return it.Name, nil
+		}
+		return class, nil
+	}
 )
 
 var vehicleCategoryText = map[string]string{"car": "Cars", "truck": "Trucks", "boat": "Boats", "vehicle": "Vehicles"}

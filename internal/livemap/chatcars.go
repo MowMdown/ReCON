@@ -8,6 +8,7 @@ package livemap
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 	"strings"
 	"sync"
@@ -91,3 +92,40 @@ func keepChatCars(found []chatCarResult, untracked bool, now time.Time) {
 		})
 	}
 }
+
+// ErrNoChatVehicle is !remove's answer when the player has no chat car.
+var ErrNoChatVehicle = errors.New("You don't have a spawned vehicle")
+
+// RemoveChatVehicle queues the removal of the player's chat car (matched by
+// persistent ID and class, its crew put out first) and returns its class.
+// It is forgotten once the mod has removed it or says it's already gone.
+func RemoveChatVehicle(guid string, now time.Time) (CommandStatus, string, error) {
+	pid, class, ok := chatCarOf(guid)
+	if !ok {
+		return CommandStatus{}, "", ErrNoChatVehicle
+	}
+	c, err := QueueWorld(Command{Action: "removeEntity", Text: pid, Stat: class}, now)
+	if err != nil {
+		return c, class, err
+	}
+	state.Lock()
+	for _, q := range state.commands {
+		if q.ID == c.ID {
+			q.RemoveFor = guid
+			c = *q
+		}
+	}
+	state.Unlock()
+	return c, class, nil
+}
+
+func forgetChatCar(guid string) {
+	if db == nil {
+		return
+	}
+	if _, err := db.Exec(`DELETE FROM chat_vehicles WHERE guid = ?`, strings.ToLower(guid)); err != nil {
+		log.Printf("recon-mod: forgetting %s's chat vehicle: %v", guid, err)
+	}
+}
+
+var oldRemoveOnce sync.Once

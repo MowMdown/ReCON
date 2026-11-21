@@ -76,6 +76,9 @@ var ChatCommandDefs = []chatCommandDef{
 	vehicleDef("truck", "that truck"),
 	vehicleDef("boat", "that boat"),
 	vehicleDef("vehicle", "that vehicle (bikes, ATVs, helicopters and the rest)"),
+	{Cmd: "remove", Role: RoleVehicles, Cool: "0", NeedsMod: true,
+		Help: "!remove removes the vehicle your last !car, !truck, !boat or !vehicle spawned (anyone in it gets out first).",
+		Fields: []chatField{{"removing", "Removing (to the player)", "Removing your {vehicle}", []string{"vehicle"}}}},
 }
 
 // vehicleDef is !car, !truck, !boat or !vehicle: spawn one from the map's
@@ -500,6 +503,16 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 
 	case "car", "truck", "boat", "vehicle":
 		runVehicleCommand(cmd, p, set, args)
+
+	case "remove":
+		name, err := removeChatVehicle(p.GUID)
+		if err != nil {
+			chatSay(p, false, err.Error())
+			return
+		}
+		if chatSay(p, false, fillTemplate(set.Msgs["removing"], map[string]string{"vehicle": name})) {
+			markUsed(cmd)
+		}
 	}
 }
 

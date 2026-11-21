@@ -19,15 +19,16 @@ type vehicleTest struct {
 	spawnErr  error
 	connected bool
 	pick      int
+	removeErr error
 	said      []string
 	spawned   []string // guid|class
 }
 
 func newVehicleTest(t *testing.T) (*vehicleTest, func(role int, text string)) {
 	vt := &vehicleTest{connected: true}
-	oldSay, oldConn, oldChoices, oldSpawn, oldPick := chatSay, modConnected, vehicleChoices, spawnVehicle, pickColour
+	oldSay, oldConn, oldChoices, oldSpawn, oldPick, oldRemove := chatSay, modConnected, vehicleChoices, spawnVehicle, pickColour, removeChatVehicle
 	t.Cleanup(func() {
-		chatSay, modConnected, vehicleChoices, spawnVehicle, pickColour = oldSay, oldConn, oldChoices, oldSpawn, oldPick
+		chatSay, modConnected, vehicleChoices, spawnVehicle, pickColour, removeChatVehicle = oldSay, oldConn, oldChoices, oldSpawn, oldPick, oldRemove
 		chatState.Lock()
 		chatState.loaded = false
 		chatState.Unlock()
@@ -46,6 +47,13 @@ func newVehicleTest(t *testing.T) (*vehicleTest, func(role int, text string)) {
 		return "Olga 24", nil
 	}
 	pickColour = func(n int) int { return vt.pick }
+	removeChatVehicle = func(guid string) (string, error) {
+		if vt.removeErr != nil {
+			return "", vt.removeErr
+		}
+		vt.spawned = append(vt.spawned, "remove|"+guid)
+		return "Olga 24", nil
+	}
 	chatState.Lock()
 	chatState.settings, chatState.loaded = DefaultChatSettings(), true
 	chatState.Unlock()
@@ -129,5 +137,19 @@ func TestVehicleCommandRolesAndMod(t *testing.T) {
 
 	vt.connected = true
 	typ(roleMod, "!help")
-	eq(t, "help with mod", vt.said, "Commands: "+everyone+", !kick, !ban, !warning, !car, !truck, !boat, !vehicle. Type !help !<command> for details.")
+	eq(t, "help with mod", vt.said, "Commands: "+everyone+", !kick, !ban, !warning, !car, !truck, !boat, !vehicle, !remove. Type !help !<command> for details.")
+}
+
+func TestRemoveCommand(t *testing.T) {
+	vt, typ := newVehicleTest(t)
+	typ(RoleVehicles, "!remove")
+	eq(t, "removed", vt.spawned, "remove|"+test.GUID1)
+	eq(t, "said", vt.said, "Removing your Olga 24")
+	vt.removeErr = livemap.ErrNoChatVehicle
+	typ(RoleVehicles, "!remove")
+	eq(t, "none", vt.said, "You don't have a spawned vehicle")
+	vt.removeErr = nil
+	typ(RolePlayer, "!remove")
+	eq(t, "player", vt.said)
+	eq(t, "player removed", vt.spawned)
 }
