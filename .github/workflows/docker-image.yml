@@ -58,6 +58,9 @@ jobs:
               echo "${image}:mod"
             fi
             echo "EOF"
+            # ReCON's version on its pages: the tag without a "-release"
+            # suffix (v2.1.1-release shows as v2.1.1).
+            echo "APP_VERSION=${TAG%-release}"
           } >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
@@ -76,4 +79,4 @@ jobs:
           context: .
           push: true
           tags: ${{ env.TAGS }}
-          build-args: VERSION=${{ github.event.release.tag_name }}
+          build-args: VERSION=${{ env.APP_VERSION }}
