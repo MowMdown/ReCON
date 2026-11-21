@@ -512,3 +512,124 @@ func TestCatalogPagesAndSpawn(t *testing.T) {
 		t.Fatal("kept the old list")
 	}
 }
+
+func TestVehicles(t *testing.T) {
+	setup(t)
+	now := time.Now()
+	if _, _, sent := Vehicles(now); sent {
+		t.Fatal("vehicles before any sync")
+	}
+	req := syncReq()
+	Sync(req, now)
+	if _, _, sent := Vehicles(now); sent {
+		t.Fatal("vehicles from a mod that sent none (before 0.0.1i)")
+	}
+	req.VehiclesSent = true
+	req.Vehicles = []Vehicle{{ID: 77, Type: "OffroadHatchback", X: 100, Z: 200, Fuel: 0.5, Crew: 1}}
+	Sync(req, now)
+	// A sync without them keeps the last ones.
+	Sync(syncReq(), now.Add(time.Second))
+	vs, at, sent := Vehicles(now.Add(time.Second))
+	if !sent || len(vs) != 1 || vs[0].ID != 77 || !at.Equal(now) {
+		t.Fatalf("vehicles %+v at %v sent %v", vs, at, sent)
+	}
+	// None at all is an empty list, not "never sent".
+	req.Vehicles = nil
+	Sync(req, now.Add(2*time.Second))
+	if vs, _, sent := Vehicles(now.Add(2 * time.Second)); !sent || vs == nil || len(vs) != 0 {
+		t.Errorf("no vehicles: %+v %v", vs, sent)
+	}
+
+	if cs, err := QueueWorld(Command{Action: "deleteVehicle", Text: "77"}, now); err != nil || cs.Text != "77" {
+		t.Errorf("delete: %+v %v", cs, err)
+	}
+	if _, err := QueueWorld(Command{Action: "deleteVehicle", Text: "car"}, now); err == nil {
+		t.Error("deleted a vehicle with no id")
+	}
+}
+
+func TestVehicleDetail(t *testing.T) {
+	setup(t)
+	now := time.Now()
+	req := syncReq()
+	req.VehiclesSent = true
+	req.Vehicles = []Vehicle{{ID: 77, Type: "OffroadHatchback"}}
+	if reply, _ := Sync(req, now); reply.WatchVehicles != nil {
+		t.Fatalf("asking for %v unasked", reply.WatchVehicles)
+	}
+	AskVehicle(77, now)
+	if _, _, have, ok := VehicleOf(77, now); !ok || have {
+		t.Fatalf("before the mod sent it: ok %v detail %v", ok, have)
+	}
+	reply, _ := Sync(syncReq(), now)
+	if len(reply.WatchVehicles) != 1 || reply.WatchVehicles[0] != 77 {
+		t.Fatalf("asking %v", reply.WatchVehicles)
+	}
+	r2 := syncReq()
+	r2.VehicleDetails = []VehicleDetail{{ID: 77, Zones: []Zone{{Name: "Engine", Health: 0.4}},
+		Items: []Item{{ID: 5, Type: "HatchbackWheel", Slot: "NivaWheel_1_1", HealthLevel: 2}}}}
+	reply, _ = Sync(r2, now.Add(time.Second))
+	_, d, have, ok := VehicleOf(77, now.Add(time.Second))
+	if !ok || !have || len(d.Zones) != 1 || d.Zones[0].Name != "Engine" || len(d.Items) != 1 || !d.At.Equal(now.Add(time.Second)) {
+		t.Fatalf("detail %+v have %v ok %v", d, have, ok)
+	}
+	// Answered once: the mod isn't asked again.
+	if len(reply.WatchVehicles) != 0 {
+		t.Errorf("still asking %v after the answer", reply.WatchVehicles)
+	}
+	// Asking again forgets the old answer until the new one comes.
+	AskVehicle(77, now.Add(2*time.Second))
+	if _, _, have, _ := VehicleOf(77, now.Add(2*time.Second)); have {
+		t.Error("kept the old detail after a new ask")
+	}
+	// An ask nobody answers stops after watchFor.
+	if reply, _ := Sync(syncReq(), now.Add(watchFor+3*time.Second)); len(reply.WatchVehicles) != 0 {
+		t.Errorf("still asking %v", reply.WatchVehicles)
+	}
+}
+
+func TestPlacesAndWorldEvents(t *testing.T) {
+	setup(t)
+	now := time.Now()
+	req := syncReq()
+	req.World = "ChernarusPlus"
+	reply, _ := Sync(req, now)
+	if !reply.WantPlaces {
+		t.Fatal("not asking for the place names")
+	}
+	if _, _, sent := Places(now); sent {
+		t.Fatal("places before the mod sent any")
+	}
+	req.PlacesSent = true
+	req.Places = []Place{{Name: "Chernogorsk", Type: "Capital", X: 6700, Z: 2500}}
+	req.VehiclesSent = true
+	req.WorldEvents = []WorldEvent{{ID: 9, Type: "Wreck_UH1Y", Kind: "crash", X: 1, Z: 2}}
+	Sync(req, now)
+	req.PlacesSent, req.Places = false, nil
+	if reply, _ := Sync(req, now.Add(time.Second)); reply.WantPlaces {
+		t.Error("asking again after they came")
+	}
+	ps, world, sent := Places(now.Add(time.Second))
+	if !sent || world != "chernarusplus" || len(ps) != 1 || ps[0].Name != "Chernogorsk" {
+		t.Errorf("places %+v %q %v", ps, world, sent)
+	}
+	if es, sent := WorldEvents(now); !sent || len(es) != 1 || es[0].Kind != "crash" {
+		t.Errorf("events %+v %v", es, sent)
+	}
+	// A new connection (the server restarted, maybe on another map) asks again.
+	if reply, _ := Sync(req, now.Add(time.Hour)); !reply.WantPlaces {
+		t.Error("not asking again after a reconnect")
+	}
+}
+
+func TestDeathsSince(t *testing.T) {
+	openTestDB(t)
+	now := time.Now()
+	for i, ago := range []time.Duration{50 * time.Hour, 3 * time.Hour, time.Hour} {
+		addKill(Kill{At: now.Add(-ago), VictimGUID: "g", VictimName: string(rune('a' + i)), Cause: "fall", X: 10, Z: 20})
+	}
+	ks, err := deathsSince(now.Add(-24*time.Hour), 1000)
+	if err != nil || len(ks) != 2 || ks[0].VictimName != "c" || ks[1].VictimName != "b" {
+		t.Errorf("%+v %v", ks, err)
+	}
+}

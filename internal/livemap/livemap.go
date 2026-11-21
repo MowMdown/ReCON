@@ -58,11 +58,16 @@ func Start(h Host) error {
 	h.AddRoute("GET /api/mod/map/{world}/calibration", calibration(h.DataDir))     // maps/<world>/calibration.json: {"points"}
 	h.AddRoute("POST /api/mod/map/{world}/calibration", setCalibration(h.DataDir)) // {"points"}: set them (none: not calibrated)
 	h.AddRoute("POST /api/mod/sync", handleModSync)                                // the mod's player data in, commands out
+	h.AddRoute("GET /api/mod/vehicles", handleModVehicles)                         // every vehicle on the server
+	h.AddRoute("GET /api/mod/worldevents", handleModWorldEvents)                   // helicopter crashes and toxic zones
+	h.AddRoute("GET /api/mod/places", handleModPlaces)                             // the map's place names
+	h.AddRoute("GET /api/mod/deaths", handleModDeaths)                             // every death in the last ?hours=
+	h.AddRoute("GET /api/mod/vehicles/{id}", handleModVehicle)                     // one, with its damage zones, parts and cargo
 	h.AddRoute("GET /api/mod/items", handleModItems)                               // every item the server can spawn
 	h.AddRoute("GET /api/mod/players", handleModPlayers)                           // every online player's live state, the weather
 	h.AddRoute("GET /api/mod/players/{guid}", handleModPlayer)                     // one player's live state, kills, commands
 	h.AddRoute("POST /api/mod/players/{guid}/{action}", handleModAction)           // heal | kill | teleport | teleportTo | back | set | message | spawn
-	h.AddRoute("POST /api/mod/world/{action}", handleModWorld)                     // weather | weatherMode | storm | rainThresholds | date | freezeTime
+	h.AddRoute("POST /api/mod/world/{action}", handleModWorld)                     // weather | weatherMode | storm | rainThresholds | date | freezeTime | deleteVehicle
 	if h.AddNavLink != nil {
 		h.AddNavLink("live", "Live Map", "/live")
 	}

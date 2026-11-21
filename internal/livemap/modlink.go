@@ -62,6 +62,64 @@ type SyncRequest struct {
 	CatalogTotal int           `json:"catalogTotal"`
 	CatalogAt    int           `json:"catalogAt"`
 	Catalog      []CatalogItem `json:"catalog"`
+	// Every vehicle on the server (mod 0.0.1i on), in the syncs that have
+	// them (every few seconds: VehiclesSent).
+	VehiclesSent Flag      `json:"vehiclesSent"`
+	Vehicles     []Vehicle `json:"vehicles"`
+	// The vehicles the reply's WatchVehicles asked to see inside.
+	VehicleDetails []VehicleDetail `json:"vehicleDetails"`
+	// The map's dynamic events, sent with the vehicles.
+	WorldEvents []WorldEvent `json:"worldEvents"`
+	// The map's place names, when the reply asked for them (WantPlaces).
+	PlacesSent Flag    `json:"placesSent"`
+	Places     []Place `json:"places"`
+}
+
+// WorldEvent is one of the map's dynamic events (ReCON_WorldEvent).
+type WorldEvent struct {
+	ID     int     `json:"id"`
+	Type   string  `json:"type"`
+	Kind   string  `json:"kind"` // crash, gas or area
+	X      float64 `json:"x"`
+	Z      float64 `json:"z"`
+	Radius float64 `json:"radius"` // an area's, in metres
+}
+
+// Place is one of the map's place names (ReCON_Place).
+type Place struct {
+	Name string  `json:"name"`
+	Type string  `json:"type"` // Capital, City, Village, Local, Marine, Hill, ViewPoint...
+	X    float64 `json:"x"`
+	Z    float64 `json:"z"`
+}
+
+// VehicleDetail is what is in a vehicle (ReCON_VehicleDetail): its damage
+// zones' health, and its parts (attachments) and cargo.
+type VehicleDetail struct {
+	ID    int       `json:"id"`
+	Zones []Zone    `json:"zones"`
+	Items []Item    `json:"items"`
+	At    time.Time `json:"at"` // when it came in (ReCON's)
+}
+
+// Zone is one of a vehicle's damage zones.
+type Zone struct {
+	Name   string  `json:"name"`
+	Health float64 `json:"health"` // 0-1
+}
+
+// Vehicle is a car, motorbike or boat on the server (ReCON_Vehicle).
+type Vehicle struct {
+	ID      int     `json:"id"` // its object id, for deleteVehicle
+	Type    string  `json:"type"`
+	Name    string  `json:"name"`
+	X       float64 `json:"x"`
+	Z       float64 `json:"z"`
+	Heading float64 `json:"heading"`
+	Health  float64 `json:"health"` // 0-1
+	Fuel    float64 `json:"fuel"`   // 0-1, -1 when it isn't a car
+	Crew    int     `json:"crew"`
+	Engine  Flag    `json:"engine"`
 }
 
 // CatalogItem is an item the server can spawn (ReCON_CatalogItem).
@@ -218,6 +276,12 @@ type SyncReply struct {
 	Interval int       `json:"interval"`
 	Commands []Command `json:"commands"`
 	Watch    []string  `json:"watch"` // SteamID64s whose inventory to send
+	// Vehicle ids whose parts and cargo to send (left out when none, for a
+	// mod before 0.0.1i).
+	WatchVehicles []int `json:"watchVehicles,omitempty"`
+	// WantPlaces asks for the map's place names (once a connection; left
+	// out when false, for a mod before 0.0.1i).
+	WantPlaces bool `json:"wantPlaces,omitempty"`
 	// CatalogNext is 1 + the first catalog entry wanted next (0: none).
 	CatalogNext int `json:"catalogNext"`
 }
@@ -269,8 +333,20 @@ var state struct {
 	catalog      []CatalogItem
 	catalogTotal int
 	catalogTypes map[string]CatalogItem
-	nextID       int
-	commands     []*CommandStatus // oldest first: queued and sent ones, then the last keepResults finished
+	// The vehicles as last sent, and when (zero: never, so a mod before 0.0.1i).
+	vehicles   []Vehicle
+	vehiclesAt time.Time
+	// Vehicles asked about (by id: until when to keep asking), and what is
+	// in them. An ask is answered once: the mod sends it in one sync.
+	vehWatch  map[int]time.Time
+	vehDetail map[int]VehicleDetail
+	// The map's dynamic events (with the vehicles), and its place names
+	// (placesFor: the world they are of; asked for once a connection).
+	worldEvents []WorldEvent
+	places      []Place
+	placesFor   string
+	nextID      int
+	commands    []*CommandStatus // oldest first: queued and sent ones, then the last keepResults finished
 	// SteamIDs saved to the players table this run (one write per player).
 	steamSaved map[string]bool
 	refused    string // the last refusal logged, so it isn't logged every second
@@ -307,8 +383,44 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		log.Printf("recon-mod: the mod (version %s) connected (%s, %d players)", req.Mod, req.World, len(req.Players))
 		// The server may have restarted with other mods: fetch the item list again.
 		state.catalog, state.catalogTotal, state.catalogTypes = nil, 0, nil
+		state.places, state.placesFor = nil, ""
 	}
 	takeCatalog(req)
+	if req.VehiclesSent {
+		state.vehicles, state.vehiclesAt = req.Vehicles, now
+		if state.vehicles == nil {
+			state.vehicles = []Vehicle{}
+		}
+		state.worldEvents = req.WorldEvents
+		if state.worldEvents == nil {
+			state.worldEvents = []WorldEvent{}
+		}
+	}
+	if req.PlacesSent {
+		state.places, state.placesFor = req.Places, strings.ToLower(req.World)
+		if state.places == nil {
+			state.places = []Place{}
+		}
+	}
+	for _, d := range req.VehicleDetails {
+		if state.vehDetail == nil {
+			state.vehDetail = map[int]VehicleDetail{}
+		}
+		if d.Zones == nil {
+			d.Zones = []Zone{}
+		}
+		if d.Items == nil {
+			d.Items = []Item{}
+		}
+		d.At = now
+		state.vehDetail[d.ID] = d
+		delete(state.vehWatch, d.ID) // answered: don't ask again
+	}
+	for id, d := range state.vehDetail {
+		if now.Sub(d.At) > 5*time.Minute {
+			delete(state.vehDetail, id)
+		}
+	}
 	state.refused = ""
 	if state.steamSaved == nil {
 		state.steamSaved = map[string]bool{}
@@ -367,6 +479,15 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	if len(state.catalog) < state.catalogTotal {
 		reply.CatalogNext = len(state.catalog) + 1
 	}
+	for id, until := range state.vehWatch {
+		if now.After(until) {
+			delete(state.vehWatch, id)
+			continue
+		}
+		reply.WatchVehicles = append(reply.WatchVehicles, id)
+	}
+	sort.Ints(reply.WatchVehicles)
+	reply.WantPlaces = state.placesFor != strings.ToLower(req.World)
 	for g, until := range state.watch {
 		if now.After(until) {
 			delete(state.watch, g)
@@ -468,6 +589,40 @@ func Catalog(now time.Time) (items []CatalogItem, complete bool) {
 		return []CatalogItem{}, false
 	}
 	return state.catalog, true
+}
+
+// Vehicles is every vehicle on the server as the mod last sent them, and
+// when; none while the mod isn't connected (sent false: it hasn't sent
+// any, so it may be a mod before 0.0.1i).
+func Vehicles(now time.Time) (vs []Vehicle, at time.Time, sent bool) {
+	state.Lock()
+	defer state.Unlock()
+	if !connected(now) || state.vehiclesAt.IsZero() {
+		return []Vehicle{}, time.Time{}, false
+	}
+	return state.vehicles, state.vehiclesAt, true
+}
+
+// WorldEvents is the map's dynamic events as the mod last sent them (sent
+// false: it hasn't, as a mod before 0.0.1i doesn't).
+func WorldEvents(now time.Time) (es []WorldEvent, sent bool) {
+	state.Lock()
+	defer state.Unlock()
+	if !connected(now) || state.worldEvents == nil {
+		return []WorldEvent{}, false
+	}
+	return state.worldEvents, true
+}
+
+// Places is the map's place names, and the world they are of (sent false:
+// the mod hasn't sent them, as one before 0.0.1i doesn't).
+func Places(now time.Time) (ps []Place, world string, sent bool) {
+	state.Lock()
+	defer state.Unlock()
+	if !connected(now) || state.places == nil {
+		return []Place{}, "", false
+	}
+	return state.places, state.placesFor, true
 }
 
 // logRefusal logs why a sync was refused, once until the reason (key)
@@ -576,6 +731,37 @@ func Watch(guid string, now time.Time) {
 		state.watch = map[string]time.Time{}
 	}
 	state.watch[strings.ToLower(guid)] = now.Add(watchFor)
+}
+
+// AskVehicle asks the mod, once, for what is in a vehicle now: it is sent
+// in the next sync (asked until it is, for up to watchFor). What came in
+// before is forgotten, so VehicleOf has nothing until then.
+func AskVehicle(id int, now time.Time) {
+	state.Lock()
+	defer state.Unlock()
+	if state.vehWatch == nil {
+		state.vehWatch = map[int]time.Time{}
+	}
+	state.vehWatch[id] = now.Add(watchFor)
+	delete(state.vehDetail, id)
+}
+
+// VehicleOf is a vehicle as last sent, and what is in it if the mod has
+// sent that (false: no such vehicle, or the mod isn't connected).
+func VehicleOf(id int, now time.Time) (v Vehicle, d VehicleDetail, haveDetail, ok bool) {
+	state.Lock()
+	defer state.Unlock()
+	if !connected(now) {
+		return
+	}
+	for _, x := range state.vehicles {
+		if x.ID == id {
+			v, ok = x, true
+			break
+		}
+	}
+	d, haveDetail = state.vehDetail[id]
+	return
 }
 
 // InventoryOf is a player's last inventory from the mod (false: none yet,
@@ -748,7 +934,7 @@ func add(c Command, guid string, now time.Time) CommandStatus {
 }
 
 // WorldActions are the commands on the world rather than a player.
-var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true}
+var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true, "deleteVehicle": true}
 
 // weatherMax is each weather part's largest value.
 var weatherMax = map[string]float64{"overcast": 1, "rain": 1, "fog": 1, "snow": 1, "windSpeed": 50, "windDir": 360}
@@ -773,6 +959,11 @@ func checkWorld(c *Command) error {
 	}
 	c.SteamID, c.Target = "", ""
 	switch c.Action {
+	case "deleteVehicle":
+		// Text is the vehicle's id (Vehicle.ID).
+		if _, err := strconv.Atoi(c.Text); err != nil {
+			return errors.New("pick a vehicle")
+		}
 	case "weather":
 		max, ok := weatherMax[c.Stat]
 		if !ok {

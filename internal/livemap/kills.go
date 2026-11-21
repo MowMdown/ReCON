@@ -101,6 +101,29 @@ func killCounts(guid string) (kills, deaths int, err error) {
 	return
 }
 
+// deathsSince is every death since then, newest first (at most limit).
+func deathsSince(since time.Time, limit int) ([]Kill, error) {
+	rows, err := db.Query(`SELECT at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z
+		FROM mod_kills ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Kill{}
+	for rows.Next() {
+		var k Kill
+		if err := rows.Scan(&k.At, &k.VictimGUID, &k.VictimName, &k.KillerGUID, &k.KillerName, &k.Weapon, &k.Cause, &k.Agents, &k.Distance, &k.X, &k.Z); err != nil {
+			return nil, err
+		}
+		if k.At.Before(since) {
+			break
+		}
+		k.Illnesses = Illnesses(k.Agents)
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 // killsOf is the latest limit deaths a player was in, as killer or victim,
 // newest first.
 func killsOf(guid string, limit int) ([]Kill, error) {

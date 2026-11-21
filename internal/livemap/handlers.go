@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -57,6 +58,72 @@ func handleModPlayers(w http.ResponseWriter, r *http.Request) {
 func handleModItems(w http.ResponseWriter, r *http.Request) {
 	items, complete := Catalog(time.Now())
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "complete": complete})
+}
+
+// handleModVehicles serves GET /api/mod/vehicles: every vehicle on the
+// server, as the mod last sent them (sent: false when it hasn't, as a mod
+// before 0.0.1i doesn't).
+func handleModVehicles(w http.ResponseWriter, r *http.Request) {
+	vs, at, sent := Vehicles(time.Now())
+	out := map[string]any{"ok": true, "vehicles": vs, "sent": sent}
+	if sent {
+		out["at"] = at
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleModWorldEvents serves GET /api/mod/worldevents: the map's dynamic
+// events (helicopter crashes, toxic zones) as the mod last sent them.
+func handleModWorldEvents(w http.ResponseWriter, r *http.Request) {
+	es, sent := WorldEvents(time.Now())
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "events": es, "sent": sent})
+}
+
+// handleModPlaces serves GET /api/mod/places: the map's place names.
+func handleModPlaces(w http.ResponseWriter, r *http.Request) {
+	ps, world, sent := Places(time.Now())
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "places": ps, "world": world, "sent": sent})
+}
+
+// handleModDeaths serves GET /api/mod/deaths?hours=24: every death in the
+// last hours (1 to 720; at most 1000), newest first, for the map.
+func handleModDeaths(w http.ResponseWriter, r *http.Request) {
+	hours, err := strconv.Atoi(r.URL.Query().Get("hours"))
+	if err != nil || hours < 1 || hours > 720 {
+		hours = 24
+	}
+	ks, err := deathsSince(time.Now().Add(-time.Duration(hours)*time.Hour), 1000)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deaths": ks})
+}
+
+// handleModVehicle serves GET /api/mod/vehicles/{id}: one vehicle, and its
+// damage zones, parts and cargo once the mod has sent them. ?ask=1 asks the
+// mod for them afresh (they come a sync or so later); without it, it only
+// reads what came in.
+func handleModVehicle(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	now := time.Now()
+	if r.URL.Query().Get("ask") == "1" {
+		AskVehicle(id, now)
+	}
+	v, d, haveDetail, ok := VehicleOf(id, now)
+	if !ok {
+		fail(w, http.StatusNotFound, "that vehicle isn't on the server any more")
+		return
+	}
+	out := map[string]any{"ok": true, "vehicle": v}
+	if haveDetail {
+		out["detail"] = d
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleModPlayer serves GET /api/mod/players/{guid}: one player's live

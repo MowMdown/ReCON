@@ -53,6 +53,44 @@
 .leaflet-container { font: inherit; }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .mapbar > * { pointer-events: auto; }
+.mapbar button.on { border-color: #8ab4f8; color: #fff; }
+/* Vehicles on the map, and the popup a click on one opens. */
+.vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #1e1e1e; color: #ddd; border: 1px solid #444; box-shadow: 0 2px 10px rgba(0,0,0,.5); }
+.leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; min-width: 210px; }
+.leaflet-container a.leaflet-popup-close-button { color: #aaa; }
+.vpop h4 { margin: 0 0 2px; font-size: 14px; }
+.vpop .ty { color: #888; font-size: 11.5px; font-family: ui-monospace, Consolas, monospace; margin-bottom: 6px; overflow-wrap: anywhere; }
+.vpop .row { display: flex; justify-content: space-between; gap: 12px; }
+.vpop .row span:first-child { color: #999; }
+.vpop .acts { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+.vpop .acts button { margin: 0; }
+.vpop .st { font-size: 12px; }
+/* Town names: bigger for bigger places; zoomed out only the cities
+   (#map's data-zb is far, mid or near). */
+.town { pointer-events: none; }
+.town span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; color: #f1f3f4; font-size: 11px; font-weight: 600; letter-spacing: .2px;
+	text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
+.town.t-capital span { font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
+.town.t-city span { font-size: 13px; font-weight: 700; }
+.town.t-village span { font-size: 12px; }
+.town.t-local span, .town.t-camp span, .town.t-ruin span, .town.t-railroadstation span { font-size: 10.5px; font-weight: 500; color: #d7dcd8; }
+.town.t-marine span { font-size: 10.5px; font-style: italic; font-weight: 500; color: #a8c7fa; }
+#map[data-zb="far"] .town:not(.t-capital):not(.t-city) { display: none; }
+#map[data-zb="mid"] .town:not(.t-capital):not(.t-city):not(.t-village) { display: none; }
+/* Events and deaths. */
+.emark svg, .dmark svg { position: absolute; overflow: visible; cursor: pointer; }
+.emark svg { left: -9px; top: -9px; }
+.dmark svg { left: -6px; top: -6px; }
+.leaflet-tooltip { background: #1e1e1e; color: #ddd; border: 1px solid #444; box-shadow: 0 2px 8px rgba(0,0,0,.5); font-size: 12px; }
+.leaflet-tooltip-top:before { border-top-color: #444; }
+.mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: rgba(34,34,34,.92); color: #ddd; border: 1px solid #555; border-radius: 4px; }
+.vpop h5 { margin: 8px 0 3px; font-size: 12px; color: #ccc; font-weight: 600; }
+.vpop .scroll { max-height: min(260px, 40vh); overflow-y: auto; margin-top: 4px; padding-right: 4px; }
+.vpop .part { display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 1px 0; }
+.vpop .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vpop .part .lv { font-size: 11.5px; white-space: nowrap; }
+.vpop .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 /* The weather and in-game time, beside Time & Weather above the map. */
 .worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .worldbar .badge { font-size: 12px; background: #1a1a1a; border: 1px solid #444; border-radius: 4px; padding: 3px 8px; color: #ccc; }
@@ -290,6 +328,11 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 	<div class="mapwrap">
 		<div id="map"></div>
 		<div class="mapbar">
+			<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
+			<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
+			<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
+			<button type="button" id="deathBtn" onclick="toggleDeaths()" title="Show where players died">Deaths</button>
+			<select id="deathHours" aria-label="Deaths in the last" hidden><option value="1">last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select>
 			<span class="sp"></span>
 			<button type="button" onclick="fitAll()" title="Show the whole map">Fit</button>
 			<button type="button" onclick="fillWidth()" title="Zoom so the map's width fills the view, edge to edge">Fill</button>
@@ -495,6 +538,7 @@ function initMap() {
 	gridLayer = L.layerGroup().addTo(map);
 	labelLayer = L.layerGroup().addTo(map);
 	map.on('moveend zoomend', drawLabels);
+	map.on('zoomend', zoomBand);
 	map.setView([7680, 7680], -5);
 }
 
@@ -751,6 +795,267 @@ function toggleFull(on) {
 	map.invalidateSize({ pan: false });
 	map.panTo(c, { animate: false });
 }
+// ---- Vehicles: every car, motorbike and boat on the server (mod 0.0.1i) -
+// Shown while the Vehicles button is on (remembered in this browser), read
+// every 5 s. A click on one opens its details, with Delete.
+
+let vehOn = false, vehicles = [], vehSent = true, vehLayer = null, vehMarkers = {}, vehOpen = null, vehPending = {}, vehDetail = null;
+try { vehOn = localStorage.getItem('live.vehicles') === '1'; } catch (e) { }
+const vehPopup = L.popup({ autoPan: false, offset: [0, -6] });
+function toggleVehicles() {
+	vehOn = !vehOn;
+	try { localStorage.setItem('live.vehicles', vehOn ? '1' : '0'); } catch (e) { }
+	if (!vehOn) map.closePopup(vehPopup);
+	drawVehicles();
+	loadVehicles();
+}
+async function loadVehicles() {
+	if (!vehOn) return;
+	try {
+		const d = await api('GET', '/api/mod/vehicles');
+		vehicles = d.vehicles || [];
+		vehSent = !!d.sent;
+	} catch (e) { return; }
+	drawVehicles();
+}
+// vehColor: someone in it blue, the engine running green, else grey.
+function vehColor(v) { return v.crew ? '#8ab4f8' : v.engine ? '#81c995' : '#e8eaed'; }
+function vehSVG(v) {
+	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><g transform="rotate(' + Math.round(v.heading || 0) + ')">' +
+		'<rect x="-4.5" y="-7.5" width="9" height="15" rx="2.5" fill="' + vehColor(v) + '" stroke="#111" stroke-width="1.2"/>' +
+		'<rect x="-3" y="-5" width="6" height="3.5" rx="1" fill="#111" opacity=".55"/></g></svg>';
+}
+function drawVehicles() {
+	const btn = document.getElementById('vehBtn');
+	btn.classList.toggle('on', vehOn);
+	btn.textContent = 'Vehicles' + (vehOn && vehSent ? ' ' + vehicles.length : '');
+	btn.title = vehOn && !vehSent ? 'The mod on the server doesn\'t send vehicles: it needs recon-mod 0.0.1i or later'
+		: 'Show every car, motorbike and boat on the server';
+	if (!vehLayer) vehLayer = L.layerGroup();
+	if (!vehOn) { vehLayer.remove(); return; }
+	if (!map.hasLayer(vehLayer)) vehLayer.addTo(map);
+	const seen = {};
+	for (const v of vehicles) {
+		seen[v.id] = true;
+		const icon = L.divIcon({ className: 'vmark', html: vehSVG(v), iconSize: [0, 0] });
+		let m = vehMarkers[v.id];
+		if (!m) {
+			m = vehMarkers[v.id] = L.marker([v.z, v.x], { icon, keyboard: false, title: catLabel(v) }).addTo(vehLayer);
+			m.on('click', () => openVehicle(v.id));
+		} else {
+			m.setLatLng([v.z, v.x]);
+			m.setIcon(icon);
+		}
+	}
+	for (const id in vehMarkers) if (!seen[id]) { vehMarkers[id].remove(); delete vehMarkers[id]; }
+	if (vehOpen != null) {
+		if (seen[vehOpen]) renderVehicle(); else map.closePopup(vehPopup);
+	}
+}
+function catLabel(v) { return v.name && v.name[0] !== '$' ? v.name : item(v.type); }
+function openVehicle(id) {
+	vehOpen = id;
+	renderVehicle();
+	// Pan the map to fit it as it opens, not on every redraw after.
+	vehPopup.options.autoPan = true;
+	vehPopup.openOn(map);
+	vehPopup.options.autoPan = false;
+	askVehicle();
+}
+// askVehicle asks the mod, once, for what is in the open vehicle (its
+// damage zones, parts and cargo), then reads it as soon as it has come
+// (a sync or two): no more asking after that, until Refresh.
+let vehAsk = 0;
+async function askVehicle() {
+	if (vehOpen == null) return;
+	const id = vehOpen, ask = ++vehAsk;
+	vehDetail = null;
+	renderVehicle();
+	for (let i = 0; i < 15 && id === vehOpen && ask === vehAsk; i++) {
+		try {
+			const d = await api('GET', '/api/mod/vehicles/' + id + (i === 0 ? '?ask=1' : ''));
+			if (id !== vehOpen || ask !== vehAsk) return;
+			if (d.detail) { vehDetail = d.detail; break; }
+		} catch (e) { break; }
+		await new Promise(r => setTimeout(r, 1000));
+	}
+	if (id === vehOpen && ask === vehAsk) {
+		if (!vehDetail) vehDetail = { failed: true };
+		renderVehicle();
+	}
+}
+// zoneName makes a damage zone's name readable: FuelTank → Fuel tank.
+function zoneName(z) { const w = z.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2'); return w[0].toUpperCase() + w.slice(1).toLowerCase(); }
+function partRow(name, level, extra) {
+	const [cn, cc] = CONDITION[Math.max(0, Math.min(4, level))];
+	return '<div class="part"><span class="dot" style="background:' + cc + '"></span><span class="nm">' + esc(name) + '</span>' +
+		'<span class="lv" style="color:' + cc + '">' + cn + (extra ? ' · ' + extra : '') + '</span></div>';
+}
+function vehInside() {
+	const d = vehDetail;
+	if (!d) return '<h5>Parts and cargo</h5><div class="muted">Asking recon-mod…</div>';
+	if (d.failed) return '<h5>Parts and cargo</h5><div class="muted">recon-mod didn\'t send them (it needs 0.0.1i or later).</div>';
+	const lvl = h => h > 0.7 ? 0 : h > 0.5 ? 1 : h > 0.3 ? 2 : h > 0 ? 3 : 4;
+	let h = '<div class="scroll">';
+	if (d.zones.length) h += '<h5>Damage</h5>' + d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('');
+	const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
+	h += '<h5>Parts · ' + parts.length + '</h5>' + (parts.length ? parts.map(it => partRow(itemName(it), it.healthLevel | 0)).join('') : '<div class="muted">None fitted</div>');
+	h += '<h5>Cargo · ' + cargo.length + '</h5>' + (cargo.length ? cargo.map(it => {
+		const n = countIn(it);
+		return partRow(itemName(it), it.healthLevel | 0, n ? n + (n === 1 ? ' item inside' : ' items inside') : qty(it));
+	}).join('') : '<div class="muted">Empty</div>');
+	return h + '</div>';
+}
+function vehCondition(h) { return CONDITION[h > 0.7 ? 0 : h > 0.5 ? 1 : h > 0.3 ? 2 : h > 0 ? 3 : 4]; }
+function renderVehicle() {
+	const v = vehicles.find(x => x.id === vehOpen);
+	if (!v) return;
+	const [cn, cc] = vehCondition(v.health);
+	const cmd = vehPending[v.id] && commands.find(c => c.id === vehPending[v.id]);
+	let st = '';
+	if (cmd && (cmd.status === 'queued' || cmd.status === 'sent')) st = '<span class="st" style="color:#fdd663">Deleting…</span>';
+	else if (cmd && cmd.status !== 'done') st = '<span class="st" style="color:#f28b82">Not deleted: ' + esc(cmd.error || cmd.status) + '</span>';
+	const rows = [['Where', grid(v.x, v.z) + ' <span class="muted">' + Math.round(v.x) + ', ' + Math.round(v.z) + '</span>'],
+		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'],
+		['Fuel', v.fuel >= 0 ? Math.round(v.fuel * 100) + '%' : '—'],
+		['Inside', v.crew ? v.crew + (v.crew === 1 ? ' person' : ' people') : 'Nobody'],
+		['Engine', v.engine ? 'Running' : 'Off']];
+	// Redrawn every few seconds: keep where its list was scrolled to.
+	const old = vehPopup.getElement() && vehPopup.getElement().querySelector('.vpop .scroll');
+	const top = old ? old.scrollTop : 0;
+	vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop"><h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
+		rows.map(([k, x]) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>').join('') + vehInside() +
+		'<div class="acts"><button type="button" onclick="askVehicle()" title="Read its parts, cargo and damage again">Refresh</button><button type="button" class="bad" onclick="deleteVehicle(' + v.id + ')"' + (v.crew ? ' disabled title="Someone is in it"' : '') + '>Delete</button>' + st + '</div></div>');
+	const now = vehPopup.getElement() && vehPopup.getElement().querySelector('.vpop .scroll');
+	if (now) now.scrollTop = top;
+}
+async function deleteVehicle(id) {
+	const v = vehicles.find(x => x.id === id);
+	if (!v || !confirm('Delete this ' + catLabel(v) + ' and everything in it? It can\'t be undone.')) return;
+	try {
+		const d = await api('POST', '/api/mod/world/deleteVehicle', { text: String(id) });
+		if (d.command) vehPending[id] = d.command.id;
+		await poll();
+	} catch (e) { alert('Not deleted: ' + e.message); return; }
+	renderVehicle();
+}
+setInterval(loadVehicles, 5000);
+
+// ---- Towns, events and deaths on the map ---------------------------------
+// Each layer is shown while its button is on (remembered in this browser).
+
+function layerPref(k, dflt) { try { const v = localStorage.getItem('live.' + k); return v == null ? dflt : v; } catch (e) { return dflt; } }
+function setLayerPref(k, v) { try { localStorage.setItem('live.' + k, v); } catch (e) { } }
+function layerButton(id, on, text, title) {
+	const b = document.getElementById(id);
+	b.classList.toggle('on', on);
+	b.textContent = text;
+	if (title) b.title = title;
+}
+
+// Towns: the map's place names, sent by recon-mod once a connection.
+let townsOn = layerPref('towns', '0') === '1', places = null, placesWorld = '';
+const townLayer = L.layerGroup();
+const TOWN_TYPES = { Capital: 1, City: 1, Village: 1, Local: 1, Marine: 1, Camp: 1, Ruin: 1, RailroadStation: 1 };
+function toggleTowns() { townsOn = !townsOn; setLayerPref('towns', townsOn ? '1' : '0'); drawTowns(); loadPlaces(); }
+async function loadPlaces() {
+	if (!townsOn || (places && placesWorld === world)) return;
+	try {
+		const d = await api('GET', '/api/mod/places');
+		if (!d.sent) { places = null; drawTowns(); return; }
+		places = d.places || []; placesWorld = d.world;
+	} catch (e) { return; }
+	townLayer.clearLayers();
+	for (const p of places) {
+		if (!TOWN_TYPES[p.type]) continue;
+		L.marker([p.z, p.x], { icon: L.divIcon({ className: 'town t-' + p.type.toLowerCase(), html: '<span>' + esc(p.name) + '</span>', iconSize: null }),
+			interactive: false, keyboard: false }).addTo(townLayer);
+	}
+	drawTowns();
+}
+function drawTowns() {
+	layerButton('townBtn', townsOn, 'Towns', townsOn && !places ? 'recon-mod hasn\'t sent the place names: it needs 0.0.1i or later' : 'Show the map\'s town and place names');
+	if (townsOn && places) townLayer.addTo(map); else townLayer.remove();
+}
+// zoomBand sets which town names show: far (cities), mid (and villages), near (all).
+function zoomBand() {
+	const z = map.getZoom();
+	document.getElementById('map').dataset.zb = z < -3.5 ? 'far' : z < -2 ? 'mid' : 'near';
+}
+setInterval(loadPlaces, 10000);
+
+// Events: helicopter crashes and toxic zones, every 10 s.
+let eventsOn = layerPref('events', '0') === '1', worldEvents = [], eventsSent = true;
+const eventLayer = L.layerGroup();
+const EVENT_NAMES = { Wreck_UH1Y: 'Helicopter crash (UH-1Y)', Wreck_Mi8_Crashed: 'Helicopter crash (Mi-8)', Wreck_Mi8: 'Helicopter crash (Mi-8)',
+	Wreck_SantasSleigh: 'Santa\'s sleigh', ContaminatedArea_Static: 'Toxic zone', ContaminatedArea_Dynamic: 'Toxic zone (airstrike)', ContaminatedArea_Local: 'Toxic gas (grenade)' };
+function eventName(e) { return EVENT_NAMES[e.type] || (e.kind === 'crash' ? 'Crash (' + item(e.type) + ')' : item(e.type)); }
+function toggleEvents() { eventsOn = !eventsOn; setLayerPref('events', eventsOn ? '1' : '0'); drawEvents(); loadEvents(); }
+async function loadEvents() {
+	if (!eventsOn) return;
+	try {
+		const d = await api('GET', '/api/mod/worldevents');
+		worldEvents = d.events || []; eventsSent = !!d.sent;
+	} catch (e) { return; }
+	drawEvents();
+}
+function drawEvents() {
+	layerButton('eventBtn', eventsOn, 'Events' + (eventsOn && eventsSent ? ' ' + worldEvents.length : ''),
+		eventsOn && !eventsSent ? 'recon-mod doesn\'t send events: it needs 0.0.1i or later' : 'Show helicopter crashes and toxic zones');
+	eventLayer.clearLayers();
+	if (!eventsOn) { eventLayer.remove(); return; }
+	eventLayer.addTo(map);
+	for (const e of worldEvents) {
+		const tip = eventName(e) + (e.radius ? ' · ' + Math.round(e.radius) + ' m across' : '') + ' · ' + grid(e.x, e.z);
+		if (e.kind !== 'crash' && e.radius > 0)
+			L.circle([e.z, e.x], { radius: e.radius, color: '#c5d86d', weight: 1.5, dashArray: '5 4', fillColor: '#c5d86d', fillOpacity: 0.15, interactive: false }).addTo(eventLayer);
+		const html = e.kind === 'crash'
+			? '<svg width="18" height="18" viewBox="-9 -9 18 18"><path d="M0 -8 L8 0 L0 8 L-8 0 Z" fill="#f2a65a" stroke="#111" stroke-width="1.2"/><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="#111" stroke-width="1.8"/></svg>'
+			: '<svg width="18" height="18" viewBox="-9 -9 18 18"><circle r="6.5" fill="#c5d86d" stroke="#111" stroke-width="1.2"/><text y="3.5" text-anchor="middle" font-size="10" font-weight="700" fill="#111">!</text></svg>';
+		L.marker([e.z, e.x], { icon: L.divIcon({ className: 'emark', html, iconSize: [0, 0] }), keyboard: false }).bindTooltip(esc(tip), { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
+	}
+}
+setInterval(loadEvents, 10000);
+
+// Deaths: a red X where each death in the time picked was, every 30 s.
+let deathsOn = layerPref('deaths', '0') === '1', deathHours = +layerPref('deathHours', '24') || 24, deathList = [];
+const deathLayer = L.layerGroup();
+function toggleDeaths() { deathsOn = !deathsOn; setLayerPref('deaths', deathsOn ? '1' : '0'); drawDeaths(); loadDeaths(); }
+document.getElementById('deathHours').addEventListener('change', e => { deathHours = +e.target.value; setLayerPref('deathHours', String(deathHours)); loadDeaths(); });
+async function loadDeaths() {
+	if (!deathsOn) return;
+	try { deathList = (await api('GET', '/api/mod/deaths?hours=' + deathHours)).deaths || []; } catch (e) { return; }
+	drawDeaths();
+}
+// deathText says who died and how (as on the Kills & deaths tab), and when.
+function deathText(k) {
+	const cause = causeOf(k), c = CAUSES[cause], w = k.weapon && !/^Survivor/i.test(k.weapon) ? item(k.weapon) : '';
+	let how;
+	if (cause === 'player') how = 'killed by ' + (k.killerName || 'a player') + (w ? ' with ' + w : '') + (k.distance ? ' at ' + Math.round(k.distance) + ' m' : '');
+	else if (c) how = c[1][0].toLowerCase() + c[1].slice(1) + (cause === 'illness' && k.illnesses && k.illnesses.length ? ': ' + k.illnesses.join(', ') : w ? ' (' + w + ')' : '');
+	else how = 'died' + (w ? ' (' + w + ')' : '');
+	const d = new Date(k.at);
+	return (k.victimName || 'Someone') + ' ' + how + ' · ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+function drawDeaths() {
+	layerButton('deathBtn', deathsOn, 'Deaths' + (deathsOn ? ' ' + deathList.length : ''));
+	const sel = document.getElementById('deathHours');
+	sel.hidden = !deathsOn;
+	sel.value = String(deathHours);
+	deathLayer.clearLayers();
+	if (!deathsOn) { deathLayer.remove(); return; }
+	deathLayer.addTo(map);
+	const x = '<svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#111" stroke-width="4" stroke-linecap="round"/>' +
+		'<path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#ea4335" stroke-width="2.4" stroke-linecap="round"/></svg>';
+	for (const k of deathList) {
+		if (!k.x && !k.z) continue;
+		const m = L.marker([k.z, k.x], { icon: L.divIcon({ className: 'dmark', html: x, iconSize: [0, 0] }), keyboard: false })
+			.bindTooltip(esc(deathText(k)), { direction: 'top', offset: [0, -6] }).addTo(deathLayer);
+		if (k.victimGuid) m.on('click', () => { if (byGuid[k.victimGuid]) openPlayer(k.victimGuid); });
+	}
+}
+setInterval(loadDeaths, 30000);
+
 // fillWidth zooms so the map's width is exactly the view's, keeping the
 // part north to south in view (but not past the map's top or bottom edge).
 function fillWidth() {
@@ -1209,6 +1514,7 @@ function cmdText(c) {
 		case 'rainThresholds': return 'Rain between ' + Math.round(c.min * 100) + '% and ' + Math.round(c.max * 100) + '% overcast';
 		case 'date': return 'In-game time ' + c.year + '-' + pad(c.month) + '-' + pad(c.day) + ' ' + pad(c.hour) + ':' + pad(c.minute);
 		case 'freezeTime': return c.value ? 'Freeze time' : 'Unfreeze time';
+		case 'deleteVehicle': return 'Delete a vehicle';
 	}
 	return esc(c.action);
 }
@@ -1808,7 +2114,14 @@ for (const id of ['pModal', 'wModal']) document.getElementById(id).addEventListe
 });
 
 initMap();
+map.on('popupclose', e => { if (e.popup === vehPopup) { vehOpen = null; vehDetail = null; vehAsk++; } });
 buildWorld();
+drawVehicles();
+loadVehicles();
+zoomBand();
+drawTowns(); loadPlaces();
+drawEvents(); loadEvents();
+drawDeaths(); loadDeaths();
 poll();
 setInterval(poll, 1000);
 </script>
