@@ -1282,7 +1282,12 @@ function showCtx(e) {
 		'<div class="hd">' + Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z) + '</div>' + ctxTeleportList('Teleport here') +
 		'<div class="lbl">This spot</div>' + ctxItem('spawn', 'Spawn an item here…'),
 		a => {
-			if (a.startsWith('tp:')) { const p = byGuid[a.slice(3)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(3) + '/teleport', { x, z, y: 0 }); }
+			if (a.startsWith('tp:')) {
+				// Asked first: one slip in the list would move the wrong player.
+				const p = byGuid[a.slice(3)], who = p ? p.name : 'them';
+				if (!confirm('Teleport ' + who + ' to ' + Math.round(x) + ', ' + Math.round(z) + ' (' + grid(x, z) + ')?')) return;
+				ctxRun('Teleporting ' + who, '/api/mod/players/' + a.slice(3) + '/teleport', { x, z, y: 0 });
+			}
 			else if (a === 'spawn') { closeCtx(); openSpawnAt(x, z); }
 		});
 }
@@ -1325,7 +1330,11 @@ function showVehicleCtx(id, e) {
 			if (a === 'info') { closeCtx(); openVehicleInfo(id); }
 			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'vehicle', id }); }
 			// Beside it (3 m east), not on top of it.
-			else if (a.startsWith('tp:')) { const p = byGuid[a.slice(3)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(3) + '/teleport', { x: v.x + 3, z: v.z, y: 0 }); }
+			else if (a.startsWith('tp:')) {
+				const p = byGuid[a.slice(3)], who = p ? p.name : 'them';
+				if (!confirm('Teleport ' + who + ' beside this ' + catLabel(v) + '?')) return;
+				ctxRun('Teleporting ' + who, '/api/mod/players/' + a.slice(3) + '/teleport', { x: v.x + 3, z: v.z, y: 0 });
+			}
 			else if (a === 'delete') { closeCtx(); deleteVehicle(id); }
 		});
 }
