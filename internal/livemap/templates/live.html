@@ -71,6 +71,10 @@
 .vpop .acts button { margin: 0; padding: 4px 10px; font: inherit; font-size: 12.5px; color: #ddd; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; cursor: pointer; }
 .vpop .acts button:hover { background: #2a2f36; border-color: #8ab4f8; color: #fff; }
 .vpop .st { font-size: 12px; }
+/* A player's popup: their stats, then what they wear and hold. */
+.vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid #333; }
+.vpop .gear .row span:last-child { text-align: right; overflow-wrap: anywhere; }
+.vpop .muted { color: #888; font-size: 12px; }
 /* Town names: bigger for bigger places; zoomed out only the cities
    (#map's data-zb is far, mid or near). */
 .town { pointer-events: none; }
@@ -831,7 +835,7 @@ function drawMarkers() {
 		if (!m) {
 			const guid = p.guid;
 			m = L.marker([p.z, p.x], { icon: L.divIcon({ className: 'pmark', html: arrowSVG(colorOf(guid)) + '<span></span>', iconSize: [0, 0] }), keyboard: false });
-			m.on('click', () => openPlayer(guid));
+			m.on('click', () => openPlayerPopup(guid));
 			m.on('contextmenu', e => showPlayerCtx(guid, e));
 			m.addTo(map);
 			markers[guid] = m;
@@ -847,6 +851,7 @@ function drawMarkers() {
 	});
 	for (const g in markers) if (!seen[g]) { markers[g].remove(); delete markers[g]; }
 	if (track && track.kind === 'player') followTrack();
+	renderPlayerPopup(); // follows them, with their stats now
 }
 
 // fitAll shows the whole map in the window.
@@ -1495,9 +1500,55 @@ document.getElementById('plist').addEventListener('click', e => {
 });
 document.getElementById('find').addEventListener('input', renderList);
 
+// ---- A player's popup on the map ------------------------------------------
+// A click on a player opens their basic stats and what they wear and hold;
+// Info… opens their dialog. While it's open their gear is read every 2 s
+// (which also keeps ReCON asking the mod for it).
+
+const plPopup = L.popup({ autoPan: false, offset: [0, -6] });
+let plOpen = null, plInv = null;
+function openPlayerPopup(guid) {
+	map.closePopup(vehPopup);
+	plOpen = guid; plInv = null;
+	renderPlayerPopup();
+	plPopup.options.autoPan = true;
+	plPopup.openOn(map);
+	plPopup.options.autoPan = false;
+	loadPlayerPopup();
+}
+async function loadPlayerPopup() {
+	const g = plOpen;
+	if (!g) return;
+	try {
+		const d = await api('GET', '/api/mod/players/' + g);
+		if (g === plOpen) { plInv = d.inventory || null; renderPlayerPopup(); }
+	} catch (e) { }
+}
+setInterval(() => { if (plOpen) loadPlayerPopup(); }, 2000);
+function renderPlayerPopup() {
+	const p = plOpen && byGuid[plOpen];
+	if (!plOpen) return;
+	if (!p) { map.closePopup(plPopup); return; }
+	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
+	const pc = (v, max) => Math.round(Math.max(0, Math.min(100, 100 * v / max))) + '%';
+	const state = !p.alive ? 'Dead' : p.unconscious ? 'Unconscious' : p.restrained ? 'Restrained' : '';
+	let h = '<div class="vpop" data-noicon><h4>' + esc(p.name) + '</h4><div class="ty">' + grid(p.x, p.z) + ' · ' + Math.round(p.x) + ', ' + Math.round(p.z) + '</div>' +
+		(state ? row('State', state) : '') +
+		row('Health', pc(p.health, 100)) + row('Blood', pc(p.blood, 5000)) + row('Water', pc(p.water, 5000)) + row('Food', pc(p.energy, 5000)) +
+		(p.bleeding ? row('Bleeding', p.bleeding + (p.bleeding === 1 ? ' cut' : ' cuts')) : '') +
+		(p.vehicleName || p.vehicle ? row('In', esc(p.vehicleName || item(p.vehicle))) : '') +
+		'<div class="gear">';
+	const worn = plInv && (plInv.items || []).filter(it => it.slot).sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99));
+	if (worn) h += worn.length ? worn.map(it => row(slotLabel(it.slot), esc(itemName(it)))).join('') : '<div class="muted">Nothing worn or held</div>';
+	else h += (p.handsName || p.hands ? row('Hands', esc(p.handsName || item(p.hands))) : '') + '<div class="muted">Reading their gear…</div>';
+	h += '</div><div class="acts"><button type="button" onclick="event.stopPropagation(); openPlayer(\'' + p.guid + '\')" title="Their stats, inventory, spawning and actions">Info…</button></div></div>';
+	plPopup.setLatLng([p.z, p.x]).setContent(h);
+}
+
 // ---- A player's dialog --------------------------------------------------
 
 function openPlayer(guid) {
+	map.closePopup(plPopup);
 	resetMini();
 	calMode = false; calNote = '';
 	drag = null; pending = {}; staged = {};
@@ -2479,7 +2530,7 @@ for (const id of ['pModal', 'wModal', 'sModal', 'vModal']) document.getElementBy
 });
 
 initMap();
-map.on('popupclose', e => { if (e.popup === vehPopup) vehOpen = null; });
+map.on('popupclose', e => { if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
 buildWorld();
 drawVehicles();
 loadVehicles();
