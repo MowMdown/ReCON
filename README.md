@@ -256,16 +256,18 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
   cold colours) and comfort (the heat buff, with its +/++/+++ stage and the
   most their clothes allow), conditions with **Heal** and **Dry** (them and everything they carry) beside them, a
   mini-map of the 1 km around them, what's in hand, vehicle, kills and
-  deaths, and the actions: Teleport (to a spot, a mini-map click or
-  another player), Message and Kill. Each action's result shows below
-  them. The other tabs: **Inventory** (an item's condition can be set: pristine, worn, damaged, badly damaged or ruined), **Spawn item** (every item the server
+  deaths, and the actions: Teleport (to X and Y or a mini-map click, this
+  player to another, or another to this player; **Previous** sends them
+  back) and a message box. Each action's result shows below
+  them. The other tabs: **Inventory** (every equipment slot is always
+  listed, *Empty* when there's nothing in it; an item's condition can be set: pristine, worn, damaged, badly damaged or ruined), **Spawn item** (every item the server
   has loaded, on the ground in front of them, into their inventory (what
   doesn't fit goes on the ground) or into their empty hands; and its
   vehicles, modded ones too, which come whole with their parts and full
   fluids, one at a time, 8 m in front of them; the list fits the dialog's
   height) and **Kills & deaths**, the latest 100 they were in
   (when, who with what and how far, and where), with their all-time
-  totals. Each death says what killed them (a player, an infected, an
+  totals, and **Kill**. Each death says what killed them (a player, an infected, an
   animal, the environment: a fall, fire, drowning, cold, a vehicle, an
   explosion or a trap; an ailment: bleeding out, thirst, hunger or
   illness; a suicide or ReCON's Kill), with buttons to show only one kind.

@@ -277,6 +277,16 @@ table.dt a { color: #8ab4f8; text-decoration: none; cursor: pointer; }
 .pbox #fSpawn { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; flex: 1; min-height: 0; }
 .pbox #fSpawn .splist { flex: 1; min-height: 120px; max-height: none; }
 .pbox .killhead { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.pbox .killhead button { margin: 0 0 0 auto; font-size: 13px; }
+/* Teleport: three ways in a line (stacked when narrow), Teleport and
+   Previous on the right (below, side by side, when narrow). */
+#fTeleport { align-items: center; }
+#fTeleport .tpopts { flex: 1; display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; min-width: 0; }
+#fTeleport .tpopt { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+#fTeleport .tpopt input[type=radio] { margin: 0; padding: 0; accent-color: #8ab4f8; }
+#fTeleport .tpopt b { font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+#fTeleport .tpbtns { display: flex; gap: 8px; margin-left: auto; }
+@media (max-width: 900px) { #fTeleport .tpopts { flex-direction: column; align-items: flex-start; flex-basis: 100%; } #fTeleport .tpbtns { margin-left: 0; } }
 .pbox table.kills td.where { white-space: nowrap; color: #aaa; }
 .pbox table.kills td.k { white-space: nowrap; width: 1%; }
 .killkinds { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; }
@@ -307,6 +317,8 @@ html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-
 .irow { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 6px 10px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
 .irow:hover { border-color: #555; }
 .irow.sel { border-color: #8ab4f8; background: #1b2433; }
+/* A slot with nothing in it (every slot is always listed: no pop-in). */
+.irow.none { cursor: default; } .irow.none:hover { border-color: #333; } .irow.none .nm { color: #666; }
 .irow .sl { color: #999; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .irow .nm { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .irow .ex { color: #888; font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
@@ -416,22 +428,18 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 			<div class="tile"><div class="k">Vehicle</div><div class="v" id="tVehicle"></div></div>
 			<div class="tile"><div class="k">Kills / deaths</div><div class="v" id="tKD"></div><div class="s" id="tKDall"></div></div>
 		</div>
-		<div class="acts">
-			<button type="button" id="bMessage" onclick="showForm('message')">Message…</button>
-			<span class="sp"></span>
-			<button type="button" class="bad" onclick="killPlayer()">Kill</button>
-		</div>
 		<div class="form" id="fTeleport">
-			Teleport to <input id="tpX" size="6" inputmode="decimal" aria-label="X (east)"> , <input id="tpZ" size="6" inputmode="decimal" aria-label="Z (north)">
-			<span class="muted">or click the mini-map (double-click to go there now)</span>
-			<span class="muted">·</span> to player <select id="tpTo"></select>
-			<button type="button" id="bBring" onclick="doBring()" title="Teleport the player picked here to this player instead">Bring here</button>
-			<span class="grow"></span><button type="button" id="bBack" onclick="act('back')" disabled>Previous</button>
-			<button type="button" class="go" onclick="doTeleport()">Teleport</button>
+			<div class="tpopts">
+				<label class="tpopt" title="Or click the mini-map (double-click to go there now)"><input type="radio" name="tpMode" value="spot" checked> Teleport to
+					X: <input id="tpX" size="6" inputmode="decimal" aria-label="X (east)"> Y: <input id="tpZ" size="6" inputmode="decimal" aria-label="Y (north)"></label>
+				<label class="tpopt" title="This player goes to the player picked"><input type="radio" name="tpMode" value="to"> Teleport <b class="tpName"></b> → <select id="tpTo" aria-label="To player"></select></label>
+				<label class="tpopt" title="The player picked comes to this player"><input type="radio" name="tpMode" value="from"> Teleport <b class="tpName"></b> ← <select id="tpFrom" aria-label="Bring player"></select></label>
+			</div>
+			<div class="tpbtns"><button type="button" class="go" onclick="doTeleport()">Teleport</button><button type="button" id="bBack" onclick="act('back')" disabled>Previous</button></div>
 		</div>
-		<div class="form" id="fMessage" hidden>
+		<div class="form" id="fMessage">
 			<input id="msgText" class="grow" maxlength="500" placeholder="Message, shown on their screen" aria-label="Message">
-			<button type="button" class="go" onclick="doMessage()">Send</button><button type="button" onclick="showForm('')">Cancel</button>
+			<button type="button" class="go" onclick="doMessage()">Send</button>
 		</div>
 		</div>
 		<div class="ppane" data-ppane="inventory" hidden>
@@ -452,7 +460,7 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 		</div>
 		</div>
 		<div class="ppane" data-ppane="kills" hidden>
-		<h4 class="killhead">Kills and deaths <span class="muted" id="pKillSum"></span></h4>
+		<h4 class="killhead">Kills and deaths <span class="muted" id="pKillSum"></span><button type="button" class="bad" onclick="killPlayer()" title="Their character dies and they start again fresh">Kill</button></h4>
 		<div class="killkinds" id="pKillKinds" role="group" aria-label="Show only"></div>
 		<table class="dt kills"><tbody id="pKills"></tbody></table>
 		</div>
@@ -1780,10 +1788,13 @@ function renderPlayer() {
 		['tHands', 'tVehicle', 'tKD'].forEach(id => document.getElementById(id).textContent = '—');
 	}
 	document.getElementById('tKDall').textContent = detail && detail.kills != null ? detail.kills + ' / ' + detail.deaths + ' all time' : '';
-	// Teleport to: everyone else online.
-	const sel = document.getElementById('tpTo'), keep = sel.value;
+	// Teleport to or from: everyone else online.
 	const opts = '<option value="">—</option>' + players.filter(o => o.guid !== selGuid).map(o => '<option value="' + o.guid + '">' + esc(o.name) + '</option>').join('');
-	if (sel.getAttribute('data-opts') !== opts) { sel.innerHTML = opts; sel.setAttribute('data-opts', opts); sel.value = keep; }
+	for (const sel of [document.getElementById('tpTo'), document.getElementById('tpFrom')]) {
+		const keep = sel.value;
+		if (sel.getAttribute('data-opts') !== opts) { sel.innerHTML = opts; sel.setAttribute('data-opts', opts); sel.value = keep; }
+	}
+	document.querySelectorAll('#fTeleport .tpName').forEach(b => { b.textContent = p ? p.name : 'them'; });
 	renderLast();
 	// Previous: back to where they were before their last teleport.
 	const prev = detail && detail.previous, bb = document.getElementById('bBack');
@@ -1848,20 +1859,23 @@ function renderInv(p) {
 		det.innerHTML = '';
 		return;
 	}
+	// Every slot is always listed, empty or not (and while the inventory is
+	// still coming), so rows never pop in; slots DayZ has beyond these follow.
+	const items = inv ? (inv.items || []).slice().sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99)) : [];
+	const bySlot = {};
+	for (const it of items) bySlot[it.slot] = it;
+	const row = it => { const n = countIn(it); return irow(it, slotLabel(it.slot), n ? n + (n === 1 ? ' item' : ' items') : qty(it)); };
+	list.innerHTML = SLOTS.map(([slot, label]) => bySlot[slot] ? row(bySlot[slot])
+		: '<div class="irow none"><span class="sl">' + label + '</span><span class="nm">' + (inv ? 'Empty' : '…') + '</span><span class="ex"></span></div>').join('') +
+		items.filter(it => SLOT_RANK[it.slot] == null).map(row).join('');
 	if (!inv) {
-		when.textContent = '';
-		list.innerHTML = '<div class="empty">' + (Date.now() - invAsked > 10000
-			? 'recon-mod hasn\'t sent their inventory. The mod on the server may be a version without it.'
-			: 'Asking recon-mod for their inventory…') + '</div>';
+		when.textContent = Date.now() - invAsked > 10000
+			? '· recon-mod hasn\'t sent their inventory (the mod on the server may be a version without it)'
+			: '· asking recon-mod…';
 		det.innerHTML = '';
 		return;
 	}
 	when.textContent = '· updated ' + Math.max(0, Math.round((Date.now() - new Date(inv.at)) / 1000)) + ' s ago';
-	const items = (inv.items || []).slice().sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99));
-	list.innerHTML = items.length ? items.map(it => {
-		const n = countIn(it);
-		return irow(it, slotLabel(it.slot), n ? n + (n === 1 ? ' item' : ' items') : qty(it));
-	}).join('') : '<div class="empty">They carry nothing.</div>';
 
 	const path = invSel != null ? pathTo(items, invSel) : null;
 	if (!path) {
@@ -2122,7 +2136,7 @@ function endMiniDrag(e, pick) {
 	tpPick = [at.x, at.z];
 	document.getElementById('tpX').value = Math.round(at.x);
 	document.getElementById('tpZ').value = Math.round(at.z);
-	document.getElementById('tpTo').value = '';
+	setTpMode('spot');
 	renderPlayer();
 }
 miniEl.addEventListener('pointerup', e => endMiniDrag(e, true));
@@ -2216,12 +2230,8 @@ miniEl.addEventListener('wheel', e => {
 }, { passive: false });
 document.getElementById('miniFollow').addEventListener('click', () => { mini.follow = true; mini.span = MINI_HOME; redrawMini(); });
 
+// showForm('message') puts the cursor in the message box (always shown).
 function showForm(name) {
-	for (const [f, b] of [['Message', 'bMessage']]) {
-		const on = f.toLowerCase() === name;
-		document.getElementById('f' + f).hidden = !on;
-		document.getElementById(b).classList.toggle('on', on);
-	}
 	if (name === 'message') document.getElementById('msgText').focus();
 }
 
@@ -2359,24 +2369,35 @@ function killPlayer() {
 	const p = byGuid[selGuid];
 	if (confirm('Kill ' + (p ? p.name : 'this player') + '? Their character dies and they start again fresh.')) act('kill');
 }
-// The teleport panel is always open; it empties after each teleport.
+// The teleport panel is always open; it empties after each teleport. Its
+// three ways: to a spot (typed, or a mini-map click), this player to
+// another (to), or another to this player (from). Typing or picking in one
+// selects it.
+function tpMode() { const r = document.querySelector('#fTeleport input[name=tpMode]:checked'); return r ? r.value : 'spot'; }
+function setTpMode(m) { document.querySelector('#fTeleport input[name=tpMode][value=' + m + ']').checked = true; }
 function clearTeleport() {
 	tpPick = null;
-	for (const id of ['tpX', 'tpZ', 'tpTo']) document.getElementById(id).value = '';
+	for (const id of ['tpX', 'tpZ', 'tpTo', 'tpFrom']) document.getElementById(id).value = '';
+	setTpMode('spot');
+}
+for (const [id, m] of [['tpX', 'spot'], ['tpZ', 'spot'], ['tpTo', 'to'], ['tpFrom', 'from']]) {
+	const el = document.getElementById(id);
+	el.addEventListener('focus', () => setTpMode(m));
+	el.addEventListener('input', () => setTpMode(m));
 }
 function doTeleport() {
-	const to = document.getElementById('tpTo').value;
-	if (to) { act('teleportTo', { target: to }).then(ok => { if (ok) clearTeleport(); }); return; }
+	const err = document.getElementById('pErr'), m = tpMode();
+	if (m === 'to' || m === 'from') {
+		const other = document.getElementById(m === 'to' ? 'tpTo' : 'tpFrom').value;
+		if (!other) { err.textContent = 'Pick a player.'; return; }
+		const done = ok => { if (ok) clearTeleport(); };
+		if (m === 'to') act('teleportTo', { target: other }).then(done);
+		else act('teleportTo', { target: selGuid }, false, other).then(done);
+		return;
+	}
 	const x = parseFloat(document.getElementById('tpX').value), z = parseFloat(document.getElementById('tpZ').value);
-	if (!(x > 0) || !(z > 0)) { document.getElementById('pErr').textContent = 'Enter where to (x and z, in metres), click the mini-map, or pick a player.'; return; }
+	if (!(x > 0) || !(z > 0)) { err.textContent = 'Enter where to (X and Y, in metres) or click the mini-map.'; return; }
 	act('teleport', { x, z, y: 0 }).then(ok => { if (ok) clearTeleport(); });
-}
-// doBring is "to player" the other way round: the player picked there is
-// teleported to the player in the dialog.
-function doBring() {
-	const from = document.getElementById('tpTo').value;
-	if (!from) { document.getElementById('pErr').textContent = 'Pick a player under "to player" to bring here.'; return; }
-	act('teleportTo', { target: selGuid }, false, from).then(ok => { if (ok) clearTeleport(); });
 }
 function doMessage() {
 	const t = document.getElementById('msgText').value.trim();
