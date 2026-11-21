@@ -88,9 +88,10 @@ html[data-theme]:not([data-theme="default"]) {
 .vpop .acts button:hover { background: var(--lm-sel); border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vpop .st { font-size: 12px; }
 /* A player's popup: their stats two to a line (label, value, label, value). */
-.vpop .stats2 { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 1px 8px; align-items: baseline; }
+.vpop .stats2 { display: grid; grid-template-columns: auto 1fr auto auto 1fr; gap: 1px 8px; align-items: baseline; }
 .vpop .stats2 .k { color: var(--lm-muted); }
-.vpop .stats2 .v { text-align: right; padding-right: 6px; }
+.vpop .stats2 .v { text-align: right; }
+.vpop .stats2 .sep { color: var(--lm-faint); }
 /* A player's popup: their stats, then what they wear and hold. */
 .vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--lm-line); }
 .vpop .gear .row span:last-child { text-align: right; overflow-wrap: anywhere; }
@@ -1927,9 +1928,9 @@ function renderPlayerPopup() {
 	const state = !p.alive ? 'Dead' : p.unconscious ? 'Unconscious' : p.restrained ? 'Restrained' : '';
 	let h = '<div class="vpop" data-noicon><h4>' + esc(p.name) + '</h4><div class="ty">' + grid(p.x, p.z) + ' · ' + Math.round(p.x) + ', ' + Math.round(p.z) + '</div>' +
 		(state ? row('State', state) : '') +
-		// Two to a line: Health and Blood, then Water and Food.
-		'<div class="stats2">' + [['Health', pc(p.health, 100)], ['Blood', pc(p.blood, 5000)], ['Water', pc(p.water, 5000)], ['Food', pc(p.energy, 5000)]]
-			.map(([k, v]) => '<span class="k">' + k + '</span><span class="v">' + v + '</span>').join('') + '</div>' +
+		// Two to a line: Health | Food, then Blood | Water.
+		'<div class="stats2">' + [[['Health', pc(p.health, 100)], ['Food', pc(p.energy, 5000)]], [['Blood', pc(p.blood, 5000)], ['Water', pc(p.water, 5000)]]]
+			.map(([[k1, v1], [k2, v2]]) => '<span class="k">' + k1 + '</span><span class="v">' + v1 + '</span><span class="sep">|</span><span class="k">' + k2 + '</span><span class="v">' + v2 + '</span>').join('') + '</div>' +
 		(p.bleeding ? row('Bleeding', p.bleeding + (p.bleeding === 1 ? ' cut' : ' cuts')) : '') +
 		(p.vehicleName || p.vehicle ? row('In', esc(p.vehicleName || item(p.vehicle))) : '') +
 		'<div class="gear">';
