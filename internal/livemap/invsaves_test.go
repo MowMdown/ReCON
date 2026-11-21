@@ -65,3 +65,48 @@ func TestSavesCleanup(t *testing.T) {
 		t.Errorf("kept past %v: %d", keepSaves, n)
 	}
 }
+
+func TestRestorePrunesTree(t *testing.T) {
+	// The bag (1) without its apple (2); the magazine (4) without its rifle (3).
+	roots := pruneSelected(deathItems, map[int]bool{1: true, 4: true})
+	if len(roots) != 2 || roots[0].ID != 1 || len(roots[0].Cargo) != 0 || roots[1].ID != 4 {
+		t.Errorf("roots %+v", roots)
+	}
+	// The rifle with its magazine: one root carrying it.
+	roots = pruneSelected(deathItems, map[int]bool{3: true, 4: true})
+	if len(roots) != 1 || roots[0].ID != 3 || len(roots[0].Attachments) != 1 {
+		t.Errorf("rifle %+v", roots)
+	}
+}
+
+func TestRestoreRecords(t *testing.T) {
+	now, die := deathSync(t, deathItems)
+	die()
+	a := PlayerState{SteamID: steamA, Name: "A", Alive: true}
+	Sync(syncReq(a), now)
+	id := InventorySaves(guid(steamA))[0].ID
+	c, err := RestoreSaved(id, []int{1, 2}, now)
+	if err != nil || c.Action != "restore" || c.Text == "" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	s, _ := InventorySave(id)
+	if !reflect.DeepEqual(s.RestoredIDs, []int{1, 2}) || s.Restored != 2 {
+		t.Errorf("restored %v", s.RestoredIDs)
+	}
+	RestoreSaved(id, []int{2, 3}, now)
+	if s, _ := InventorySave(id); !reflect.DeepEqual(s.RestoredIDs, []int{1, 2, 3}) {
+		t.Errorf("after a second restore %v", s.RestoredIDs)
+	}
+}
+
+func TestRestoreNeedsSelectionAndPlayer(t *testing.T) {
+	now, die := deathSync(t, deathItems)
+	die()
+	id := InventorySaves(guid(steamA))[0].ID
+	if _, err := RestoreSaved(id, nil, now); err == nil {
+		t.Error("restored nothing without an error")
+	}
+	if _, err := RestoreSaved(id, []int{1}, now); err == nil {
+		t.Error("restored to a player who isn't online") // deathSync has nobody online
+	}
+}

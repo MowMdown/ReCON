@@ -78,6 +78,7 @@ func Start(h Host) error {
 	h.AddRoute("GET /api/mod/vehicles", handleModVehicles)                         // every vehicle on the server
 	h.AddRoute("GET /api/mod/worldevents", handleModWorldEvents)                   // helicopter crashes and toxic zones
 	h.AddRoute("GET /api/mod/players/{guid}/saves", handleModSaves)                // their inventories saved at death
+	h.AddRoute("POST /api/mod/saves/{id}/restore", handleModRestore)               // {"items": [ids]}: give those back (mod 1.0.1 on)
 	h.AddRoute("GET /api/mod/saves/{id}", handleModSave)                           // one, with its items
 	h.AddRoute("GET /api/mod/placed", handleModPlaced)                             // the objects players placed
 	h.AddRoute("GET /api/mod/placed/{id}", handleModPlacedOne)                     // one, with what is in it (?ask=1)

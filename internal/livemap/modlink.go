@@ -897,7 +897,7 @@ var (
 	// back is a teleport to where they were before the last one.
 	// spawn puts Value (1 to maxSpawn) of the item class Text in front of them.
 	// Shock, stamina and temperature are read only.
-	Actions  = map[string]bool{"heal": true, "dry": true, "kill": true, "teleport": true, "teleportTo": true, "back": true, "set": true, "message": true, "spawn": true, "condition": true}
+	Actions  = map[string]bool{"heal": true, "dry": true, "kill": true, "teleport": true, "teleportTo": true, "back": true, "set": true, "message": true, "spawn": true, "condition": true, "restore": true}
 	StatMaxs = map[string]float64{"health": 100, "blood": 5000, "water": 5000, "energy": 5000, "heatBuffer": 30}
 )
 
@@ -920,6 +920,11 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 	case "teleport":
 		if c.X <= 0 || c.Z <= 0 {
 			return CommandStatus{}, errors.New("pick where to teleport them")
+		}
+	case "restore":
+		// Text is the items to give back, as JSON (invsaves.go; mod 1.0.1 on).
+		if strings.TrimSpace(c.Text) == "" {
+			return CommandStatus{}, errors.New("pick the items to give back")
 		}
 	case "spawn":
 		c.Text = strings.TrimSpace(c.Text)

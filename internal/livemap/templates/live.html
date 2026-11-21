@@ -177,6 +177,17 @@ html[data-theme]:not([data-theme="default"]) {
 .ovmenu .ovsub { display: flex; flex-direction: column; gap: 1px; padding-left: 18px; }
 .ovmenu .ovsub[hidden] { display: none; }
 .mapbar .ovmenu .ovsub button { padding: 3px 8px; font-size: 12px; }
+/* Restore: a saved inventory as a tree of tick boxes. */
+#rModal .rbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+#rModal .rbar .sp { flex: 1; }
+#rModal .rtree { max-height: 60vh; overflow-y: auto; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; }
+#rModal .rkids { padding-left: 22px; }
+#rModal label.rn { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; cursor: pointer; }
+#rModal label.rn input { margin: 0; accent-color: var(--lm-accent); }
+#rModal label.rn .sl { color: var(--lm-muted); font-size: 12px; min-width: 64px; }
+#rModal label.rn .ex { color: var(--lm-muted); font-size: 12px; }
+#rModal label.rn .done { color: var(--lm-faint); font-size: 11px; border: 1px solid var(--lm-line); border-radius: 4px; padding: 0 5px; }
+#pKills button.rs { margin: 0; padding: 2px 8px; font-size: 12px; }
 /* A placed object: a small square in the colour of its condition. */
 .omark svg { position: absolute; left: -5px; top: -5px; overflow: visible; cursor: pointer; }
 /* The grid's lines: the theme's border colour lit with its accent, so they
@@ -541,6 +552,18 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="sub" id="vType"></span></div>
 		<div id="vBody"></div>
 		<div class="dfoot"><div class="acts" id="vActs"></div><button type="button" onclick="closeVehicleInfo()">Close</button></div>
+	</div>
+</div>
+
+<!-- Give back chosen items from an inventory saved at death (Restore… on a death) -->
+<div id="rModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="rTitle" style="width:min(820px, 95vw)">
+		<div class="dlg-head"><h2 id="rTitle">Restore items</h2><span class="sub" id="rSub"></span></div>
+		<div class="rbar"><button type="button" id="rAll">Select all</button><button type="button" id="rNone">Deselect all</button><span class="sp"></span><span class="muted" id="rCount"></span></div>
+		<div class="rtree" id="rTree"></div>
+		<div class="dlg-err" id="rErr"></div>
+		<div class="dfoot"><span class="muted">Only the ticked items are given back: into their slots and containers, or their inventory, or on the ground at their feet.</span>
+			<span><button type="button" class="go" id="rGo">Restore selected</button><button type="button" onclick="closeRestore()">Close</button></span></div>
 	</div>
 </div>
 
@@ -1298,6 +1321,63 @@ function drawPredators() {
 	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
 }
 setInterval(loadPredators, 2000);
+
+// ---- Restore: give back chosen items from an inventory saved at death -----
+// Nothing is ticked at first. Ticking a container or a weapon ticks what is
+// in and on it (each can be unticked again); a ticked item without its
+// container comes back on its own. Items given back already are marked, and
+// Select all leaves them out.
+let restoreSave = null;
+async function openRestore(id) {
+	const tree = document.getElementById('rTree');
+	restoreSave = null;
+	document.getElementById('rErr').textContent = '';
+	tree.innerHTML = '<div class="muted">Loading…</div>';
+	document.getElementById('rModal').style.display = 'flex';
+	try { restoreSave = (await api('GET', '/api/mod/saves/' + id)).save; }
+	catch (e) { tree.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; return; }
+	const s = restoreSave, p = byGuid[s.guid];
+	document.getElementById('rSub').textContent = (p ? p.name + ' · ' : '') + 'saved at death ' + new Date(s.at).toLocaleString();
+	const done = new Set(s.restoredIds || []);
+	const node = it => {
+		const kids = (it.attachments || []).concat(it.cargo || []);
+		const extra = qty(it);
+		return '<div class="rnode"><label class="rn"><input type="checkbox" data-id="' + it.id + '"' + (done.has(it.id) ? ' data-done="1"' : '') + '>' +
+			(it.slot ? '<span class="sl">' + esc(slotLabel(it.slot)) + '</span>' : '') + '<span>' + esc(itemName(it)) + '</span>' +
+			(extra ? '<span class="ex">' + esc(extra) + '</span>' : '') + (done.has(it.id) ? '<span class="done">given back</span>' : '') + '</label>' +
+			(kids.length ? '<div class="rkids">' + kids.map(node).join('') + '</div>' : '') + '</div>';
+	};
+	tree.innerHTML = (s.items || []).length ? s.items.map(node).join('') : '<div class="empty">Nothing was saved.</div>';
+	restoreCount();
+}
+function closeRestore() { document.getElementById('rModal').style.display = 'none'; restoreSave = null; }
+function restoreCount() {
+	const all = document.querySelectorAll('#rTree input'), on = document.querySelectorAll('#rTree input:checked');
+	document.getElementById('rCount').textContent = on.length + ' of ' + all.length + ' items selected';
+	document.getElementById('rGo').disabled = !on.length;
+}
+document.getElementById('rTree').addEventListener('change', e => {
+	const box = e.target.closest('input[data-id]');
+	if (!box) return;
+	// What is in and on it follows it.
+	box.closest('.rnode').querySelectorAll('.rkids input').forEach(c => { c.checked = box.checked; });
+	restoreCount();
+});
+document.getElementById('rAll').addEventListener('click', () => { document.querySelectorAll('#rTree input').forEach(c => { c.checked = !c.dataset.done; }); restoreCount(); });
+document.getElementById('rNone').addEventListener('click', () => { document.querySelectorAll('#rTree input').forEach(c => { c.checked = false; }); restoreCount(); });
+document.getElementById('rGo').addEventListener('click', async () => {
+	const s = restoreSave;
+	if (!s) return;
+	const picked = [...document.querySelectorAll('#rTree input:checked')].map(c => +c.dataset.id);
+	const p = byGuid[s.guid], err = document.getElementById('rErr');
+	if (!picked.length || !confirm('Give back ' + picked.length + (picked.length === 1 ? ' item' : ' items') + ' to ' + (p ? p.name : 'them') + '?')) return;
+	err.textContent = '';
+	try { await api('POST', '/api/mod/saves/' + s.id + '/restore', { items: picked }); }
+	catch (e) { err.textContent = e.message; return; }
+	closeRestore();
+	poll();
+	loadDetail();
+});
 
 // Placed objects: what players placed (recon-mod 1.0.1 on), every 30 s,
 // filtered by kind. Thousands are possible, so markers are drawn only for
@@ -2231,6 +2311,7 @@ function cmdText(c) {
 		case 'date': return 'In-game time ' + c.year + '-' + pad(c.month) + '-' + pad(c.day) + ' ' + pad(c.hour) + ':' + pad(c.minute);
 		case 'freezeTime': return c.value ? 'Freeze time' : 'Unfreeze time';
 		case 'deleteVehicle': return 'Delete a vehicle';
+		case 'restore': return 'Restore saved items';
 		case 'removeEntity': return 'Remove ' + esc(c.stat ? item(c.stat) : 'an object');
 		case 'spawnAt': return 'Spawn ' + (c.value > 1 ? c.value + ' × ' : '') + esc(catalogBy[c.text] ? catName(catalogBy[c.text]) : c.text) + ' at ' + Math.round(c.x) + ', ' + Math.round(c.z);
 	}
@@ -2317,7 +2398,11 @@ function renderKills() {
 		if (cause !== 'illness' && kind !== 'kill' && k.illnesses && k.illnesses.length) t += ' <span class="muted">· had ' + esc(k.illnesses.join(', ')) + '</span>';
 		const chip = KIND_CHIP[kind];
 		const where = k.x || k.z ? grid(k.x, k.z) + ' <span class="muted">' + Math.round(k.x) + ', ' + Math.round(k.z) + '</span>' : '';
-		return '<tr><td class="t">' + when + '</td><td class="k"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></td><td>' + t + '</td><td class="where">' + where + '</td></tr>';
+		// Their own death with the inventory saved: Restore….
+		const save = k.victimGuid === selGuid && (detail.saves || []).find(sv => sv.killId === k.id);
+		const rs = save ? ' <button type="button" class="rs" data-save="' + save.id + '" title="Give back chosen items from what they had (' + save.items + ' items' +
+			(save.restored ? ', ' + save.restored + ' given back already' : '') + ')">Restore…</button>' : '';
+		return '<tr><td class="t">' + when + '</td><td class="k"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></td><td>' + t + rs + '</td><td class="where">' + where + '</td></tr>';
 	}).join('');
 }
 document.getElementById('pKillKinds').addEventListener('click', e => {
@@ -2327,6 +2412,8 @@ document.getElementById('pKillKinds').addEventListener('click', e => {
 	renderKills();
 });
 document.getElementById('pKills').addEventListener('click', e => {
+	const rb = e.target.closest('[data-save]');
+	if (rb) { openRestore(+rb.dataset.save); return; }
 	const a = e.target.closest('a[data-guid]');
 	if (!a) return;
 	const g = a.getAttribute('data-guid');
@@ -2857,13 +2944,14 @@ document.addEventListener('keydown', e => {
 	if (pickSend) { endPick(); return; }
 	if (document.getElementById('sModal').style.display === 'flex') { closeSpawnAt(); return; }
 	if (document.getElementById('vModal').style.display === 'flex') { closeVehicleInfo(); return; }
+	if (document.getElementById('rModal').style.display === 'flex') { closeRestore(); return; }
 	if (document.getElementById('oModal').style.display === 'flex') { closePlacedInfo(); return; }
 	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
 	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
-for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'oModal']) document.getElementById(id).addEventListener('mousedown', e => {
-	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'oModal') closePlacedInfo(); else closeWorld(); }
+for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'oModal', 'rModal']) document.getElementById(id).addEventListener('mousedown', e => {
+	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'oModal') closePlacedInfo(); else if (id === 'rModal') closeRestore(); else closeWorld(); }
 });
 
 initMap();

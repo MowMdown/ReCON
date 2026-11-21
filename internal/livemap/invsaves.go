@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -188,4 +189,103 @@ func handleModSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "save": s})
+}
+
+// pruneSelected is what to give back from a saved inventory: each selected
+// item with its selected attachments and contents. A selected item whose
+// container or parent wasn't selected comes back on its own (loose).
+func pruneSelected(items []Item, sel map[int]bool) []Item {
+	kept, loose := pruneItems(items, sel)
+	return append(kept, loose...)
+}
+
+func pruneItems(items []Item, sel map[int]bool) (kept, loose []Item) {
+	for _, it := range items {
+		ka, la := pruneItems(it.Attachments, sel)
+		kc, lc := pruneItems(it.Cargo, sel)
+		if sel[it.ID] {
+			c := it
+			c.Attachments, c.Cargo = ka, kc
+			kept = append(kept, c)
+			loose = append(append(loose, la...), lc...)
+		} else {
+			loose = append(append(append(append(loose, ka...), kc...), la...), lc...)
+		}
+	}
+	return kept, loose
+}
+
+// RestoreSaved gives the player back the selected items (by id) from a
+// saved inventory, and notes them as given back. They must be online.
+func RestoreSaved(id int64, itemIDs []int, now time.Time) (CommandStatus, error) {
+	if len(itemIDs) == 0 {
+		return CommandStatus{}, errors.New("pick the items to give back")
+	}
+	s, err := InventorySave(id)
+	if err != nil {
+		return CommandStatus{}, err
+	}
+	sel := map[int]bool{}
+	for _, i := range itemIDs {
+		sel[i] = true
+	}
+	tree := pruneSelected(s.Items, sel)
+	if len(tree) == 0 {
+		return CommandStatus{}, errors.New("none of those items are in that saved inventory")
+	}
+	data, err := json.Marshal(tree)
+	if err != nil {
+		return CommandStatus{}, err
+	}
+	c, err := Queue(s.GUID, Command{Action: "restore", Text: string(data)}, now)
+	if err != nil {
+		return c, err
+	}
+	done := map[int]bool{}
+	all := []int{}
+	for _, i := range append(s.RestoredIDs, ids(tree)...) {
+		if !done[i] {
+			done[i] = true
+			all = append(all, i)
+		}
+	}
+	sort.Ints(all)
+	rec, _ := json.Marshal(all)
+	if _, err := db.Exec(`UPDATE inventory_saves SET restored = ? WHERE id = ?`, string(rec), id); err != nil {
+		log.Printf("recon-mod: noting a restore: %v", err)
+	}
+	log.Printf("recon-mod: restoring %d items to %s from their inventory saved %s", countItems(tree), s.GUID, s.At.Format(time.DateTime))
+	return c, nil
+}
+
+func ids(items []Item) []int {
+	var out []int
+	for _, it := range items {
+		out = append(out, it.ID)
+		out = append(out, ids(it.Attachments)...)
+		out = append(out, ids(it.Cargo)...)
+	}
+	return out
+}
+
+// handleModRestore serves POST /api/mod/saves/{id}/restore {"items": [ids]}.
+func handleModRestore(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct {
+		Items []int `json:"items"`
+	}
+	if err := decodeBody(w, r, &req, 1<<20); err != nil {
+		fail(w, http.StatusBadRequest, "bad JSON")
+		return
+	}
+	c, err := RestoreSaved(id, req.Items, time.Now())
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "command": c})
 }
