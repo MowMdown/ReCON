@@ -377,6 +377,11 @@ html[data-theme]:not([data-theme="default"]) .prow, html[data-theme]:not([data-t
 html[data-theme]:not([data-theme="default"]) .form, html[data-theme]:not([data-theme="default"]) .mapwrap,
 html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-theme="default"]) .chip,
 html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: var(--color-divider); }
+/* A toggled button (Vehicles, Towns... on) looks like the theme's hovered
+   one: its accent for the text and border, over a tint of it. */
+html[data-theme]:not([data-theme="default"]) .mapbar button.on, html[data-theme]:not([data-theme="default"]) .minihud button.on,
+html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-theme]:not([data-theme="default"]) button.on:not(.ptabs button):not(.setcond button) {
+	color: var(--color-accent) !important; border-color: var(--color-accent) !important; background: color-mix(in srgb, var(--color-accent) 12%, transparent) !important; }
 </style>
 {{template "theme" .}}
 </head>
