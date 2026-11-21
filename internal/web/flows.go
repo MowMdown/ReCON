@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/MowMdown/ReCON/internal/flows"
+	"github.com/MowMdown/ReCON/internal/livemap"
 )
 
 func handleFlowsList(w http.ResponseWriter, r *http.Request) {
@@ -263,10 +265,14 @@ func handleFlowReorder(w http.ResponseWriter, r *http.Request) {
 
 // handleChatCommandsGet serves GET /api/chat-commands: every command with
 // its labels, defaults and allowed placeholders ("commands"), and the
-// current settings.
+// current settings; whether recon-mod is connected, and the vehicles on the
+// server that the map's vehicles.json doesn't have yet.
 func handleChatCommandsGet(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	st, _ := livemap.Current(now)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "commands": flows.ChatCommandDefs,
-		"settings": flows.CurrentChatSettings(), "defaults": flows.DefaultChatSettings()})
+		"settings": flows.CurrentChatSettings(), "defaults": flows.DefaultChatSettings(),
+		"modConnected": st.Connected, "vehicleWorld": strings.ToLower(st.World), "unlistedVehicles": livemap.UnlistedVehicles(now)})
 }
 
 // handleChatCommandsSave serves POST /api/chat-commands {"settings": {...}}.

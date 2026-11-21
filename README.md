@@ -481,15 +481,23 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 | `!kick <code or number> <reason>` | Mods, Admins | Kicks that player |
 | `!ban <code or number> <reason>` | Mods, Admins | Bans that player permanently; by code, even if they've left |
 | `!warning <code or number> <reason>` | Mods, Admins | Warns that player (see below) |
+| `!car`, `!truck`, `!boat`, `!vehicle <name> [colour]` | Mods, Admins | Spawns that vehicle whole in front of them (needs recon-mod; see below). Alone, lists the names |
 
 - **Code or number:** a player's code is the last 6 characters of their GUID (they can type `!code`); their number is the one `!players` shows (`12` or `#12`).
 - **Roles** are set on the Players page, under **Details → Role**, and are stored with the player's GUID, so they survive a name change. New players are Players.
 - Mods can kick, ban and warn Players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
 - Every mod and admin online is told about each kick, ban and warning. With **Announce** on, everyone is told.
 - **Warnings:** each `!warning` is sent to the player with its reason and adds one to their warnings. Warnings are counted per visit: they start again at 0 when the player leaves. The warning that reaches the threshold (**Warnings until**, 2 by default, 1 or more) is followed 5 seconds later by a kick or a permanent ban with that warning's reason, whichever the **Kick / Ban** setting next to it says at that moment, and the count starts again.
-- Only a command that works gets a reply. A typo, a cooldown or a missing permission is silently ignored, though the line still appears in the player's chat history.
+- Only a command that works gets a reply. A typo, a cooldown or a missing permission is silently ignored, though the line still appears in the player's chat history. The vehicle commands are the exception: they say why they couldn't spawn one.
+- **Vehicles** (`!car olga black`) come from the map's `maps/<map>/vehicles.json` in ReCON's data folder: category (`car`, `truck`, `boat`, `vehicle`), then a short name, then colours, each naming a class:
 
-**Chat commands** on the Flows page turns each command on or off, sets its cooldown and edits the wording of everything ReCON sends. Cooldowns are server-wide: once anyone uses a command, it's ignored for everyone until the time is up.
+  ```json
+  {"car": {"olga": {"default": "CivilianSedan", "black": "CivilianSedan_Black"}}}
+  ```
+
+  No colour picks `default`, or a random colour if there's none. Case never matters. The first time recon-mod connects on a map with no file, ReCON writes one from the server's vehicles: colours grouped by display name, the name's first word as the short name, `boat` and `truck` by class name, DayZ's own five cars under `car`, and everything else under `vehicle`. ReCON never changes the file after that; edit it to rename, move or add vehicles, and the next command uses it. The **Chat commands** dialog lists vehicles on the server that the file doesn't have yet. Without recon-mod, no file is made, `!help` doesn't list these commands, and typing one answers that recon-mod isn't running.
+
+**Chat commands** on the Flows page (a tab for everyone's commands and one for Mods & Admins) turns each command on or off, sets its cooldown and edits the wording of everything ReCON sends. Cooldowns are server-wide: once anyone uses a command, it's ignored for everyone until the time is up.
 
 | Chat command settings | Role |
 | :---: | :---: |

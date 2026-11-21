@@ -719,3 +719,31 @@ func TestServerSettingsRoutes(t *testing.T) {
 		t.Errorf("save: %d %s", code, body)
 	}
 }
+
+// TestChatCommandsGetHasVehicleFields checks GET /api/chat-commands says
+// whether the mod is connected, lists the vehicles missing from the map's
+// vehicles.json, and marks the vehicle commands as needing the mod.
+func TestChatCommandsGetHasVehicleFields(t *testing.T) {
+	testDB(t)
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/chat-commands", nil))
+	var out struct {
+		ModConnected     *bool             `json:"modConnected"`
+		UnlistedVehicles []json.RawMessage `json:"unlistedVehicles"`
+		Commands         []struct {
+			Cmd      string `json:"cmd"`
+			NeedsMod bool   `json:"needsMod"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.ModConnected == nil || *out.ModConnected || out.UnlistedVehicles == nil || len(out.UnlistedVehicles) != 0 {
+		t.Errorf("got %s", rec.Body.String())
+	}
+	for _, c := range out.Commands {
+		if c.Cmd == "car" && !c.NeedsMod {
+			t.Error("!car doesn't need the mod")
+		}
+	}
+}
