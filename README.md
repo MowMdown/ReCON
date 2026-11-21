@@ -254,14 +254,23 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
   DayZ's HUD colours (white, yellow, red, blinking red at the same
   thresholds as the game), shock, stamina, temperature (the game's hot and
   cold colours) and comfort (the heat buff, with its +/++/+++ stage and the
-  most their clothes allow), conditions with **Heal** beside them, a
+  most their clothes allow), conditions with **Heal** and **Dry** (them and everything they carry) beside them, a
   mini-map of the 1 km around them, what's in hand, vehicle, kills and
   deaths, and the actions: Teleport (to a spot, a mini-map click or
   another player), Message and Kill. Each action's result shows below
-  them. The other tabs: **Inventory**, **Spawn item** (its list fits the
-  dialog's height) and **Kills & deaths**, the latest 100 they were in
+  them. The other tabs: **Inventory** (an item's condition can be set: pristine, worn, damaged, badly damaged or ruined), **Spawn item** (every item the server
+  has loaded, on the ground in front of them, into their inventory (what
+  doesn't fit goes on the ground) or into their empty hands; and its
+  vehicles, modded ones too, which come whole with their parts and full
+  fluids, one at a time, 8 m in front of them; the list fits the dialog's
+  height) and **Kills & deaths**, the latest 100 they were in
   (when, who with what and how far, and where), with their all-time
-  totals.
+  totals. Each death says what killed them (a player, an infected, an
+  animal, the environment: a fall, fire, drowning, cold, a vehicle, an
+  explosion or a trap; an ailment: bleeding out, thirst, hunger or
+  illness; a suicide or ReCON's Kill), with buttons to show only one kind.
+  That needs recon-mod 0.0.1h or later; older deaths say only who killed
+  them.
 - **World…** sets the in-game date and time, freezes the clock, and sets the
   weather: overcast, rain, fog, snow, wind speed and direction, and
   lightning, with presets (Clear, Cloudy, Rain, Thunderstorm, Fog, Snow),
@@ -663,11 +672,11 @@ ReCON stores every death the mod reports (its own `mod_kills` table) and the Ste
 | ------ | ---- | ---- | ----------- |
 | POST | `/api/mod/sync` | the mod's sync | Used by the mod only: player data in, commands out (403 with the wrong password) |
 | GET  | `/api/mod/players` | | `mod` (`connected`, `lastSync`, `world`, in-game `date`), every online player's live state with their `guid`, and the recent commands |
-| GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills` (the latest 100), and the commands sent to them |
+| GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills` (the latest 100, each with its `cause` and `illnesses`), and the commands sent to them |
 | POST | `/api/mod/players/<guid>/<action>` | see below | Queue an action. The mod runs it on its next sync; its `status` (`queued`, `sent`, `done`, `failed`, `expired`) shows in the commands |
 | POST | `/api/mod/world/<action>` | see below | Queue a weather or time change, the same way |
 
-Actions: `heal` (full health, blood, shock, food and water; stops bleeding, cures illnesses, mends broken legs), `kill`, `teleport` `{"x", "z", "y"}` (`y` 0 = ground level), `teleportTo` `{"target": "<guid>"}`, `set` `{"stat": "health|blood|water|energy|heatBuffer", "value"}` (shock, stamina and temperature are read only), `message` `{"text", "title", "seconds"}`. A command the mod hasn't answered within 30 seconds expires.
+Actions: `heal` (full health, blood, shock, food and water; stops bleeding, cures illnesses, mends broken legs), `kill`, `teleport` `{"x", "z", "y"}` (`y` 0 = ground level), `teleportTo` `{"target": "<guid>"}`, `set` `{"stat": "health|blood|water|energy|heatBuffer", "value"}` (shock, stamina and temperature are read only), `message` `{"text", "title", "seconds"}`, `dry`, `condition` `{"text": "<item id>", "value": 0-4}` (0 pristine to 4 ruined), `spawn` `{"text": "<class>", "value": 1-20, "stat": "ground|inventory|hands"}` (a vehicle: one, whole, on the ground; hands: one). A command the mod hasn't answered within 30 seconds expires.
 
 World actions, modelled on Community Online Tools' weather module (`mod.weather` in `/api/mod/players` shows the weather now and where it is heading):
 

@@ -195,7 +195,7 @@ func TestKillsAndSteamIDsStored(t *testing.T) {
 	req.Events = []Event{
 		{Type: "kill", Victim: steamB, VictimName: "b", Killer: steamA, KillerName: "a", Weapon: "M4A1", Distance: 120},
 		{Type: "kill", Victim: steamA, VictimName: "a", Killer: steamA, KillerName: "a", Weapon: "Grenade"},
-		{Type: "kill", Victim: steamA, VictimName: "a", Weapon: "ZmbM_Soldier"},
+		{Type: "kill", Victim: steamA, VictimName: "a", Weapon: "ZmbM_Soldier", Cause: "infected", Agents: 1<<0 | 1<<6},
 	}
 	if _, err := Sync(req, now); err != nil {
 		t.Fatal(err)
@@ -213,6 +213,39 @@ func TestKillsAndSteamIDsStored(t *testing.T) {
 	recent, err := killsOf(guid(steamA), 10)
 	if err != nil || len(recent) != 3 || recent[0].Weapon != "ZmbM_Soldier" || recent[0].KillerGUID != "" {
 		t.Errorf("recent %+v %v", recent, err)
+	}
+	if k := recent[0]; k.Cause != "infected" || !reflect.DeepEqual(k.Illnesses, []string{"cholera", "wound infection"}) {
+		t.Errorf("the cause: %q %v", k.Cause, k.Illnesses)
+	}
+	if k := recent[2]; k.Cause != "" || len(k.Illnesses) != 0 {
+		t.Errorf("an older mod's death: %q %v", k.Cause, k.Illnesses)
+	}
+}
+
+// A database from before the causes gets the new columns, and keeps its kills.
+func TestKillsTableUpgrade(t *testing.T) {
+	d, err := sql.Open("sqlite", "file::memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.SetMaxOpenConns(1)
+	t.Cleanup(func() { d.Close() })
+	if _, err := d.Exec(`CREATE TABLE mod_kills (id INTEGER PRIMARY KEY AUTOINCREMENT, at DATETIME NOT NULL,
+		victim_guid TEXT NOT NULL, victim_name TEXT NOT NULL, killer_guid TEXT NOT NULL, killer_name TEXT NOT NULL,
+		weapon TEXT NOT NULL, distance REAL NOT NULL, x REAL NOT NULL, z REAL NOT NULL);
+		INSERT INTO mod_kills (at, victim_guid, victim_name, killer_guid, killer_name, weapon, distance, x, z)
+		VALUES ('2026-11-01 10:00:00', 'g1', 'old', '', '', 'SurvivorM_Oliver', 0, 1, 2)`); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // and again, with the columns there
+		if err := openKills(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addKill(Kill{At: time.Now(), VictimGUID: "g1", VictimName: "new", Cause: "fall"})
+	ks, err := killsOf("g1", 10)
+	if err != nil || len(ks) != 2 || ks[0].Cause != "fall" || ks[1].Cause != "" || ks[1].Weapon != "SurvivorM_Oliver" {
+		t.Errorf("%+v %v", ks, err)
 	}
 }
 
@@ -397,7 +430,7 @@ func TestCatalogPagesAndSpawn(t *testing.T) {
 	now := time.Now()
 	a := PlayerState{SteamID: steamA, Name: "A", Alive: true}
 	all := []CatalogItem{{Type: "AKM", Name: "AKM", Kind: "weapon"}, {Type: "Apple", Name: "Apple", Kind: "item"},
-		{Type: "Mag_AKM_30Rnd", Name: "$STR_untranslated", Kind: "magazine"}}
+		{Type: "Mag_AKM_30Rnd", Name: "$STR_untranslated", Kind: "magazine"}, {Type: "OffroadHatchback", Name: "Gunter 2", Kind: "vehicle"}}
 	req := func(at int, items ...CatalogItem) SyncRequest {
 		r := syncReq(a)
 		r.CatalogTotal, r.CatalogAt, r.Catalog = len(all), at, items
@@ -422,15 +455,15 @@ func TestCatalogPagesAndSpawn(t *testing.T) {
 		t.Fatalf("next %d after a resend, want 3", reply.CatalogNext)
 	}
 	if _, complete := Catalog(now); complete {
-		t.Fatal("complete with 2 of 3")
+		t.Fatal("complete with 2 of 4")
 	}
-	reply, _ = Sync(req(2, all[2]), now)
+	reply, _ = Sync(req(2, all[2], all[3]), now)
 	items, complete := Catalog(now)
-	if reply.CatalogNext != 0 || !complete || len(items) != 3 {
+	if reply.CatalogNext != 0 || !complete || len(items) != 4 {
 		t.Fatalf("next %d, complete %v, %d items", reply.CatalogNext, complete, len(items))
 	}
 	// Sorted by name; an untranslated name sorts by its class name.
-	if items[0].Type != "AKM" || items[1].Type != "Apple" || items[2].Type != "Mag_AKM_30Rnd" {
+	if items[0].Type != "AKM" || items[1].Type != "Apple" || items[2].Type != "OffroadHatchback" || items[3].Type != "Mag_AKM_30Rnd" {
 		t.Fatalf("order %+v", items)
 	}
 
@@ -444,6 +477,30 @@ func TestCatalogPagesAndSpawn(t *testing.T) {
 	cs, err := Queue(guid(steamA), Command{Action: "spawn", Text: " Apple ", Value: 5}, now)
 	if err != nil || cs.Text != "Apple" || cs.Value != 5 || cs.SteamID != steamA {
 		t.Fatalf("spawn %+v, %v", cs, err)
+	}
+	if cs, err := Queue(guid(steamA), Command{Action: "spawn", Text: "OffroadHatchback", Value: 5, Stat: "hands"}, now); err != nil || cs.Value != 1 || cs.Stat != "" {
+		t.Errorf("a vehicle: %+v, %v; want one, on the ground", cs, err)
+	}
+	if cs, err := Queue(guid(steamA), Command{Action: "spawn", Text: "AKM", Value: 3, Stat: "hands"}, now); err != nil || cs.Value != 1 || cs.Stat != "hands" {
+		t.Errorf("into hands: %+v, %v; want one", cs, err)
+	}
+	if cs, err := Queue(guid(steamA), Command{Action: "spawn", Text: "Apple", Value: 3, Stat: "inventory"}, now); err != nil || cs.Value != 3 || cs.Stat != "inventory" {
+		t.Errorf("into the inventory: %+v, %v", cs, err)
+	}
+	if _, err := Queue(guid(steamA), Command{Action: "spawn", Text: "Apple", Value: 1, Stat: "pocket"}, now); err == nil {
+		t.Error("spawned somewhere unknown")
+	}
+	if _, err := Queue(guid(steamA), Command{Action: "dry"}, now); err != nil {
+		t.Errorf("dry: %v", err)
+	}
+	if cs, err := Queue(guid(steamA), Command{Action: "condition", Text: "4242", Value: 4}, now); err != nil || cs.Text != "4242" || cs.Value != 4 {
+		t.Errorf("condition: %+v, %v", cs, err)
+	}
+	for _, bad := range []Command{{Text: "", Value: 1}, {Text: "x", Value: 1}, {Text: "1", Value: 5}, {Text: "1", Value: -1}, {Text: "1", Value: 1.5}} {
+		bad.Action = "condition"
+		if _, err := Queue(guid(steamA), bad, now); err == nil {
+			t.Errorf("condition %q %v accepted", bad.Text, bad.Value)
+		}
 	}
 
 	// The server restarts with another mod list: it is fetched again.

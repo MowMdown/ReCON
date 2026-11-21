@@ -68,7 +68,7 @@ type SyncRequest struct {
 type CatalogItem struct {
 	Type string `json:"type"`
 	Name string `json:"name"`
-	Kind string `json:"kind"` // weapon, magazine, ammo, clothing or item
+	Kind string `json:"kind"` // weapon, magazine, ammo, clothing, vehicle or item
 }
 
 // PlayerState is one player as the mod reads them (ReCON_PlayerState).
@@ -168,6 +168,8 @@ type Event struct {
 	Killer     string  `json:"killer"`
 	KillerName string  `json:"killerName"`
 	Weapon     string  `json:"weapon"`
+	Cause      string  `json:"cause"`  // what killed them (from mod 0.0.1h; see Kill.Cause)
+	Agents     int     `json:"agents"` // the illnesses they had (eAgents bits)
 	Distance   float64 `json:"distance"`
 	X          float64 `json:"x"`
 	Y          float64 `json:"y"`
@@ -407,7 +409,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 				continue
 			}
 			k := Kill{At: now, VictimName: e.VictimName, KillerName: e.KillerName,
-				Weapon: e.Weapon, Distance: e.Distance, X: e.X, Z: e.Z}
+				Weapon: e.Weapon, Cause: e.Cause, Agents: e.Agents, Distance: e.Distance, X: e.X, Z: e.Z}
 			k.VictimGUID = guidOf(e.Victim)
 			k.KillerGUID = guidOf(e.Killer)
 			if err := addKill(k); err != nil {
@@ -609,7 +611,7 @@ var (
 	// back is a teleport to where they were before the last one.
 	// spawn puts Value (1 to maxSpawn) of the item class Text in front of them.
 	// Shock, stamina and temperature are read only.
-	Actions  = map[string]bool{"heal": true, "kill": true, "teleport": true, "teleportTo": true, "back": true, "set": true, "message": true, "spawn": true}
+	Actions  = map[string]bool{"heal": true, "dry": true, "kill": true, "teleport": true, "teleportTo": true, "back": true, "set": true, "message": true, "spawn": true, "condition": true}
 	StatMaxs = map[string]float64{"health": 100, "blood": 5000, "water": 5000, "energy": 5000, "heatBuffer": 30}
 )
 
@@ -640,6 +642,26 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 		}
 		if c.Value != float64(int(c.Value)) || c.Value < 1 || c.Value > maxSpawn {
 			return CommandStatus{}, errors.New("spawn 1 to " + strconv.Itoa(maxSpawn) + " at a time")
+		}
+		// Where it goes rides in Stat: ground (""), inventory or hands
+		// (one). A mod before 0.0.1h puts everything on the ground.
+		switch c.Stat {
+		case "", "ground":
+			c.Stat = ""
+		case "inventory":
+		case "hands":
+			c.Value = 1
+		default:
+			return CommandStatus{}, errors.New("spawn on the ground, in their inventory or in their hands")
+		}
+	case "condition":
+		// Text is the item's id (ReCON_Item.id), Value its condition: 0
+		// pristine, 1 worn, 2 damaged, 3 badly damaged, 4 ruined.
+		if _, err := strconv.Atoi(c.Text); err != nil {
+			return CommandStatus{}, errors.New("pick an item")
+		}
+		if c.Value != float64(int(c.Value)) || c.Value < 0 || c.Value > 4 {
+			return CommandStatus{}, errors.New("pick a condition: pristine, worn, damaged, badly damaged or ruined")
 		}
 	case "message":
 		c.Text = strings.TrimSpace(c.Text)
@@ -673,8 +695,12 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 		if state.catalogTypes == nil {
 			return CommandStatus{}, errors.New("the item list hasn't come in from the mod yet")
 		}
-		if _, ok := state.catalogTypes[c.Text]; !ok {
+		it, ok := state.catalogTypes[c.Text]
+		if !ok {
 			return CommandStatus{}, errors.New(c.Text + " isn't an item the server can spawn")
+		}
+		if it.Kind == "vehicle" {
+			c.Value, c.Stat = 1, "" // whole, one at a time, in front of them
 		}
 	case "back":
 		prev, ok := state.previous[guid]

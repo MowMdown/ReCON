@@ -27,10 +27,39 @@ CREATE TABLE IF NOT EXISTS mod_kills (
 CREATE INDEX IF NOT EXISTS idx_mod_kills_victim ON mod_kills(victim_guid);
 CREATE INDEX IF NOT EXISTS idx_mod_kills_killer ON mod_kills(killer_guid);`
 
-// openKills creates the table if needed and uses d from then on.
+// killsColumns are columns added since the table was made, added to it if
+// it hasn't them yet.
+var killsColumns = []struct{ name, def string }{
+	{"cause", "TEXT NOT NULL DEFAULT ''"},
+	{"agents", "INTEGER NOT NULL DEFAULT 0"},
+}
+
+// openKills creates the table if needed (or adds the columns it lacks) and
+// uses d from then on.
 func openKills(d *sql.DB) error {
 	if _, err := d.Exec(killsSchema); err != nil {
 		return err
+	}
+	have := map[string]bool{}
+	rows, err := d.Query(`SELECT name FROM pragma_table_info('mod_kills')`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return err
+		}
+		have[n] = true
+	}
+	rows.Close()
+	for _, c := range killsColumns {
+		if !have[c.name] {
+			if _, err := d.Exec(`ALTER TABLE mod_kills ADD COLUMN ` + c.name + ` ` + c.def); err != nil {
+				return err
+			}
+		}
 	}
 	db = d
 	return nil
@@ -44,16 +73,23 @@ type Kill struct {
 	KillerGUID string    `json:"killerGuid"` // "" for the environment, an infected or an animal
 	KillerName string    `json:"killerName"`
 	Weapon     string    `json:"weapon"` // class name: a weapon, a vehicle, an infected...
-	Distance   float64   `json:"distance"`
-	X          float64   `json:"x"`
-	Z          float64   `json:"z"`
+	// Cause is what killed them, as the mod (0.0.1h on) tells it: player,
+	// suicide, admin, vehicle, infected, animal, explosion, trap, fall,
+	// fire, drowned, bleeding, dehydration, starvation, cold, illness; ""
+	// when it couldn't tell, or the death came from an older mod.
+	Cause     string   `json:"cause"`
+	Agents    int      `json:"-"`
+	Illnesses []string `json:"illnesses"` // what Agents names
+	Distance  float64  `json:"distance"`
+	X         float64  `json:"x"`
+	Z         float64  `json:"z"`
 }
 
 // addKill stores a death.
 func addKill(k Kill) error {
-	_, err := db.Exec(`INSERT INTO mod_kills (at, victim_guid, victim_name, killer_guid, killer_name, weapon, distance, x, z)
-		VALUES (?, lower(?), ?, lower(?), ?, ?, ?, ?, ?)`,
-		k.At, k.VictimGUID, k.VictimName, k.KillerGUID, k.KillerName, k.Weapon, k.Distance, k.X, k.Z)
+	_, err := db.Exec(`INSERT INTO mod_kills (at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z)
+		VALUES (?, lower(?), ?, lower(?), ?, ?, ?, ?, ?, ?, ?)`,
+		k.At, k.VictimGUID, k.VictimName, k.KillerGUID, k.KillerName, k.Weapon, k.Cause, k.Agents, k.Distance, k.X, k.Z)
 	return err
 }
 
@@ -68,7 +104,7 @@ func killCounts(guid string) (kills, deaths int, err error) {
 // killsOf is the latest limit deaths a player was in, as killer or victim,
 // newest first.
 func killsOf(guid string, limit int) ([]Kill, error) {
-	rows, err := db.Query(`SELECT at, victim_guid, victim_name, killer_guid, killer_name, weapon, distance, x, z
+	rows, err := db.Query(`SELECT at, victim_guid, victim_name, killer_guid, killer_name, weapon, cause, agents, distance, x, z
 		FROM mod_kills WHERE victim_guid = lower(?1) OR killer_guid = lower(?1) ORDER BY id DESC LIMIT ?2`, guid, limit)
 	if err != nil {
 		return nil, err
@@ -77,9 +113,10 @@ func killsOf(guid string, limit int) ([]Kill, error) {
 	out := []Kill{}
 	for rows.Next() {
 		var k Kill
-		if err := rows.Scan(&k.At, &k.VictimGUID, &k.VictimName, &k.KillerGUID, &k.KillerName, &k.Weapon, &k.Distance, &k.X, &k.Z); err != nil {
+		if err := rows.Scan(&k.At, &k.VictimGUID, &k.VictimName, &k.KillerGUID, &k.KillerName, &k.Weapon, &k.Cause, &k.Agents, &k.Distance, &k.X, &k.Z); err != nil {
 			return nil, err
 		}
+		k.Illnesses = Illnesses(k.Agents)
 		out = append(out, k)
 	}
 	return out, rows.Err()

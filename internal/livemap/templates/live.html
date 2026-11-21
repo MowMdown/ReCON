@@ -202,6 +202,12 @@ table.dt a { color: #8ab4f8; text-decoration: none; cursor: pointer; }
 .pbox #fSpawn .splist { flex: 1; min-height: 120px; max-height: none; }
 .pbox .killhead { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
 .pbox table.kills td.where { white-space: nowrap; color: #aaa; }
+.pbox table.kills td.k { white-space: nowrap; width: 1%; }
+.killkinds { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; }
+.killkinds button { margin: 0; padding: 2px 10px; font-size: 12px; border-radius: 10px; background: transparent; border: 1px solid #444; color: #aaa; }
+.killkinds button.on { border-color: #8ab4f8; color: #fff; }
+.killkinds button:disabled { opacity: .35; }
+.chip.violet { border-color: #5b3f7a; color: #c58af9; }
 /* The stats fill the height beside the mini-map: taller bars, more room. */
 .pbox .bars { gap: 12.5px; padding-top: 4px; }
 .pbox .bar { grid-template-columns: 84px minmax(0, 1fr) 150px; font-size: 14.5px; }
@@ -214,6 +220,7 @@ table.dt a { color: #8ab4f8; text-decoration: none; cursor: pointer; }
 .pbox .ailrow { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; }
 .pbox .ailrow .chips { flex: 1; margin-top: 0; }
 .pbox .ailrow button { margin: 0; flex: none; }
+.pbox .ailrow button + button { margin-left: -4px; }
 @media (max-width: 900px) { .pbox .statgrid { grid-template-columns: minmax(0, 1fr); } .pbox #mini { width: 100%; height: auto; aspect-ratio: 1; } }
 .ppane > h4:first-child { margin-top: 0; }
 html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-divider); }
@@ -235,6 +242,11 @@ html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-
 .idet .ty { color: #888; font-size: 12px; font-family: ui-monospace, Consolas, monospace; margin: 2px 0 10px; overflow-wrap: anywhere; }
 .props { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 5px 10px; }
 .props .k { color: #999; }
+.idet .setcond { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 10px; }
+.idet .setcond .k { color: #888; margin-right: 6px; }
+.idet .setcond button { margin: 0; padding: 2px 9px; font-size: 12px; border-radius: 10px; background: transparent; border: 1px solid #444; color: var(--c); }
+.idet .setcond button:hover { border-color: var(--c); }
+.idet .setcond button.on { border-color: var(--c); background: #222; }
 .idet h5 { margin: 14px 0 5px; font-size: 12px; color: #ccc; font-weight: 600; }
 .sub-items { display: flex; flex-direction: column; gap: 3px; }
 .sub-items .irow { background: #141414; padding: 5px 9px; }
@@ -305,7 +317,7 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 			<div>
 				<div class="bars" id="pBars"></div>
 				<div id="pSave"></div>
-				<div class="ailrow"><div class="chips" id="pChips"></div><button type="button" class="go" onclick="act('heal')" title="Full health, blood, shock, food, water and stamina; stops bleeding, cures illnesses, mends broken legs and wakes them">Heal</button></div>
+				<div class="ailrow"><div class="chips" id="pChips"></div><button type="button" class="go" onclick="act('heal')" title="Full health, blood, shock, food, water and stamina; stops bleeding, cures illnesses, mends broken legs and wakes them">Heal</button><button type="button" onclick="act('dry')" title="Make them and everything they carry dry">Dry</button></div>
 			</div>
 			<div class="miniwrap">
 				<canvas id="miniCv" aria-hidden="true"></canvas><svg id="mini" viewBox="0 0 260 260" role="img" aria-label="The map around the player: drag to move, scroll to zoom, click to pick a teleport spot, double-click to teleport there"><g id="miniG"></g></svg>
@@ -345,16 +357,18 @@ html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: va
 		<div class="form stats" id="fSpawn">
 			<div class="inl"><input id="spFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
 				<select id="spKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
-					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="item">Other items</option></select></div>
+					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="item">Other items</option></select></div>
 			<div class="spaz" id="spAZ" role="group" aria-label="Jump to a letter"></div>
 			<div class="splist" id="spList"></div>
 			<div class="setfoot"><span class="muted" id="spPick"></span><span class="grow"></span>
+				<select id="spWhere" aria-label="Where"><option value="ground">On the ground</option><option value="inventory">In their inventory</option><option value="hands">In their hands</option></select>
 				<span>Count</span><input id="spCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
 				<button type="button" class="go" onclick="doSpawn()">Spawn</button></div>
 		</div>
 		</div>
 		<div class="ppane" data-ppane="kills" hidden>
 		<h4 class="killhead">Kills and deaths <span class="muted" id="pKillSum"></span></h4>
+		<div class="killkinds" id="pKillKinds" role="group" aria-label="Show only"></div>
 		<table class="dt kills"><tbody id="pKills"></tbody></table>
 		</div>
 		<div class="dlg-err" id="pErr"></div>
@@ -1089,6 +1103,15 @@ function pathTo(items, id) {
 	}
 	return null;
 }
+// findItem is the item with that id anywhere in items, or null.
+function findItem(items, id) {
+	for (const it of items) {
+		if (it.id === id) return it;
+		const f = findItem((it.attachments || []).concat(it.cargo || []), id);
+		if (f) return f;
+	}
+	return null;
+}
 function irow(it, label, extra) {
 	const [cn, cc] = condOf(it);
 	return '<button type="button" class="irow' + (it.id === invSel ? ' sel' : '') + '" data-item="' + it.id + '">' +
@@ -1138,6 +1161,10 @@ function renderInv(p) {
 	props.push(['Wetness', it.wet > 0 ? Math.round(100 * it.wet) + '%' : 'Dry']);
 	props.push(['Temperature', (Math.round(it.temperature * 10) / 10) + ' °C']);
 	h += props.map(([k, v]) => '<span class="k">' + k + '</span><span>' + (k === 'Condition' ? v : esc(v)) + '</span>').join('') + '</div>';
+	// Set its condition: DayZ's five levels, the one it is at marked.
+	const lvl = Math.max(0, Math.min(4, it.healthLevel | 0));
+	h += '<div class="setcond"><span class="k">Set condition</span>' + CONDITION.map(([n, c], i) =>
+		'<button type="button" data-cond="' + i + '" data-cond-item="' + it.id + '" style="--c:' + c + '"' + (i === lvl ? ' class="on" aria-pressed="true"' : '') + '>' + n + '</button>').join('') + '</div>';
 	const att = it.attachments || [], cargo = (it.cargo || []).slice().sort((a, b) => a.row - b.row || a.col - b.col);
 	h += '<h5>Attachments' + (att.length ? ' · ' + att.length : '') + '</h5>' + (att.length
 		? '<div class="sub-items">' + att.map(a => irow(a, slotLabel(a.slot), qty(a))).join('') + '</div>' : '<div class="muted">None</div>');
@@ -1149,6 +1176,11 @@ function renderInv(p) {
 	det.innerHTML = h;
 }
 document.getElementById('pModal').addEventListener('click', e => {
+	const c = e.target.closest('[data-cond]');
+	if (c) {
+		act('condition', { text: c.getAttribute('data-cond-item'), value: +c.getAttribute('data-cond') }, true);
+		return;
+	}
 	const t = e.target.closest('[data-item]');
 	if (!t) return;
 	invSel = +t.getAttribute('data-item');
@@ -1159,12 +1191,17 @@ const STAT_TEXT = { health: 'health', blood: 'blood', shock: 'shock', water: 'wa
 function cmdText(c) {
 	switch (c.action) {
 		case 'heal': return 'Heal';
+		case 'dry': return 'Dry';
 		case 'kill': return 'Kill';
 		case 'teleport': return (c.back ? 'Teleport back to ' : 'Teleport to ') + grid(c.x, c.z);
 		case 'teleportTo': { const t = players.find(o => o.steamId === c.target); return 'Teleport to ' + (t ? esc(t.name) : 'a player'); }
 		case 'set': return 'Set ' + (STAT_TEXT[c.stat] || esc(c.stat)) + ' to ' + c.value;
 		case 'message': return 'Message “' + esc(c.text) + '”';
-		case 'spawn': return 'Spawn ' + (c.value > 1 ? c.value + ' × ' : '') + esc(catalogBy[c.text] ? catName(catalogBy[c.text]) : c.text);
+		case 'condition': {
+			const found = detail && detail.inventory && findItem(detail.inventory.items || [], +c.text);
+			return 'Set ' + (found ? esc(itemName(found)) : 'an item') + ' to ' + (CONDITION[c.value] ? CONDITION[c.value][0].toLowerCase() : c.value);
+		}
+		case 'spawn': return 'Spawn ' + (c.value > 1 ? c.value + ' × ' : '') + esc(catalogBy[c.text] ? catName(catalogBy[c.text]) : c.text) + (c.stat === 'hands' ? ' in their hands' : c.stat === 'inventory' ? ' in their inventory' : '');
 		case 'weather': return (STAT_TEXT[c.stat] || esc(c.stat))[0].toUpperCase() + (STAT_TEXT[c.stat] || esc(c.stat)).slice(1) + ' → ' +
 			(c.stat === 'windSpeed' ? c.value + ' m/s' : c.stat === 'windDir' ? compass(c.value) + ' ' + c.value + '°' : Math.round(c.value * 100) + '%');
 		case 'weatherMode': return 'Weather follows ' + ({ world: "the map's rules", forecast: "only what's set", static: 'nothing (frozen)' })[c.text];
@@ -1195,27 +1232,76 @@ function renderLast() {
 	el.innerHTML = 'Last action: ' + text + ' · ' + statusHTML(bad || open || batch[0]) +
 		' <span class="muted">' + new Date(batch[0].queued).toLocaleTimeString() + '</span>';
 }
+// What killed them (a kill's cause, from mod 0.0.1h): its kind and the
+// words for it.
+const CAUSES = {
+	player: ['player'], infected: ['infected', 'Killed by an infected'], animal: ['animal', 'Killed by an animal'],
+	vehicle: ['env', 'Hit by a vehicle'], explosion: ['env', 'Blown up'], trap: ['env', 'Caught in a trap'],
+	fall: ['env', 'Fell to their death'], fire: ['env', 'Burned to death'], drowned: ['env', 'Drowned'], cold: ['env', 'Froze to death'],
+	bleeding: ['ailment', 'Bled out'], dehydration: ['ailment', 'Died of thirst'], starvation: ['ailment', 'Starved to death'], illness: ['ailment', 'Died of illness'],
+	suicide: ['other', 'Killed themselves'], admin: ['other', 'Killed by an admin (ReCON)'],
+};
+const KILL_KINDS = [['', 'All'], ['kill', 'Kills'], ['player', 'By players'], ['infected', 'Infected'], ['animal', 'Animals'],
+	['env', 'Environment'], ['ailment', 'Ailments'], ['other', 'Other']];
+const KIND_CHIP = { kill: ['red', 'Kill'], player: ['red', 'Player'], infected: ['amber', 'Infected'], animal: ['amber', 'Animal'],
+	env: ['blue', 'Environment'], ailment: ['violet', 'Ailment'], other: ['', 'Other'] };
+let killKind = '';
+// causeOf is what killed them; for a death from before mod 0.0.1h, as
+// much as who killed them and with what tells.
+function causeOf(k) {
+	if (k.cause) return k.cause;
+	if (k.killerGuid && k.killerGuid !== k.victimGuid) return 'player';
+	if (/^Zmb/i.test(k.weapon)) return 'infected';
+	if (/^Animal_/i.test(k.weapon)) return 'animal';
+	if (k.killerGuid && k.weapon && !/^Survivor/i.test(k.weapon)) return 'suicide';
+	return '';
+}
+// killKindOf is the row's kind: the player's own kill, or what killed them.
+function killKindOf(k) {
+	if (k.killerGuid === selGuid && k.victimGuid !== selGuid) return 'kill';
+	const c = CAUSES[causeOf(k)];
+	return c ? c[0] : 'other';
+}
 function renderKills() {
 	const tb = document.getElementById('pKills');
-	const ks = detail && detail.recentKills || [];
+	const all = detail && detail.recentKills || [];
+	const counts = {};
+	all.forEach(k => { const n = killKindOf(k); counts[n] = (counts[n] || 0) + 1; });
+	const kinds = document.getElementById('pKillKinds');
+	const kh = KILL_KINDS.map(([v, t]) => '<button type="button" data-kind="' + v + '"' + (v === killKind ? ' class="on"' : '') +
+		(v && !counts[v] ? ' disabled' : '') + '>' + t + (v ? ' ' + (counts[v] || 0) : '') + '</button>').join('');
+	if (kinds.getAttribute('data-h') !== kh) { kinds.innerHTML = kh; kinds.setAttribute('data-h', kh); }
+	const ks = killKind ? all.filter(k => killKindOf(k) === killKind) : all;
 	const sum = document.getElementById('pKillSum');
 	sum.textContent = detail && detail.kills != null
 		? detail.kills + (detail.kills === 1 ? ' kill, ' : ' kills, ') + detail.deaths + (detail.deaths === 1 ? ' death' : ' deaths') + ' all time' + (ks.length >= 100 ? ' · the latest 100' : '')
 		: '';
-	if (!ks.length) { tb.innerHTML = '<tr><td class="muted">None recorded.</td></tr>'; return; }
+	if (!ks.length) { tb.innerHTML = '<tr><td class="muted">' + (all.length ? 'None of these.' : 'None recorded.') + '</td></tr>'; return; }
 	const link = (g, n) => g ? '<a data-guid="' + g + '">' + esc(n) + '</a>' : esc(n);
 	tb.innerHTML = ks.map(k => {
 		const d = new Date(k.at), when = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 		const w = k.weapon ? item(k.weapon) : 'something', far = k.distance ? ' at ' + Math.round(k.distance) + ' m' : '';
+		const cause = causeOf(k), kind = killKindOf(k), c = CAUSES[cause];
+		// The weapon, unless it is only their own body (an older mod's report).
+		const wpn = k.weapon && !/^Survivor/i.test(k.weapon) ? ' (' + esc(w) + ')' : '';
 		let t;
-		if (k.killerGuid && k.killerGuid === k.victimGuid) t = 'Killed themselves' + (k.weapon ? ' (' + esc(w) + ')' : '');
-		else if (k.killerGuid === selGuid) t = 'Killed ' + link(k.victimGuid, k.victimName || 'someone') + ' with ' + esc(w) + far;
-		else if (k.killerGuid) t = 'Killed by ' + link(k.killerGuid, k.killerName) + ' with ' + esc(w) + far;
-		else t = 'Died' + (k.weapon ? ' (' + esc(w) + ')' : '');
+		if (kind === 'kill') t = 'Killed ' + link(k.victimGuid, k.victimName || 'someone') + ' with ' + esc(w) + far;
+		else if (cause === 'player') t = 'Killed by ' + link(k.killerGuid, k.killerName || 'a player') + (k.weapon ? ' with ' + esc(w) : '') + far;
+		else if (cause === 'vehicle' && k.killerGuid) t = 'Run over by ' + link(k.killerGuid, k.killerName) + wpn;
+		else if (c) t = c[1] + (cause === 'illness' && k.illnesses && k.illnesses.length ? ': ' + esc(k.illnesses.join(', ')) : wpn);
+		else t = 'Died' + wpn;
+		if (cause !== 'illness' && kind !== 'kill' && k.illnesses && k.illnesses.length) t += ' <span class="muted">· had ' + esc(k.illnesses.join(', ')) + '</span>';
+		const chip = KIND_CHIP[kind];
 		const where = k.x || k.z ? grid(k.x, k.z) + ' <span class="muted">' + Math.round(k.x) + ', ' + Math.round(k.z) + '</span>' : '';
-		return '<tr><td class="t">' + when + '</td><td>' + t + '</td><td class="where">' + where + '</td></tr>';
+		return '<tr><td class="t">' + when + '</td><td class="k"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></td><td>' + t + '</td><td class="where">' + where + '</td></tr>';
 	}).join('');
 }
+document.getElementById('pKillKinds').addEventListener('click', e => {
+	const b = e.target.closest('[data-kind]');
+	if (!b || b.disabled) return;
+	killKind = b.dataset.kind;
+	renderKills();
+});
 document.getElementById('pKills').addEventListener('click', e => {
 	const a = e.target.closest('a[data-guid]');
 	if (!a) return;
@@ -1439,7 +1525,7 @@ document.getElementById('pTabs').addEventListener('click', e => {
 // ---- Spawn item: every item the server has loaded, on the ground --------
 
 let catalog = null, catalogBy = {}, spSel = null;
-const KIND_TEXT = { weapon: 'Weapon', magazine: 'Magazine', ammo: 'Ammo', clothing: 'Clothing', item: 'Item' };
+const KIND_TEXT = { weapon: 'Weapon', magazine: 'Magazine', ammo: 'Ammo', clothing: 'Clothing', vehicle: 'Vehicle', item: 'Item' };
 function catName(it) { return it.name && it.name[0] !== '$' ? it.name : item(it.type); }
 async function loadItems() {
 	if (catalog) { renderItems(); return; }
@@ -1486,8 +1572,21 @@ document.getElementById('spAZ').addEventListener('click', e => {
 });
 function renderPick() {
 	const it = spSel && catalogBy[spSel];
-	document.getElementById('spPick').textContent = it ? catName(it) + ', on the ground in front of them' : (catalog ? catalog.length.toLocaleString() + ' items · pick one' : '');
+	const vehicle = it && it.kind === 'vehicle';
+	const whereEl = document.getElementById('spWhere'), where = vehicle ? 'ground' : whereEl.value;
+	const WHERE_TEXT = { ground: ', on the ground in front of them', inventory: ', into their inventory (what doesn\'t fit goes on the ground)', hands: ', into their hands (they must be empty)' };
+	document.getElementById('spPick').textContent = it
+		? catName(it) + (vehicle ? ', whole (parts and fluids), 8 m in front of them' : WHERE_TEXT[where])
+		: (catalog ? catalog.length.toLocaleString() + ' items · pick one' : '');
+	// A vehicle goes in front of them, and it and anything for their hands
+	// come one at a time.
+	if (vehicle) whereEl.value = 'ground';
+	whereEl.disabled = !!vehicle;
+	const one = vehicle || where === 'hands', cnt = document.getElementById('spCount');
+	if (one) cnt.value = 1;
+	cnt.disabled = one;
 }
+document.getElementById('spWhere').addEventListener('change', renderPick);
 document.getElementById('spFind').addEventListener('input', renderItems);
 document.getElementById('spKind').addEventListener('change', renderItems);
 document.getElementById('spList').addEventListener('click', e => {
@@ -1504,7 +1603,7 @@ function doSpawn() {
 	if (!spSel) { err.textContent = 'Pick an item to spawn.'; return; }
 	const n = parseInt(document.getElementById('spCount').value, 10);
 	if (!(n >= 1 && n <= 20)) { err.textContent = 'Spawn 1 to 20 at a time.'; return; }
-	act('spawn', { text: spSel, value: n }, true); // stays open for the next item
+	act('spawn', { text: spSel, value: n, stat: document.getElementById('spWhere').value }, true); // stays open for the next item
 }
 
 // act queues an action for the player in the dialog (or for guid, when
