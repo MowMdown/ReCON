@@ -3,7 +3,7 @@ window.RECON_PREVIEW_DATA = {
 	"commands": [
 		{
 			"cmd": "help",
-			"staff": false,
+			"role": 0,
 			"cool": "0",
 			"announce": false,
 			"length": false,
@@ -22,7 +22,7 @@ window.RECON_PREVIEW_DATA = {
 		},
 		{
 			"cmd": "shout",
-			"staff": false,
+			"role": 0,
 			"cool": "10s",
 			"announce": false,
 			"length": false,
@@ -42,7 +42,7 @@ window.RECON_PREVIEW_DATA = {
 		},
 		{
 			"cmd": "whisper",
-			"staff": false,
+			"role": 0,
 			"cool": "0",
 			"announce": false,
 			"length": false,
@@ -62,7 +62,7 @@ window.RECON_PREVIEW_DATA = {
 		},
 		{
 			"cmd": "players",
-			"staff": false,
+			"role": 0,
 			"cool": "10s",
 			"announce": false,
 			"length": false,
@@ -82,7 +82,7 @@ window.RECON_PREVIEW_DATA = {
 		},
 		{
 			"cmd": "vote",
-			"staff": false,
+			"role": 0,
 			"cool": "10m",
 			"announce": false,
 			"length": true,
@@ -113,7 +113,7 @@ window.RECON_PREVIEW_DATA = {
 		},
 		{
 			"cmd": "code",
-			"staff": false,
+			"role": 0,
 			"cool": "0",
 			"announce": false,
 			"length": false,
@@ -134,7 +134,7 @@ window.RECON_PREVIEW_DATA = {
 		},
 		{
 			"cmd": "kick",
-			"staff": true,
+			"role": 1,
 			"cool": "0",
 			"announce": true,
 			"length": false,
@@ -164,7 +164,7 @@ window.RECON_PREVIEW_DATA = {
 		},
 		{
 			"cmd": "ban",
-			"staff": true,
+			"role": 1,
 			"cool": "0",
 			"announce": true,
 			"length": false,
@@ -194,7 +194,7 @@ window.RECON_PREVIEW_DATA = {
 		},
 		{
 			"cmd": "warning",
-			"staff": true,
+			"role": 1,
 			"cool": "0",
 			"announce": true,
 			"length": false,

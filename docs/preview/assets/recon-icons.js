@@ -11,7 +11,7 @@
     ['overview', 'squares-four'], ['sessions', 'clock-counter-clockwise'], ['ips', 'globe'], ['steam profile', 'steam-logo'],
     ['chat commands', 'terminal'], ['chat', 'chat-circle'], ['notes', 'note-pencil'], ['permissions', 'shield-check'], ['role', 'shield-check'], ['danger', 'warning'],
     ['steps', 'list-numbers'], ['if / else', 'git-fork'], ['triggers', 'lightning'], ['schedule', 'calendar-dots'],
-    ['players', 'users'], ['server bans', 'prohibit'], ['flows', 'flow-arrow']
+    ['server info', 'info'], ['players', 'users'], ['server bans', 'prohibit'], ['flows', 'flow-arrow'], ['refresh', 'arrow-clockwise']
   ];
   var PRIMARY = /^(new flow|help|chat commands|commands|settings|console|save|send|connect|confirm|import|export|ban player|ok|run)\b/;
   var DANGER = /^(kick|ban|unban|delete|remove|stop)\b/;

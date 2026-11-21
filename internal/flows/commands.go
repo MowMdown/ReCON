@@ -21,11 +21,12 @@ import (
 // default wording and the placeholders it may use).
 type chatCommandDef struct {
 	Cmd      string      `json:"cmd"`
-	Staff    bool        `json:"staff"`    // mods and admins only
+	Role     int         `json:"role"`     // the lowest role that may use it: RolePlayer (everyone), RoleVehicles, roleMod or RoleAdmin (compared by RoleRank)
 	Cool     string      `json:"cool"`     // default cooldown
 	Announce bool        `json:"announce"` // has the Announce setting
 	Length   bool        `json:"length"`   // has the vote length setting
 	Warn     bool        `json:"warn"`     // has the warning threshold and the Kick/Ban setting
+	NeedsMod bool        `json:"needsMod"` // works only with recon-mod on the server (hidden from !help without it)
 	Help     string      `json:"help"`     // what !help !<cmd> sends
 	Fields   []chatField `json:"fields"`
 }
@@ -53,17 +54,17 @@ var ChatCommandDefs = []chatCommandDef{
 		}},
 	{Cmd: "code", Cool: "0", Help: "!code sends your player code to the admins and mods online, so they can find you.",
 		Fields: []chatField{{"staff", "Message (to each mod and admin online)", "Code for {player_name} (#{player_id}): {code}", []string{"player_name", "player_id", "code"}}}},
-	{Cmd: "kick", Staff: true, Cool: "0", Announce: true, Help: "!kick <code or player number> <reason> kicks that player. Their code comes from !code, their number from !players.",
+	{Cmd: "kick", Role: roleMod, Cool: "0", Announce: true, Help: "!kick <code or player number> <reason> kicks that player. Their code comes from !code, their number from !players.",
 		Fields: []chatField{
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been kicked by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
 			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been kicked", []string{"target_name", "reason"}},
 		}},
-	{Cmd: "ban", Staff: true, Cool: "0", Announce: true, Help: "!ban <code or player number> <reason> permanently bans that player. Their code (the last 6 characters of their GUID) comes from !code, their number from !players.",
+	{Cmd: "ban", Role: roleMod, Cool: "0", Announce: true, Help: "!ban <code or player number> <reason> permanently bans that player. Their code (the last 6 characters of their GUID) comes from !code, their number from !players.",
 		Fields: []chatField{
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} has been banned by {player_name}: {reason}", []string{"target_name", "player_name", "reason"}},
 			{"announce", "Announcement (to everyone, when Announce is on)", "{target_name} has been banned", []string{"target_name", "reason"}},
 		}},
-	{Cmd: "warning", Staff: true, Cool: "0", Announce: true, Warn: true, Help: "!warning <code or player number> <reason> warns that player. Enough warnings in one visit and they are kicked or banned.",
+	{Cmd: "warning", Role: roleMod, Cool: "0", Announce: true, Warn: true, Help: "!warning <code or player number> <reason> warns that player. Enough warnings in one visit and they are kicked or banned.",
 		Fields: []chatField{
 			{"player", "Warning (to the player)", "Warning {warnings}/{warn_count} from {player_name}: {reason}", []string{"target_name", "player_name", "reason", "warnings", "warn_count"}},
 			{"staff", "Notice (to each mod and admin online, always)", "{target_name} was warned by {player_name} ({warnings}/{warn_count}): {reason}", []string{"target_name", "player_name", "reason", "warnings", "warn_count"}},
@@ -71,6 +72,21 @@ var ChatCommandDefs = []chatCommandDef{
 			{"limit_staff", "At the threshold: notice (to each mod and admin online, always)", "{target_name} reached {warn_count} warnings and has been {action}: {reason}", []string{"target_name", "player_name", "reason", "warn_count", "action"}},
 			{"limit_announce", "At the threshold: announcement (to everyone, when Announce is on)", "{target_name} has been {action}", []string{"target_name", "reason", "action"}},
 		}},
+	vehicleDef("car", "that car"),
+	vehicleDef("truck", "that truck"),
+	vehicleDef("boat", "that boat"),
+	vehicleDef("vehicle", "that vehicle (bikes, ATVs, helicopters and the rest)"),
+}
+
+// vehicleDef is !car, !truck, !boat or !vehicle: spawn one from the map's
+// vehicles.json (see vehicles.go).
+func vehicleDef(cmd, what string) chatCommandDef {
+	return chatCommandDef{Cmd: cmd, Role: RoleVehicles, Cool: "0", NeedsMod: true,
+		Help: "!" + cmd + " <name> [colour] spawns " + what + " in front of you. !" + cmd + " alone lists the names.",
+		Fields: []chatField{
+			{"spawned", "Spawned (to the player)", "Spawning {vehicle} ({colour})", []string{"vehicle", "colour"}},
+			{"list", "List (to the player, for !" + cmd + " alone or a name it doesn't have)", "{category}: {names}", []string{"category", "names"}},
+		}}
 }
 
 // Defaults for !warning: kick or ban at the second warning.
@@ -79,6 +95,10 @@ const (
 	defaultWarnAction    = "ban"
 	maxWarnThreshold     = 100
 )
+
+// allowedFor reports whether a player with role may use the command, and so
+// whether !help lists it for them.
+func (d *chatCommandDef) allowedFor(role int) bool { return RoleRank(role) >= RoleRank(d.Role) }
 
 func chatDef(cmd string) *chatCommandDef {
 	for i := range ChatCommandDefs {
@@ -325,7 +345,7 @@ func listOnlineStaff() []battleye.Player {
 	}
 	var out []battleye.Player
 	for _, p := range onlineNow() {
-		if roles[strings.ToLower(p.GUID)] >= roleMod {
+		if RoleRank(roles[strings.ToLower(p.GUID)]) >= RoleRank(roleMod) { // Vehicles players aren't staff
 			out = append(out, p)
 		}
 	}
@@ -367,7 +387,12 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 	}
 	all := CurrentChatSettings()
 	set := all[cmd]
-	if !set.On || def.Staff && role < roleMod {
+	if !set.On || !def.allowedFor(role) {
+		return
+	}
+	// Only staff can use these, so say why instead of a silent nothing.
+	if def.NeedsMod && !modConnected() {
+		chatSay(p, false, "recon-mod isn't running on this server")
 		return
 	}
 	rest := strings.TrimSpace(text[len(fields[0]):])
@@ -381,7 +406,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 		if len(args) == 0 {
 			var names []string
 			for _, d := range ChatCommandDefs {
-				if all[d.Cmd].On && (!d.Staff || role >= roleMod) {
+				if all[d.Cmd].On && d.allowedFor(role) && (!d.NeedsMod || modConnected()) { // only what their role may use
 					names = append(names, "!"+d.Cmd)
 				}
 			}
@@ -391,7 +416,7 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 			return
 		}
 		d := chatDef(strings.ToLower(strings.TrimPrefix(args[0], "!")))
-		if d == nil || !all[d.Cmd].On || d.Staff && role < roleMod {
+		if d == nil || !all[d.Cmd].On || !d.allowedFor(role) || (d.NeedsMod && !modConnected()) {
 			return
 		}
 		if chatSay(p, false, d.Help) {
@@ -472,6 +497,9 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 
 	case "warning":
 		runWarningCommand(p, role, set, args)
+
+	case "car", "truck", "boat", "vehicle":
+		runVehicleCommand(cmd, p, set, args)
 	}
 }
 
@@ -564,7 +592,7 @@ func findChatTarget(arg string, offline bool) (t battleye.Player, online, ok boo
 // chatTargetAllowed reports whether p (of role) may punish t: nobody can
 // punish themselves, or anyone of their own rank or higher, from chat.
 func chatTargetAllowed(p battleye.Player, role int, t battleye.Player) bool {
-	return !strings.EqualFold(t.GUID, p.GUID) && lookupPlayerRole(t.GUID) < role
+	return !strings.EqualFold(t.GUID, p.GUID) && RoleRank(lookupPlayerRole(t.GUID)) < RoleRank(role)
 }
 
 // runPunishCommand handles !kick and !ban <code or player number> [reason].

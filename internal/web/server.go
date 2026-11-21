@@ -20,8 +20,13 @@ import (
 
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/livemap"
 	"github.com/MowMdown/ReCON/internal/store"
 )
+
+// Version is ReCON's version, set when the image is built (-ldflags -X
+// .../internal/web.Version=v3.0.25-dev); "dev" in a build without it.
+var Version = "dev"
 
 // Serve serves every route (routes) until the listener fails.
 func Serve(addr string) error {
@@ -39,11 +44,11 @@ func Serve(addr string) error {
 // routing.
 func buildWebRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
-	// The bare address opens the Players page. {$} matches "/" only, so a
+	// The bare address opens the Server Info page. {$} matches "/" only, so a
 	// mistyped path still gets a 404. 302, not 301: browsers keep a 301, and
 	// a page at / later would never be seen.
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/players", http.StatusFound)
+		http.Redirect(w, r, "/server", http.StatusFound)
 	})
 	// The theme's stylesheets and scripts (assets/, see base.html "theme").
 	mux.Handle("GET /assets/", http.FileServerFS(assetFiles))
@@ -59,8 +64,13 @@ func buildWebRoutes() *http.ServeMux {
 	// "unavailable"}, and while not connected either "waiting": true (a
 	// login was sent and ReCON is waiting for the server to answer it) or
 	// "retryInMs": time until the next check of the game server.
+	// Also "version" (ReCON's) and "mod" (recon-mod's on the game server,
+	// "" while it isn't connected), for the version line on every page.
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
-		st := map[string]any{"ok": true, "rcon": game.Status()}
+		st := map[string]any{"ok": true, "rcon": game.Status(), "version": Version, "mod": ""}
+		if ms, _ := livemap.Current(time.Now()); ms.Connected {
+			st["mod"] = ms.Mod
+		}
 		if st["rcon"] != "connected" {
 			if game.WaitingForLogin() {
 				st["waiting"] = true
@@ -76,6 +86,16 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /kickall", handleKickAll) // optional {"reason": ...}
 
 	// Players.
+	// Server Info: the Steam query's answer, uptime, population, mods (serverinfo.go)
+	mux.HandleFunc("GET /server", servePageHandler(serverPage))
+	mux.HandleFunc("GET /api/server", handleServerInfo)
+	mux.HandleFunc("POST /api/server/refresh", handleServerRefresh)      // ask the server now
+	mux.HandleFunc("GET /api/server/population", handleServerPopulation) // ?range=12h|1d|7d|30d|all
+	mux.HandleFunc("GET /api/server/busiest", handleServerBusiest)       // ?tz=America/New_York
+	mux.HandleFunc("GET /api/server/settings", handleServerSettingsGet)
+	mux.HandleFunc("POST /api/server/settings", handleServerSettingsSave) // {queryPort, serverTime, latitude}
+	mux.HandleFunc("POST /api/server/mods/{id}/ack", handleServerModAck)  // an update on Steam was seen
+
 	mux.HandleFunc("GET /players", servePageHandler(playersPage))
 	mux.HandleFunc("GET /api/players", handlePlayersJSON)                      // online + offline players
 	mux.HandleFunc("GET /api/players/all", handleAllPlayersJSON)               // every player ever seen (no RCON needed)
@@ -120,29 +140,44 @@ func buildWebRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /api/flows/import", handleFlowImport)    // {flows: [...]}
 	mux.HandleFunc("POST /api/flows/command", handleQuickCommand) // {command: lock|unlock|shutdown|kickall}
 
+	// Developer page: not in the nav, read only (developer.go)
+	mux.HandleFunc("GET /developer", servePageHandler(devPage))
+	mux.HandleFunc("GET /api/developer/players", handleDevPlayers)       // every player: online, banned, IPs
+	mux.HandleFunc("GET /api/developer/players/{guid}", handleDevPlayer) // everything ReCON holds about one
+
 	// Built-in chat commands (!help, !shout, ...): their settings, edited on the Flows page.
 	mux.HandleFunc("GET /api/chat-commands", handleChatCommandsGet)
 	mux.HandleFunc("POST /api/chat-commands", handleChatCommandsSave) // {settings: {...}}
+
+	// Add-ons' pages and API (AddRoute).
+	addons.Lock()
+	for _, rt := range addons.routes {
+		mux.HandleFunc(rt.pattern, rt.handler)
+	}
+	addons.Unlock()
 
 	return mux
 }
 
 // quietPaths are the pages' routine GET polls, left out of the request log.
 var quietPaths = map[string]bool{
-	"/health": true, "/favicon.ico": true, "/players": true, "/bans": true, "/flows": true,
+	"/health": true, "/favicon.ico": true, "/server": true, "/api/server": true, "/players": true, "/bans": true, "/flows": true,
 	"/api/players": true, "/api/bans": true, "/api/flows": true, "/api/status": true,
-	"/api/console": true,
+	"/api/console": true, "/developer": true, "/api/developer/players": true,
 }
 
 // isQuiet reports whether a request is a routine read: a quietPaths GET, a
-// theme file (/assets/...), or the Message and Details dialogs reading one
+// theme file (/assets/...), the Developer page's reads, or the Message and Details dialogs reading one
 // player (/api/players/<guid>/chat, /details, /steam).
 func isQuiet(r *http.Request) bool {
+	if addonQuiet(r) {
+		return true
+	}
 	if r.Method != http.MethodGet {
 		return false
 	}
 	p := r.URL.Path
-	return quietPaths[p] || strings.HasPrefix(p, "/assets/") || (strings.HasPrefix(p, "/api/players/") &&
+	return quietPaths[p] || strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/api/developer/") || (strings.HasPrefix(p, "/api/players/") &&
 		(strings.HasSuffix(p, "/chat") || strings.HasSuffix(p, "/details") || strings.HasSuffix(p, "/steam")))
 }
 
@@ -205,13 +240,15 @@ var assetFiles embed.FS
 
 // loadPageTemplate parses one page together with base.html.
 func loadPageTemplate(name string) *template.Template {
-	return template.Must(template.New(name).ParseFS(templateFiles, "templates/base.html", "templates/"+name))
+	return template.Must(template.New(name).Funcs(pageFuncs).ParseFS(templateFiles, "templates/base.html", "templates/"+name))
 }
 
 var (
 	playersPage = loadPageTemplate("players.html")
 	bansPage    = loadPageTemplate("bans.html")
 	flowsPage   = loadPageTemplate("flows.html")
+	devPage     = loadPageTemplate("developer.html")
+	serverPage  = loadPageTemplate("server.html")
 )
 
 // servePageHandler serves an HTML page. Its layout values (widths, paddings, font

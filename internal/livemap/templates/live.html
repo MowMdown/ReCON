@@ -1,0 +1,2725 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DayZ Live Map</title>
+{{template "icons" .}}
+{{template "style" .}}
+<link rel="stylesheet" href="assets/leaflet/leaflet.css">
+<script src="assets/leaflet/leaflet.js"></script>
+<style>
+/* The page's colours, as variables: these are the Default theme's, black
+   and white (its accent is a light grey, not a colour); the other themes
+   (data-theme) map them onto their own palette below. */
+:root {
+	--lm-accent: #e0e0e0; --lm-surface: #1a1a1a; --lm-raised: #222; --lm-ground: #111; --lm-sel: #383838;
+	--lm-line: #333; --lm-line2: #555; --lm-text: #ddd; --lm-text-hi: #fff; --lm-muted: #999; --lm-faint: #666;
+	--lm-overlay: rgba(25,25,25,.9);
+}
+html[data-theme]:not([data-theme="default"]) {
+	--lm-accent: var(--color-accent); --lm-surface: var(--color-surface); --lm-ground: var(--color-bg);
+	--lm-raised: color-mix(in srgb, var(--color-text) 6%, var(--color-surface));
+	--lm-sel: color-mix(in srgb, var(--color-accent) 16%, var(--color-surface));
+	--lm-line: var(--color-divider); --lm-line2: var(--color-neutral-600); --lm-text: var(--color-text); --lm-text-hi: var(--color-text);
+	--lm-muted: var(--color-neutral-400); --lm-faint: var(--color-neutral-500);
+	--lm-overlay: color-mix(in srgb, var(--color-surface) 92%, transparent);
+}
+/* Live Map (recon-mod): the online players on the left, the map on the
+   right; a player's stats and actions in a dialog, the weather and time in
+   another. The stats use DayZ's own HUD colours and thresholds, from
+   DayZ's scripts (Bohemia Interactive, DayZ Public License; see NOTICE). */
+:root { --hud-white: rgb(220,220,220); --hud-yellow: rgb(220,220,0); --hud-red: rgb(220,0,0); --hud-lblue: rgb(0,206,209); --hud-blue: rgb(30,144,220); }
+.live { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; height: calc(100vh - 210px); min-height: 420px; }
+@media (max-width: 760px) { .live { grid-template-columns: minmax(0, 1fr); height: auto; } .mapwrap { height: 70vh; } }
+/* A phone held upright: the map first, square (the whole map fits the
+   screen's width), the players under it two to a row. */
+@media (max-width: 760px) and (orientation: portrait) {
+	.live .mapwrap { order: -1; height: auto; min-height: 0; aspect-ratio: 1; max-height: 75svh; }
+	.live .plist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.live .prow { grid-template-columns: 9px minmax(0, 1fr); gap: 7px; padding: 7px 8px; }
+	.live .prow .hb { grid-column: 1 / -1; }
+	.live .plist > .empty { grid-column: 1 / -1; }
+}
+.side { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.modline { display: flex; align-items: center; gap: 8px; color: var(--lm-muted); font-size: 13px; }
+.modline .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #81c995; box-shadow: 0 0 6px #81c995; }
+.modline .dot.off { background: #f28b82; box-shadow: 0 0 6px #f28b82; }
+.side input { margin: 0; }
+.plist { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
+.prow { display: grid; grid-template-columns: 10px minmax(0, 1fr) 64px; gap: 9px; align-items: center; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 7px 10px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
+.prow:hover { border-color: var(--lm-line2); }
+.prow.sel { border-color: var(--lm-accent); background: var(--lm-sel); }
+.prow .d { width: 9px; height: 9px; border-radius: 50%; }
+.prow .n { min-width: 0; }
+.prow .n b { font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prow .n small { color: var(--lm-muted); display: block; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.flags span { font-size: 10.5px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--lm-line); color: var(--lm-muted); }
+.flags .r, .chip.red { border-color: #8c3b36; color: #f28b82; }
+.flags .a, .chip.amber { border-color: #7d6420; color: #fdd663; }
+.hb { height: 6px; background: var(--lm-ground); border-radius: 3px; overflow: hidden; }
+.hb i { display: block; height: 100%; }
+.empty { color: var(--lm-muted); font-size: 13px; line-height: 1.5; }
+.mapwrap { position: relative; border: 1px solid var(--lm-line); border-radius: 6px; overflow: hidden; background: var(--lm-ground); min-height: 420px; }
+#map { position: absolute; inset: 0; background: var(--lm-ground); }
+/* Full screen: the map covers the browser's window (not the monitor);
+   the dialogs still open over it. */
+.live .mapwrap.full { position: fixed; inset: 0; z-index: 900; border: none; border-radius: 0; height: auto; min-height: 0; max-height: none; aspect-ratio: auto; order: 0; }
+.leaflet-container { font: inherit; }
+.mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
+.mapbar > * { pointer-events: auto; }
+.mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
+/* Vehicles on the map, and the popup a click on one opens. */
+.vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
+.amark svg { position: absolute; left: -6px; top: -6px; overflow: visible; }
+/* The animal's name, beside its dot. */
+.amark span { position: absolute; left: 9px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--lm-surface); color: var(--lm-text); border: 1px solid var(--lm-line); box-shadow: 0 2px 10px rgba(0,0,0,.5); }
+.leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; min-width: 210px; }
+.leaflet-container a.leaflet-popup-close-button { color: var(--lm-muted); }
+.vpop h4 { margin: 0 0 2px; font-size: 14px; }
+.vpop .ty { color: var(--lm-muted); font-size: 11.5px; font-family: ui-monospace, Consolas, monospace; margin-bottom: 6px; overflow-wrap: anywhere; }
+.vpop .row { display: flex; justify-content: space-between; gap: 12px; }
+.vpop .row span:first-child { color: var(--lm-muted); }
+.vpop .acts { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+/* The popup's Info button: the popup's own look, not the page theme's. */
+.vpop .acts button { margin: 0; padding: 4px 10px; font: inherit; font-size: 12.5px; color: var(--lm-text); background: var(--lm-raised); border: 1px solid var(--lm-line); border-radius: 4px; cursor: pointer; }
+.vpop .acts button:hover { background: var(--lm-sel); border-color: var(--lm-accent); color: var(--lm-text-hi); }
+.vpop .st { font-size: 12px; }
+/* A player's popup: their stats, then what they wear and hold. */
+.vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--lm-line); }
+.vpop .gear .row span:last-child { text-align: right; overflow-wrap: anywhere; }
+/* At most 5 rows, then it scrolls, so the popup fits near the map's edge. */
+.vpop .gear { max-height: calc(5 * 1.45em + 6px); overflow-y: auto; padding-right: 4px; }
+.vpop .muted { color: var(--lm-muted); font-size: 12px; }
+/* Town names: bigger for bigger places; zoomed out only the cities
+   (#map's data-zb is far, mid or near). */
+.town { pointer-events: none; }
+.town span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; color: var(--lm-text); font-size: 11px; font-weight: 600; letter-spacing: .2px;
+	text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
+.town.t-capital span { font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
+.town.t-city span { font-size: 13px; font-weight: 700; }
+.town.t-village span { font-size: 12px; }
+.town.t-local span, .town.t-camp span, .town.t-ruin span, .town.t-railroadstation span { font-size: 10.5px; font-weight: 500; color: var(--lm-text); }
+.town.t-marine span { font-size: 10.5px; font-style: italic; font-weight: 500; color: var(--lm-accent); }
+#map[data-zb="far"] .town:not(.t-capital):not(.t-city) { display: none; }
+#map[data-zb="mid"] .town:not(.t-capital):not(.t-city):not(.t-village) { display: none; }
+/* Events and deaths. */
+.emark svg, .dmark svg { position: absolute; overflow: visible; cursor: pointer; }
+.emark svg { left: -9px; top: -9px; }
+.dmark svg { left: -6px; top: -6px; }
+.leaflet-tooltip { background: var(--lm-surface); color: var(--lm-text); border: 1px solid var(--lm-line); box-shadow: 0 2px 8px rgba(0,0,0,.5); font-size: 12px; }
+.leaflet-tooltip-top:before { border-top-color: var(--lm-line); }
+/* The map's right-click menu. */
+.ctx { position: absolute; z-index: 800; min-width: 200px; max-width: 280px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.6); padding: 6px; font-size: 13px; }
+.ctx[hidden] { display: none; }
+.ctx .hd { user-select: text; cursor: text; color: var(--lm-muted); font-size: 12px; padding: 2px 6px 6px; border-bottom: 1px solid var(--lm-line); margin-bottom: 4px; }
+.ctx .lbl { color: var(--lm-muted); font-size: 11.5px; padding: 6px 6px 2px; }
+.ctx button { display: block; width: 100%; text-align: left; margin: 0; padding: 5px 8px; background: transparent; border: 0; border-radius: 4px; color: var(--lm-text); font: inherit; cursor: pointer; }
+.ctx button:hover { background: var(--lm-sel); color: var(--lm-text-hi); }
+.ctx .plist { max-height: 200px; overflow-y: auto; }
+.ctx .msg { padding: 4px 8px; font-size: 12px; }
+.ctx .msg:empty { display: none; }
+.ctx button.bad { color: #f28b82; }
+/* A player in a teleport list, asked: their name, then Confirm and Cancel. */
+.ctx .ask { display: flex; align-items: center; gap: 4px; padding: 2px 0 2px 8px; }
+.ctx .ask span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--lm-text-hi); }
+.ctx .ask button { display: inline-block; width: auto; padding: 3px 8px; border: 1px solid var(--lm-line); }
+.ctx .ask button.ok { color: var(--lm-accent); border-color: var(--lm-accent); }
+.mapbar .pick { font-size: 12px; background: var(--lm-sel); border: 1px solid var(--lm-accent); border-radius: 4px; padding: 4px 9px; color: var(--lm-text); }
+.mapbar .pick[hidden] { display: none; }
+.mapbar button[hidden] { display: none; }
+#map.picking, #map.picking .leaflet-interactive { cursor: crosshair; }
+.ctx .muted { padding: 2px 8px; }
+#sModal .box { width: min(900px, 96vw); }
+#sModal .splist { max-height: min(640px, 62vh); }
+.mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
+/* The vehicle dialog: its facts, then parts, damage and cargo side by
+   side, each scrolling on its own; one under the other on a narrow screen. */
+#vModal .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
+#vModal .vfacts .k { color: var(--lm-muted); font-size: 12px; grid-row: 1; }
+#vModal .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+#vModal .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
+#vModal .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
+#vModal .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
+#vModal .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#vModal .part .lv { font-size: 12px; white-space: nowrap; }
+#vModal .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+#vModal .acts { display: flex; align-items: center; gap: 8px; }
+#vModal .acts button { margin: 0; }
+#vModal .st { font-size: 12.5px; }
+@media (max-width: 760px) { #vModal .vcols { grid-template-columns: minmax(0, 1fr); } #vModal .vcols > div { max-height: none; } #vModal .vfacts { grid-template-columns: auto auto; } #vModal .vfacts .k { grid-row: auto; } }
+/* The weather and in-game time, beside Time & Weather above the map. */
+.worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.worldbar .badge { font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; padding: 3px 8px; color: var(--lm-text); }
+.worldbar .badge[hidden] { display: none; }
+.mapbar .sp { flex: 1; }
+.mapbar button { margin: 0; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); }
+.mapbar button:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
+.mapbar button:disabled { opacity: .45; }
+/* Overlays: one button, its menu of layers to switch on and off (a box,
+   ticked when on), Deaths with how far back beside it. */
+.ovwrap { position: relative; }
+.ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: 300px; display: flex; flex-direction: column; gap: 2px; padding: 5px;
+	background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+.ovmenu[hidden] { display: none; }
+.ovmenu .ovrow { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.ovmenu .ovrow select { flex: none; }
+.mapbar .ovmenu button { white-space: nowrap; }
+.ovmenu .ovrow button { flex: 1; }
+.mapbar .ovmenu button { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; text-align: left; border-color: transparent; background: transparent; padding: 5px 8px; }
+.mapbar .ovmenu button::before { content: ''; flex: none; width: 11px; height: 11px; border: 1px solid var(--lm-line2); border-radius: 3px; }
+.mapbar .ovmenu button.on::before { background: var(--lm-accent); border-color: var(--lm-accent);
+	box-shadow: inset 0 0 0 2px var(--lm-surface); }
+.mapbar .ovmenu button:hover { background: var(--lm-sel); }
+/* The grid's lines: the theme's border colour lit with its accent, so they
+   stand out on the map's picture; the map's edge a step stronger. */
+.leaflet-overlay-pane path.gridline { stroke: color-mix(in srgb, var(--lm-accent) 45%, var(--lm-line2)); stroke-opacity: .85; }
+.leaflet-overlay-pane path.gridedge { stroke: color-mix(in srgb, var(--lm-accent) 70%, var(--lm-line2)); stroke-width: 1.5; }
+/* The grid's numbers: a small bubble, like a button that isn't one. */
+.gridlbl span { display: inline-block; white-space: nowrap; font-size: 10.5px; line-height: 1.3; padding: 1px 5px; color: var(--lm-text);
+	background: var(--lm-overlay); border: 1px solid var(--lm-line2); border-radius: 4px; }
+html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(--color-divider); border-radius: var(--radius-md, 4px); font-family: var(--font-body, inherit); }
+.pmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
+.pmark span { position: absolute; left: 11px; top: -8px; white-space: nowrap; font-size: 12px; color: var(--lm-text); cursor: pointer; text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
+.pmark.sel svg circle { display: block !important; }
+/* Dialogs */
+.modal { z-index: 1000; align-items: flex-start; padding-top: 4vh; overflow-y: auto; }
+.box.wide { width: min(860px, 95vw); box-sizing: border-box; margin-bottom: 4vh; }
+.dlg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.dlg-head h2 { margin: 0; font-size: 20px; }
+.dlg-head .sub { color: var(--lm-muted); font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+.dlg-head .nav { margin-left: auto; display: flex; gap: 6px; }
+.dlg-head .nav button { margin: 0; }
+.badge { font-size: 12px; border-radius: 3px; padding: 1px 6px; color: var(--lm-text); background: var(--lm-line); }
+.badge.online { color: var(--lm-ground); background: #81c995; }
+.badge.gone { color: var(--lm-ground); background: #f28b82; }
+.liveline { display: flex; gap: 10px; color: var(--lm-muted); font-size: 13px; margin-bottom: 12px; flex-wrap: wrap; }
+.liveline .pos { margin-left: auto; color: var(--lm-text); }
+.liveline b { color: var(--lm-text); font-weight: 600; }
+.statgrid { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; }
+@media (max-width: 700px) { .statgrid { grid-template-columns: minmax(0, 1fr); } }
+.bars { display: grid; gap: 9px; align-content: start; }
+.bar { display: grid; grid-template-columns: 70px minmax(0, 1fr) 128px; align-items: center; gap: 10px; font-size: 13px; }
+.bar .k { color: var(--lm-muted); }
+.bar .v { text-align: right; font-variant-numeric: tabular-nums; }
+.track { height: 9px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 5px; overflow: hidden; position: relative; }
+.track .fill { height: 100%; border-radius: 4px; }
+.track.temp { background: linear-gradient(90deg, #1e4f7a, var(--lm-surface) 35%, var(--lm-surface) 65%, #7a2b1e); }
+.track .mark { position: absolute; top: -2px; width: 3px; height: 13px; border-radius: 2px; }
+/* A limit on the bar (stamina's load cap, comfort's clothing cap): a light
+   tick the size of Temp's. */
+.track .cap { position: absolute; top: -2px; width: 3px; height: 13px; margin-left: -1.5px; background: var(--lm-text); border-radius: 2px; z-index: 1; }
+.blink .fill, .blink .v, .blink .mark { animation: hudblink 1s steps(2, start) infinite; }
+/* Draggable bars (health, blood, water, food, comfort): a handle on hover;
+   while dragging, the new level striped with its value above the handle. */
+.bar.can .track { cursor: ew-resize; touch-action: none; overflow: visible; }
+.bar.can .fill { border-radius: 4px; }
+.track .handle { display: none; position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--lm-text); box-shadow: 0 0 0 2px var(--lm-ground), 0 1px 4px #000a; pointer-events: none; }
+.bar.can:hover .handle, .bar.drag .handle { display: block; }
+.bar.can:hover .track { border-color: var(--lm-line2); }
+.bar.drag .track { border-color: var(--lm-accent); }
+.bar.drag .handle { background: var(--lm-accent); box-shadow: 0 0 0 2px var(--lm-ground), 0 0 0 5px color-mix(in srgb, var(--lm-accent) 35%, transparent); }
+.track .ghost { position: absolute; top: 0; height: 100%; border-radius: 4px; pointer-events: none; background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--lm-accent) 55%, transparent) 0 4px, color-mix(in srgb, var(--lm-accent) 25%, transparent) 4px 8px); }
+.track .tip { position: absolute; bottom: 16px; transform: translateX(-50%); background: var(--lm-ground); border: 1px solid var(--lm-accent); color: var(--lm-text); font-size: 12px; padding: 3px 8px; border-radius: 4px; white-space: nowrap; pointer-events: none; z-index: 2; }
+.bar .v .to { color: var(--lm-accent); font-weight: 600; }
+.bar .v .pend { color: #fdd663; }
+.draghint { color: var(--lm-muted); font-size: 12px; margin-top: 2px; }
+.bar.staged .handle { display: block; background: var(--lm-accent); }
+.bar.staged .track { border-color: var(--lm-accent); }
+.savebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--lm-accent); margin-top: 2px; }
+.savebar .sp { flex: 1; }
+.savebar button { margin: 0; }
+@keyframes hudblink { to { visibility: hidden; } }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.chip { font-size: 12px; padding: 2px 9px; border-radius: 10px; border: 1px solid var(--lm-line); color: var(--lm-muted); }
+.chip.blue { border-color: #2f4f7a; color: var(--lm-accent); }
+#mini { display: block; width: 260px; height: 260px; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 6px; cursor: crosshair; touch-action: none; user-select: none; }
+#mini.panning { cursor: grabbing; }
+/* The mini-map's overlays: the point under the cursor and Recenter at
+   the top, the scale at the bottom. */
+.miniwrap { position: relative; align-self: start; }
+/* The map's picture, under the mini-map's SVG: only the part in view, at
+   the mini-map's own size (a phone can't hold the whole picture scaled up). */
+.miniwrap #mini { position: relative; background: transparent; }
+.miniwrap #miniCv { position: absolute; left: 1px; top: 1px; border-radius: 5px; background: var(--lm-ground); pointer-events: none; }
+.minihud { position: absolute; top: 6px; left: 6px; right: 6px; display: flex; align-items: center; gap: 6px; pointer-events: none; font-size: 11.5px; color: var(--lm-text); }
+.minihud #miniXY { background: var(--lm-overlay); border-radius: 4px; padding: 1px 6px; }
+.minihud #miniXY:empty { display: none; }
+.minihud .sp { flex: 1; }
+.minihud button { pointer-events: auto; margin: 0; padding: 3px 8px; font-size: 11.5px; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
+.minihud button:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
+.minical { position: absolute; left: 6px; right: 6px; bottom: 24px; display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 11.5px; color: var(--lm-text); background: var(--lm-overlay); border: 1px solid var(--lm-accent); border-radius: 4px; }
+.minical[hidden] { display: none; }
+.minical .sp { flex: 1; }
+.minical button { margin: 0; padding: 2px 8px; font-size: 11.5px; background: var(--lm-raised); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
+.minihud button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
+.miniscale { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: var(--lm-faint); pointer-events: none; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0 14px; }
+.tile { background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 10px 12px; }
+.tile .k { font-size: 12px; color: var(--lm-muted); margin-bottom: 3px; }
+.tile .v { font-size: 15px; overflow-wrap: anywhere; }
+.tile .s { font-size: 12px; color: var(--lm-muted); }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.acts button { margin: 0; }
+.acts .sp { flex: 1; }
+/* The main button of a row: plain in Default, the theme's accent in the others. */
+html[data-theme]:not([data-theme="default"]) button.go { color: var(--color-accent); border-color: var(--color-accent); }
+button.bad { color: #f28b82; border-color: #8c3b36; }
+button.on { color: var(--lm-accent); border-color: var(--lm-accent); }
+.form { margin-top: 10px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 12px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.form[hidden], .inl[hidden] { display: none; }
+.form input, .form select, .inl input, .inl select { width: auto; margin: 0; padding: 5px 8px; background: var(--lm-ground); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; font: inherit; }
+.form .grow { flex: 1; min-width: 160px; }
+.muted { color: var(--lm-muted); font-size: 12.5px; }
+.form button { margin: 0; }
+.form.stats { display: block; }
+.form.stats[hidden] { display: none; }
+.form.stats .wrow input[type=range] { width: 100%; }
+.setfoot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.splist { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; margin: 10px 0 8px; }
+.sprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 5px; padding: 5px 9px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
+.sprow:hover { border-color: var(--lm-line2); }
+/* A-Z: jump to the first item starting with that letter (# for the rest) */
+.spaz { display: flex; flex-wrap: wrap; gap: 2px; margin: 8px 0 0; }
+.spaz button { margin: 0; padding: 2px 0; width: 24px; font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; color: var(--lm-text); cursor: pointer; }
+.spaz button:hover:not(:disabled) { border-color: var(--lm-accent); color: var(--lm-text-hi); }
+.spaz button:disabled { opacity: .3; cursor: default; }
+.sprow.sel { border-color: var(--lm-accent); background: var(--lm-sel); }
+.sprow .nm { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sprow .nm small { color: var(--lm-muted); font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; margin-left: 6px; }
+.sprow .kd { color: var(--lm-muted); font-size: 11.5px; }
+.lastact { font-size: 13px; color: var(--lm-muted); margin-top: 10px; min-height: 1.2em; }
+h4 { margin: 18px 0 6px; font-size: 13px; color: var(--lm-text); font-weight: 600; }
+table.dt { table-layout: auto; }
+table.dt td { height: auto; padding: 5px 8px; font-size: 13px; border-bottom: none; border-top: 1px solid var(--lm-line); }
+table.dt td.t { color: var(--lm-muted); width: 120px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ok { color: #81c995; } .fail { color: #f28b82; } .wait { color: #fdd663; }
+table.dt a { color: var(--lm-accent); text-decoration: none; cursor: pointer; }
+.dfoot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; gap: 10px; }
+.dfoot button { margin: 0; }
+.dlg-err { color: #f28b82; font-size: 13px; min-height: 1.2em; margin-top: 8px; }
+/* The player dialog's tabs: Stats, Inventory, and Spawn item */
+.ptabs { display: flex; gap: 2px; border-bottom: 1px solid var(--lm-line); margin: 4px 0 14px; }
+.ptabs button { margin: 0 0 -1px; padding: 7px 14px; font-size: 13px; color: var(--lm-muted); background: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; }
+.ptabs button:hover { color: var(--lm-text); }
+.ptabs button.on { color: var(--lm-text); background: var(--lm-raised); border-color: var(--lm-line); border-bottom: 1px solid var(--lm-raised); }
+.ppane[hidden] { display: none; }
+/* The player dialog: 1290 x 1025 (smaller on small screens), the same size
+   on both tabs; a tab scrolls inside it when it needs more room. */
+.box.pbox { width: min(1290px, 96vw); height: min(1025px, 92vh); display: flex; flex-direction: column; margin-bottom: 0; }
+.pbox .ppane { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.pbox .dfoot { margin-top: auto; padding-top: 10px; }
+/* The error and last-action lines take no room until they have something to say. */
+.pbox .dlg-err:empty, .pbox .lastact:empty { min-height: 0; margin-top: 0; }
+.pbox .statgrid { grid-template-columns: minmax(0, 1fr) 390px; }
+.pbox #mini { width: 390px; height: 390px; }
+/* Spawn item: the list takes the height the dialog has left, and grows
+   and shrinks with it; below 120 px the tab scrolls instead. */
+.pbox .ppane[data-ppane="spawn"]:not([hidden]) { display: flex; flex-direction: column; }
+.pbox #fSpawn { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; flex: 1; min-height: 0; }
+.pbox #fSpawn .splist { flex: 1; min-height: 120px; max-height: none; }
+.pbox .killhead { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.pbox .killhead button { margin: 0 0 0 auto; font-size: 13px; }
+/* Teleport: three ways in a line (stacked when narrow), Teleport and
+   Previous on the right (below, side by side, when narrow). */
+#fTeleport { align-items: center; }
+#fTeleport .tpopts { flex: 1; display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; min-width: 0; }
+#fTeleport .tpopt { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+#fTeleport .tpopt input[type=radio] { margin: 0; padding: 0; accent-color: var(--lm-accent); }
+#fTeleport .tpopt b { font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+#fTeleport .tpbtns { display: flex; gap: 8px; margin-left: auto; }
+@media (max-width: 900px) { #fTeleport .tpopts { flex-direction: column; align-items: flex-start; flex-basis: 100%; } #fTeleport .tpbtns { margin-left: 0; } }
+.pbox table.kills td.where { white-space: nowrap; color: var(--lm-muted); }
+.pbox table.kills td.k { white-space: nowrap; width: 1%; }
+.killkinds { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; }
+.killkinds button { margin: 0; padding: 2px 10px; font-size: 12px; border-radius: 10px; background: transparent; border: 1px solid var(--lm-line); color: var(--lm-muted); }
+.killkinds button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
+.killkinds button:disabled { opacity: .35; }
+.chip.violet { border-color: #5b3f7a; color: #c58af9; }
+/* The stats fill the height beside the mini-map: taller bars, more room. */
+.pbox .bars { gap: 12.5px; padding-top: 4px; }
+.pbox .bar { grid-template-columns: 84px minmax(0, 1fr) 150px; font-size: 14.5px; }
+.pbox .track { height: 14px; border-radius: 7px; overflow: visible; }
+.pbox .track .fill { border-radius: 6px; }
+.pbox .track .mark, .pbox .track .cap { top: -3px; height: 18px; }
+.pbox .track .handle { width: 18px; height: 18px; margin: -9px 0 0 -9px; }
+.pbox .track .tip { bottom: 20px; }
+.pbox .draghint { margin-top: 12px; }
+.pbox .ailrow { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; }
+.pbox .ailrow .chips { flex: 1; margin-top: 0; }
+.pbox .ailrow button { margin: 0; flex: none; }
+.pbox .ailrow button + button { margin-left: -4px; }
+@media (max-width: 900px) { .pbox .statgrid { grid-template-columns: minmax(0, 1fr); } .pbox #mini { width: 100%; height: auto; aspect-ratio: 1; } }
+.ppane > h4:first-child { margin-top: 0; }
+html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-divider); }
+/* Inventory: the slots on the left, the item picked on the right */
+.inv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; align-items: start; }
+@media (max-width: 700px) { .inv { grid-template-columns: minmax(0, 1fr); } }
+.ilist { display: flex; flex-direction: column; gap: 4px; }
+.irow { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
+.irow:hover { border-color: var(--lm-line2); }
+.irow.sel { border-color: var(--lm-accent); background: var(--lm-sel); }
+/* A slot with nothing in it (every slot is always listed: no pop-in). */
+.irow.none { cursor: default; } .irow.none:hover { border-color: var(--lm-line); } .irow.none .nm { color: var(--lm-faint); }
+.irow .sl { color: var(--lm-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.irow .nm { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.irow .ex { color: var(--lm-muted); font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.cond { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.idet { background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 12px 14px; font-size: 13px; min-height: 120px; }
+.idet .crumbs { color: var(--lm-muted); font-size: 12px; margin-bottom: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.idet .crumbs a { color: var(--lm-accent); cursor: pointer; }
+.idet h3 { margin: 0; font-size: 16px; }
+.idet .ty { color: var(--lm-muted); font-size: 12px; font-family: ui-monospace, Consolas, monospace; margin: 2px 0 10px; overflow-wrap: anywhere; }
+.props { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 5px 10px; }
+.props .k { color: var(--lm-muted); }
+.idet .setcond { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 10px; }
+.idet .setcond .k { color: var(--lm-muted); margin-right: 6px; }
+.idet .setcond button { margin: 0; padding: 2px 9px; font-size: 12px; border-radius: 10px; background: transparent; border: 1px solid var(--lm-line); color: var(--c); }
+.idet .setcond button:hover { border-color: var(--c); }
+.idet .setcond button.on { border-color: var(--c); background: var(--lm-raised); }
+.idet h5 { margin: 14px 0 5px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
+.sub-items { display: flex; flex-direction: column; gap: 3px; }
+.sub-items .irow { background: var(--lm-ground); padding: 5px 9px; }
+html[data-theme]:not([data-theme="default"]) .irow, html[data-theme]:not([data-theme="default"]) .idet { border-color: var(--color-divider); }
+/* World */
+.wsec { border-top: 1px solid var(--lm-line); padding: 14px 0 4px; margin-top: 4px; }
+.wsec.first { border-top: none; padding-top: 0; }
+.wsec h3 { margin: 0 0 10px; font-size: 14px; color: var(--lm-text); }
+.inl { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.inl button { margin: 0; }
+.seg { display: inline-flex; border: 1px solid var(--lm-line2); border-radius: 6px; overflow: hidden; }
+.seg button { margin: 0; border: none; border-radius: 0; border-right: 1px solid var(--lm-line2); }
+.seg button:last-child { border-right: none; }
+.seg button.on { background: var(--lm-sel); color: var(--lm-accent); }
+.presets { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+.presets button { margin: 0; }
+.wrow { display: grid; grid-template-columns: 100px minmax(0, 1fr) 76px 160px; gap: 12px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+@media (max-width: 640px) { .wrow { grid-template-columns: 90px minmax(0, 1fr) 70px; } .wrow .now { grid-column: 2 / 4; } }
+.wrow input[type=range] { margin: 0; padding: 0; accent-color: var(--lm-accent); border: none; background: none; }
+.wrow .val { text-align: right; font-variant-numeric: tabular-nums; }
+.wrow .val.moved { color: var(--lm-accent); }
+.wrow .now { color: var(--lm-muted); font-size: 12px; }
+.wnote { margin-top: 8px; font-size: 12.5px; color: #fdd663; line-height: 1.5; }
+html[data-theme]:not([data-theme="default"]) .prow, html[data-theme]:not([data-theme="default"]) .tile,
+html[data-theme]:not([data-theme="default"]) .form, html[data-theme]:not([data-theme="default"]) .mapwrap,
+html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-theme="default"]) .chip,
+html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: var(--color-divider); }
+/* A toggled button (Vehicles, Towns... on) looks like the theme's hovered
+   one: its accent for the text and border, over a tint of it. */
+html[data-theme]:not([data-theme="default"]) .mapbar button.on, html[data-theme]:not([data-theme="default"]) .minihud button.on,
+html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-theme]:not([data-theme="default"]) button.on:not(.ptabs button):not(.setcond button) {
+	color: var(--color-accent) !important; border-color: var(--color-accent) !important; background: color-mix(in srgb, var(--color-accent) 12%, transparent) !important; }
+</style>
+{{template "theme" .}}
+</head>
+<body>
+<nav>{{template "navlinks" "live"}}</nav>
+{{template "statusbar" .}}
+<div class="top"><h1>Live Map</h1><div class="worldbar"><span class="badge" id="wxBadge" hidden></span><span class="badge" id="timeBadge" hidden></span><button type="button" id="worldBtn" onclick="openWorld()" disabled title="Change the in-game time and weather">Time &amp; Weather</button></div></div>
+<div class="live">
+	<div class="side">
+		<div class="modline"><span class="dot off" id="modDot"></span><span id="modLine">No Connection to DayZ Server</span></div>
+		<input id="find" type="search" placeholder="Find a player" aria-label="Find a player" autocomplete="off">
+		<div class="plist" id="plist"></div>
+	</div>
+	<div class="mapwrap">
+		<div id="map"></div>
+		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
+		<div class="mapbar">
+			<div class="ovwrap">
+				<button type="button" id="ovBtn" onclick="toggleOvMenu()" aria-expanded="false" aria-controls="ovMenu" title="Show or hide what's drawn on the map">Overlays</button>
+				<div class="ovmenu" id="ovMenu" hidden data-noicon role="menu">
+					<button type="button" id="plyBtn" onclick="togglePlayers()" title="Show the players on the map">Players</button>
+					<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
+					<button type="button" id="predBtn" onclick="togglePredators()" title="Show the bears, wolves and guard dogs">Predators</button>
+					<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
+					<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
+					<button type="button" id="gridBtn" onclick="toggleGrid()" title="Show the 1 km grid and its numbers">Grid</button>
+					<div class="ovrow"><button type="button" id="deathBtn" onclick="toggleDeaths()" title="Show where players died">Deaths</button>
+					<select id="deathHours" aria-label="Deaths in the last" hidden><option value="1">last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select></div>
+				</div>
+			</div>
+			<button type="button" id="trackBtn" class="on" hidden onclick="setTrack(null)" title="Stop following"></button>
+			<span class="badge pick" id="pickBanner" hidden></span>
+			<span class="sp"></span>
+			<button type="button" onclick="fitAll()" title="Show the whole map">Fit</button>
+			<button type="button" onclick="fillWidth()" title="Zoom so the map's width fills the view, edge to edge">Fill</button>
+			<button type="button" id="fullBtn" onclick="toggleFull()" title="Make the map fill the window (Esc to go back)">Full screen</button>
+		</div>
+	</div>
+</div>
+
+<!-- A player's live stats and actions -->
+<div id="pModal" class="modal">
+	<div class="box wide pbox" role="dialog" aria-labelledby="pName">
+		<div class="dlg-head">
+			<h2 id="pName">Player</h2><span class="badge" id="pBadge"></span><span class="sub" id="pGuid"></span>
+			<div class="nav"><button type="button" onclick="stepPlayer(-1)">‹ Prev</button><button type="button" onclick="stepPlayer(1)">Next ›</button></div>
+		</div>
+		<div class="liveline"><span id="pWhen"></span><span class="pos" id="pPos"></span></div>
+		<div class="ptabs" id="pTabs" role="tablist">
+			<button type="button" role="tab" data-ptab="stats">Stats</button>
+			<button type="button" role="tab" data-ptab="inventory">Inventory</button>
+			<button type="button" role="tab" data-ptab="spawn">Spawn item</button>
+			<button type="button" role="tab" data-ptab="kills">Kills &amp; deaths</button>
+		</div>
+		<div class="ppane" data-ppane="stats">
+		<div class="statgrid">
+			<div>
+				<div class="bars" id="pBars"></div>
+				<div id="pSave"></div>
+				<div class="ailrow"><div class="chips" id="pChips"></div><button type="button" class="go" onclick="act('heal')" title="Full health, blood, shock, food, water and stamina; stops bleeding, cures illnesses, mends broken legs and wakes them">Heal</button><button type="button" onclick="act('dry')" title="Make them and everything they carry dry">Dry</button></div>
+			</div>
+			<div class="miniwrap">
+				<canvas id="miniCv" aria-hidden="true"></canvas><svg id="mini" viewBox="0 0 260 260" role="img" aria-label="The map around the player: drag to move, scroll to zoom, click to pick a teleport spot, double-click to teleport there"><g id="miniG"></g></svg>
+				<div class="minihud"><span id="miniXY"></span><span class="sp"></span><button type="button" id="miniFollow" hidden title="Zoom back to 500 m across on the player and follow them again">Recenter</button><button type="button" id="miniCal" hidden title="If the map's picture is off: stand somewhere you can tell on it, then click where you really are">Calibrate</button></div>
+				<div class="minical" id="miniCalBox" hidden><span id="miniCalMsg"></span><span class="sp"></span><button type="button" id="miniCalReset" hidden title="Forget this map's calibration">Reset</button></div>
+				<div class="miniscale" id="miniScale"></div>
+			</div>
+		</div>
+		<div class="tiles">
+			<div class="tile"><div class="k">In hands</div><div class="v" id="tHands"></div></div>
+			<div class="tile"><div class="k">Vehicle</div><div class="v" id="tVehicle"></div></div>
+			<div class="tile"><div class="k">Kills / deaths</div><div class="v" id="tKD"></div><div class="s" id="tKDall"></div></div>
+		</div>
+		<div class="form" id="fTeleport">
+			<div class="tpopts">
+				<label class="tpopt" title="Or click the mini-map (double-click to go there now)"><input type="radio" name="tpMode" value="spot" checked> Teleport to
+					X: <input id="tpX" size="6" inputmode="decimal" aria-label="X (east)"> Y: <input id="tpZ" size="6" inputmode="decimal" aria-label="Y (north)"></label>
+				<label class="tpopt" title="This player goes to the player picked"><input type="radio" name="tpMode" value="to"> Teleport <b class="tpName"></b> to <select id="tpTo" aria-label="To player"></select></label>
+				<label class="tpopt" title="The player picked comes to this player"><input type="radio" name="tpMode" value="from"> Teleport <select id="tpFrom" aria-label="Bring player"></select> to <b class="tpName"></b></label>
+			</div>
+			<div class="tpbtns"><button type="button" class="go" id="bTeleport" onclick="doTeleport()" disabled>Teleport</button><button type="button" id="bBack" onclick="act('back')" disabled>Previous</button></div>
+		</div>
+		<div class="form" id="fMessage">
+			<input id="msgText" class="grow" maxlength="500" placeholder="Message, shown on their screen" aria-label="Message">
+			<button type="button" class="go" onclick="doMessage()">Send</button>
+		</div>
+		</div>
+		<div class="ppane" data-ppane="inventory" hidden>
+		<h4>Inventory <span class="muted" id="invWhen"></span></h4>
+		<div class="inv"><div class="ilist" id="iList"></div><div class="idet" id="iDet"></div></div>
+		</div>
+		<div class="ppane" data-ppane="spawn" hidden>
+		<div class="form stats" id="fSpawn">
+			<div class="inl"><input id="spFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
+				<select id="spKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
+					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="animal">Animals</option><option value="item">Other items</option></select></div>
+			<div class="spaz" id="spAZ" role="group" aria-label="Jump to a letter"></div>
+			<div class="splist" id="spList"></div>
+			<div class="setfoot"><span class="muted" id="spPick"></span><span class="grow"></span>
+				<select id="spWhere" aria-label="Where"><option value="ground">On the ground</option><option value="inventory">In their inventory</option><option value="hands">In their hands</option></select>
+				<span>Count</span><input id="spCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
+				<button type="button" class="go" onclick="doSpawn()">Spawn</button></div>
+		</div>
+		</div>
+		<div class="ppane" data-ppane="kills" hidden>
+		<h4 class="killhead">Kills and deaths <span class="muted" id="pKillSum"></span><button type="button" class="bad" onclick="killPlayer()" title="Their character dies and they start again fresh">Kill</button></h4>
+		<div class="killkinds" id="pKillKinds" role="group" aria-label="Show only"></div>
+		<table class="dt kills"><tbody id="pKills"></tbody></table>
+		</div>
+		<div class="dlg-err" id="pErr"></div>
+		<div class="lastact" id="pLast"></div>
+		<div class="dfoot"><button type="button" onclick="openInPlayers()">Open in Players</button><button type="button" onclick="closePlayer()">Close</button></div>
+	</div>
+</div>
+
+<!-- The weather and the in-game time -->
+<!-- A vehicle's parts, damage and cargo (Info… on its popup) -->
+<div id="vModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="vTitle" style="width:min(1000px, 95vw)">
+		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="sub" id="vType"></span></div>
+		<div id="vBody"></div>
+		<div class="dfoot"><div class="acts" id="vActs"></div><button type="button" onclick="closeVehicleInfo()">Close</button></div>
+	</div>
+</div>
+
+<!-- Spawn an item at a spot on the map (the map's right-click menu) -->
+<div id="sModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="sTitle">
+		<div class="dlg-head"><h2 id="sTitle">Spawn here</h2><span class="badge" id="sWhere"></span></div>
+		<div class="form stats">
+			<div class="inl"><input id="sFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
+				<select id="sKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
+					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="animal">Animals</option><option value="item">Other items</option></select></div>
+			<div class="spaz" id="sAZ" role="group" aria-label="Jump to a letter"></div>
+			<div class="splist" id="sList"></div>
+			<div class="setfoot"><span class="muted" id="sPick"></span><span class="grow"></span>
+				<span>Count</span><input id="sCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
+				<button type="button" class="go" onclick="doSpawnAt()">Spawn</button></div>
+		</div>
+		<div class="dlg-err" id="sErr"></div>
+		<div class="dfoot"><span class="muted" id="sLast"></span><button type="button" onclick="closeSpawnAt()">Close</button></div>
+	</div>
+</div>
+
+<div id="wModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="wTitle">
+		<div class="dlg-head"><h2 id="wTitle">Time &amp; Weather</h2><span class="badge" id="wWorld"></span></div>
+		<div class="wsec first"><h3>Time</h3>
+			<div class="inl">In-game <input type="date" id="wDate" aria-label="In-game date"> <input type="time" id="wTime" aria-label="In-game time">
+				<button type="button" class="go" onclick="setDate()">Set</button><span style="flex:1"></span>
+				<button type="button" id="freezeBtn" onclick="toggleFreeze()">Freeze time</button></div>
+			<div class="presets" id="timePresets">
+				<button type="button" data-t="dawn">Dawn</button><button type="button" data-t="day">Day</button>
+				<button type="button" data-t="dusk">Dusk</button><button type="button" data-t="night">Night</button></div>
+			<div class="muted" id="wNow"></div>
+		</div>
+		<div class="wsec"><h3>Weather</h3>
+			<div class="inl">Weather follows <div class="seg" id="wMode">
+				<button type="button" data-mode="world">the map's rules</button><button type="button" data-mode="forecast">only what's set here</button><button type="button" data-mode="static">nothing (frozen)</button></div></div>
+			<div class="presets" id="presets"></div>
+			<div id="wRows"></div>
+			<div class="inl" style="margin-top:12px">Change over <input id="wTrans" size="4" value="0" inputmode="numeric" aria-label="Seconds"> seconds, then hold for at least
+				<input id="wHold" size="4" value="0" inputmode="numeric" aria-label="Minutes"> minutes
+				<span style="flex:1"></span><button type="button" class="go" onclick="applyWeather()">Apply</button></div>
+			<div class="inl" id="rainRange" style="margin-top:12px">Rain falls between <input id="rMin" size="3" value="60" inputmode="numeric" aria-label="Lowest overcast %">% and
+				<input id="rMax" size="3" value="100" inputmode="numeric" aria-label="Highest overcast %">% overcast, and stops within <input id="rStop" size="3" value="30" inputmode="numeric" aria-label="Seconds"> seconds
+				<button type="button" class="go" onclick="setRainRange()">Set</button></div>
+		</div>
+		<div class="dlg-err" id="wErr"></div>
+		<div class="dfoot"><span class="muted" id="wLast"></span><button type="button" onclick="closeWorld()">Close</button></div>
+	</div>
+</div>
+
+<script>
+// ---- Data ---------------------------------------------------------------
+
+let mod = null, players = [], commands = [], byGuid = {};
+let selGuid = null, detail = null; // the player in the dialog, and their kills and inventory (every 2 s)
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+function pad(n, w) { return String(Math.max(0, Math.floor(n))).padStart(w || 2, '0'); }
+// grid is DayZ's map grid: the 100 m square, "067 112".
+function grid(x, z) { return pad(x / 100, 3) + ' ' + pad(z / 100, 3); }
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+function compass(deg) { return COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8]; }
+// A steady colour per player, from their GUID.
+function colorOf(guid) {
+	let h = 0;
+	for (const c of guid) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+	return 'hsl(' + (h % 360) + ', 70%, 65%)';
+}
+// Class names read better without underscores: "MountainBag_Blue" -> "MountainBag Blue".
+function item(s) { return s ? s.replace(/_/g, ' ') : ''; }
+// What's in their hands and the vehicle they're in, by the names the game
+// shows ("Wood Axe"); the class name when the mod didn't send one.
+function handsOf(p) { return p.handsName || item(p.hands); }
+function vehicleOf(p) { return p.vehicleName || item(p.vehicle); }
+
+// hud is DayZ's HUD colour for health, blood, food and water: white,
+// yellow, red, or red blinking (PlayerBase.GetStatLevel with
+// PlayerConstants.SL_*: critical, low, normal).
+const LEVELS = { health: [15, 30, 50], blood: [3000, 3500, 4000], energy: [0, 300, 800], water: [0, 300, 1000] };
+function hud(stat, v) {
+	const l = LEVELS[stat];
+	if (!l) return ['#888', false];
+	if (v <= l[0]) return ['var(--hud-red)', true];
+	if (v <= l[1]) return ['var(--hud-red)', false];
+	if (v <= l[2]) return ['var(--hud-yellow)', false];
+	return ['var(--hud-white)', false];
+}
+// temp is the HUD's temperature: heat comfort from -1 to 1, with
+// PlayerConstants.THRESHOLD_HEAT_COMFORT_* and the HUD's colours.
+function temp(h) {
+	if (h >= 0.75) return ['var(--hud-red)', true, 'overheating'];
+	if (h > 0.45) return ['var(--hud-red)', false, 'very hot'];
+	if (h > 0.15) return ['var(--hud-yellow)', false, 'hot'];
+	if (h <= -0.75) return ['var(--hud-blue)', true, 'freezing'];
+	if (h < -0.45) return ['var(--hud-blue)', false, 'very cold'];
+	if (h < -0.15) return ['var(--hud-lblue)', false, 'cold'];
+	return ['var(--hud-white)', false, 'comfortable'];
+}
+
+async function api(method, path, body) {
+	const r = await fetch(path, { method, cache: 'no-store', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+	let d = {};
+	try { d = await r.json(); } catch (e) { }
+	if (!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status));
+	return d;
+}
+
+let polling = false;
+async function poll() {
+	if (polling) return;
+	polling = true;
+	try {
+		const d = await api('GET', '/api/mod/players');
+		mod = d.mod; players = d.players || []; commands = d.commands || [];
+		byGuid = {};
+		players.forEach(p => byGuid[p.guid] = p);
+		render();
+	} catch (e) {
+		mod = null;
+		document.getElementById('modLine').textContent = "Can't reach ReCON";
+		document.getElementById('modDot').className = 'dot off';
+	} finally { polling = false; }
+}
+
+// ---- The map ------------------------------------------------------------
+
+// Each map's size in metres; one the list doesn't know is sized to fit
+// the players on it.
+const SIZES = { chernarusplus: 15360, enoch: 12800, namalsk: 12800, deerisle: 16384, sakhal: 15360, esseker: 12800, takistanplus: 12800, banov: 15360, chiemsee: 10240, pripyat: 20480, rostow: 14336, iztek: 8192, alteria: 8192, nasdara: 16384 };
+const NAMES = { chernarusplus: 'Chernarus', enoch: 'Livonia', namalsk: 'Namalsk', deerisle: 'Deer Isle', sakhal: 'Sakhal', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', pripyat: 'Pripyat', rostow: 'Rostow', iztek: 'Iztek', alteria: 'Alteria', nasdara: 'Nasdara' };
+let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
+
+function initMap() {
+	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: 3, zoomSnap: 0.25, attributionControl: false, zoomControl: false });
+	L.control.zoom({ position: 'bottomright' }).addTo(map);
+	// What covers what, top first: players, vehicles and predators, town
+	// names, events and deaths, the grid's numbers; then the grid lines
+	// (overlay pane, 400) and the map's picture. Popups (700) stay on top.
+	for (const [name, z] of [['players', 640], ['vehicles', 630], ['towns', 620], ['events', 610], ['gridlabels', 450]]) map.createPane(name).style.zIndex = z;
+	map.getPane('towns').style.pointerEvents = 'none';
+	map.getPane('gridlabels').style.pointerEvents = 'none';
+	gridLayer = L.layerGroup().addTo(map);
+	labelLayer = L.layerGroup().addTo(map);
+	map.on('moveend zoomend', drawLabels);
+	map.on('zoomend', zoomBand);
+	map.on('contextmenu', showCtx);
+	map.on('dragstart zoomstart', closeCtx);
+	map.on('dragstart', () => { if (track) setTrack(null); });
+	map.on('click', pickClick);
+	map.setView([7680, 7680], -5);
+}
+
+// The map's picture: tiles sliced ahead of time (satmap),
+// maps/<world>/<level>/<column>_<row>.jpg, else the whole picture,
+// maps/<world>.jpg. Level 0 is the whole map in one tile and each level
+// after it has twice the detail, so whatever the zoom only the few tiles in
+// view, from the least detailed level that is sharp enough, are loaded.
+// Either way only what is in view is drawn, at screen size: scaling a
+// whole picture up instead (an <img> or SVG <image>) made phones run out
+// of memory and reload the page.
+let pic = null; // { levels, tile, px, url(level, col, row) } for tiles, { img } for the whole picture
+
+// srcCache holds the loaded tiles by URL, the most recently used last.
+const srcCache = new Map();
+// srcImage is the tile at url once it has loaded, else null: it starts
+// loading it, and calls again() when it has.
+function srcImage(url, again) {
+	let im = srcCache.get(url);
+	if (im) srcCache.delete(url);
+	else { im = new Image(); im.decoding = 'async'; im.src = url; }
+	srcCache.set(url, im);
+	while (srcCache.size > 160) srcCache.delete(srcCache.keys().next().value);
+	if (im.complete && im.naturalWidth) return im;
+	if (again) im.addEventListener('load', again, { once: true });
+	return null;
+}
+// srcLoaded is the tile at url if it has already loaded, without loading it.
+function srcLoaded(url) {
+	const im = srcCache.get(url);
+	return im && im.complete && im.naturalWidth ? im : null;
+}
+
+// calPoints are the map's calibration points, oldest first: where a player
+// was (x, z, as the mod reported) and where on the picture they really
+// were (u from its west edge, v from its north edge, 0 to 1).
+let calPoints = [];
+const CAL_MIN = 1000; // metres two points must be apart to set the picture's size
+// placement is where the map's picture lies: its north-west corner at
+// (W, N), L metres across. Not calibrated, it covers the map (see L0); one point
+// moves it so that spot on it is where the player was; two at least
+// CAL_MIN apart set its size too.
+function placement() {
+	const S = size || 15360, p = calPoints;
+	// A picture within 2% of the map's size is taken as 1 px a metre from
+	// the map's north-west corner (Deer Isle's is 16512 px for 16384 m).
+	const px = pic && (pic.px || (pic.img && pic.img.naturalWidth));
+	const L0 = px && Math.abs(px - S) <= S * 0.02 ? px : S;
+	if (!p.length) return { W: 0, N: S, L: L0 };
+	let L = L0, use = [p[p.length - 1]];
+	if (p.length >= 2) {
+		const a = p[p.length - 2], b = p[p.length - 1];
+		const dw = Math.hypot(b.x - a.x, b.z - a.z), dp = Math.hypot(b.u - a.u, b.v - a.v);
+		if (dw >= CAL_MIN && dp > 0) { L = dw / dp; use = [a, b]; }
+	}
+	let W = 0, N = 0;
+	for (const q of use) { W += q.x - q.u * L; N += q.z + q.v * L; }
+	return { W: W / use.length, N: N / use.length, L };
+}
+
+// drawPicture draws the map's picture from (x0, z0), span metres across,
+// onto all of the canvas cv (north up); again() is called when a tile it
+// needed has loaded, to draw it again.
+function drawPicture(cv, x0, z0, span, again) {
+	const ctx = cv.getContext('2d');
+	ctx.clearRect(0, 0, cv.width, cv.height);
+	if (!pic || !span) return;
+	const P = placement(), f = cv.width / span; // canvas px a metre
+	ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+	// put draws image im, covering the map from (ix, iTop) w × h metres
+	// (iTop its north edge), clipped to the canvas and to the box
+	// [cx0, cx1] × [cb, ct] if given.
+	const put = (im, ix, iTop, w, h, cx0 = -Infinity, cx1 = Infinity, cb = -Infinity, ct = Infinity) => {
+		const vx0 = Math.max(x0, ix, cx0), vx1 = Math.min(x0 + span, ix + w, cx1);
+		const vt = Math.min(z0 + span, iTop, ct), vb = Math.max(z0, iTop - h, cb);
+		if (vx1 <= vx0 || vt <= vb) return;
+		const kx = im.naturalWidth / w, ky = im.naturalHeight / h; // image px a metre
+		ctx.drawImage(im, (vx0 - ix) * kx, (iTop - vt) * ky, (vx1 - vx0) * kx, (vt - vb) * ky,
+			(vx0 - x0) * f, (z0 + span - vt) * f, (vx1 - vx0) * f + 0.5, (vt - vb) * f + 0.5);
+	};
+	if (pic.img) { put(pic.img, P.W, P.N, P.L, P.L); return; }
+	// At level k a tile pixel is m(k) metres; pick the first level whose
+	// pixels are no bigger than the canvas's.
+	const top = pic.levels - 1, m = k => Math.pow(2, top - k) * P.L / pic.px;
+	let k = 0;
+	while (k < top && m(k) > 1 / f) k++;
+	// drawTile draws level k's tile (c, r) if it has loaded (loading it
+	// when load), clipped to the box; true if it drew.
+	const drawTile = (k, c, r, load, box = []) => {
+		const url = pic.url(k, c, r), im = load ? srcImage(url, again) : srcLoaded(url);
+		if (!im) return false;
+		const T = pic.tile * m(k);
+		put(im, P.W + c * T, P.N - r * T, im.naturalWidth * m(k), im.naturalHeight * m(k), ...box);
+		return true;
+	};
+	const T = pic.tile * m(k), n = Math.ceil(pic.px / Math.pow(2, top - k) / pic.tile);
+	const c0 = Math.max(0, Math.floor((x0 - P.W) / T)), c1 = Math.min(n - 1, Math.floor((x0 + span - P.W) / T));
+	const r0 = Math.max(0, Math.floor((P.N - z0 - span) / T)), r1 = Math.min(n - 1, Math.floor((P.N - z0) / T));
+	for (let r = r0; r <= r1; r++) {
+		for (let c = c0; c <= c1; c++) {
+			if (drawTile(k, c, r, true)) continue;
+			// Not loaded yet: draw its area from the nearest coarser level
+			// that has (level 0, the whole map, is loaded first).
+			const box = [P.W + c * T, P.W + (c + 1) * T, P.N - (r + 1) * T, P.N - r * T];
+			for (let j = k - 1; j >= 0; j--) {
+				const d = Math.pow(2, k - j);
+				if (drawTile(j, Math.floor(c / d), Math.floor(r / d), j === 0, box)) break;
+			}
+		}
+	}
+}
+
+// PictureLayer shows the map's picture on the big map as 256 px canvas
+// tiles, made only for what is on screen and just around it (Leaflet's
+// keepBuffer), which load the picture's tiles they cover.
+const PictureLayer = L.GridLayer.extend({
+	options: { tileSize: 256, noWrap: true, updateWhenZooming: false, minZoom: -6, maxZoom: 3, className: 'piclayer' },
+	createTile(c) {
+		const t = document.createElement('canvas'), ts = this.getTileSize().x;
+		const dpr = Math.min(window.devicePixelRatio || 1, 2);
+		t.width = t.height = Math.round(ts * dpr);
+		// In CRS.Simple a pixel at zoom z is 2^-z metres; tile y grows south.
+		const m = ts / Math.pow(2, c.z), x0 = c.x * m, z0 = -(c.y + 1) * m;
+		const again = () => { if (t.isConnected) drawPicture(t, x0, z0, m, again); };
+		drawPicture(t, x0, z0, m, again);
+		return t;
+	},
+});
+
+// loadPicture puts the map's picture under the grid: the tiles in
+// maps/<world>/ if there are any, else maps/<world>.jpg if there is one
+// (never both: the whole picture is too big to load when there are tiles).
+function loadPicture() {
+	if (imageLayer) { imageLayer.remove(); imageLayer = null; }
+	pic = null; srcCache.clear(); calPoints = [];
+	const w = world;
+	const show = p => {
+		if (w !== world) return;
+		pic = p;
+		placePicture();
+	};
+	api('GET', '/api/mod/map/' + encodeURIComponent(w) + '/calibration').then(d => {
+		if (w !== world) return;
+		calPoints = d.points || [];
+		placePicture();
+	}).catch(() => { });
+	api('GET', '/api/mod/map/' + encodeURIComponent(w) + '/tiles').then(t => {
+		const base = '/api/mod/map/' + encodeURIComponent(w) + '/tile/';
+		const url = (k, c, r) => base + k + '/' + c + '_' + r + '.' + t.ext + '?v=' + t.version;
+		const p = { levels: t.levels, tile: t.tile, px: t.px, url };
+		const first = new Image(); // level 0 first: it is under everything still loading
+		first.onload = first.onerror = () => show(p);
+		first.decoding = 'async';
+		first.src = url(0, 0, 0);
+		srcCache.set(url(0, 0, 0), first);
+	}).catch(() => {
+		if (w !== world) return;
+		const img = new Image();
+		img.onload = () => show({ img });
+		img.src = '/api/mod/map/' + encodeURIComponent(w);
+	});
+}
+// placePicture (re)draws the map's picture where placement() puts it.
+function placePicture() {
+	if (imageLayer) { imageLayer.remove(); imageLayer = null; }
+	if (pic) {
+		const P = placement();
+		imageLayer = new PictureLayer({ bounds: [[P.N - P.L, P.W], [P.N, P.W + P.L]] }).addTo(map);
+		imageLayer.bringToBack();
+	}
+	redrawMini();
+	calUI();
+}
+let miniSoon = 0;
+function redrawMiniSoon() { if (!miniSoon) miniSoon = setTimeout(() => { miniSoon = 0; redrawMini(); }, 50); }
+
+// setWorld sizes the map and draws its 1 km grid, with the map's picture
+// under it if ReCON's data folder has one (maps/<world>.jpg).
+function setWorld(w, s) {
+	if (w === world && s === size) return;
+	const newWorld = w !== world;
+	world = w; size = s;
+	gridLayer.clearLayers();
+	loadPicture();
+	const line = { className: 'gridline', weight: 1, interactive: false };
+	for (let g = 0; g <= size; g += 1000) {
+		L.polyline([[0, g], [size, g]], line).addTo(gridLayer);
+		L.polyline([[g, 0], [g, size]], line).addTo(gridLayer);
+	}
+	L.polyline([[0, 0], [0, size], [size, size], [size, 0], [0, 0]], { className: 'gridedge', weight: 1, interactive: false }).addTo(gridLayer);
+	map.setMaxBounds([[-size * 0.25, -size * 0.25], [size * 1.25, size * 1.25]]);
+	// The whole map once, when it is first known; never again on its own
+	// (a player joining used to zoom the map back out).
+	if (!fitted) { map.fitBounds([[0, 0], [size, size]]); fitted = true; }
+	drawLabels();
+}
+
+// drawLabels writes the grid's numbers along the bottom (east, x) and left
+// (north, z) edges of what's in view, so they show at any zoom.
+function drawLabels() {
+	if (!labelLayer || !size) return;
+	labelLayer.clearLayers();
+	const b = map.getBounds();
+	const label = (at, text, anchor) => L.marker(at, { interactive: false, keyboard: false, pane: 'gridlabels',
+		icon: L.divIcon({ className: 'gridlbl', html: '<span>' + text + '</span>', iconSize: null, iconAnchor: anchor }) }).addTo(labelLayer);
+	const west = Math.max(0, b.getWest()), east = Math.min(size, b.getEast());
+	const south = Math.max(0, b.getSouth()), north = Math.min(size, b.getNorth());
+	for (let g = Math.ceil(west / 1000) * 1000; g <= east; g += 1000) label([b.getSouth(), g], pad(g / 100, 3), [-3, 24]);
+	for (let g = Math.ceil(south / 1000) * 1000; g <= north; g += 1000) label([g, b.getWest()], pad(g / 100, 3), [-4, 20]);
+}
+
+function arrowSVG(color) {
+	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><circle r="8.5" fill="none" stroke="#8ab4f8" stroke-width="1.5" style="display:none"/>' +
+		'<path class="arr" d="M0,-8 L5.6,6.4 L0,2.8 L-5.6,6.4 Z" fill="' + color + '" stroke="#111" stroke-width="1.2"/></svg>';
+}
+
+function drawMarkers() {
+	const seen = {};
+	players.forEach(p => {
+		seen[p.guid] = true;
+		let m = markers[p.guid];
+		if (!m) {
+			const guid = p.guid;
+			m = L.marker([p.z, p.x], { pane: 'players', icon: L.divIcon({ className: 'pmark', html: arrowSVG(colorOf(guid)) + '<span></span>', iconSize: [0, 0] }), keyboard: false });
+			m.on('click', () => openPlayerPopup(guid));
+			m.on('contextmenu', e => showPlayerCtx(guid, e));
+			m.addTo(map);
+			markers[guid] = m;
+		}
+		m.setLatLng([p.z, p.x]);
+		const el = m.getElement();
+		if (el) {
+			el.querySelector('.arr').setAttribute('transform', 'rotate(' + (p.heading || 0) + ')');
+			el.querySelector('span').textContent = p.name;
+			el.classList.toggle('sel', p.guid === selGuid);
+			el.style.opacity = p.alive ? 1 : 0.45;
+		}
+	});
+	for (const g in markers) if (!seen[g]) { markers[g].remove(); delete markers[g]; }
+	if (track && track.kind === 'player') followTrack();
+	renderPlayerPopup(); // follows them, with their stats now
+}
+
+// fitAll shows the whole map in the window.
+function fitAll() {
+	const s = size || 15360;
+	map.fitBounds([[0, 0], [s, s]]);
+}
+// toggleFull makes the map fill the browser's window, or puts it back.
+function toggleFull(on) {
+	const wrap = document.querySelector('.mapwrap');
+	on = on === undefined ? !wrap.classList.contains('full') : on;
+	const c = map.getCenter();
+	wrap.classList.toggle('full', on);
+	document.body.style.overflow = on ? 'hidden' : '';
+	const b = document.getElementById('fullBtn');
+	b.textContent = on ? 'Exit full screen' : 'Full screen';
+	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
+	map.invalidateSize({ pan: false });
+	map.panTo(c, { animate: false });
+}
+// ---- Vehicles: every car, motorbike and boat on the server (mod 0.0.1i) -
+// Shown while the Vehicles button is on (remembered in this browser), read
+// every 5 s. A click on one opens its details, with Delete.
+
+let vehOn = false, vehicles = [], vehSent = true, vehLayer = null, vehMarkers = {}, vehOpen = null, vehPending = {}, vehDetail = null;
+try { vehOn = localStorage.getItem('live.vehicles') === '1'; } catch (e) { }
+const vehPopup = L.popup({ autoPan: false, offset: [0, -6] });
+function toggleVehicles() {
+	vehOn = !vehOn;
+	try { localStorage.setItem('live.vehicles', vehOn ? '1' : '0'); } catch (e) { }
+	if (!vehOn) map.closePopup(vehPopup);
+	drawVehicles();
+	loadVehicles();
+}
+async function loadVehicles() {
+	if (!vehOn) return;
+	try {
+		const d = await api('GET', '/api/mod/vehicles');
+		vehicles = d.vehicles || [];
+		vehSent = !!d.sent;
+	} catch (e) { return; }
+	drawVehicles();
+}
+// vehColor: someone in it blue, the engine running green, else grey.
+function vehColor(v) { return v.crew ? '#8ab4f8' : v.engine ? '#81c995' : '#e8eaed'; }
+function vehSVG(v) {
+	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><g transform="rotate(' + Math.round(v.heading || 0) + ')">' +
+		'<rect x="-4.5" y="-7.5" width="9" height="15" rx="2.5" fill="' + vehColor(v) + '" stroke="#111" stroke-width="1.2"/>' +
+		'<rect x="-3" y="-5" width="6" height="3.5" rx="1" fill="#111" opacity=".55"/></g></svg>';
+}
+function drawVehicles() {
+	const btn = document.getElementById('vehBtn');
+	btn.classList.toggle('on', vehOn);
+	btn.textContent = 'Vehicles' + (vehOn && vehSent ? ' ' + vehicles.length : '');
+	renderOvBtn();
+	btn.title = vehOn && !vehSent ? 'The mod on the server doesn\'t send vehicles: it needs recon-mod 0.0.1i or later'
+		: 'Show every car, motorbike and boat on the server';
+	if (!vehLayer) vehLayer = L.layerGroup();
+	if (!vehOn) { vehLayer.remove(); return; }
+	if (!map.hasLayer(vehLayer)) vehLayer.addTo(map);
+	const seen = {};
+	for (const v of vehicles) {
+		seen[v.id] = true;
+		const icon = L.divIcon({ className: 'vmark', html: vehSVG(v), iconSize: [0, 0] });
+		let m = vehMarkers[v.id];
+		if (!m) {
+			m = vehMarkers[v.id] = L.marker([v.z, v.x], { pane: 'vehicles', icon, keyboard: false, title: catLabel(v) }).addTo(vehLayer);
+			m.on('click', () => openVehicle(v.id));
+			const vid = v.id;
+			m.on('contextmenu', e => showVehicleCtx(vid, e));
+		} else {
+			m.setLatLng([v.z, v.x]);
+			m.setIcon(icon);
+		}
+	}
+	for (const id in vehMarkers) if (!seen[id]) { vehMarkers[id].remove(); delete vehMarkers[id]; }
+	if (vehOpen != null) {
+		if (seen[vehOpen]) renderVehicle(); else map.closePopup(vehPopup);
+	}
+	renderVehicleInfo();
+	if (track && track.kind === 'vehicle') followTrack();
+}
+function catLabel(v) { return v.name && v.name[0] !== '$' ? v.name : item(v.type); }
+// openVehicle opens the popup on the map: what the vehicle list says.
+function openVehicle(id) {
+	vehOpen = id;
+	renderVehicle();
+	// Pan the map to fit it as it opens, not on every redraw after.
+	vehPopup.options.autoPan = true;
+	vehPopup.openOn(map);
+	vehPopup.options.autoPan = false;
+}
+// The vehicle dialog (Info…): its parts, damage and cargo, asked of the
+// mod when it opens and on Refresh, not otherwise.
+let vehInfo = null, vehAsk = 0;
+function openVehicleInfo(id) {
+	vehInfo = id;
+	document.getElementById('vModal').style.display = 'flex';
+	askVehicle();
+}
+function closeVehicleInfo() { document.getElementById('vModal').style.display = 'none'; vehInfo = null; vehDetail = null; vehAsk++; }
+// askVehicle asks the mod, once, for what is in the vehicle in the dialog
+// (its damage zones, parts and cargo), then reads it as soon as it has
+// come (a sync or two): no more asking after that, until Refresh.
+async function askVehicle() {
+	if (vehInfo == null) return;
+	const id = vehInfo, ask = ++vehAsk;
+	vehDetail = null;
+	renderVehicleInfo();
+	for (let i = 0; i < 15 && id === vehInfo && ask === vehAsk; i++) {
+		try {
+			const d = await api('GET', '/api/mod/vehicles/' + id + (i === 0 ? '?ask=1' : ''));
+			if (id !== vehInfo || ask !== vehAsk) return;
+			if (d.detail) { vehDetail = d.detail; break; }
+		} catch (e) { break; }
+		await new Promise(r => setTimeout(r, 1000));
+	}
+	if (id === vehInfo && ask === vehAsk) {
+		if (!vehDetail) vehDetail = { failed: true };
+		renderVehicleInfo();
+	}
+}
+// zoneName makes a damage zone's name readable: FuelTank → Fuel tank.
+function zoneName(z) { const w = z.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2'); return w[0].toUpperCase() + w.slice(1).toLowerCase(); }
+function partRow(name, level, extra) {
+	const [cn, cc] = CONDITION[Math.max(0, Math.min(4, level))];
+	return '<div class="part"><span class="dot" style="background:' + cc + '"></span><span class="nm">' + esc(name) + '</span>' +
+		'<span class="lv" style="color:' + cc + '">' + cn + (extra ? ' · ' + extra : '') + '</span></div>';
+}
+function vehCondition(h) { return CONDITION[h > 0.7 ? 0 : h > 0.5 ? 1 : h > 0.3 ? 2 : h > 0 ? 3 : 4]; }
+// vehFacts is what the vehicle list says about v, as label/value rows.
+function vehFacts(v) {
+	const [cn, cc] = vehCondition(v.health);
+	return [['Where', grid(v.x, v.z) + ' <span class="muted">' + Math.round(v.x) + ', ' + Math.round(v.z) + '</span>'],
+		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'],
+		['Fuel', v.fuel >= 0 ? Math.round(v.fuel * 100) + '%' : '—'],
+		['Inside', v.crew ? v.crew + (v.crew === 1 ? ' person' : ' people') : 'Nobody'],
+		['Engine', v.engine ? 'Running' : 'Off']];
+}
+// vehDeleteState is how deleting v went, if it was asked.
+function vehDeleteState(v) {
+	const cmd = vehPending[v.id] && commands.find(c => c.id === vehPending[v.id]);
+	if (cmd && (cmd.status === 'queued' || cmd.status === 'sent')) return '<span class="st" style="color:#fdd663">Deleting…</span>';
+	if (cmd && cmd.status !== 'done') return '<span class="st" style="color:#f28b82">Not deleted: ' + esc(cmd.error || cmd.status) + '</span>';
+	return '';
+}
+function deleteButton(v) {
+	return '<button type="button" class="bad" onclick="event.stopPropagation(); deleteVehicle(' + v.id + ')"' + (v.crew ? ' disabled title="Someone is in it"' : '') + '>Delete</button>';
+}
+function renderVehicle() {
+	const v = vehicles.find(x => x.id === vehOpen);
+	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop" data-noicon><h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
+		vehFacts(v).map(([k, x]) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>').join('') +
+		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage, cargo and Delete">Info…</button></div></div>');
+	renderVehicleInfo();
+}
+// renderVehicleInfo draws the dialog: the facts, then parts, damage and
+// cargo side by side (each column keeps where it was scrolled to).
+function renderVehicleInfo() {
+	if (vehInfo == null) return;
+	const v = vehicles.find(x => x.id === vehInfo), body = document.getElementById('vBody');
+	if (!v) { body.innerHTML = '<div class="empty">That vehicle isn\'t on the server any more.</div>'; document.getElementById('vActs').innerHTML = ''; return; }
+	document.getElementById('vTitle').textContent = catLabel(v);
+	document.getElementById('vType').textContent = v.type;
+	const tops = [...body.querySelectorAll('.vcols > div')].map(c => c.scrollTop);
+	let h = '<div class="vfacts">' + vehFacts(v).map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
+	const d = vehDetail;
+	if (!d) h += '<div class="muted">Asking recon-mod for its parts, damage and cargo…</div>';
+	else if (d.failed) h += '<div class="muted">recon-mod didn\'t send its parts, damage and cargo (it needs 0.0.1i or later).</div>';
+	else {
+		const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
+		const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
+		h += '<div class="vcols"><div><h5>Parts · ' + parts.length + '</h5>' +
+			(parts.length ? parts.map(it => partRow(itemName(it), it.healthLevel | 0)).join('') : '<div class="muted">None fitted</div>') +
+			'</div><div><h5>Damage</h5>' +
+			(d.zones.length ? d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('') : '<div class="muted">No zones</div>') +
+			'</div><div><h5>Cargo · ' + cargo.length + '</h5>' +
+			(cargo.length ? cargo.map(it => {
+				const n = countIn(it);
+				return partRow(itemName(it), it.healthLevel | 0, n ? n + (n === 1 ? ' item inside' : ' items inside') : qty(it));
+			}).join('') : '<div class="muted">Empty</div>') + '</div></div>';
+	}
+	body.innerHTML = h;
+	body.querySelectorAll('.vcols > div').forEach((c, i) => { c.scrollTop = tops[i] || 0; });
+	document.getElementById('vActs').innerHTML = '<button type="button" onclick="askVehicle()" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + vehDeleteState(v);
+}
+async function deleteVehicle(id) {
+	const v = vehicles.find(x => x.id === id);
+	if (!v || !confirm('Delete this ' + catLabel(v) + ' and everything in it? It can\'t be undone.')) return;
+	try {
+		const d = await api('POST', '/api/mod/world/deleteVehicle', { text: String(id) });
+		if (d.command) vehPending[id] = d.command.id;
+		await poll();
+	} catch (e) { alert('Not deleted: ' + e.message); return; }
+	renderVehicle();
+}
+setInterval(loadVehicles, 5000);
+
+// ---- Towns, events and deaths on the map ---------------------------------
+// Each layer is shown while its button is on (remembered in this browser).
+
+function layerPref(k, dflt) { try { const v = localStorage.getItem('live.' + k); return v == null ? dflt : v; } catch (e) { return dflt; } }
+function setLayerPref(k, v) { try { localStorage.setItem('live.' + k, v); } catch (e) { } }
+function layerButton(id, on, text, title) {
+	const b = document.getElementById(id);
+	b.classList.toggle('on', on);
+	b.textContent = text;
+	if (title) b.title = title;
+	renderOvBtn();
+}
+// The Overlays button says how many layers are on; its menu opens below it
+// and closes with a click anywhere else.
+function renderOvBtn() {
+	const n = document.querySelectorAll('#ovMenu button.on').length;
+	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
+}
+function toggleOvMenu(open) {
+	const m = document.getElementById('ovMenu'), b = document.getElementById('ovBtn');
+	open = open === undefined ? m.hidden : open;
+	m.hidden = !open;
+	b.classList.toggle('open', open);
+	b.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+document.addEventListener('mousedown', e => { if (!e.target.closest('.ovwrap')) toggleOvMenu(false); });
+
+// Players: their arrows and names (on unless switched off); hiding them
+// hides their pane, so nothing else about them changes.
+let playersOn = layerPref('players', '1') === '1';
+function togglePlayers() { playersOn = !playersOn; setLayerPref('players', playersOn ? '1' : '0'); drawPlayersToggle(); }
+function drawPlayersToggle() {
+	layerButton('plyBtn', playersOn, 'Players');
+	map.getPane('players').style.display = playersOn ? '' : 'none';
+	if (!playersOn) map.closePopup(plPopup);
+}
+
+// Grid: the 1 km lines and their numbers (on unless switched off).
+let gridOn = layerPref('grid', '1') === '1';
+function toggleGrid() { gridOn = !gridOn; setLayerPref('grid', gridOn ? '1' : '0'); drawGridToggle(); }
+function drawGridToggle() {
+	layerButton('gridBtn', gridOn, 'Grid');
+	for (const l of [gridLayer, labelLayer]) if (l) { if (gridOn) l.addTo(map); else l.remove(); }
+}
+
+// Towns: the map's place names, sent by recon-mod once a connection.
+let townsOn = layerPref('towns', '0') === '1', places = null, placesWorld = '';
+const townLayer = L.layerGroup();
+const TOWN_TYPES = { Capital: 1, City: 1, Village: 1, Local: 1, Marine: 1, Camp: 1, Ruin: 1, RailroadStation: 1 };
+// townType is a place's type the way Chernarus names it: other maps (Deer
+// Isle) say NameCityCapital, NameCity, NameVillage, NameLocal...; an
+// airfield shows like a local name.
+function townType(t) {
+	t = String(t || '').replace(/^Name/, '');
+	return t === 'CityCapital' ? 'Capital' : t === 'Airport' ? 'Local' : t;
+}
+function toggleTowns() { townsOn = !townsOn; setLayerPref('towns', townsOn ? '1' : '0'); drawTowns(); loadPlaces(); }
+async function loadPlaces() {
+	if (!townsOn || (places && placesWorld === world)) return;
+	try {
+		const d = await api('GET', '/api/mod/places');
+		if (!d.sent) { places = null; drawTowns(); return; }
+		places = d.places || []; placesWorld = d.world;
+	} catch (e) { return; }
+	townLayer.clearLayers();
+	for (const p of places) {
+		const ty = townType(p.type);
+		if (!TOWN_TYPES[ty]) continue;
+		L.marker([p.z, p.x], { pane: 'towns', icon: L.divIcon({ className: 'town t-' + ty.toLowerCase(), html: '<span>' + esc(p.name) + '</span>', iconSize: null }),
+			interactive: false, keyboard: false }).addTo(townLayer);
+	}
+	drawTowns();
+}
+function drawTowns() {
+	layerButton('townBtn', townsOn, 'Towns', townsOn && !places ? 'recon-mod hasn\'t sent the place names: it needs 0.0.1i or later' : 'Show the map\'s town and place names');
+	if (townsOn && places) townLayer.addTo(map); else townLayer.remove();
+}
+// zoomBand sets which town names show: far (cities), mid (and villages), near (all).
+function zoomBand() {
+	const z = map.getZoom();
+	document.getElementById('map').dataset.zb = z < -3.5 ? 'far' : z < -2 ? 'mid' : 'near';
+}
+setInterval(loadPlaces, 10000);
+
+// Events: helicopter crashes and toxic zones, every 10 s.
+let eventsOn = layerPref('events', '0') === '1', worldEvents = [], eventsSent = true;
+const eventLayer = L.layerGroup();
+const EVENT_NAMES = { Wreck_UH1Y: 'Helicopter crash (UH-1Y)', Wreck_Mi8_Crashed: 'Helicopter crash (Mi-8)', Wreck_Mi8: 'Helicopter crash (Mi-8)',
+	Wreck_SantasSleigh: 'Santa\'s sleigh', ContaminatedArea_Static: 'Toxic zone', ContaminatedArea_Dynamic: 'Toxic zone (airstrike)', ContaminatedArea_Local: 'Toxic gas (grenade)' };
+function eventName(e) { return EVENT_NAMES[e.type] || (e.kind === 'crash' ? 'Crash (' + item(e.type) + ')' : item(e.type)); }
+function toggleEvents() { eventsOn = !eventsOn; setLayerPref('events', eventsOn ? '1' : '0'); drawEvents(); loadEvents(); }
+async function loadEvents() {
+	if (!eventsOn) return;
+	try {
+		const d = await api('GET', '/api/mod/worldevents');
+		worldEvents = d.events || []; eventsSent = !!d.sent;
+	} catch (e) { return; }
+	drawEvents();
+}
+function drawEvents() {
+	layerButton('eventBtn', eventsOn, 'Events' + (eventsOn && eventsSent ? ' ' + worldEvents.length : ''),
+		eventsOn && !eventsSent ? 'recon-mod doesn\'t send events: it needs 0.0.1i or later' : 'Show helicopter crashes and toxic zones');
+	eventLayer.clearLayers();
+	if (!eventsOn) { eventLayer.remove(); return; }
+	eventLayer.addTo(map);
+	for (const e of worldEvents) {
+		const tip = eventName(e) + (e.radius ? ' · ' + Math.round(e.radius) + ' m across' : '') + ' · ' + grid(e.x, e.z);
+		if (e.kind !== 'crash' && e.radius > 0)
+			L.circle([e.z, e.x], { radius: e.radius, color: '#c5d86d', weight: 1.5, dashArray: '5 4', fillColor: '#c5d86d', fillOpacity: 0.15, pane: 'events', interactive: false }).addTo(eventLayer);
+		const html = e.kind === 'crash'
+			? '<svg width="18" height="18" viewBox="-9 -9 18 18"><path d="M0 -8 L8 0 L0 8 L-8 0 Z" fill="#f2a65a" stroke="#111" stroke-width="1.2"/><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="#111" stroke-width="1.8"/></svg>'
+			: '<svg width="18" height="18" viewBox="-9 -9 18 18"><circle r="6.5" fill="#c5d86d" stroke="#111" stroke-width="1.2"/><text y="3.5" text-anchor="middle" font-size="10" font-weight="700" fill="#111">!</text></svg>';
+		L.marker([e.z, e.x], { pane: 'events', icon: L.divIcon({ className: 'emark', html, iconSize: [0, 0] }), keyboard: false }).bindTooltip(esc(tip), { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
+	}
+}
+setInterval(loadEvents, 10000);
+
+// Predators: the bears, wolves and guard dogs alive on the server, every
+// 2 s (recon-mod 0.0.1l on). A marker points the way the animal faces.
+let predOn = layerPref('predators', '0') === '1', predators = [], predSent = true, predMarkers = {};
+const predLayer = L.layerGroup();
+const PRED = { bear: ['Bear', '#d08b5b'], wolf: ['Wolf', '#f28b82'], dog: ['Dog', '#fdd663'] };
+function togglePredators() { predOn = !predOn; setLayerPref('predators', predOn ? '1' : '0'); drawPredators(); loadPredators(); }
+async function loadPredators() {
+	if (!predOn) return;
+	try {
+		const d = await api('GET', '/api/mod/predators');
+		predators = d.predators || []; predSent = !!d.sent;
+	} catch (e) { return; }
+	drawPredators();
+}
+function predSVG(a) {
+	const [name, c] = PRED[a.kind] || [item(a.type), '#ccc'];
+	return '<svg width="12" height="12" viewBox="-6 -6 12 12"><g transform="rotate(' + Math.round(a.heading || 0) + ')"><path d="M0 -9 L3.5 -4.5 L-3.5 -4.5 Z" fill="' + c + '" stroke="#111" stroke-width="1"/></g>' +
+		'<circle r="4.5" fill="' + c + '" stroke="#111" stroke-width="1.2"/></svg><span style="color:' + c + '">' + esc(name) + '</span>';
+}
+function drawPredators() {
+	const n = {};
+	for (const a of predators) n[a.kind] = (n[a.kind] || 0) + 1;
+	layerButton('predBtn', predOn, 'Predators' + (predOn && predSent ? ' ' + predators.length : ''),
+		predOn && !predSent ? 'recon-mod doesn\'t send predators: it needs 0.0.1l or later'
+			: predOn ? (n.bear || 0) + ' bears · ' + (n.wolf || 0) + ' wolves · ' + (n.dog || 0) + ' dogs' : 'Show the bears, wolves and guard dogs');
+	if (!predOn) { predLayer.remove(); predLayer.clearLayers(); predMarkers = {}; return; }
+	if (!map.hasLayer(predLayer)) predLayer.addTo(map);
+	const seen = {};
+	for (const a of predators) {
+		seen[a.id] = true;
+		const icon = L.divIcon({ className: 'amark', html: predSVG(a), iconSize: [0, 0] }), tip = esc((PRED[a.kind] || [item(a.type)])[0] + ' · ' + grid(a.x, a.z));
+		let m = predMarkers[a.id];
+		if (!m) m = predMarkers[a.id] = L.marker([a.z, a.x], { pane: 'vehicles', icon, keyboard: false }).bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(predLayer);
+		else { m.setLatLng([a.z, a.x]); m.setIcon(icon); m.setTooltipContent(tip); }
+	}
+	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
+}
+setInterval(loadPredators, 2000);
+
+// Deaths: a red X where each death in the time picked was, every 30 s.
+let deathsOn = layerPref('deaths', '0') === '1', deathHours = +layerPref('deathHours', '24') || 24, deathList = [];
+const deathLayer = L.layerGroup();
+function toggleDeaths() { deathsOn = !deathsOn; setLayerPref('deaths', deathsOn ? '1' : '0'); drawDeaths(); loadDeaths(); }
+document.getElementById('deathHours').addEventListener('change', e => { deathHours = +e.target.value; setLayerPref('deathHours', String(deathHours)); loadDeaths(); });
+async function loadDeaths() {
+	if (!deathsOn) return;
+	try { deathList = (await api('GET', '/api/mod/deaths?hours=' + deathHours)).deaths || []; } catch (e) { return; }
+	drawDeaths();
+}
+// deathText says who died and how (as on the Kills & deaths tab), and when.
+function deathText(k) {
+	const cause = causeOf(k), c = CAUSES[cause], w = k.weapon && !/^Survivor/i.test(k.weapon) ? item(k.weapon) : '';
+	let how;
+	if (cause === 'player') how = 'killed by ' + (k.killerName || 'a player') + (w ? ' with ' + w : '') + (k.distance ? ' at ' + Math.round(k.distance) + ' m' : '');
+	else if (c) how = c[1][0].toLowerCase() + c[1].slice(1) + (cause === 'illness' && k.illnesses && k.illnesses.length ? ': ' + k.illnesses.join(', ') : w ? ' (' + w + ')' : '');
+	else how = 'died' + (w ? ' (' + w + ')' : '');
+	const d = new Date(k.at);
+	return (k.victimName || 'Someone') + ' ' + how + ' · ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+function drawDeaths() {
+	layerButton('deathBtn', deathsOn, 'Deaths' + (deathsOn ? ' ' + deathList.length : ''));
+	const sel = document.getElementById('deathHours');
+	sel.hidden = !deathsOn;
+	sel.value = String(deathHours);
+	deathLayer.clearLayers();
+	if (!deathsOn) { deathLayer.remove(); return; }
+	deathLayer.addTo(map);
+	const x = '<svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#111" stroke-width="4" stroke-linecap="round"/>' +
+		'<path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#ea4335" stroke-width="2.4" stroke-linecap="round"/></svg>';
+	for (const k of deathList) {
+		if (!k.x && !k.z) continue;
+		const m = L.marker([k.z, k.x], { pane: 'events', icon: L.divIcon({ className: 'dmark', html: x, iconSize: [0, 0] }), keyboard: false })
+			.bindTooltip(esc(deathText(k)), { direction: 'top', offset: [0, -6] }).addTo(deathLayer);
+		if (k.victimGuid) m.on('click', () => { if (byGuid[k.victimGuid]) openPlayer(k.victimGuid); });
+	}
+}
+setInterval(loadDeaths, 30000);
+
+// ---- Right-click menus: on the map, a player or a vehicle -------------
+// One menu (#ctx) at the click, its items' data-a handled by the one that
+// opened it; it closes with Esc, a click elsewhere, or dragging or zooming
+// the map.
+
+let ctxAt = null, ctxHandle = null;
+function closeCtx() { document.getElementById('ctx').hidden = true; ctxAt = null; ctxHandle = null; }
+function openCtx(pt, at, html, handle) {
+	const el = document.getElementById('ctx');
+	ctxAt = at; ctxHandle = handle;
+	el.innerHTML = html + '<div class="msg" id="ctxMsg"></div>';
+	el.hidden = false;
+	const wrap = document.querySelector('.mapwrap').getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
+	el.style.left = Math.max(4, Math.min(pt.x, wrap.width - w - 4)) + 'px';
+	el.style.top = Math.max(4, Math.min(pt.y, wrap.height - h - 4)) + 'px';
+}
+function ctxMsg(text, bad) { const m = document.getElementById('ctxMsg'); if (m) { m.style.color = bad ? '#f28b82' : ''; m.textContent = text; } }
+function ctxItem(a, text, cls) { return '<button type="button" data-a="' + a + '"' + (cls ? ' class="' + cls + '"' : '') + '>' + text + '</button>'; }
+// ctxTeleportList is a button per online player, to send them there.
+function ctxTeleportList(label, except) {
+	const alive = players.filter(p => p.alive && p.guid !== except).sort((a, b) => a.name.localeCompare(b.name));
+	return '<div class="lbl">' + label + '</div><div class="plist">' + (alive.length
+		? alive.map(p => ctxItem('tp:' + p.guid, esc(p.name))).join('') : '<div class="muted">Nobody is online.</div>') + '</div>';
+}
+// ctxAsk handles a click on a player in a menu's teleport list: their name
+// turns into Confirm and Cancel (one slip would move the wrong player), and
+// Cancel puts the name back. True when it handled a (tp: or tpno:).
+function ctxAsk(a) {
+	const menu = document.getElementById('ctx');
+	const restore = row => { const g = row.dataset.ask, p = byGuid[g]; row.outerHTML = ctxItem('tp:' + g, esc(p ? p.name : g)); };
+	if (a.startsWith('tp:')) {
+		menu.querySelectorAll('.ask').forEach(restore); // one at a time
+		const g = a.slice(3), b = menu.querySelector('[data-a="tp:' + g + '"]'), p = byGuid[g];
+		if (b) b.outerHTML = '<div class="ask" data-ask="' + g + '"><span>' + esc(p ? p.name : g) + '</span>' +
+			'<button type="button" data-a="tpok:' + g + '" class="ok">Confirm</button><button type="button" data-a="tpno:' + g + '">Cancel</button></div>';
+		return true;
+	}
+	if (a.startsWith('tpno:')) {
+		const row = menu.querySelector('.ask[data-ask="' + a.slice(5) + '"]');
+		if (row) restore(row);
+		return true;
+	}
+	return false;
+}
+// ctxRun sends an action, says so in the menu, and closes it a moment later.
+async function ctxRun(text, path, body) {
+	const at = ctxAt;
+	ctxMsg(text + '…');
+	try {
+		await api('POST', path, body || {});
+		poll();
+		setTimeout(() => { if (ctxAt === at) closeCtx(); }, 900);
+	} catch (err) { ctxMsg(err.message, true); }
+}
+document.getElementById('ctx').addEventListener('click', e => {
+	const b = e.target.closest('[data-a]');
+	if (b && ctxHandle) ctxHandle(b.dataset.a);
+});
+document.addEventListener('mousedown', e => { if (ctxAt && !e.target.closest('#ctx')) closeCtx(); });
+
+// On the map: teleport a player here, spawn here. The header's position
+// can be selected and copied.
+function showCtx(e) {
+	const x = e.latlng.lng, z = e.latlng.lat;
+	if (!(x > 0 && z > 0) || (size && (x > size || z > size))) { closeCtx(); return; }
+	openCtx(e.containerPoint, { x, z },
+		'<div class="hd">' + Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z) + '</div>' + ctxTeleportList('Teleport here') +
+		'<div class="lbl">This spot</div>' + ctxItem('spawn', 'Spawn an item here…'),
+		a => {
+			if (ctxAsk(a)) return;
+			if (a.startsWith('tpok:')) { const p = byGuid[a.slice(5)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(5) + '/teleport', { x, z, y: 0 }); }
+			else if (a === 'spawn') { closeCtx(); openSpawnAt(x, z); }
+		});
+}
+
+// On a player: open them (a tab), follow them, send them to a spot, and
+// the quick actions.
+function showPlayerCtx(guid, e) {
+	const p = byGuid[guid];
+	if (!p) return;
+	const following = track && track.kind === 'player' && track.id === guid;
+	openCtx(e.containerPoint, { guid },
+		'<div class="hd">' + esc(p.name) + ' · ' + grid(p.x, p.z) + (p.alive ? '' : ' · dead') + '</div>' +
+		ctxItem('open', 'Open') + ctxItem('inv', 'Inventory') + ctxItem('spawn', 'Spawn an item for them…') +
+		'<div class="lbl">Map</div>' + ctxItem('follow', following ? 'Stop following' : 'Follow Player') + ctxItem('send', 'Teleport to…') +
+		'<div class="lbl">Actions</div>' + ctxItem('heal', 'Heal') + ctxItem('dry', 'Dry') + ctxItem('message', 'Message…') + ctxItem('kill', 'Kill', 'bad'),
+		a => {
+			const tab = t => { closeCtx(); openPlayer(guid); showPTab(t); };
+			if (a === 'open') tab('stats');
+			else if (a === 'inv') tab('inventory');
+			else if (a === 'spawn') tab('spawn');
+			else if (a === 'message') { tab('stats'); showForm('message'); }
+			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'player', id: guid }); }
+			else if (a === 'send') { closeCtx(); startPick(guid); }
+			else if (a === 'heal') ctxRun('Healing ' + p.name, '/api/mod/players/' + guid + '/heal');
+			else if (a === 'dry') ctxRun('Drying ' + p.name, '/api/mod/players/' + guid + '/dry');
+			else if (a === 'kill') { if (confirm('Kill ' + p.name + '? Their character dies and they start again fresh.')) ctxRun('Killing ' + p.name, '/api/mod/players/' + guid + '/kill'); }
+		});
+}
+
+// On a vehicle: its info, follow it, bring a player to it, delete it.
+function showVehicleCtx(id, e) {
+	const v = vehicles.find(x => x.id === id);
+	if (!v) return;
+	const following = track && track.kind === 'vehicle' && track.id === id;
+	openCtx(e.containerPoint, { id },
+		'<div class="hd">' + esc(catLabel(v)) + ' · ' + grid(v.x, v.z) + '</div>' +
+		ctxItem('info', 'Info…') + ctxItem('follow', following ? 'Stop following' : 'Follow Vehicle') +
+		ctxTeleportList('Teleport a player beside it') + '<div class="lbl">Vehicle</div>' + ctxItem('delete', 'Delete', 'bad'),
+		a => {
+			if (a === 'info') { closeCtx(); openVehicleInfo(id); }
+			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'vehicle', id }); }
+			// Beside it (3 m east), not on top of it.
+			else if (ctxAsk(a)) return;
+			else if (a.startsWith('tpok:')) { const p = byGuid[a.slice(5)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(5) + '/teleport', { x: v.x + 3, z: v.z, y: 0 }); }
+			else if (a === 'delete') { closeCtx(); deleteVehicle(id); }
+		});
+}
+
+// ---- Following a player or vehicle on the map ----------------------------
+// The map keeps them in the middle (a player every second, a vehicle
+// every 5 s) until Stop, or the map is dragged.
+
+let track = null; // { kind: 'player' | 'vehicle', id }
+function trackPos() {
+	if (!track) return null;
+	return track.kind === 'player' ? byGuid[track.id] : vehicles.find(v => v.id === track.id);
+}
+function setTrack(t) {
+	track = t;
+	followTrack();
+	renderTrack();
+}
+function followTrack() {
+	if (!track) return;
+	const p = trackPos();
+	if (!p) { track = null; renderTrack(); return; }
+	map.panTo([p.z, p.x], { animate: true, duration: 0.4 });
+}
+function renderTrack() {
+	const b = document.getElementById('trackBtn'), p = trackPos();
+	b.hidden = !track;
+	if (track) b.textContent = 'Following ' + (track.kind === 'player' ? (p ? p.name : '') : (p ? catLabel(p) : '')) + ' ✕';
+}
+
+// ---- Send a player to a spot: the next click on the map ------------------
+
+let pickSend = null; // the GUID of the player to send
+function startPick(guid) {
+	pickSend = guid;
+	document.getElementById('map').classList.add('picking');
+	const b = document.getElementById('pickBanner'), p = byGuid[guid];
+	b.hidden = false;
+	b.textContent = 'Click where to send ' + (p ? p.name : 'them') + ' · Esc cancels';
+}
+function endPick() {
+	pickSend = null;
+	document.getElementById('map').classList.remove('picking');
+	document.getElementById('pickBanner').hidden = true;
+}
+async function pickClick(e) {
+	if (!pickSend) return;
+	const guid = pickSend, x = e.latlng.lng, z = e.latlng.lat, b = document.getElementById('pickBanner');
+	if (!(x > 0 && z > 0) || (size && (x > size || z > size))) { b.textContent = 'That spot is off the map: click on it · Esc cancels'; return; }
+	endPick();
+	try { await api('POST', '/api/mod/players/' + guid + '/teleport', { x, z, y: 0 }); poll(); }
+	catch (err) { alert('Not sent: ' + err.message); }
+}
+
+// Spawn at a spot: the item list, searched, and how many.
+let sAt = null, sSel = null;
+async function openSpawnAt(x, z) {
+	sAt = { x, z }; sSel = null;
+	document.getElementById('sWhere').textContent = Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z);
+	document.getElementById('sErr').textContent = '';
+	document.getElementById('sLast').textContent = '';
+	document.getElementById('sModal').style.display = 'flex';
+	document.getElementById('sFind').focus();
+	renderSpawnAt();
+	if (!catalog) { await fetchCatalog(); renderSpawnAt(); }
+}
+function closeSpawnAt() { document.getElementById('sModal').style.display = 'none'; sAt = null; }
+// renderSpawnAt lists every match, with the A-Z bar, like Spawn item.
+function renderSpawnAt() {
+	const list = document.getElementById('sList');
+	if (!catalog) { list.innerHTML = '<div class="empty">The item list is still coming in from recon-mod…</div>'; document.getElementById('sAZ').innerHTML = ''; renderSpawnPick(); return; }
+	const words = document.getElementById('sFind').value.toLowerCase().split(/\s+/).filter(Boolean);
+	const kind = document.getElementById('sKind').value;
+	const hits = catalog.filter(it => (!kind || it.kind === kind) && words.every(w => it.find.includes(w)));
+	const seen = {};
+	list.innerHTML = hits.length ? itemRows(hits, sSel, seen) : '<div class="empty">No item matches.</div>';
+	list.scrollTop = 0;
+	document.getElementById('sAZ').innerHTML = azBar(seen);
+	renderSpawnPick();
+}
+function renderSpawnPick() {
+	const it = sSel && catalogBy[sSel], vehicle = it && it.kind === 'vehicle', cnt = document.getElementById('sCount');
+	document.getElementById('sPick').textContent = it ? catName(it) + (vehicle ? ', whole (parts and fluids), facing north' : ', on the ground here')
+		: (catalog ? catalog.length.toLocaleString() + ' items · pick one' : '');
+	if (vehicle) cnt.value = 1;
+	cnt.disabled = !!vehicle;
+}
+document.getElementById('sFind').addEventListener('input', renderSpawnAt);
+document.getElementById('sKind').addEventListener('change', renderSpawnAt);
+document.getElementById('sList').addEventListener('click', e => {
+	const t = e.target.closest('[data-type]');
+	if (!t) return;
+	sSel = t.getAttribute('data-type');
+	document.querySelectorAll('#sList .sprow.sel').forEach(r => r.classList.remove('sel'));
+	t.classList.add('sel');
+	renderSpawnPick();
+});
+async function doSpawnAt() {
+	const err = document.getElementById('sErr');
+	err.textContent = '';
+	if (!sAt) return;
+	if (!sSel) { err.textContent = 'Pick an item to spawn.'; return; }
+	const n = parseInt(document.getElementById('sCount').value, 10);
+	if (!(n >= 1 && n <= 20)) { err.textContent = 'Spawn 1 to 20 at a time.'; return; }
+	try {
+		await api('POST', '/api/mod/world/spawnAt', { text: sSel, value: n, x: sAt.x, z: sAt.z });
+		const it = catalogBy[sSel];
+		document.getElementById('sLast').textContent = 'Sent: ' + (n > 1 ? n + ' × ' : '') + (it ? catName(it) : sSel) + ' · ' + new Date().toLocaleTimeString();
+		poll();
+	} catch (e) { err.textContent = e.message; }
+}
+
+// fillWidth zooms so the map's width is exactly the view's, keeping the
+// part north to south in view (but not past the map's top or bottom edge).
+function fillWidth() {
+	const s = size || 15360, view = map.getSize();
+	const z = Math.log2(view.x / s), h = view.y / Math.pow(2, z); // metres the view is high
+	const c = map.getCenter();
+	const north = h >= s ? s / 2 : Math.min(s - h / 2, Math.max(h / 2, c.lat));
+	// Exactly that zoom, not the nearest zoomSnap step.
+	const snap = map.options.zoomSnap;
+	map.options.zoomSnap = 0;
+	map.setView([north, s / 2], z, { animate: false });
+	map.options.zoomSnap = snap;
+}
+
+// ---- The page -----------------------------------------------------------
+
+function pct(v) { return Math.round((v || 0) * 100) + '%'; }
+function dayMonth(d, month) { return new Date(2000, d[1] - 1, d[2]).toLocaleDateString(undefined, { month: month || 'short', day: 'numeric' }); }
+
+function render() {
+	const line = document.getElementById('modLine'), dot = document.getElementById('modDot');
+	const connected = mod && mod.connected;
+	if (!connected) {
+		dot.className = 'dot off';
+		const last = mod && mod.lastSync && !mod.lastSync.startsWith('0001') ? new Date(mod.lastSync) : null;
+		line.textContent = 'No Connection to DayZ Server';
+		line.title = last ? 'recon-mod last sent at ' + last.toLocaleTimeString() : 'recon-mod hasn\'t connected';
+		document.getElementById('worldBtn').disabled = true;
+		document.getElementById('wxBadge').hidden = document.getElementById('timeBadge').hidden = true;
+	} else {
+		dot.className = 'dot';
+		const w = (mod.world || '').toLowerCase();
+		line.textContent = 'Connected to Server';
+		line.title = 'recon-mod ' + (mod.mod || '') + ' · ' + (NAMES[w] || mod.world) + ' · ' + players.length + ' online';
+		document.getElementById('worldBtn').disabled = false;
+		let s = SIZES[w];
+		if (!s) s = Math.max(size || 0, Math.ceil(Math.max(1, ...players.map(p => Math.max(p.x, p.z))) / 1024) * 1024);
+		setWorld(w, s);
+		const wx = mod.weather || {};
+		const wb = document.getElementById('wxBadge');
+		wb.hidden = false;
+		wb.textContent = '☁ ' + pct(wx.overcast) + ' · rain ' + pct(wx.rain) + ' · fog ' + pct(wx.fog) + (wx.snow > 0.005 ? ' · snow ' + pct(wx.snow) : '') +
+			' · wind ' + (wx.windSpeed || 0).toFixed(0) + ' m/s from ' + compass(wx.windDir || 0);
+		const tb = document.getElementById('timeBadge');
+		tb.hidden = false;
+		tb.textContent = 'In-game ' + pad(mod.date[3]) + ':' + pad(mod.date[4]) + ' · ' + dayMonth(mod.date) + (wx.timeFrozen ? ' (frozen)' : '');
+	}
+	setStatusCount(connected ? players.length + ' player(s) on the map' : '');
+	renderList();
+	drawMarkers();
+	if (selGuid) renderPlayer();
+	if (document.getElementById('wModal').style.display === 'flex') renderWorld();
+}
+
+function flagsOf(p) {
+	const f = [];
+	if (!p.alive) f.push(['r', 'dead']);
+	if (p.unconscious) f.push(['r', 'knocked out']);
+	if (p.bleeding) f.push(['r', 'bleeding']);
+	if (p.restrained) f.push(['a', 'restrained']);
+	if (p.brokenLegs === 1) f.push(['a', 'broken legs']);
+	(p.illnesses || []).forEach(i => f.push(['a', i]));
+	return f;
+}
+
+function renderList() {
+	const q = document.getElementById('find').value.trim().toLowerCase();
+	const list = document.getElementById('plist');
+	if (!mod || !mod.connected) {
+		list.innerHTML = '<div class="empty">The Live Map shows the players recon-mod, the DayZ server mod, reports. Once it is installed and sending to this ReCON, they appear here every second.</div>';
+		return;
+	}
+	const shown = players.filter(p => !q || p.name.toLowerCase().includes(q));
+	if (!shown.length) {
+		list.innerHTML = '<div class="empty">' + (players.length ? 'Nobody matches.' : 'Nobody is online.') + '</div>';
+		return;
+	}
+	list.innerHTML = shown.map(p => {
+		const [hc] = hud('health', p.health);
+		const what = p.vehicle ? 'in ' + vehicleOf(p) : (p.hands ? handsOf(p) : 'unarmed');
+		const f = flagsOf(p).map(([k, t]) => '<span class="' + k + '">' + esc(t) + '</span>').join('');
+		return '<button type="button" class="prow' + (p.guid === selGuid ? ' sel' : '') + '" data-guid="' + p.guid + '">' +
+			'<span class="d" style="background:' + colorOf(p.guid) + '"></span>' +
+			'<span class="n"><b>' + esc(p.name) + '</b><small>' + grid(p.x, p.z) + ' · ' + esc(what) + '</small>' + (f ? '<span class="flags">' + f + '</span>' : '') + '</span>' +
+			'<span class="hb"><i style="width:' + Math.max(0, Math.min(100, p.health)) + '%;background:' + hc + '"></i></span></button>';
+	}).join('');
+}
+
+document.getElementById('plist').addEventListener('click', e => {
+	const b = e.target.closest('.prow');
+	if (b) openPlayer(b.getAttribute('data-guid'));
+});
+document.getElementById('find').addEventListener('input', renderList);
+
+// ---- A player's popup on the map ------------------------------------------
+// A click on a player opens their basic stats and what they wear and hold;
+// Info opens their dialog, Teleport and Spawn as on their right-click menu.
+// While it's open their gear is read every 2 s
+// (which also keeps ReCON asking the mod for it).
+
+const plPopup = L.popup({ autoPan: false, offset: [0, -6] });
+let plOpen = null, plInv = null;
+function openPlayerPopup(guid) {
+	map.closePopup(vehPopup);
+	plOpen = guid; plInv = null;
+	renderPlayerPopup();
+	plPopup.options.autoPan = true;
+	plPopup.openOn(map);
+	plPopup.options.autoPan = false;
+	loadPlayerPopup();
+}
+async function loadPlayerPopup() {
+	const g = plOpen;
+	if (!g) return;
+	try {
+		const d = await api('GET', '/api/mod/players/' + g);
+		if (g === plOpen) { plInv = d.inventory || null; renderPlayerPopup(); }
+	} catch (e) { }
+}
+setInterval(() => { if (plOpen) loadPlayerPopup(); }, 2000);
+// playerPopupAct is the popup's Teleport (pick a spot on the map) and
+// Spawn (their Spawn item tab), as on their right-click menu.
+function playerPopupAct(guid, a) {
+	map.closePopup(plPopup);
+	if (a === 'send') startPick(guid);
+	else { openPlayer(guid); showPTab('spawn'); }
+}
+function renderPlayerPopup() {
+	const p = plOpen && byGuid[plOpen];
+	if (!plOpen) return;
+	if (!p) { map.closePopup(plPopup); return; }
+	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
+	const pc = (v, max) => Math.round(Math.max(0, Math.min(100, 100 * v / max))) + '%';
+	const state = !p.alive ? 'Dead' : p.unconscious ? 'Unconscious' : p.restrained ? 'Restrained' : '';
+	let h = '<div class="vpop" data-noicon><h4>' + esc(p.name) + '</h4><div class="ty">' + grid(p.x, p.z) + ' · ' + Math.round(p.x) + ', ' + Math.round(p.z) + '</div>' +
+		(state ? row('State', state) : '') +
+		row('Health', pc(p.health, 100)) + row('Blood', pc(p.blood, 5000)) + row('Water', pc(p.water, 5000)) + row('Food', pc(p.energy, 5000)) +
+		(p.bleeding ? row('Bleeding', p.bleeding + (p.bleeding === 1 ? ' cut' : ' cuts')) : '') +
+		(p.vehicleName || p.vehicle ? row('In', esc(p.vehicleName || item(p.vehicle))) : '') +
+		'<div class="gear">';
+	const worn = plInv && (plInv.items || []).filter(it => it.slot).sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99));
+	if (worn) h += worn.length ? worn.map(it => row(slotLabel(it.slot), esc(itemName(it)))).join('') : '<div class="muted">Nothing worn or held</div>';
+	else h += (p.handsName || p.hands ? row('Hands', esc(p.handsName || item(p.hands))) : '') + '<div class="muted">Reading their gear…</div>';
+	const g = '\'' + p.guid + '\'';
+	h += '</div><div class="acts">' +
+		'<button type="button" onclick="event.stopPropagation(); openPlayer(' + g + ')" title="Their stats, inventory, spawning and actions">Info</button>' +
+		'<button type="button" onclick="event.stopPropagation(); playerPopupAct(' + g + ', \'send\')" title="Click a place on the map to move them there">Teleport</button>' +
+		'<button type="button" onclick="event.stopPropagation(); playerPopupAct(' + g + ', \'spawn\')" title="Spawn an item for them">Spawn</button></div></div>';
+	// Keep where the gear list was scrolled to across the redraws.
+	const old = plPopup.getElement() && plPopup.getElement().querySelector('.gear'), top = old ? old.scrollTop : 0;
+	plPopup.setLatLng([p.z, p.x]).setContent(h);
+	const now = plPopup.getElement() && plPopup.getElement().querySelector('.gear');
+	if (now) now.scrollTop = top;
+}
+
+// ---- A player's dialog --------------------------------------------------
+
+function openPlayer(guid) {
+	map.closePopup(plPopup);
+	resetMini();
+	calMode = false; calNote = '';
+	drag = null; pending = {}; staged = {};
+	selGuid = guid;
+	calUI();
+	clearTeleport();
+	detail = null;
+	invSel = null;
+	invAsked = Date.now();
+	showForm('');
+	showPTab(pTab);
+	document.getElementById('pErr').textContent = '';
+	document.getElementById('pModal').style.display = 'flex';
+	const p = byGuid[guid];
+	if (p) map.panTo([p.z, p.x]);
+	render();
+	loadDetail();
+}
+function closePlayer() {
+	calMode = false; calNote = '';
+	document.getElementById('pModal').style.display = 'none';
+	selGuid = null;
+	render();
+}
+function stepPlayer(dir) {
+	if (!players.length) return;
+	const i = players.findIndex(p => p.guid === selGuid);
+	openPlayer(players[(i < 0 ? 0 : i + dir + players.length) % players.length].guid);
+}
+function openInPlayers() { location.href = '/players#details=' + selGuid; }
+
+async function loadDetail() {
+	const g = selGuid;
+	if (!g) return;
+	try {
+		const d = await api('GET', '/api/mod/players/' + g);
+		if (g === selGuid) { detail = d; renderPlayer(); }
+	} catch (e) { }
+}
+// Every 2 s while open: that also keeps ReCON asking the mod for their inventory.
+setInterval(() => { if (selGuid) loadDetail(); }, 2000);
+
+function bar(label, v, max, colour, blink, text) {
+	return '<div class="bar' + (blink ? ' blink' : '') + '"><span class="k">' + label + '</span><div class="track"><div class="fill" style="width:' +
+		Math.max(0, Math.min(100, 100 * v / max)) + '%;background:' + colour + '"></div></div><span class="v" style="color:' + colour + '">' + text + '</span></div>';
+}
+function num(v) { return Math.round(v).toLocaleString(); }
+
+// Draggable stat bars: dragging one only marks the new value (staged, by
+// stat); Save sends every marked stat at once. pending is what was sent
+// and not yet reported back, by stat: { value, id } (the command), shown as
+// "setting …" until the command finishes.
+let drag = null, pending = {}, staged = {};
+const STAT_LABEL = { health: 'health', blood: 'blood', water: 'water', energy: 'food', heatBuffer: 'comfort' };
+function dragBar(stat, label, v, max, colour, blink, text, extra) {
+	const pct = Math.max(0, Math.min(100, 100 * v / max));
+	const pend = pending[stat], st = pend ? undefined : staged[stat];
+	const fmt = x => stat === 'heatBuffer' ? Math.round(100 * x / max) + '%' : num(x);
+	let shown = text, ghost = '', at = pct;
+	if (pend) shown = '<span class="pend">setting ' + fmt(pend.value) + '…</span>';
+	else if (st !== undefined) {
+		// Marked, not saved yet: striped from now to the new value.
+		at = Math.max(0, Math.min(100, 100 * st / max));
+		ghost = '<div class="ghost" style="left:' + Math.min(pct, at) + '%;width:' + Math.abs(at - pct) + '%"></div>';
+		shown = esc(fmt(v)) + ' → <span class="to">' + esc(fmt(st)) + '</span>';
+	}
+	return '<div class="bar can' + (st !== undefined ? ' staged' : '') + (blink && !pend ? ' blink' : '') + '" data-stat="' + stat + '" data-max="' + max + '" data-v="' + v + '">' +
+		'<span class="k">' + label + '</span><div class="track" title="Drag to set ' + STAT_LABEL[stat] + ', then Save">' +
+		'<div class="fill" style="width:' + pct + '%;background:' + colour + '"></div>' + extra + ghost +
+		'<div class="handle" style="left:' + at + '%"></div></div>' +
+		'<span class="v" style="color:' + colour + '">' + shown + '</span></div>';
+}
+// valueAt is the stat's value where the pointer is on the bar, rounded to
+// a sensible step.
+function valueAt(row, clientX) {
+	const r = row.querySelector('.track').getBoundingClientRect(), max = +row.dataset.max;
+	const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+	const step = max >= 1000 ? 50 : max > 30 ? 1 : max / 100;
+	return Math.round(frac * max / step) * step;
+}
+function dragText(row, v) {
+	return row.dataset.stat === 'heatBuffer' ? Math.round(100 * v / +row.dataset.max) + '%' : num(v);
+}
+function showDrag(v) {
+	const row = drag.row, max = +row.dataset.max, from = 100 * drag.from / max, to = 100 * v / max;
+	const track = row.querySelector('.track');
+	track.querySelectorAll('.ghost, .tip').forEach(e => e.remove());
+	track.insertAdjacentHTML('beforeend', '<div class="ghost" style="left:' + Math.min(from, to) + '%;width:' + Math.abs(to - from) + '%"></div>' +
+		'<div class="tip" style="left:' + to + '%">' + dragText(row, v) + '</div>');
+	row.querySelector('.handle').style.left = to + '%';
+	row.querySelector('.v').innerHTML = esc(dragText(row, drag.from)) + ' → <span class="to">' + esc(dragText(row, v)) + '</span>';
+	drag.value = v;
+}
+// endDrag marks where the bar was let go (keep), or leaves it as it was
+// (Esc). Back at the live value, the mark goes.
+function endDrag(keep) {
+	if (!drag) return;
+	const d = drag;
+	drag = null;
+	d.row.classList.remove('drag');
+	if (keep) {
+		const stat = d.row.dataset.stat;
+		if (Math.abs(d.value - d.from) > 1e-6) staged[stat] = d.value;
+		else delete staged[stat];
+	}
+	renderPlayer();
+}
+// saveStats sends every marked stat; the last-action line shows them together.
+async function saveStats() {
+	const err = document.getElementById('pErr');
+	err.textContent = '';
+	const ids = [];
+	for (const stat of Object.keys(staged)) {
+		const value = staged[stat];
+		try {
+			const r = await api('POST', '/api/mod/players/' + selGuid + '/set', { stat, value });
+			pending[stat] = { value, id: r.command.id };
+			ids.push(r.command.id);
+			delete staged[stat];
+		} catch (e) { err.textContent = 'Setting ' + STAT_LABEL[stat] + ': ' + e.message; break; }
+	}
+	if (ids.length) lastBatch = ids;
+	poll();
+	renderPlayer();
+}
+function resetStats() { staged = {}; renderPlayer(); }
+document.getElementById('pBars').addEventListener('pointerdown', e => {
+	const row = e.target.closest('.bar.can');
+	if (!row || !e.target.closest('.track') || e.button !== 0 || pending[row.dataset.stat]) return;
+	e.preventDefault();
+	document.getElementById('pErr').textContent = '';
+	const live = +row.dataset.v, st = staged[row.dataset.stat];
+	drag = { row, from: live, value: st !== undefined ? st : live, pointer: e.pointerId };
+	row.classList.add('drag');
+	row.querySelector('.track').setPointerCapture(e.pointerId);
+	showDrag(valueAt(row, e.clientX));
+});
+document.getElementById('pBars').addEventListener('pointermove', e => { if (drag && e.pointerId === drag.pointer) showDrag(valueAt(drag.row, e.clientX)); });
+document.getElementById('pBars').addEventListener('pointerup', e => { if (drag && e.pointerId === drag.pointer) endDrag(true); });
+document.getElementById('pBars').addEventListener('pointercancel', () => endDrag(false));
+// clearPending drops what the mod has answered: done (the next sync shows
+// the new value) or failed (the error shows).
+function clearPending() {
+	for (const stat in pending) {
+		const c = pending[stat].id && commands.find(x => x.id === pending[stat].id);
+		if (!c || c.status === 'queued' || c.status === 'sent') continue;
+		if (c.status !== 'done') document.getElementById('pErr').textContent = 'Setting ' + STAT_LABEL[stat] + ' ' + c.status + (c.error ? ': ' + c.error : '');
+		delete pending[stat];
+	}
+}
+
+function renderPlayer() {
+	clearPending();
+	const p = byGuid[selGuid];
+	document.getElementById('pName').textContent = p ? p.name : 'Player';
+	const badge = document.getElementById('pBadge');
+	badge.textContent = p ? (p.alive ? 'Online' : 'Dead') : 'Not online';
+	badge.className = 'badge ' + (p && p.alive ? 'online' : 'gone');
+	document.getElementById('pGuid').textContent = selGuid;
+	document.getElementById('pWhen').textContent = p && mod && mod.connected ? 'Live from recon-mod · updated ' + Math.max(0, Math.round((Date.now() - new Date(mod.lastSync)) / 1000)) + ' s ago' : 'Not on the server now';
+	document.getElementById('pPos').innerHTML = p ? 'Grid <b>' + grid(p.x, p.z) + '</b> · ' + Math.round(p.x) + ', ' + Math.round(p.z) + ' · facing <b>' + compass(p.heading) + '</b> ' + Math.round(p.heading) + '°' : '';
+	if (p) {
+		let h = '';
+		for (const [k, label, max] of [['health', 'Health', 100], ['blood', 'Blood', 5000], ['water', 'Water', 5000], ['energy', 'Food', 5000]]) {
+			const [c, b] = hud(k, p[k]);
+			h += dragBar(k, label, p[k], max, c, b, num(p[k]) + ' / ' + num(max), '');
+		}
+		h += bar('Shock', p.shock, 100, 'var(--lm-muted)', false, num(p.shock) + ' / 100');
+		// Stamina: out of DayZ's maximum, with a mark at the most their load
+		// lets them have (carried weight lowers it).
+		const sMax = p.staminaMax || 100, sCap = p.staminaCap > 0 ? Math.min(p.staminaCap, sMax) : sMax;
+		h += '<div class="bar"><span class="k">Stamina</span><div class="track"><div class="fill" style="width:' + Math.max(0, Math.min(100, 100 * p.stamina / sMax)) + '%;background:var(--lm-muted)"></div>' +
+			(sCap < sMax ? '<div class="cap" style="left:' + (100 * sCap / sMax) + '%" title="The most their load lets them have"></div>' : '') +
+			'</div><span class="v" style="color:var(--lm-muted)">' + num(p.stamina) + ' / ' + num(sMax) + (sCap < sMax - 0.5 ? ' · cap ' + num(sCap) : '') + '</span></div>';
+		const [tc, tb, tt] = temp(p.heat);
+		h += '<div class="bar' + (tb ? ' blink' : '') + '"><span class="k">Temp</span><div class="track temp"><div class="mark" style="left:calc(' + (50 + 50 * Math.max(-1, Math.min(1, p.heat))) + '% - 1px);background:' + tc + '"></div></div><span class="v" style="color:' + tc + '">' + tt + '</span></div>';
+		const hbFrac = Math.max(0, Math.min(1, p.heatBuffer / (p.heatBufferMax || 30)));
+		const stage = ['none', '+', '++', '+++'][p.heatBufferStage] || 'none';
+		h += dragBar('heatBuffer', 'Comfort', p.heatBuffer, p.heatBufferMax || 30, 'var(--hud-white)', false, stage + ' · ' + Math.round(100 * hbFrac) + '%',
+			p.heatBufferCap > 0 ? '<div class="cap" style="left:' + (100 * p.heatBufferCap) + '%" title="The most their clothes allow"></div>' : '');
+		// Not while a bar is being dragged: redrawing would drop the drag.
+		const n = Object.keys(staged).length;
+		const foot = n
+			? '<div class="savebar"><span>' + n + (n === 1 ? ' change' : ' changes') + ' not saved</span><span class="sp"></span>' +
+				'<button type="button" class="go" onclick="saveStats()">Save</button><button type="button" onclick="resetStats()">Reset</button></div>'
+			: '<div class="draghint">Drag Health, Blood, Water, Food or Comfort to where you want it (or click a spot on the bar), then Save. Esc cancels a drag.</div>';
+		if (!drag) document.getElementById('pBars').innerHTML = h;
+		// Apart from the bars (redrawn every second), so a click on Save isn't lost.
+		const save = document.getElementById('pSave');
+		if (save.getAttribute('data-n') !== String(n)) { save.innerHTML = foot; save.setAttribute('data-n', n); }
+		const chips = [];
+		chips.push(p.bleeding ? ['red', 'Bleeding · ' + p.bleeding + (p.bleeding === 1 ? ' wound' : ' wounds')] : ['', 'Not bleeding']);
+		(p.illnesses || []).forEach(i => chips.push(['amber', i[0].toUpperCase() + i.slice(1)]));
+		if (p.wet) chips.push(['blue', 'Wet']);
+		chips.push(p.brokenLegs === 1 ? ['red', 'Broken legs'] : p.brokenLegs === 2 ? ['amber', 'Legs splinted'] : ['', 'Legs fine']);
+		chips.push(p.unconscious ? ['red', 'Knocked out'] : ['', 'Conscious']);
+		chips.push(p.restrained ? ['amber', 'Restrained'] : ['', 'Not restrained']);
+		document.getElementById('pChips').innerHTML = chips.map(([c, t]) => '<span class="chip ' + c + '">' + esc(t) + '</span>').join('');
+		document.getElementById('tHands').textContent = p.hands ? handsOf(p) : 'Nothing';
+		document.getElementById('tVehicle').textContent = p.vehicle ? vehicleOf(p) : 'On foot';
+		document.getElementById('tKD').innerHTML = p.kills + ' / ' + p.deaths + ' <span class="s">this session</span>';
+		drawMini(p);
+	} else {
+		document.getElementById('pBars').innerHTML = '<div class="empty">They aren\'t on the server now, so there is no live data.</div>';
+		staged = {};
+		const save = document.getElementById('pSave');
+		save.innerHTML = ''; save.setAttribute('data-n', '');
+		document.getElementById('pChips').innerHTML = '';
+		document.getElementById('miniG').innerHTML = '';
+		drawMiniPicture(0, 0, 0);
+		['tHands', 'tVehicle', 'tKD'].forEach(id => document.getElementById(id).textContent = '—');
+	}
+	document.getElementById('tKDall').textContent = detail && detail.kills != null ? detail.kills + ' / ' + detail.deaths + ' all time' : '';
+	// Teleport to or from: everyone else online.
+	const opts = '<option value="">—</option>' + players.filter(o => o.guid !== selGuid).map(o => '<option value="' + o.guid + '">' + esc(o.name) + '</option>').join('');
+	for (const sel of [document.getElementById('tpTo'), document.getElementById('tpFrom')]) {
+		const keep = sel.value;
+		if (sel.getAttribute('data-opts') !== opts) { sel.innerHTML = opts; sel.setAttribute('data-opts', opts); sel.value = keep; }
+	}
+	document.querySelectorAll('#fTeleport .tpName').forEach(b => { b.textContent = p ? p.name : 'them'; });
+	tpReady(); // a picked player may have left
+	renderLast();
+	// Previous: back to where they were before their last teleport.
+	const prev = detail && detail.previous, bb = document.getElementById('bBack');
+	bb.disabled = !p || !prev;
+	bb.textContent = prev ? 'Previous · ' + grid(prev.x, prev.z) : 'Previous';
+	bb.title = prev ? 'Back to where they were before the teleport at ' + new Date(prev.at).toLocaleTimeString() : 'They haven\'t been teleported yet';
+	renderKills();
+	renderInv(p);
+}
+
+// ---- Inventory ----------------------------------------------------------
+
+let invSel = null, invAsked = 0;
+// The player's slots, in the order DayZ's inventory shows them.
+const SLOTS = [['Hands', 'Hands'], ['Headgear', 'Head'], ['Mask', 'Face'], ['Eyewear', 'Eyes'], ['Gloves', 'Gloves'], ['Armband', 'Armband'],
+	['Body', 'Top'], ['Vest', 'Vest'], ['Back', 'Back'], ['Hips', 'Belt'], ['Legs', 'Pants'], ['Feet', 'Shoes'], ['Shoulder', 'Shoulder'], ['Melee', 'Melee']];
+const SLOT_LABEL = Object.fromEntries(SLOTS);
+const SLOT_RANK = Object.fromEntries(SLOTS.map(([k], i) => [k, i]));
+const CONDITION = [['Pristine', '#81c995'], ['Worn', '#b5d07a'], ['Damaged', '#fdd663'], ['Badly damaged', '#f2a65a'], ['Ruined', '#f28b82']];
+function slotLabel(s) {
+	if (!s) return '';
+	return SLOT_LABEL[s] || (s.charAt(0).toUpperCase() + s.slice(1)).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ');
+}
+function itemName(it) { return it.name || item(it.type); }
+function condOf(it) { return CONDITION[Math.max(0, Math.min(4, it.healthLevel | 0))]; }
+function countIn(it) { return (it.attachments || []).concat(it.cargo || []).reduce((n, c) => n + 1 + countIn(c), 0); }
+function qty(it) {
+	if (!it.quantityMax) return '';
+	return num(it.quantity) + ' / ' + num(it.quantityMax) + (it.unit ? ' ' + it.unit : '');
+}
+// pathTo is the items from the top down to the one with that id, or null.
+function pathTo(items, id) {
+	for (const it of items || []) {
+		if (it.id === id) return [it];
+		const sub = pathTo((it.attachments || []).concat(it.cargo || []), id);
+		if (sub) return [it].concat(sub);
+	}
+	return null;
+}
+// findItem is the item with that id anywhere in items, or null.
+function findItem(items, id) {
+	for (const it of items) {
+		if (it.id === id) return it;
+		const f = findItem((it.attachments || []).concat(it.cargo || []), id);
+		if (f) return f;
+	}
+	return null;
+}
+function irow(it, label, extra) {
+	const [cn, cc] = condOf(it);
+	return '<button type="button" class="irow' + (it.id === invSel ? ' sel' : '') + '" data-item="' + it.id + '">' +
+		'<span class="sl">' + esc(label) + '</span><span class="nm">' + esc(itemName(it)) + '</span>' +
+		'<span class="ex">' + esc(extra || '') + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
+}
+
+function renderInv(p) {
+	const list = document.getElementById('iList'), det = document.getElementById('iDet'), when = document.getElementById('invWhen');
+	const inv = detail && detail.inventory;
+	if (!p) {
+		when.textContent = '';
+		list.innerHTML = '<div class="empty">They aren\'t on the server now.</div>';
+		det.innerHTML = '';
+		return;
+	}
+	// Every slot is always listed, empty or not (and while the inventory is
+	// still coming), so rows never pop in; slots DayZ has beyond these follow.
+	const items = inv ? (inv.items || []).slice().sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99)) : [];
+	const bySlot = {};
+	for (const it of items) bySlot[it.slot] = it;
+	const row = it => { const n = countIn(it); return irow(it, slotLabel(it.slot), n ? n + (n === 1 ? ' item' : ' items') : qty(it)); };
+	list.innerHTML = SLOTS.map(([slot, label]) => bySlot[slot] ? row(bySlot[slot])
+		: '<div class="irow none"><span class="sl">' + label + '</span><span class="nm">' + (inv ? 'Empty' : '…') + '</span><span class="ex"></span></div>').join('') +
+		items.filter(it => SLOT_RANK[it.slot] == null).map(row).join('');
+	if (!inv) {
+		when.textContent = Date.now() - invAsked > 10000
+			? '· recon-mod hasn\'t sent their inventory (the mod on the server may be a version without it)'
+			: '· asking recon-mod…';
+		det.innerHTML = '';
+		return;
+	}
+	when.textContent = '· updated ' + Math.max(0, Math.round((Date.now() - new Date(inv.at)) / 1000)) + ' s ago';
+
+	const path = invSel != null ? pathTo(items, invSel) : null;
+	if (!path) {
+		invSel = null;
+		det.innerHTML = '<div class="empty">' + (items.length ? 'Pick an item to see its condition, attachments and contents.' : '') + '</div>';
+		return;
+	}
+	const it = path[path.length - 1];
+	const [cn, cc] = condOf(it);
+	let h = '';
+	if (path.length > 1) h += '<div class="crumbs">' + path.slice(0, -1).map(x => '<a data-item="' + x.id + '">' + esc(itemName(x)) + '</a> ›').join(' ') + '</div>';
+	h += '<h3>' + esc(itemName(it)) + '</h3><div class="ty">' + esc(it.type) + '</div><div class="props">';
+	const where = it.slot ? slotLabel(it.slot) + (path.length > 1 ? ' (attached)' : '') : 'Cargo, row ' + (it.row + 1) + ', column ' + (it.col + 1);
+	const props = [['Slot', where],
+		['Condition', '<span style="color:' + cc + '">' + cn + '</span> · ' + num(it.health) + ' / ' + num(it.healthMax)]];
+	if (it.quantityMax) props.push([it.unit === 'rounds' ? 'Rounds' : 'Quantity', esc(qty(it))]);
+	props.push(['Wetness', it.wet > 0 ? Math.round(100 * it.wet) + '%' : 'Dry']);
+	props.push(['Temperature', (Math.round(it.temperature * 10) / 10) + ' °C']);
+	h += props.map(([k, v]) => '<span class="k">' + k + '</span><span>' + (k === 'Condition' ? v : esc(v)) + '</span>').join('') + '</div>';
+	// Set its condition: DayZ's five levels, the one it is at marked.
+	const lvl = Math.max(0, Math.min(4, it.healthLevel | 0));
+	h += '<div class="setcond"><span class="k">Set condition</span>' + CONDITION.map(([n, c], i) =>
+		'<button type="button" data-cond="' + i + '" data-cond-item="' + it.id + '" style="--c:' + c + '"' + (i === lvl ? ' class="on" aria-pressed="true"' : '') + '>' + n + '</button>').join('') + '</div>';
+	const att = it.attachments || [], cargo = (it.cargo || []).slice().sort((a, b) => a.row - b.row || a.col - b.col);
+	h += '<h5>Attachments' + (att.length ? ' · ' + att.length : '') + '</h5>' + (att.length
+		? '<div class="sub-items">' + att.map(a => irow(a, slotLabel(a.slot), qty(a))).join('') + '</div>' : '<div class="muted">None</div>');
+	if (cargo.length)
+		h += '<h5>Contents · ' + cargo.length + '</h5><div class="sub-items">' + cargo.map(c => {
+			const n = countIn(c);
+			return irow(c, 'Row ' + (c.row + 1) + ', ' + (c.col + 1), n ? n + (n === 1 ? ' item' : ' items') : qty(c));
+		}).join('') + '</div>';
+	det.innerHTML = h;
+}
+document.getElementById('pModal').addEventListener('click', e => {
+	const c = e.target.closest('[data-cond]');
+	if (c) {
+		act('condition', { text: c.getAttribute('data-cond-item'), value: +c.getAttribute('data-cond') }, true);
+		return;
+	}
+	const t = e.target.closest('[data-item]');
+	if (!t) return;
+	invSel = +t.getAttribute('data-item');
+	renderInv(byGuid[selGuid]);
+});
+
+const STAT_TEXT = { health: 'health', blood: 'blood', shock: 'shock', water: 'water', energy: 'food', stamina: 'stamina', heatBuffer: 'comfort', overcast: 'overcast', rain: 'rain', fog: 'fog', snow: 'snow', windSpeed: 'wind speed', windDir: 'wind direction' };
+function cmdText(c) {
+	switch (c.action) {
+		case 'heal': return 'Heal';
+		case 'dry': return 'Dry';
+		case 'kill': return 'Kill';
+		case 'teleport': return (c.back ? 'Teleport back to ' : 'Teleport to ') + grid(c.x, c.z);
+		case 'teleportTo': { const t = players.find(o => o.steamId === c.target); return 'Teleport to ' + (t ? esc(t.name) : 'a player'); }
+		case 'set': return 'Set ' + (STAT_TEXT[c.stat] || esc(c.stat)) + ' to ' + c.value;
+		case 'message': return 'Message “' + esc(c.text) + '”';
+		case 'condition': {
+			const found = detail && detail.inventory && findItem(detail.inventory.items || [], +c.text);
+			return 'Set ' + (found ? esc(itemName(found)) : 'an item') + ' to ' + (CONDITION[c.value] ? CONDITION[c.value][0].toLowerCase() : c.value);
+		}
+		case 'spawn': return 'Spawn ' + (c.value > 1 ? c.value + ' × ' : '') + esc(catalogBy[c.text] ? catName(catalogBy[c.text]) : c.text) + (c.stat === 'hands' ? ' in their hands' : c.stat === 'inventory' ? ' in their inventory' : '');
+		case 'weather': return (STAT_TEXT[c.stat] || esc(c.stat))[0].toUpperCase() + (STAT_TEXT[c.stat] || esc(c.stat)).slice(1) + ' → ' +
+			(c.stat === 'windSpeed' ? c.value + ' m/s' : c.stat === 'windDir' ? compass(c.value) + ' ' + c.value + '°' : Math.round(c.value * 100) + '%');
+		case 'weatherMode': return 'Weather follows ' + ({ world: "the map's rules", forecast: "only what's set", static: 'nothing (frozen)' })[c.text];
+		case 'storm': return 'Lightning ' + Math.round(c.value * 100) + '%';
+		case 'rainThresholds': return 'Rain between ' + Math.round(c.min * 100) + '% and ' + Math.round(c.max * 100) + '% overcast';
+		case 'date': return 'In-game time ' + c.year + '-' + pad(c.month) + '-' + pad(c.day) + ' ' + pad(c.hour) + ':' + pad(c.minute);
+		case 'freezeTime': return c.value ? 'Freeze time' : 'Unfreeze time';
+		case 'deleteVehicle': return 'Delete a vehicle';
+		case 'spawnAt': return 'Spawn ' + (c.value > 1 ? c.value + ' × ' : '') + esc(catalogBy[c.text] ? catName(catalogBy[c.text]) : c.text) + ' at ' + Math.round(c.x) + ', ' + Math.round(c.z);
+	}
+	return esc(c.action);
+}
+function statusHTML(c) {
+	const cls = c.status === 'done' ? 'ok' : (c.status === 'failed' || c.status === 'expired') ? 'fail' : 'wait';
+	const text = c.status === 'queued' ? 'waiting for the mod' : (c.status === 'failed' || c.status === 'expired') && c.error ? c.status + ': ' + c.error : c.status;
+	return '<span class="' + cls + '">' + esc(text) + '</span>';
+}
+// The dialog's last action line: the newest command to this player, or
+// every stat of the last Save together.
+let lastBatch = [];
+function renderLast() {
+	const el = document.getElementById('pLast');
+	const mine = commands.filter(c => c.guid === selGuid);
+	if (!mine.length) { el.innerHTML = ''; return; }
+	let batch = lastBatch.includes(mine[0].id) ? mine.filter(c => lastBatch.includes(c.id)).reverse() : [mine[0]];
+	let text = cmdText(batch[0]);
+	if (batch.length > 1) text = 'Set ' + batch.map(c => (STAT_TEXT[c.stat] || esc(c.stat)) + ' to ' + c.value).join(', ');
+	const bad = batch.find(c => c.status === 'failed' || c.status === 'expired');
+	const open = batch.find(c => c.status === 'queued' || c.status === 'sent');
+	el.innerHTML = 'Last action: ' + text + ' · ' + statusHTML(bad || open || batch[0]) +
+		' <span class="muted">' + new Date(batch[0].queued).toLocaleTimeString() + '</span>';
+}
+// What killed them (a kill's cause, from mod 0.0.1h): its kind and the
+// words for it.
+const CAUSES = {
+	player: ['player'], infected: ['infected', 'Killed by an infected'], animal: ['animal', 'Killed by an animal'],
+	vehicle: ['env', 'Hit by a vehicle'], explosion: ['env', 'Blown up'], trap: ['env', 'Caught in a trap'],
+	fall: ['env', 'Fell to their death'], fire: ['env', 'Burned to death'], drowned: ['env', 'Drowned'], cold: ['env', 'Froze to death'],
+	bleeding: ['ailment', 'Bled out'], dehydration: ['ailment', 'Died of thirst'], starvation: ['ailment', 'Starved to death'], illness: ['ailment', 'Died of illness'],
+	suicide: ['other', 'Killed themselves'], admin: ['other', 'Killed by an admin (ReCON)'],
+};
+const KILL_KINDS = [['', 'All'], ['kill', 'Kills'], ['player', 'By players'], ['infected', 'Infected'], ['animal', 'Animals'],
+	['env', 'Environment'], ['ailment', 'Ailments'], ['other', 'Other']];
+const KIND_CHIP = { kill: ['red', 'Kill'], player: ['red', 'Player'], infected: ['amber', 'Infected'], animal: ['amber', 'Animal'],
+	env: ['blue', 'Environment'], ailment: ['violet', 'Ailment'], other: ['', 'Other'] };
+let killKind = '';
+// causeOf is what killed them; for a death from before mod 0.0.1h, as
+// much as who killed them and with what tells.
+function causeOf(k) {
+	if (k.cause) return k.cause;
+	if (k.killerGuid && k.killerGuid !== k.victimGuid) return 'player';
+	if (/^Zmb/i.test(k.weapon)) return 'infected';
+	if (/^Animal_/i.test(k.weapon)) return 'animal';
+	if (k.killerGuid && k.weapon && !/^Survivor/i.test(k.weapon)) return 'suicide';
+	return '';
+}
+// killKindOf is the row's kind: the player's own kill, or what killed them.
+function killKindOf(k) {
+	if (k.killerGuid === selGuid && k.victimGuid !== selGuid) return 'kill';
+	const c = CAUSES[causeOf(k)];
+	return c ? c[0] : 'other';
+}
+function renderKills() {
+	const tb = document.getElementById('pKills');
+	const all = detail && detail.recentKills || [];
+	const counts = {};
+	all.forEach(k => { const n = killKindOf(k); counts[n] = (counts[n] || 0) + 1; });
+	const kinds = document.getElementById('pKillKinds');
+	const kh = KILL_KINDS.map(([v, t]) => '<button type="button" data-kind="' + v + '"' + (v === killKind ? ' class="on"' : '') +
+		(v && !counts[v] ? ' disabled' : '') + '>' + t + (v ? ' ' + (counts[v] || 0) : '') + '</button>').join('');
+	if (kinds.getAttribute('data-h') !== kh) { kinds.innerHTML = kh; kinds.setAttribute('data-h', kh); }
+	const ks = killKind ? all.filter(k => killKindOf(k) === killKind) : all;
+	const sum = document.getElementById('pKillSum');
+	sum.textContent = detail && detail.kills != null
+		? detail.kills + (detail.kills === 1 ? ' kill, ' : ' kills, ') + detail.deaths + (detail.deaths === 1 ? ' death' : ' deaths') + ' all time' + (ks.length >= 100 ? ' · the latest 100' : '')
+		: '';
+	if (!ks.length) { tb.innerHTML = '<tr><td class="muted">' + (all.length ? 'None of these.' : 'None recorded.') + '</td></tr>'; return; }
+	const link = (g, n) => g ? '<a data-guid="' + g + '">' + esc(n) + '</a>' : esc(n);
+	tb.innerHTML = ks.map(k => {
+		const d = new Date(k.at), when = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+		const w = k.weapon ? item(k.weapon) : 'something', far = k.distance ? ' at ' + Math.round(k.distance) + ' m' : '';
+		const cause = causeOf(k), kind = killKindOf(k), c = CAUSES[cause];
+		// The weapon, unless it is only their own body (an older mod's report).
+		const wpn = k.weapon && !/^Survivor/i.test(k.weapon) ? ' (' + esc(w) + ')' : '';
+		let t;
+		if (kind === 'kill') t = 'Killed ' + link(k.victimGuid, k.victimName || 'someone') + ' with ' + esc(w) + far;
+		else if (cause === 'player') t = 'Killed by ' + link(k.killerGuid, k.killerName || 'a player') + (k.weapon ? ' with ' + esc(w) : '') + far;
+		else if (cause === 'vehicle' && k.killerGuid) t = 'Run over by ' + link(k.killerGuid, k.killerName) + wpn;
+		else if (c) t = c[1] + (cause === 'illness' && k.illnesses && k.illnesses.length ? ': ' + esc(k.illnesses.join(', ')) : wpn);
+		else t = 'Died' + wpn;
+		if (cause !== 'illness' && kind !== 'kill' && k.illnesses && k.illnesses.length) t += ' <span class="muted">· had ' + esc(k.illnesses.join(', ')) + '</span>';
+		const chip = KIND_CHIP[kind];
+		const where = k.x || k.z ? grid(k.x, k.z) + ' <span class="muted">' + Math.round(k.x) + ', ' + Math.round(k.z) + '</span>' : '';
+		return '<tr><td class="t">' + when + '</td><td class="k"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></td><td>' + t + '</td><td class="where">' + where + '</td></tr>';
+	}).join('');
+}
+document.getElementById('pKillKinds').addEventListener('click', e => {
+	const b = e.target.closest('[data-kind]');
+	if (!b || b.disabled) return;
+	killKind = b.dataset.kind;
+	renderKills();
+});
+document.getElementById('pKills').addEventListener('click', e => {
+	const a = e.target.closest('a[data-guid]');
+	if (!a) return;
+	const g = a.getAttribute('data-guid');
+	if (byGuid[g]) openPlayer(g); else location.href = '/players#details=' + g;
+});
+
+// The mini-map: the map around the player, a grid, the others in view.
+// It follows the player until it is dragged (pan) or zoomed with the
+// wheel away from them; Recenter zooms back to 500 m across (MINI_HOME)
+// on the player and follows them again. Each wheel notch zooms
+// 200 m in or out (no closer than 100 m across). A click that isn't a
+// drag picks a teleport spot.
+const MINI = 260;
+const MINI_HOME = 500; // metres across, when it opens and on Recenter
+let mini = { span: MINI_HOME, cx: 0, cz: 0, follow: true }, tpPick = null;
+function resetMini() { mini = { span: MINI_HOME, cx: 0, cz: 0, follow: true }; }
+function miniMax() { return Math.max(1000, size || 15360); }
+function drawMini(p) {
+	const s = document.getElementById('miniG');
+	if (mini.follow) { mini.cx = p.x; mini.cz = p.z; }
+	const span = mini.span, x0 = mini.cx - span / 2, z0 = mini.cz - span / 2;
+	const px = x => (x - x0) / span * MINI, pz = z => MINI - (z - z0) / span * MINI;
+	drawMiniPicture(x0, z0, span);
+	const inView = (x, z) => x >= x0 && x <= x0 + span && z >= z0 && z <= z0 + span;
+	// Grid: 10 m very close, 100 m close, 500 m or 1 km further out; every
+	// 100 m (10 m grid) or km brighter.
+	const step = span <= 300 ? 10 : span <= 1500 ? 100 : span <= 6000 ? 500 : 1000, major = step < 100 ? 100 : 1000;
+	let h = '';
+	for (let g = Math.ceil(x0 / step) * step; g <= x0 + span; g += step) h += '<line x1="' + px(g) + '" x2="' + px(g) + '" y1="0" y2="' + MINI + '" stroke="' + (g % major ? '#232a24' : '#3a463c') + '"/>';
+	for (let g = Math.ceil(z0 / step) * step; g <= z0 + span; g += step) h += '<line y1="' + pz(g) + '" y2="' + pz(g) + '" x1="0" x2="' + MINI + '" stroke="' + (g % major ? '#232a24' : '#3a463c') + '"/>';
+	// The map's edges, when in view.
+	const ms = size || 15360;
+	h += '<rect x="' + px(0) + '" y="' + pz(ms) + '" width="' + (px(ms) - px(0)) + '" height="' + (pz(0) - pz(ms)) + '" fill="none" stroke="#4a5a4d" stroke-width="1"/>';
+	players.forEach(o => {
+		if (o.guid === p.guid || !inView(o.x, o.z)) return;
+		const d = Math.round(Math.hypot(o.x - p.x, o.z - p.z)), right = px(o.x) > MINI - 110;
+		h += '<circle cx="' + px(o.x) + '" cy="' + pz(o.z) + '" r="4.5" fill="' + colorOf(o.guid) + '" stroke="#111"/>' +
+			'<text x="' + (px(o.x) + (right ? -8 : 8)) + '" y="' + (pz(o.z) + 4) + '" fill="#bbb" font-size="11"' + (right ? ' text-anchor="end"' : '') + '>' + esc(o.name) + ' · ' + (d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m') + '</text>';
+	});
+	if (tpPick && inView(tpPick[0], tpPick[1])) h += '<circle cx="' + px(tpPick[0]) + '" cy="' + pz(tpPick[1]) + '" r="6" fill="none" stroke="#8ab4f8" stroke-width="2"/>' +
+		'<line x1="' + (px(tpPick[0]) - 10) + '" x2="' + (px(tpPick[0]) + 10) + '" y1="' + pz(tpPick[1]) + '" y2="' + pz(tpPick[1]) + '" stroke="#8ab4f8"/>' +
+		'<line y1="' + (pz(tpPick[1]) - 10) + '" y2="' + (pz(tpPick[1]) + 10) + '" x1="' + px(tpPick[0]) + '" x2="' + px(tpPick[0]) + '" stroke="#8ab4f8"/>';
+	if (inView(p.x, p.z)) h += '<g transform="translate(' + px(p.x) + ',' + pz(p.z) + ') rotate(' + p.heading + ')"><path d="M0,-9 L6.3,7.2 L0,3.2 L-6.3,7.2 Z" fill="' + colorOf(p.guid) + '" stroke="#111" stroke-width="1.2"/></g>';
+	s.innerHTML = h;
+	document.getElementById('miniScale').textContent = (step >= 1000 ? step / 1000 + ' km' : step + ' m') + ' grid · ' + (span >= 1000 ? (span / 1000).toFixed(1).replace(/\.0$/, '') + ' km' : span + ' m') + ' across';
+	document.getElementById('miniFollow').hidden = mini.follow && mini.span === MINI_HOME;
+}
+// drawMiniPicture draws the map's picture under the mini-map: the part from
+// (x0, z0), span metres across, at the mini-map's size. span 0 clears it.
+function drawMiniPicture(x0, z0, span) {
+	const cv = document.getElementById('miniCv'), svg = document.getElementById('mini');
+	const w = svg.clientWidth, h = svg.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, 3);
+	if (cv.style.width !== w + 'px') { cv.style.width = w + 'px'; cv.style.height = h + 'px'; }
+	if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+	drawPicture(cv, x0, z0, w ? span : 0, redrawMiniSoon);
+}
+// miniAt is the map point (x, z) under the pointer.
+function miniAt(e) {
+	const r = document.getElementById('mini').getBoundingClientRect();
+	const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+	return { x: mini.cx + (fx - 0.5) * mini.span, z: mini.cz - (fy - 0.5) * mini.span, fx, fy };
+}
+function redrawMini() { const p = byGuid[selGuid]; if (p) drawMini(p); }
+let miniDrag = null, miniDragged = false; // miniDragged: the last press was a drag, not a click
+const miniEl = document.getElementById('mini');
+miniEl.addEventListener('pointerdown', e => {
+	if (e.button !== 0) return;
+	miniDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, cx: mini.cx, cz: mini.cz, moved: false };
+	miniEl.setPointerCapture(e.pointerId);
+});
+miniEl.addEventListener('pointermove', e => {
+	const at = miniAt(e);
+	document.getElementById('miniXY').textContent = at.x >= 0 && at.z >= 0 ? Math.round(at.x) + ', ' + Math.round(at.z) + ' · ' + grid(at.x, at.z) : '';
+	if (!miniDrag || e.pointerId !== miniDrag.id) return;
+	const r = miniEl.getBoundingClientRect(), dx = e.clientX - miniDrag.x, dy = e.clientY - miniDrag.y;
+	if (!miniDrag.moved && Math.hypot(dx, dy) < 4) return; // a click, not a drag (yet)
+	miniDrag.moved = true;
+	miniEl.classList.add('panning');
+	mini.follow = false;
+	mini.cx = miniDrag.cx - dx / r.width * mini.span;
+	mini.cz = miniDrag.cz + dy / r.height * mini.span;
+	redrawMini();
+});
+miniEl.addEventListener('pointerleave', () => { if (!miniDrag) document.getElementById('miniXY').textContent = ''; });
+function endMiniDrag(e, pick) {
+	if (!miniDrag || e.pointerId !== miniDrag.id) return;
+	const moved = miniDrag.moved;
+	miniDragged = moved;
+	miniDrag = null;
+	miniEl.classList.remove('panning');
+	if (moved || !pick) return;
+	if (calMode) { calPick(miniAt(e)); return; }
+	// A click: pick that spot to teleport to.
+	const at = miniAt(e);
+	tpPick = [at.x, at.z];
+	document.getElementById('tpX').value = Math.round(at.x);
+	document.getElementById('tpZ').value = Math.round(at.z);
+	setTpMode('spot');
+	renderPlayer();
+}
+miniEl.addEventListener('pointerup', e => endMiniDrag(e, true));
+// A double-click teleports them there at once: its two clicks have already
+// picked the spot, so this is the Teleport button without the trip.
+miniEl.addEventListener('dblclick', e => {
+	e.preventDefault();
+	if (miniDragged) return; // two quick drags, not a double-click
+	if (calMode || Date.now() - calPicked < 1000) return; // a calibration click, not a teleport
+	const at = miniAt(e);
+	if (!(at.x > 0) || !(at.z > 0) || (size && (at.x > size || at.z > size))) { document.getElementById('pErr').textContent = 'That spot is off the map.'; return; }
+	document.getElementById('tpTo').value = '';
+	act('teleport', { x: at.x, z: at.z, y: 0 }, true).then(ok => { if (ok) clearTeleport(); });
+});
+miniEl.addEventListener('pointercancel', e => endMiniDrag(e, false));
+
+// Calibrating: with Calibrate on, a click on the mini-map is where the
+// player really is on the map's picture, which then moves (and with two
+// points far enough apart, resizes) to put it under them.
+let calMode = false, calPicked = 0, calNote = '';
+function calUI() {
+	const b = document.getElementById('miniCal'), box = document.getElementById('miniCalBox');
+	b.hidden = !pic;
+	if (!pic) calMode = false;
+	b.textContent = calMode ? 'Cancel' : 'Calibrate';
+	b.classList.toggle('on', calMode);
+	const p = byGuid[selGuid], n = calPoints.length;
+	let msg = calNote;
+	if (calMode) msg = 'Click where ' + (p ? p.name : 'they') + ' really are' + (n ? ' (' + (n === 1 ? '1 point so far' : '2 points so far') + ')' : '');
+	box.hidden = !msg;
+	document.getElementById('miniCalMsg').textContent = msg;
+	document.getElementById('miniCalReset').hidden = !calMode || !n;
+}
+function setCalMode(on) {
+	calMode = on; calNote = '';
+	if (on) { mini.follow = true; redrawMini(); }
+	calUI();
+}
+document.getElementById('miniCal').addEventListener('click', () => setCalMode(!calMode));
+// saveCal saves the map's points; note is said once it has.
+function saveCal(points, note) {
+	const w = world;
+	// Out of calibrating at once, so what happens next (saved, or why not)
+	// shows in its place.
+	calMode = false; calNote = 'Saving…'; calUI();
+	return api('POST', '/api/mod/map/' + encodeURIComponent(w) + '/calibration', { points }).then(d => {
+		if (w !== world) return;
+		calPoints = d.points || [];
+		calMode = false; calNote = note;
+		placePicture();
+		setTimeout(() => { if (calNote === note) { calNote = ''; calUI(); } }, 8000);
+	}).catch(err => { if (w === world) { calNote = 'Not saved: ' + err.message; calUI(); } });
+}
+// calPick adds the point: the player's position, and the spot at on the
+// picture. A point within CAL_MIN of one already there replaces it;
+// otherwise it replaces the oldest of two.
+function calPick(at) {
+	const p = byGuid[selGuid];
+	if (!p) { calMode = false; calNote = "Not saved: the player isn't online."; calUI(); return; }
+	calPicked = Date.now();
+	const P = placement();
+	const pt = { x: p.x, z: p.z, u: (at.x - P.W) / P.L, v: (P.N - at.z) / P.L };
+	let pts = calPoints.filter(q => Math.hypot(q.x - pt.x, q.z - pt.z) >= CAL_MIN);
+	if (pts.length >= 2) pts = pts.slice(-1);
+	pts.push(pt);
+	saveCal(pts, pts.length === 1
+		? 'Moved the picture. To fix its size too, calibrate again 1 km or more away (the farther the better).'
+		: 'Moved and resized the picture from 2 points ' + (Math.hypot(pts[1].x - pts[0].x, pts[1].z - pts[0].z) / 1000).toFixed(1) + ' km apart.');
+}
+document.getElementById('miniCalReset').addEventListener('click', () => {
+	if (confirm('Forget this map\'s calibration and draw its picture over the whole map again?')) saveCal([], 'Calibration reset.');
+});
+// The wheel: 200 m per notch (a trackpad's small steps add up to notches).
+let miniWheel = 0;
+miniEl.addEventListener('wheel', e => {
+	e.preventDefault();
+	miniWheel += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+	const notches = Math.trunc(miniWheel / 100) || (Math.abs(e.deltaY) >= 50 && e.deltaMode === 0 ? Math.sign(e.deltaY) : 0);
+	if (!notches) return;
+	miniWheel = 0;
+	const span = Math.max(100, Math.min(miniMax(), mini.span + 200 * notches));
+	if (span === mini.span) return;
+	if (!mini.follow) {
+		// Zoom around the point under the pointer, so it stays put.
+		const at = miniAt(e);
+		mini.cx = at.x - (at.fx - 0.5) * span;
+		mini.cz = at.z + (at.fy - 0.5) * span;
+	}
+	mini.span = span;
+	redrawMini();
+}, { passive: false });
+document.getElementById('miniFollow').addEventListener('click', () => { mini.follow = true; mini.span = MINI_HOME; redrawMini(); });
+
+// showForm('message') puts the cursor in the message box (always shown).
+function showForm(name) {
+	if (name === 'message') document.getElementById('msgText').focus();
+}
+
+// ---- The dialog's tabs: Stats, Inventory, Spawn item, Kills & deaths -----
+
+// pTab stays as it is from one player to the next (Prev / Next).
+let pTab = 'stats';
+function showPTab(name) {
+	pTab = name;
+	document.querySelectorAll('#pTabs button').forEach(b => {
+		const on = b.dataset.ptab === name;
+		b.classList.toggle('on', on);
+		b.setAttribute('aria-selected', on);
+	});
+	document.querySelectorAll('#pModal .ppane').forEach(p => p.hidden = p.dataset.ppane !== name);
+	if (name === 'spawn') loadItems();
+}
+document.getElementById('pTabs').addEventListener('click', e => {
+	const b = e.target.closest('[data-ptab]');
+	if (b) showPTab(b.dataset.ptab);
+});
+
+// ---- Spawn item: every item the server has loaded, on the ground --------
+
+let catalog = null, catalogBy = {}, spSel = null;
+const KIND_TEXT = { weapon: 'Weapon', magazine: 'Magazine', ammo: 'Ammo', clothing: 'Clothing', vehicle: 'Vehicle', animal: 'Animal', item: 'Item' };
+function catName(it) { return it.name && it.name[0] !== '$' ? it.name : item(it.type); }
+// fetchCatalog loads the item list once the mod has sent all of it.
+async function fetchCatalog() {
+	if (catalog) return;
+	try {
+		const d = await api('GET', '/api/mod/items');
+		if (d.complete) {
+			// Sorted by name, so the A-Z bar can jump to a letter.
+			catalog = d.items.map(it => Object.assign(it, { find: (catName(it) + ' ' + it.type).toLowerCase(), letter: letterOf(it) }))
+				.sort((a, b) => catName(a).localeCompare(catName(b), undefined, { sensitivity: 'base' }));
+			catalogBy = Object.fromEntries(catalog.map(it => [it.type, it]));
+		}
+	} catch (e) { }
+}
+async function loadItems() {
+	if (catalog) { renderItems(); return; }
+	await fetchCatalog();
+	renderItems();
+	// Still coming in from the mod: look again while the tab is open.
+	if (!catalog) setTimeout(() => { if (pTab === 'spawn' && document.getElementById('pModal').style.display === 'flex') loadItems(); }, 2000);
+}
+// letterOf is the A-Z bar's letter for an item: its name's first letter,
+// or # for a digit or anything else.
+const AZ = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+function letterOf(it) { const c = (catName(it)[0] || '').toUpperCase(); return c >= 'A' && c <= 'Z' ? c : '#'; }
+function renderItems() {
+	const list = document.getElementById('spList'), az = document.getElementById('spAZ');
+	if (!catalog) { list.innerHTML = '<div class="empty">The item list is still coming in from recon-mod…</div>'; az.innerHTML = ''; renderPick(); return; }
+	const words = document.getElementById('spFind').value.toLowerCase().split(/\s+/).filter(Boolean);
+	const kind = document.getElementById('spKind').value;
+	const hits = catalog.filter(it => (!kind || it.kind === kind) && words.every(w => it.find.includes(w)));
+	// Every match, in name order; the first item of each letter is marked
+	// for the A-Z bar.
+	const seen = {};
+	list.innerHTML = hits.length ? itemRows(hits, spSel, seen) : '<div class="empty">No item matches.</div>';
+	list.scrollTop = 0;
+	az.innerHTML = azBar(seen);
+	renderPick();
+}
+// itemRows is the item list's rows, sel highlighted; the first item of each
+// letter is marked (and noted in seen) for the A-Z bar.
+function itemRows(hits, sel, seen) {
+	return hits.map(it => {
+		const first = !seen[it.letter]; seen[it.letter] = true;
+		return '<button type="button" class="sprow' + (it.type === sel ? ' sel' : '') + '" data-type="' + esc(it.type) + '"' + (first ? ' data-first="' + it.letter + '"' : '') + '>' +
+			'<span class="nm">' + esc(catName(it)) + '<small>' + esc(it.type) + '</small></span><span class="kd">' + KIND_TEXT[it.kind] + '</span></button>';
+	}).join('');
+}
+function azBar(seen) {
+	return AZ.map(l => '<button type="button" data-az="' + l + '"' + (seen[l] ? '' : ' disabled') + ' title="' + (l === '#' ? 'Digits and symbols' : l) + '">' + l + '</button>').join('');
+}
+// The A-Z bars (Spawn item, Spawn here) scroll their list to that letter.
+for (const [bar, lst] of [['spAZ', 'spList'], ['sAZ', 'sList']]) document.getElementById(bar).addEventListener('click', e => {
+	const b = e.target.closest('[data-az]');
+	if (!b || b.disabled) return;
+	const list = document.getElementById(lst), row = list.querySelector('[data-first="' + b.dataset.az + '"]');
+	if (row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+});
+function renderPick() {
+	const it = spSel && catalogBy[spSel];
+	const vehicle = it && it.kind === 'vehicle', animal = it && it.kind === 'animal';
+	const whereEl = document.getElementById('spWhere'), where = vehicle || animal ? 'ground' : whereEl.value;
+	const WHERE_TEXT = { ground: ', on the ground in front of them', inventory: ', into their inventory (what doesn\'t fit goes on the ground)', hands: ', into their hands (they must be empty)' };
+	document.getElementById('spPick').textContent = it
+		? catName(it) + (vehicle ? ', whole (parts and fluids), 8 m in front of them' : animal ? ', on the ground 4 m in front of them' : WHERE_TEXT[where])
+		: (catalog ? catalog.length.toLocaleString() + ' items · pick one' : '');
+	// A vehicle or an animal goes in front of them; a vehicle and anything
+	// for their hands come one at a time.
+	if (vehicle || animal) whereEl.value = 'ground';
+	whereEl.disabled = !!(vehicle || animal);
+	const one = vehicle || where === 'hands', cnt = document.getElementById('spCount');
+	if (one) cnt.value = 1;
+	cnt.disabled = one;
+}
+document.getElementById('spWhere').addEventListener('change', renderPick);
+document.getElementById('spFind').addEventListener('input', renderItems);
+document.getElementById('spKind').addEventListener('change', renderItems);
+document.getElementById('spList').addEventListener('click', e => {
+	const t = e.target.closest('[data-type]');
+	if (!t) return;
+	spSel = t.getAttribute('data-type');
+	// Only the highlight moves: redrawing the list would lose its scroll.
+	document.querySelectorAll('#spList .sprow.sel').forEach(r => r.classList.remove('sel'));
+	t.classList.add('sel');
+	renderPick();
+});
+function doSpawn() {
+	const err = document.getElementById('pErr');
+	if (!spSel) { err.textContent = 'Pick an item to spawn.'; return; }
+	const n = parseInt(document.getElementById('spCount').value, 10);
+	if (!(n >= 1 && n <= 20)) { err.textContent = 'Spawn 1 to 20 at a time.'; return; }
+	act('spawn', { text: spSel, value: n, stat: document.getElementById('spWhere').value }, true); // stays open for the next item
+}
+
+// act queues an action for the player in the dialog (or for guid, when
+// given); the panel it came from closes unless keepOpen.
+async function act(action, body, keepOpen, guid) {
+	const err = document.getElementById('pErr');
+	err.textContent = '';
+	try {
+		const d = await api('POST', '/api/mod/players/' + (guid || selGuid) + '/' + action, body || {});
+		lastBatch = d.command ? [d.command.id] : [];
+		if (!keepOpen) showForm('');
+		poll();
+		return true;
+	} catch (e) { err.textContent = e.message; return false; }
+}
+function killPlayer() {
+	const p = byGuid[selGuid];
+	if (confirm('Kill ' + (p ? p.name : 'this player') + '? Their character dies and they start again fresh.')) act('kill');
+}
+// The teleport panel is always open; it empties after each teleport. Its
+// three ways: to a spot (typed, or a mini-map click), this player to
+// another (to), or another to this player (from). Typing or picking in one
+// selects it.
+function tpMode() { const r = document.querySelector('#fTeleport input[name=tpMode]:checked'); return r ? r.value : 'spot'; }
+function setTpMode(m) { document.querySelector('#fTeleport input[name=tpMode][value=' + m + ']').checked = true; tpReady(); }
+// tpReady greys Teleport out until the way picked has what it needs: X and
+// Y typed (or a mini-map click), or a player picked.
+function tpReady() {
+	const m = tpMode(), v = id => document.getElementById(id).value;
+	const ok = m === 'to' ? !!v('tpTo') : m === 'from' ? !!v('tpFrom') : parseFloat(v('tpX')) > 0 && parseFloat(v('tpZ')) > 0;
+	document.getElementById('bTeleport').disabled = !ok;
+}
+function clearTeleport() {
+	tpPick = null;
+	for (const id of ['tpX', 'tpZ', 'tpTo', 'tpFrom']) document.getElementById(id).value = '';
+	setTpMode('spot');
+}
+for (const [id, m] of [['tpX', 'spot'], ['tpZ', 'spot'], ['tpTo', 'to'], ['tpFrom', 'from']]) {
+	const el = document.getElementById(id);
+	el.addEventListener('focus', () => setTpMode(m));
+	el.addEventListener('input', () => setTpMode(m));
+	el.addEventListener('change', () => setTpMode(m));
+}
+document.querySelectorAll('#fTeleport input[name=tpMode]').forEach(r => r.addEventListener('change', tpReady));
+function doTeleport() {
+	const err = document.getElementById('pErr'), m = tpMode();
+	if (m === 'to' || m === 'from') {
+		const other = document.getElementById(m === 'to' ? 'tpTo' : 'tpFrom').value;
+		if (!other) { err.textContent = 'Pick a player.'; return; }
+		const done = ok => { if (ok) clearTeleport(); };
+		if (m === 'to') act('teleportTo', { target: other }).then(done);
+		else act('teleportTo', { target: selGuid }, false, other).then(done);
+		return;
+	}
+	const x = parseFloat(document.getElementById('tpX').value), z = parseFloat(document.getElementById('tpZ').value);
+	if (!(x > 0) || !(z > 0)) { err.textContent = 'Enter where to (X and Y, in metres) or click the mini-map.'; return; }
+	act('teleport', { x, z, y: 0 }).then(ok => { if (ok) clearTeleport(); });
+}
+function doMessage() {
+	const t = document.getElementById('msgText').value.trim();
+	if (!t) { document.getElementById('pErr').textContent = 'Type a message.'; return; }
+	act('message', { text: t, title: 'Server', seconds: 10 }).then(ok => { if (ok) document.getElementById('msgText').value = ''; });
+}
+document.getElementById('msgText').addEventListener('keydown', e => { if (e.key === 'Enter') doMessage(); });
+
+// ---- The world ----------------------------------------------------------
+
+// Weather sliders: the part, its label, the slider's top, and how a value shows.
+const WX = [
+	['overcast', 'Overcast', 100, v => v + '%'], ['rain', 'Rain', 100, v => v + '%'], ['fog', 'Fog', 100, v => v + '%'], ['snow', 'Snow', 100, v => v + '%'],
+	['windSpeed', 'Wind speed', 30, v => v + ' m/s'], ['windDir', 'Wind from', 359, v => compass(v) + ' ' + v + '°'],
+];
+// Presets move several sliders at once, ready to Apply.
+const PRESETS = {
+	Clear: { overcast: 5, rain: 0, fog: 0, snow: 0, windSpeed: 3 }, Cloudy: { overcast: 55, rain: 0, fog: 5, snow: 0 },
+	Rain: { overcast: 80, rain: 60, fog: 10, snow: 0, windSpeed: 8 }, Thunderstorm: { overcast: 100, rain: 100, fog: 15, snow: 0, windSpeed: 16, lightning: 100 },
+	Fog: { overcast: 40, rain: 0, fog: 85, snow: 0, windSpeed: 1 }, Snow: { overcast: 85, rain: 0, fog: 20, snow: 70, windSpeed: 6 },
+};
+let moved = {}, lightningMoved = false;
+
+// wxNow is a part's value now (target false) or where it is heading, as the slider shows it.
+function wxNow(k, wx, target) {
+	const v = wx[target ? k + 'Target' : k] || 0;
+	if (k === 'windSpeed') return Math.round(v);
+	if (k === 'windDir') return Math.round(v) % 360;
+	return Math.round(v * 100);
+}
+
+function buildWorld() {
+	document.getElementById('wRows').innerHTML = WX.map(([k, label, max]) =>
+		'<div class="wrow"><span>' + label + '</span><input type="range" min="0" max="' + max + '" step="1" id="wx_' + k + '" aria-label="' + label + '"><span class="val" id="wv_' + k + '"></span><span class="now" id="wn_' + k + '"></span></div>').join('') +
+		'<div class="wrow"><span>Lightning</span><input type="range" min="0" max="100" step="5" id="wx_lightning" value="0" aria-label="Lightning"><span class="val" id="wv_lightning">0%</span><span class="now">in heavy overcast</span></div>';
+	WX.forEach(([k, , , fmt]) => document.getElementById('wx_' + k).addEventListener('input', e => {
+		moved[k] = +e.target.value;
+		const v = document.getElementById('wv_' + k);
+		v.textContent = fmt(+e.target.value);
+		v.classList.add('moved');
+	}));
+	document.getElementById('wx_lightning').addEventListener('input', e => {
+		lightningMoved = true;
+		const v = document.getElementById('wv_lightning');
+		v.textContent = e.target.value + '%';
+		v.classList.add('moved');
+	});
+	document.getElementById('presets').innerHTML = Object.keys(PRESETS).map(n => '<button type="button" data-p="' + n + '">' + n + '</button>').join('');
+	document.getElementById('presets').addEventListener('click', e => {
+		const n = e.target.getAttribute('data-p');
+		if (!n) return;
+		for (const [k, v] of Object.entries(PRESETS[n])) {
+			const el = document.getElementById('wx_' + k);
+			el.value = v;
+			el.dispatchEvent(new Event('input'));
+		}
+	});
+	document.getElementById('wMode').addEventListener('click', e => {
+		const m = e.target.getAttribute('data-mode');
+		if (m) worldAct('weatherMode', { text: m });
+	});
+}
+
+function openWorld() {
+	if (!mod || !mod.connected) return;
+	moved = {}; lightningMoved = false;
+	document.getElementById('wErr').textContent = '';
+	const d = mod.date;
+	document.getElementById('wDate').value = d[0] + '-' + pad(d[1]) + '-' + pad(d[2]);
+	document.getElementById('wTime').value = pad(d[3]) + ':' + pad(d[4]);
+	document.querySelectorAll('#wRows .val').forEach(v => v.classList.remove('moved'));
+	const wx = mod.weather || {};
+	WX.forEach(([k, , , fmt]) => {
+		const v = wxNow(k, wx, false);
+		document.getElementById('wx_' + k).value = v;
+		document.getElementById('wv_' + k).textContent = fmt(v);
+	});
+	document.getElementById('wx_lightning').value = 0;
+	document.getElementById('wv_lightning').textContent = '0%';
+	document.getElementById('wModal').style.display = 'flex';
+	renderWorld();
+}
+function closeWorld() { document.getElementById('wModal').style.display = 'none'; }
+
+function renderWorld() {
+	if (!mod) return;
+	const wx = mod.weather || {}, d = mod.date;
+	document.getElementById('wWorld').textContent = NAMES[(mod.world || '').toLowerCase()] || mod.world;
+	document.getElementById('wNow').textContent = 'Now ' + pad(d[3]) + ':' + pad(d[4]) + ' on ' + dayMonth(d, 'long') + ' ' + d[0] + (wx.timeFrozen ? ', frozen.' : '.');
+	const fb = document.getElementById('freezeBtn');
+	fb.textContent = wx.timeFrozen ? 'Unfreeze time' : 'Freeze time';
+	fb.classList.toggle('on', !!wx.timeFrozen);
+	document.querySelectorAll('#wMode button').forEach(b => b.classList.toggle('on', b.getAttribute('data-mode') === wx.mode));
+	renderTimePresets();
+	WX.forEach(([k, , , fmt]) => {
+		const now = wxNow(k, wx, false), tgt = wxNow(k, wx, true);
+		document.getElementById('wn_' + k).textContent = 'now ' + fmt(now) + (tgt !== now ? ' → ' + fmt(tgt) : '');
+	});
+	const worldCmds = commands.filter(c => !c.guid);
+	document.getElementById('wLast').innerHTML = worldCmds.length ? 'Last change: ' + cmdText(worldCmds[0]) + ' · ' + statusHTML(worldCmds[0]) : '';
+}
+
+async function worldAct(action, body) {
+	document.getElementById('wErr').textContent = '';
+	try { await api('POST', '/api/mod/world/' + action, body); poll(); return true; }
+	catch (e) { document.getElementById('wErr').textContent = e.message; return false; }
+}
+function setDate() {
+	const d = document.getElementById('wDate').value.split('-').map(Number), t = document.getElementById('wTime').value.split(':').map(Number);
+	if (d.length !== 3 || t.length < 2 || d.some(isNaN) || t.some(isNaN)) { document.getElementById('wErr').textContent = 'Pick a date and a time.'; return; }
+	worldAct('date', { year: d[0], month: d[1], day: d[2], hour: t[0], minute: t[1] });
+}
+// Time presets, today: dawn at sunrise, day at noon, dusk at sunset, night
+// at 23:59. Sunrise and sunset come from the map (06:00 and 18:00 from a
+// mod too old to send them).
+function presetHour(t) {
+	const wx = (mod && mod.weather) || {};
+	return { dawn: wx.sunrise || 6, day: 12, dusk: wx.sunset || 18, night: 23 + 59 / 60 }[t];
+}
+function hhmm(h) { const m = Math.round(h * 60) % 1440; return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
+function renderTimePresets() {
+	const real = mod && mod.weather && mod.weather.sunrise > 0;
+	document.querySelectorAll('#timePresets button').forEach(b => {
+		const t = b.getAttribute('data-t');
+		b.textContent = b.textContent.split(' ')[0] + ' ' + hhmm(presetHour(t));
+		b.title = (t === 'dawn' ? 'Sunrise' : t === 'dusk' ? 'Sunset' : t === 'day' ? 'Noon' : 'The end of the day') +
+			(real || t === 'day' || t === 'night' ? '' : ' (about: the mod on the server is too old to say)');
+	});
+}
+document.getElementById('timePresets').addEventListener('click', e => {
+	const t = e.target.getAttribute('data-t');
+	if (!t || !mod) return;
+	const d = mod.date, m = Math.round(presetHour(t) * 60) % 1440;
+	worldAct('date', { year: d[0], month: d[1], day: d[2], hour: Math.floor(m / 60), minute: m % 60 });
+});
+function toggleFreeze() { worldAct('freezeTime', { value: mod.weather && mod.weather.timeFrozen ? 0 : 1 }); }
+async function applyWeather() {
+	const trans = parseFloat(document.getElementById('wTrans').value), holdMin = parseFloat(document.getElementById('wHold').value);
+	if (!(trans >= 0) || !(holdMin >= 0)) { document.getElementById('wErr').textContent = 'Enter how long the change takes and how long it holds.'; return; }
+	const parts = Object.keys(moved);
+	if (!parts.length && !lightningMoved) { document.getElementById('wErr').textContent = 'Move a slider or pick a preset first.'; return; }
+	for (const k of parts) {
+		const v = k === 'windSpeed' || k === 'windDir' ? moved[k] : moved[k] / 100;
+		if (!await worldAct('weather', { stat: k, value: v, transition: trans, hold: holdMin * 60 })) return;
+	}
+	if (lightningMoved && !await worldAct('storm', { value: +document.getElementById('wx_lightning').value / 100, min: 0.7, hold: 25 })) return;
+	moved = {}; lightningMoved = false;
+	document.querySelectorAll('#wRows .val').forEach(v => v.classList.remove('moved'));
+}
+function setRainRange() {
+	const lo = parseFloat(document.getElementById('rMin').value), hi = parseFloat(document.getElementById('rMax').value), stop = parseFloat(document.getElementById('rStop').value);
+	if (!(lo >= 0 && hi <= 100 && lo <= hi && stop >= 0)) { document.getElementById('wErr').textContent = 'The range is 0 to 100%, lowest first.'; return; }
+	worldAct('rainThresholds', { min: lo / 100, max: hi / 100, transition: stop });
+}
+
+document.addEventListener('keydown', e => {
+	if (e.key !== 'Escape') return;
+	if (drag) { endDrag(false); return; }
+	if (ctxAt) { closeCtx(); return; }
+	if (pickSend) { endPick(); return; }
+	if (document.getElementById('sModal').style.display === 'flex') { closeSpawnAt(); return; }
+	if (document.getElementById('vModal').style.display === 'flex') { closeVehicleInfo(); return; }
+	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
+	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
+	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
+});
+for (const id of ['pModal', 'wModal', 'sModal', 'vModal']) document.getElementById(id).addEventListener('mousedown', e => {
+	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else closeWorld(); }
+});
+
+initMap();
+map.on('popupclose', e => { if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
+buildWorld();
+drawVehicles();
+loadVehicles();
+zoomBand();
+drawPlayersToggle();
+drawGridToggle();
+drawTowns(); loadPlaces();
+drawEvents(); loadEvents();
+drawPredators(); loadPredators();
+drawDeaths(); loadDeaths();
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

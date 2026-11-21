@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/MowMdown/ReCON/internal/flows"
+	"github.com/MowMdown/ReCON/internal/livemap"
 )
 
 func handleFlowsList(w http.ResponseWriter, r *http.Request) {
@@ -145,8 +147,6 @@ type flowFileEntry struct {
 	Delay    string       `json:"delay,omitempty"`    // e.g. "5s"
 	Steps    []flows.Step `json:"steps"`
 	OnStop   []flows.Step `json:"onStop,omitempty"`
-	// CounterThreshold is the flow's {threshold}; 0 (or left out) means none.
-	CounterThreshold int `json:"counterThreshold,omitempty"`
 }
 
 type flowFile struct {
@@ -180,7 +180,7 @@ func handleFlowExport(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out.Flows = append(out.Flows, flowFileEntry{Name: f.Name, Trigger: f.Trigger, Schedule: f.Schedule,
-			Delay: f.Delay, Steps: f.Steps, OnStop: f.OnStop, CounterThreshold: f.CounterThreshold})
+			Delay: f.Delay, Steps: f.Steps, OnStop: f.OnStop})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="flows.json"`)
@@ -227,7 +227,7 @@ func handleFlowImport(w http.ResponseWriter, r *http.Request) {
 			name = flows.ClipName(base, flows.MaxNameLen-len(suffix)) + suffix
 		}
 		if _, err := flows.Save(flows.Flow{Name: name, Trigger: e.Trigger, Schedule: e.Schedule,
-			Delay: e.Delay, Steps: e.Steps, OnStop: e.OnStop, CounterThreshold: e.CounterThreshold}, true); err != nil {
+			Delay: e.Delay, Steps: e.Steps, OnStop: e.OnStop}, true); err != nil {
 			skipped = append(skipped, base+": "+err.Error())
 			continue
 		}
@@ -265,10 +265,14 @@ func handleFlowReorder(w http.ResponseWriter, r *http.Request) {
 
 // handleChatCommandsGet serves GET /api/chat-commands: every command with
 // its labels, defaults and allowed placeholders ("commands"), and the
-// current settings.
+// current settings; whether recon-mod is connected, and the vehicles on the
+// server that the map's vehicles.json doesn't have yet.
 func handleChatCommandsGet(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	st, _ := livemap.Current(now)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "commands": flows.ChatCommandDefs,
-		"settings": flows.CurrentChatSettings(), "defaults": flows.DefaultChatSettings()})
+		"settings": flows.CurrentChatSettings(), "defaults": flows.DefaultChatSettings(),
+		"modConnected": st.Connected, "vehicleWorld": strings.ToLower(st.World), "unlistedVehicles": livemap.UnlistedVehicles(now)})
 }
 
 // handleChatCommandsSave serves POST /api/chat-commands {"settings": {...}}.

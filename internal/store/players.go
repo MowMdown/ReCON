@@ -167,11 +167,19 @@ func (db *Database) ResumePlayerSession(guid string, historyID int64, playerID i
 	return tx.Commit()
 }
 
-// ListOfflinePlayers returns all players from the database who are not currently connected.
+// ListOfflinePlayers returns all players from the database who are not
+// currently connected, each with the newest chat line they wrote (the
+// Last Message column), from the chat history.
 func (db *Database) ListOfflinePlayers() ([]battleye.Player, error) {
 	rows, err := db.Query(`
-		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen, p.role
+		SELECT p.username, p.last_ip, p.guid, p.total_playtime_seconds, p.last_seen, p.role,
+			c.line, c.at
 		FROM players p
+		LEFT JOIN chat_messages c ON c.id = (
+			SELECT m.id FROM chat_messages m
+			WHERE m.guid = lower(p.guid) AND m.direction = 'in'
+			ORDER BY m.id DESC LIMIT 1
+		)
 		WHERE NOT EXISTS (
 			SELECT 1 FROM active_sessions a WHERE a.guid = p.guid
 		)
@@ -186,11 +194,25 @@ func (db *Database) ListOfflinePlayers() ([]battleye.Player, error) {
 	for rows.Next() {
 		var p battleye.Player
 		var lastSeen time.Time
-		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen, &p.Role); err != nil {
+		var line sql.NullString
+		var at sql.NullTime
+		if err := rows.Scan(&p.Name, &p.IP, &p.GUID, &p.TotalPlaytimeSecs, &lastSeen, &p.Role, &line, &at); err != nil {
 			return nil, err
 		}
 		p.LastSeenUnix = lastSeen.Unix()
 		p.Offline = true
+		if line.Valid {
+			// Stored as the server sent it: "(Global) Name: text".
+			ev := battleye.ParseServerMessage(line.String, at.Time)
+			if ev.Kind == battleye.EventChat {
+				p.LastMessage, p.LastMessageChannel = ev.Message, ev.Channel
+			} else {
+				p.LastMessage = line.String
+			}
+			if at.Valid {
+				p.LastMessageUnix = at.Time.Unix()
+			}
+		}
 		players = append(players, p)
 	}
 	return players, rows.Err()
@@ -449,6 +471,7 @@ type detailsPlayer struct {
 	GUID            string `json:"guid"`
 	Name            string `json:"name"`
 	LastIP          string `json:"lastIp"`
+	LastIPCountry   string `json:"lastIpCountry,omitempty"` // filled in by the web handler (package geoip)
 	FirstSeen       int64  `json:"firstSeen"`
 	LastSeen        int64  `json:"lastSeen"`
 	PlaytimeSeconds int64  `json:"playtimeSeconds"`
@@ -462,6 +485,7 @@ type detailsSession struct {
 	Disconnected int64  `json:"disconnected"` // 0 for the session in progress
 	Seconds      int64  `json:"seconds"`
 	IP           string `json:"ip"`
+	Country      string `json:"country,omitempty"` // IP's country, filled in by the web handler
 	Current      bool   `json:"current"`
 	Ended        string `json:"ended,omitempty"` // disconnected, kicked or banned ("" for older sessions)
 }
@@ -473,14 +497,16 @@ type SharedPlayer struct {
 
 type detailsIP struct {
 	IP        string         `json:"ip"`
+	Country   string         `json:"country,omitempty"`  // IP's country, filled in by the web handler
+	Location  any            `json:"location,omitempty"` // where it is (geoip.Location), filled in by the web handler
 	FirstUsed int64          `json:"firstUsed"`
 	LastUsed  int64          `json:"lastUsed"`
 	Others    []SharedPlayer `json:"others"` // other players seen on this IP
 }
 
 // playerDetails is everything stored about one player, as GET
-// /api/players/{guid}/details returns it. Times are Unix seconds. Online, ID
-// and Ban are filled in by the web handler.
+// /api/players/{guid}/details returns it. Times are Unix seconds. Online, ID,
+// Ban and the IPs' countries are filled in by the web handler.
 type playerDetails struct {
 	Player   detailsPlayer `json:"player"`
 	Sessions struct {

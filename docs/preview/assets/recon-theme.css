@@ -96,7 +96,7 @@ body { margin: 24px !important; }
 #onlineTable tr > .act:last-child { background: var(--color-bg) !important; }
 /* Actions columns: the pages size them for the plain buttons (the Default
    theme); the themed buttons, with an icon each, need more room. */
-#onlineTable col.act { width: 340px !important; }
+#onlineTable col.act { width: 270px !important; }
 #offlineTable col.act, #bansTable col.act { width: 120px !important; }
 #flowsTable col.act { width: 330px !important; }
 td.act, td.act-left { white-space: nowrap; }

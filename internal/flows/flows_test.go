@@ -12,6 +12,7 @@ import (
 
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 	"github.com/MowMdown/ReCON/internal/test"
 )
@@ -97,19 +98,19 @@ func TestCheckIfOperators(t *testing.T) {
 	ifStep := func(subject, op, value string) []Step {
 		return []Step{{Type: "if", Branches: []Branch{{Subject: subject, Op: op, Value: value, Steps: []Step{{Type: "stop"}}}}}}
 	}
-	if err := checkFlowSteps(triggerJoin, 0, ifStep("player_id", "gt", "3"), nil); err == nil {
+	if err := checkFlowSteps(triggerJoin, ifStep("player_id", "gt", "3"), nil); err == nil {
 		t.Error("{player_id} > 3 should be rejected")
 	}
-	if err := checkFlowSteps(triggerJoin, 0, ifStep("player_guid", "eq", "nope"), nil); err == nil {
+	if err := checkFlowSteps(triggerJoin, ifStep("player_guid", "eq", "nope"), nil); err == nil {
 		t.Error("a malformed GUID value should be rejected")
 	}
-	if err := checkFlowSteps(triggerJoin, 0, ifStep("player_role", "ge", "5"), nil); err == nil {
+	if err := checkFlowSteps(triggerJoin, ifStep("player_role", "ge", "5"), nil); err == nil {
 		t.Error("role 5 should be rejected")
 	}
-	if err := checkFlowSteps(triggerJoin, 0, ifStep("player_role", "le", "1"), nil); err != nil {
+	if err := checkFlowSteps(triggerJoin, ifStep("player_role", "le", "1"), nil); err != nil {
 		t.Errorf("role at most Mod: %v", err)
 	}
-	if err := checkFlowSteps(triggerChat, 0, ifStep("message", "exact", "!rules"), nil); err != nil {
+	if err := checkFlowSteps(triggerChat, ifStep("message", "exact", "!rules"), nil); err != nil {
 		t.Errorf("message is exactly: %v", err)
 	}
 }
@@ -199,42 +200,42 @@ func pingKickFlow() []Step {
 
 func TestForEachValidation(t *testing.T) {
 	kick := []Step{{Type: "kick", Who: "player", Reason: "x"}}
-	if err := checkFlowSteps(triggerSchedule, 0, kick, nil); err == nil {
+	if err := checkFlowSteps(triggerSchedule, kick, nil); err == nil {
 		t.Error("Kick outside a For each player was accepted in a Schedule flow")
 	}
-	if err := checkFlowSteps(triggerSchedule, 0, pingKickFlow(), nil); err != nil {
+	if err := checkFlowSteps(triggerSchedule, pingKickFlow(), nil); err != nil {
 		t.Errorf("the ping-kick example: %v", err)
 	}
-	if err := checkFlowSteps(triggerManual, 0, []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "player", Text: "hi {player_name}"}}}}, nil); err != nil {
+	if err := checkFlowSteps(triggerManual, []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "player", Text: "hi {player_name}"}}}}, nil); err != nil {
 		t.Errorf("a message to each player: %v", err)
 	}
 	nested := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "forEach", Of: "message", Steps: kick}}}}
-	if err := checkFlowSteps(triggerSchedule, 0, nested, nil); err == nil || !strings.Contains(err.Error(), "inside another") {
+	if err := checkFlowSteps(triggerSchedule, nested, nil); err == nil || !strings.Contains(err.Error(), "inside another") {
 		t.Errorf("a loop inside a loop: %v", err)
 	}
 	// {message} is the looped player's line, in any trigger.
 	for _, of := range []string{"player", "message"} {
 		words := []Step{{Type: "forEach", Of: of, Steps: []Step{{Type: "if", Branches: []Branch{{
 			Subject: "message", Op: "has", Value: "noob", Steps: []Step{{Type: "message", To: "player", Text: "You said: {message}"}}}}}}}}
-		if err := checkFlowSteps(triggerSchedule, 0, words, nil); err != nil {
+		if err := checkFlowSteps(triggerSchedule, words, nil); err != nil {
 			t.Errorf("For each %s with {message}: %v", of, err)
 		}
 	}
-	if err := checkFlowSteps(triggerSchedule, 0, []Step{{Type: "forEach", Of: "everything", Steps: kick}}, nil); err == nil {
+	if err := checkFlowSteps(triggerSchedule, []Step{{Type: "forEach", Of: "everything", Steps: kick}}, nil); err == nil {
 		t.Error("For each of an unknown kind was accepted")
 	}
 	if got := normalizeFlowSteps([]Step{{Type: "forEach"}}); got[0].Of != "player" {
 		t.Errorf("a For each without a kind reads as %q, want player", got[0].Of)
 	}
 	afterLoop := append(pingKickFlow(), kick...)
-	if err := checkFlowSteps(triggerSchedule, 0, afterLoop, nil); err == nil {
+	if err := checkFlowSteps(triggerSchedule, afterLoop, nil); err == nil {
 		t.Error("a Kick after the loop was accepted")
 	}
 	// When stopped takes every kind of step, with the same rules as Steps.
-	if err := checkFlowSteps(triggerSchedule, 0, []Step{{Type: "lock"}}, append(pingKickFlow(), Step{Type: "wait", Time: "5s"}, Step{Type: "shutdown"})); err != nil {
+	if err := checkFlowSteps(triggerSchedule, []Step{{Type: "lock"}}, append(pingKickFlow(), Step{Type: "wait", Time: "5s"}, Step{Type: "shutdown"})); err != nil {
 		t.Errorf("When stopped with For each, If, Kick, Wait and Shut down: %v", err)
 	}
-	if err := checkFlowSteps(triggerSchedule, 0, []Step{{Type: "lock"}}, kick); err == nil {
+	if err := checkFlowSteps(triggerSchedule, []Step{{Type: "lock"}}, kick); err == nil {
 		t.Error("a Kick with no player was accepted in When stopped")
 	}
 	if n := countAllSteps(pingKickFlow()); n != 3 {
@@ -526,140 +527,50 @@ func TestWarningSettingsChecked(t *testing.T) {
 	}
 }
 
-// pingCounterFlow is the ping-warning example: ++ on a high ping, kick at
-// the threshold, otherwise a warning; reset when the ping is fine.
-func pingCounterFlow() []Step {
-	inner := Step{Type: "if", Branches: []Branch{{Subject: "counter", Op: "ge", Value: "{threshold}",
-		Steps: []Step{{Type: "kick", Who: "player", Reason: "Ping {player_ping} over the limit"}}}},
-		Else: &[]Step{{Type: "message", To: "player", Text: "Warning {counter}/{threshold}"}}}
-	return []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "if",
-		Branches:    []Branch{{Subject: "player_ping", Op: "ge", Value: "500", Counter: "inc", Steps: []Step{inner}}},
-		Else:        &[]Step{},
-		ElseCounter: "reset"}}}}
-}
-
-// TestFlowCounter checks the per-player counter of a run: ++ on each high
-// ping, reset when it's fine, {counter} and {threshold} in messages
-// and Ifs, and a fresh run starting at 0.
-func TestFlowCounter(t *testing.T) {
-	testDB(t)
-	var sent []string
-	oldSend := sendCommand
-	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
-	t.Cleanup(func() { sendCommand = oldSend })
-	if err := checkFlowSteps(triggerSchedule, 0, pingCounterFlow(), nil); err == nil || !strings.Contains(err.Error(), "Counter threshold") {
-		t.Fatalf("{threshold} without a Counter threshold: err = %v", err)
+// TestFlowCountersGone checks that flows saved while flow counters existed
+// are reported instead of run: {counter} and {threshold} are no longer
+// placeholders or If subjects.
+func TestFlowCountersGone(t *testing.T) {
+	counter := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "if",
+		Branches: []Branch{{Subject: "counter", Op: "ge", Value: "3", Steps: []Step{}}}}}}}
+	if err := checkFlowSteps(triggerSchedule, counter, nil); err == nil {
+		t.Error("an If on {counter} was accepted")
 	}
-	if err := checkFlowSteps(triggerSchedule, 3, pingCounterFlow(), nil); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	run := &flowRun{name: "ping", ctx: ctx, cancel: cancel, counterThreshold: 3}
-	x := &job{run: run, ctx: ctx}
-	pass := func(lagPing, flakyPing int) []string {
-		sent = nil
-		setOnline(battleye.Player{ID: 4, GUID: test.GUID1, Name: "Laggy", Ping: lagPing}, battleye.Player{ID: 6, GUID: test.GUID2, Name: "Flaky", Ping: flakyPing})
-		if !x.execFlowSteps(pingCounterFlow()) {
-			t.Fatal("the run ended early")
-		}
-		return sent
-	}
-	steps := [][2]int{{600, 700}, {650, 40}, {700, 800}, {700, 900}}
-	want := [][]string{
-		{"say 4 Warning 1/3", "say 6 Warning 1/3"},
-		{"say 4 Warning 2/3"},                                   // Flaky's ping is fine: reset
-		{"kick 4 Ping 700 over the limit", "say 6 Warning 1/3"}, // Laggy's 3rd in a row
-		{"kick 4 Ping 700 over the limit", "say 6 Warning 2/3"}, // still over: the counter stays past the threshold
-	}
-	for i, p := range steps {
-		if got := pass(p[0], p[1]); fmt.Sprint(got) != fmt.Sprint(want[i]) {
-			t.Fatalf("pass %d sent %q, want %q", i+1, got, want[i])
-		}
-	}
-	if !strings.Contains(strings.Join(run.log, "\n"), "Laggy (#4): counter ++, now 3/3") {
-		t.Fatalf("run log:\n%s", strings.Join(run.log, "\n"))
-	}
-
-	// A new run starts every counter at 0.
-	run2 := &flowRun{name: "ping", ctx: ctx, cancel: cancel, counterThreshold: 3}
-	x = &job{run: run2, ctx: ctx}
-	if got := pass(600, 40); fmt.Sprint(got) != fmt.Sprint([]string{"say 4 Warning 1/3"}) {
-		t.Fatalf("new run sent %q", got)
+	threshold := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "if",
+		Branches: []Branch{{Subject: "player_ping", Op: "ge", Value: "{threshold}", Steps: []Step{}}}}}}}
+	if err := checkFlowSteps(triggerSchedule, threshold, nil); err == nil {
+		t.Error("a number If compared with {threshold} was accepted")
 	}
 }
 
-func TestFlowCounterChecked(t *testing.T) {
-	// A counter needs a player: not outside a For each in a Schedule flow.
-	top := []Step{{Type: "if", Branches: []Branch{{Subject: "players_online", Op: "gt", Value: "0", Counter: "inc", Steps: []Step{}}}}}
-	if err := checkFlowSteps(triggerSchedule, 0, top, nil); err == nil || !strings.Contains(err.Error(), "needs a player") {
-		t.Fatalf("counter without a player: err = %v", err)
-	}
-	if err := checkFlowSteps(triggerJoin, 0, top, nil); err != nil {
-		t.Fatalf("counter in a join flow: %v", err)
-	}
-	bad := []Step{{Type: "if", Branches: []Branch{{Subject: "player_ping", Op: "gt", Value: "0", Counter: "double", Steps: []Step{}}}}}
-	if err := checkFlowSteps(triggerJoin, 0, bad, nil); err == nil {
-		t.Fatal("an unknown counter change was accepted")
-	}
-	word := []Step{{Type: "if", Branches: []Branch{{Subject: "player_ping", Op: "gt", Value: "{player_ping}", Steps: []Step{}}}}}
-	if err := checkFlowSteps(triggerJoin, 0, word, nil); err == nil {
-		t.Fatal("a number If compared with a placeholder other than {threshold}")
-	}
-	for _, n := range []int{-2, 1001} {
-		f := Flow{Name: "x", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}, CounterThreshold: n}
-		if err := checkFlowDefinition(f); err == nil {
-			t.Errorf("counter threshold %d accepted", n)
-		}
-	}
-	// No threshold (0) is fine, and so is a counter compared with a number.
-	noThreshold := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "if",
-		Branches: []Branch{{Subject: "counter", Op: "ge", Value: "3", Counter: "inc", Steps: []Step{}}}}}}}
-	if err := checkFlowDefinition(Flow{Name: "x", Trigger: triggerManual, Steps: noThreshold}); err != nil {
-		t.Errorf("no threshold: %v", err)
-	}
-	msg := []Step{{Type: "forEach", Of: "player", Steps: []Step{{Type: "message", To: "player", Text: "{counter}/{threshold}"}}}}
-	if err := checkFlowSteps(triggerManual, 0, msg, nil); err == nil {
-		t.Error("{threshold} in a message accepted without a Counter threshold")
-	}
-	if err := checkFlowSteps(triggerManual, 2, msg, nil); err != nil {
-		t.Errorf("{threshold} with a threshold: %v", err)
-	}
-}
-
-// TestFlowCounterThresholdStored checks the threshold is saved and read
-// back, is none (0) when not sent, and that a flows table from before
-// counters gets the column.
-func TestFlowCounterThresholdStored(t *testing.T) {
+// TestFlowsTableDropsCounterThreshold checks that a flows table from when
+// flows had counters loses its counter_threshold column, and its flows load.
+func TestFlowsTableDropsCounterThreshold(t *testing.T) {
 	db := testDB(t)
 	if _, err := db.Exec(`CREATE TABLE flows (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, script TEXT NOT NULL,
 		cancel TEXT NOT NULL DEFAULT '', timer TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL DEFAULT '',
-		schedule_enabled INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		schedule_enabled INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0,
+		counter_threshold INTEGER NOT NULL DEFAULT 0)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO flows (id, name, script, schedule) VALUES (0, 'old', '[{"type":"lock"}]', 'manual')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO flows (id, name, script, schedule, counter_threshold) VALUES (0, 'old', '[{"type":"lock"}]', 'manual', 4)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.EnsureFlowsTable(); err != nil {
 		t.Fatal(err)
 	}
-	if f, err := Get(0); err != nil || f.CounterThreshold != 0 {
-		t.Fatalf("old flow: threshold %d, err %v; want none", f.CounterThreshold, err)
-	}
-	id, err := Save(Flow{Name: "four", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}, CounterThreshold: 4}, true)
-	if err != nil {
+	var sqlText string
+	if err := db.QueryRow("SELECT sql FROM sqlite_master WHERE name = 'flows'").Scan(&sqlText); err != nil {
 		t.Fatal(err)
 	}
-	if f, _ := Get(id); f.CounterThreshold != 4 {
-		t.Fatalf("saved threshold %d, want 4", f.CounterThreshold)
+	if strings.Contains(sqlText, "counter_threshold") {
+		t.Errorf("counter_threshold is still there: %s", sqlText)
 	}
-	id, err = Save(Flow{Name: "unsent", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}}, true)
-	if err != nil {
+	if f, err := Get(0); err != nil || f.Name != "old" {
+		t.Fatalf("old flow: %+v, %v", f, err)
+	}
+	if _, err := Save(Flow{Name: "new", Trigger: triggerManual, Steps: []Step{{Type: "lock"}}}, true); err != nil {
 		t.Fatal(err)
-	}
-	if f, _ := Get(id); f.CounterThreshold != 0 {
-		t.Fatalf("threshold not sent: %d, want none", f.CounterThreshold)
 	}
 }
 
@@ -856,5 +767,136 @@ func TestFlowsTableLosesAutoincrement(t *testing.T) {
 	}
 	if err := db.EnsureFlowsTable(); err != nil { // a later start: nothing to do
 		t.Fatal(err)
+	}
+}
+
+// TestHelpListsWhatTheRoleMayUse checks that !help lists only the commands
+// the caller's role may use, with ! prefixes: Players don't see the Mod
+// commands, Mods don't see Admin-only ones (an Admin-only command is added
+// for the test), Admins see everything. !help !<command> for a command
+// they may not use says nothing.
+func TestHelpListsWhatTheRoleMayUse(t *testing.T) {
+	testDB(t)
+	oldDefs, oldSay := ChatCommandDefs, chatSay
+	ChatCommandDefs = append(append([]chatCommandDef{}, oldDefs...), chatCommandDef{Cmd: "adminonly", Role: RoleAdmin, Cool: "0", Help: "!adminonly is for admins."})
+	t.Cleanup(func() {
+		ChatCommandDefs, chatSay = oldDefs, oldSay
+		chatState.Lock()
+		chatState.loaded = false
+		chatState.Unlock()
+	})
+	var said []string
+	chatSay = func(to battleye.Player, everyone bool, text string) bool { said = append(said, text); return true }
+	chatState.Lock()
+	chatState.settings, chatState.loaded = DefaultChatSettings(), true
+	chatState.Unlock()
+	p := battleye.Player{ID: 3, GUID: test.GUID1, Name: "Someone"}
+	help := func(role int, text string) string {
+		said = nil
+		handleChatCommand(p, role, text)
+		return strings.Join(said, "|")
+	}
+
+	everyone := "!help, !shout, !whisper, !players, !vote, !code"
+	if got, want := help(RolePlayer, "!help"), "Commands: "+everyone+". Type !help !<command> for details."; got != want {
+		t.Errorf("Player:\n got %q\nwant %q", got, want)
+	}
+	if got, want := help(roleMod, "!help"), "Commands: "+everyone+", !kick, !ban, !warning. Type !help !<command> for details."; got != want {
+		t.Errorf("Mod:\n got %q\nwant %q", got, want)
+	}
+	if got, want := help(RoleAdmin, "!help"), "Commands: "+everyone+", !kick, !ban, !warning, !adminonly. Type !help !<command> for details."; got != want {
+		t.Errorf("Admin:\n got %q\nwant %q", got, want)
+	}
+	if got := help(RolePlayer, "!help !kick"); got != "" {
+		t.Errorf("Player asking about !kick got %q, want nothing", got)
+	}
+	if got := help(roleMod, "!help !adminonly"); got != "" {
+		t.Errorf("Mod asking about !adminonly got %q, want nothing", got)
+	}
+	if got := help(RoleAdmin, "!help !adminonly"); got != "!adminonly is for admins." {
+		t.Errorf("Admin asking about !adminonly got %q", got)
+	}
+}
+
+// TestSteamBanConditions checks the If subjects from the Steam ban record:
+// the two example flows (kick a VAC ban in the last year; kick more than one
+// VAC ban when the last is over a year old), an If skipped, Else included,
+// when there is no record, no "days since last ban" for a player with no
+// bans, and "?" for a placeholder without a record.
+func TestSteamBanConditions(t *testing.T) {
+	testDB(t)
+	var sent []string
+	oldSend, oldBans := sendCommand, steamBanRecord
+	sendCommand = func(_ *flowRun, cmd string) { sent = append(sent, cmd) }
+	t.Cleanup(func() { sendCommand, steamBanRecord = oldSend, oldBans })
+	player := battleye.Player{ID: 4, GUID: test.GUID1, Name: "Suspect"}
+	setOnline(player)
+	var record steam.Bans
+	known := true
+	steamBanRecord = func(_ context.Context, guid string) (steam.Bans, bool) {
+		if guid != test.GUID1 {
+			t.Errorf("ban record asked for %s", guid)
+		}
+		return record, known
+	}
+	nested := func(outer, inner Branch, reason string) []Step {
+		inner.Steps = []Step{{Type: "kick", Who: "player", Reason: reason}}
+		outer.Steps = []Step{{Type: "if", Branches: []Branch{inner}}}
+		return []Step{{Type: "if", Branches: []Branch{outer}}}
+	}
+	recent := nested(Branch{Subject: "player_vac_bans", Op: "ge", Value: "1"}, Branch{Subject: "player_days_since_last_ban", Op: "lt", Value: "365"}, "VAC ban in the last year")
+	repeat := nested(Branch{Subject: "player_vac_bans", Op: "gt", Value: "1"}, Branch{Subject: "player_days_since_last_ban", Op: "gt", Value: "365"}, "Too many VAC bans")
+	for _, steps := range [][]Step{recent, repeat} {
+		if err := checkFlowSteps(triggerJoin, steps, nil); err != nil {
+			t.Fatalf("an On join flow on the ban record was rejected: %v", err)
+		}
+	}
+	run := func(steps []Step) (cmds []string, log string) {
+		sent = nil
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r := &flowRun{name: "vac", ctx: ctx, cancel: cancel}
+		(&job{run: r, ctx: ctx, p: &flowPlayer{Player: player}}).execFlowSteps(steps)
+		return sent, strings.Join(r.log, "\n")
+	}
+	for _, c := range []struct {
+		name          string
+		bans          steam.Bans
+		known         bool
+		recent, again []string
+	}{
+		{"one VAC ban 30 days ago", steam.Bans{VAC: 1, DaysSinceLast: 30}, true, []string{"kick 4 VAC ban in the last year"}, nil},
+		{"two VAC bans, last 400 days ago", steam.Bans{VAC: 2, DaysSinceLast: 400}, true, nil, []string{"kick 4 Too many VAC bans"}},
+		{"one VAC ban 400 days ago", steam.Bans{VAC: 1, DaysSinceLast: 400}, true, nil, nil},
+		{"no bans (Steam says 0 days)", steam.Bans{}, true, nil, nil},
+		{"no ban record", steam.Bans{}, false, nil, nil},
+	} {
+		record, known = c.bans, c.known
+		if got, log := run(recent); fmt.Sprint(got) != fmt.Sprint(c.recent) {
+			t.Errorf("%s, recent-ban flow: sent %q, want %q\n%s", c.name, got, c.recent, log)
+		}
+		if got, log := run(repeat); fmt.Sprint(got) != fmt.Sprint(c.again) {
+			t.Errorf("%s, repeat-ban flow: sent %q, want %q\n%s", c.name, got, c.again, log)
+		}
+	}
+
+	// No record: the If is skipped, its Else too, and the run carries on after it.
+	known = false
+	withElse := []Step{
+		{Type: "if", Branches: []Branch{{Subject: "player_vac_bans", Op: "ge", Value: "1", Steps: []Step{{Type: "kick", Who: "player", Reason: "banned"}}}},
+			Else: &[]Step{{Type: "message", To: "player", Text: "clean"}}},
+		{Type: "message", To: "player", Text: "VAC bans: {player_vac_bans}"},
+	}
+	got, log := run(withElse)
+	if fmt.Sprint(got) != fmt.Sprint([]string{"say 4 VAC bans: ?"}) {
+		t.Errorf("no record: sent %q, want only the message after the If, with ?", got)
+	}
+	if !strings.Contains(log, "If {player_vac_bans} >= 1: skipped (no Steam ban record for Suspect)") {
+		t.Errorf("no record: the skip wasn't logged:\n%s", log)
+	}
+	// With a record, the placeholder is filled and the Else runs as usual.
+	record, known = steam.Bans{VAC: 0}, true
+	if got, _ := run(withElse); fmt.Sprint(got) != fmt.Sprint([]string{"say 4 clean", "say 4 VAC bans: 0"}) {
+		t.Errorf("clean player: sent %q", got)
 	}
 }

@@ -55,6 +55,8 @@ services:
       STEAM_SEARCH_MODE: "manual"
       STEAM_SEARCH_CORES: "2"
       STEAM_SEARCH_PRIORITY: "medium"
+      MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}     # optional, country flags (see below)
+      MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
     volumes:
       - ./data:/data
     ports:
@@ -66,6 +68,8 @@ Put the secrets in `.env`, next to `docker-compose.yaml`:
 ```env
 RCON_PASSWORD=your-rcon-password
 STEAM_API_KEY=your-steam-web-api-key
+MAXMIND_ACCOUNT_ID=123456
+MAXMIND_LICENSE_KEY=your-maxmind-license-key
 ```
 
 ### Build and start
@@ -83,6 +87,12 @@ Then open `http://<host>:8080` (it goes to the Players page).
 ### More than one DayZ server
 
 Run one ReCON container per game server. Copy the service and give each copy its own service and container name, `RCON_PORT`, password, data folder and host port. Each container keeps its own database.
+
+### With recon-mod
+
+[ReCON-Mod](https://github.com/MowMdown/ReCON-Mod) is a DayZ server-side mod that sends ReCON every player's live state (position, health, stats) every second and runs actions on them and on the weather and time. ReCON shows it on the [Live Map](#live-map-live) page. Install the mod on the game server (see its README). The ReCON image carries the recon-mod it needs and puts it in its data folder as `@ReCON` on start (on Unraid, for example `/mnt/user/appdata/recon/<server>/@ReCON`), replacing it whenever a ReCON update needs a newer one: copy that folder to the game server. ReCON needs nothing more, but for the map's terrain put its pictures in the data folder's `maps` folder (see [Map pictures](#map-pictures)).
+
+The published images `:mod` and `:testing-mod` (and `:v1.2.0-mod`) are the same as `:latest` and `:testing`: they were a separate build with the Live Map in, which every image has now.
 
 ### Updating
 
@@ -116,6 +126,12 @@ Everything is set with environment variables.
 | `STEAM_SEARCH_MODE`     | `manual`           | How SteamIDs the steam2guid table can't answer are searched for (the table, if you have one, is always read first, as soon as a player joins). `manual`: when you press **Search Steam ID**. `auto`: by itself, in one search for everyone waiting, starting 60s after the first join (+30s per join, at most 3 minutes or 15 players). Either way a search covers every player still missing a SteamID |
 | `STEAM_SEARCH_CORES`    | `1`                | CPU cores a SteamID lookup may use (capped at the cores available) |
 | `STEAM_SEARCH_PRIORITY` | `medium`           | How much of each core it uses: `low` 33%, `medium` 66%, `high` 99% |
+| `MAXMIND_ACCOUNT_ID`    | none               | With `MAXMIND_LICENSE_KEY`, turns on the country flags next to IPs (below). Both are on your free [MaxMind](https://www.maxmind.com/en/geolite2/signup) account's *Manage License Keys* page |
+| `MAXMIND_LICENSE_KEY`   | none               | MaxMind licence key, for downloading the GeoLite2-City database |
+| `GEOIP_DIR`             | the folder `DB_PATH` is in | Where `GeoLite2-City.mmdb` is kept |
+| `QUERY_PORT`            | `27016`            | The server's Steam query port (`steamQueryPort` in `serverDZ.cfg`), for the Server Info page. The query goes to the RCON host (`RCON_HOST`, or RCON Settings) |
+| `SERVER_TIME`           | `SystemTime`       | Your `serverTime` from `serverDZ.cfg`: `2000/8/31/06/00` (YYYY/MM/DD/HH/MM) or `SystemTime`. Its date and the map's latitude give sunrise and sunset on the Server Info page |
+| `SERVER_LATITUDE`       | the map's (45 when unknown) | The map's latitude in degrees north, for sunrise and sunset on a map ReCON doesn't know (it knows Chernarus) |
 
 `RCON_HOST`, `RCON_PORT` and `RCON_PASSWORD` are the defaults: **Settings** on the Players page can override any of them without editing `docker-compose.yaml` (see below).
 
@@ -134,6 +150,21 @@ On the Players and Server Bans pages you can drag table headers to reorder the c
 
 The picker at the top right sets the look: **Default** (the plain look, what a browser starts with), **Terminal** (green monospace) or **Tokyo Night**. Your browser remembers the choice. The icons ([Phosphor](https://phosphoricons.com), MIT) are built into ReCON, so they work without internet. The fonts (Inter, JetBrains Mono) come from Google Fonts; without internet the pages use the system's fonts instead.
 
+### Server Info: `/server`
+
+The page ReCON opens on. Every 5 seconds ReCON asks the game server what it tells Steam's server browser (the query port, `QUERY_PORT`), so it shows the same things a server list does, and adds what ReCON has recorded itself:
+
+- **The server:** name, map, 1PP or 3PP, version, BattlEye, and whether it is answering (a red dot and "Not answering" when it isn't, with the last answer still shown).
+- **Players** and the queue, **in-game time** with the day and night speeds (☀ ×2, and ☾ ×8: the night speed is the day speed times `serverNightTimeAcceleration`) and **uptime** over the last 7 days (of the time ReCON was running).
+- **Day & night:** a bar of the 24 in-game hours (marked every hour, labelled every 4) with sunrise, sunset and the current time; how long until sunset and sunrise in real time, and how long a day and a night last. Beside it, a **sky** dial: the sky's colour follows the sun's height (night blue, an orange glow at dawn and dusk, daylight blue); the sun and moon go round one path, opposite each other, crossing the horizon at sunrise and sunset, the path as high as the sun gets at noon on that date at that latitude (low in winter and far from the equator, high in summer); the sun fades out at night as the moon fades in, and stars fade in. South of the equator it is mirrored (east on the right). When the in-game time changes, the bar's marker and the sky glide to it over a second (a jump of over 2 game hours, such as a restart, snaps). DayZ multiplies the night speed by the day speed, so a 10-hour night at ×2 and ×4 lasts 1h 15m. Sunrise and sunset are worked out from the date in `SERVER_TIME` (as in `serverDZ.cfg`) and the map's latitude, with the standard sunrise equation; the in-game date moves on as days pass, but sunrise only shifts a few minutes a week. For a map other than Chernarus, set `SERVER_LATITUDE` (it defaults to 45°N). Near the poles it shows midnight sun or polar night.
+- **Population:** players online over the last 12 hours, day, 7 days, 30 days or all time (12h, 1d, 7d, 30d, All), as a smooth line through the most players online in each short slice of time, with the peak, average, different players and sessions over 7 days. It comes from the session history, so it is exact, and it has history from the first day ReCON recorded. Sessions of a minute or less (a failed join, a quick reconnect) don't count, here or in Peak hours.
+- **Peak hours:** the average number of players for each weekday and hour over the last 4 weeks, in your browser's time zone.
+- **Mods:** the server's Workshop mods, each linking to its Workshop page, and the total download size. ReCON asks Steam every 3 hours when each was last updated; a mod Steam has updated since glows red. Click it to acknowledge the update and it goes back to normal. A mod seen for the first time counts as up to date.
+
+The page is live: ReCON asks the server every 5 seconds and the page updates as often; the graphs every minute.
+
+**Settings** (under the title) sets the same things as the container's `QUERY_PORT`, `SERVER_TIME` and `SERVER_LATITUDE`. Empty fields use the container's values, shown greyed out. The query always goes to the RCON host. **Save** checks the values (nothing changes if one is wrong), keeps them in the database so they survive restarts, and asks the server at once: the top of the dialog says whether it answers on that port.
+
 ### Players: `/players`
 
 The top table lists the players online now (refreshed every 5 seconds). ReCON follows who connects and disconnects from the server's own messages, and also asks the server for the player list every 5 seconds, for up-to-date pings and anyone whose disconnect it missed. Mods and Admins have a badge after their name. **Last Message** shows the newest thing each player has written in chat since they connected (hover for the channel, time and full text). It's empty until they chat; messages sent to them aren't shown there, only in their chat history.
@@ -142,10 +173,9 @@ The top table lists the players online now (refreshed every 5 seconds). ReCON fo
 | ------- | ------------ |
 | Message | Opens that player's conversation: their chat, the private messages ReCON sent them, and a box to send another |
 | Kick    | Kicks them with the reason you type |
-| Ban     | Bans their GUID for the minutes you enter (**0 = permanent**), then kicks them |
-| Details | Opens everything ReCON has recorded about them (below) |
+| Details | Opens everything ReCON has recorded about them (below), including **Ban** |
 
-**Offline Players** lists everyone who has played before: last IP, total time on the server, when they were last seen, and their ban status and reason. If the game server stops answering, this list still shows from the database.
+**Offline Players** lists everyone who has played before and isn't banned (banned players are on the Server Bans page): last IP, total time on the server, when they were last seen, and **Last Message**, the newest thing they wrote in chat, from their chat history (hover for the channel, time and full text). If the game server stops answering, this list still shows from the database.
 
 **Settings** (under the title, on the left) changes where ReCON connects: Server IP, Port and RCON password. The line under the title shows the server in use: *Connected to IP:PORT* in green, or *Can't reach IP:PORT* in red. A field left empty uses the default from `docker-compose.yaml`, shown greyed out; clear the fields and Connect to go back to those defaults. **Connect** tries one login with those settings on a new connection each time it's pressed, even if nothing changed. Only if the server accepts the login does ReCON switch to it and keep the settings, so a typo can't cut ReCON off; otherwise nothing changes and the dialog says why. The settings are kept in memory only: restarting ReCON goes back to the `docker-compose.yaml` values, which the command-line tool always uses.
 
@@ -153,19 +183,21 @@ The top table lists the players online now (refreshed every 5 seconds). ReCON fo
 
 ![RCON console](docs/screenshots/players-console.png)
 
+Every IP on the page (the online and offline lists, and in Details the last IP, sessions and IPs) has its country's flag to its left; hover it for the country's name. The flags need MaxMind's free GeoLite2-City database (about 60 MB): with `MAXMIND_ACCOUNT_ID` and `MAXMIND_LICENSE_KEY` set, ReCON downloads it to `GEOIP_DIR` when it starts if it isn't there, and again when it is a week old (MaxMind updates it twice a week). Without them nothing is downloaded and there are no flags, unless you put `GeoLite2-City.mmdb` in that folder yourself. A `GeoLite2-Country.mmdb` left there by an older ReCON still gives the flags (but no maps) until the City one is downloaded. Private and LAN addresses have no country, so no flag.
+
 #### Details
 
-Details works for online and offline players. It has these tabs:
+Details works for online and offline players. **Prev** and **Next** in its top right corner go through the players in the page's order, online players by number, then offline ones by name, and wrap around at either end. It has these tabs:
 
 | Tab           | Shows |
 | ------------- | ----- |
 | Overview      | First and last seen, total time, sessions, average session, last IP, ban status, and a warning when the player shares an IP with anyone else |
 | Sessions      | Each visit: connected, disconnected (noted when they were kicked or banned), duration and IP. A player back from the same IP within 5 minutes of ReCON logging in again after a server restart keeps the same session, including players the restart itself disconnected (a `#shutdown` or Kick everyone in the 2 minutes before), unless they were banned; the time they were away doesn't count. Back from another IP, they get a new session |
-| IPs           | Every IP they used, and anyone else seen on the same IP. Names are links to that player's details |
+| IPs           | Every IP they used, and anyone else seen on the same IP. Names are links to that player's details. Click an IP with a location to open a map under it: where GeoLite2-City puts the IP (where it is registered, not the player's address), with a circle for how accurate that is, the city and region, and a link to OpenStreetMap. The map's tiles come from OpenStreetMap, so your browser needs internet for them; the place shows without |
 | Steam Profile | Their Steam account (see [Steam profiles](#6-steam-profiles)) |
 | Chat          | Their chat history. While they're online you can message them from here |
 | Notes         | A private admin note of up to 500 characters. It saves when you close the dialog or switch players |
-| Role          | Their role for the chat commands: Player, Mod or Admin. Clicking a role saves it |
+| Role          | Their role for the chat commands: Player, Vehicles, Mod or Admin. Clicking a role saves it |
 | Danger        | **Delete Player** (below) |
 
 The **Ban** / **Unban** button at the bottom works whether the player is online or not.
@@ -192,6 +224,74 @@ The list follows the server's ban list: ReCON reads it when it logs in to RCON (
 
 See [Flows](#4-flows) below. **Commands** (right of the buttons above the list) opens a dialog with **Lock server** (`#lock`), **Unlock server** (`#unlock`), **Kick everyone** (`kickall`) and **Shut down server** (`#shutdown`). Picking one sends it straight away, and the result shows just above the button. Kick everyone and Shut down ask you to confirm first.
 
+### Developer: `/developer`
+
+A page for troubleshooting. No menu item links to it: type `/developer` after the address. Anyone who can open the web GUI can open it. The list on the left is every player, with a search (name, GUID, any IP they used, SteamID) and All / Online / Offline / Banned filters. Pick one to see everything ReCON holds about them, raw and untrimmed, in sections you can fold:
+
+- **flow**: what each [placeholder](#placeholders) would be for them right now, and where it is read from.
+- **memory**: the player tracker's entry (online, or held over a server restart), the online list as the pages see it, each flow's current or last run, a timed ban, and the ban list's state.
+- **db**: every row of every table in `players.db` for their GUID: `players`, `active_sessions`, `session_history`, `player_ips`, `chat_messages`, `player_notes`, `bans`.
+- **ext**: the Steam cache (profile, ban record, SteamID search) and GeoIP's country for each of their IPs.
+
+**Copy all as JSON** copies the lot. The page only reads and never asks Steam for anything. It doesn't refresh by itself, so nothing moves while you read: **Refresh** reads the list and the player again. Linking to `/developer#<guid>` opens that player.
+
+
+### Live Map: `/live`
+
+It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the game server, it says "recon-mod isn't connected".
+
+- **Left:** every online player, with their map grid square, what's in their
+  hands or the vehicle they're in, a health bar, and chips for bleeding,
+  illness, knocked out and restrained. A search box filters the list.
+- **Right:** the map, with each player as an arrow showing their heading,
+  updated every second. Drag to pan, scroll to zoom; **Fit** shows the
+  whole map, **Fill** zooms until its width fills the view, edge to edge; **Full screen** makes the map fill the browser's window (Esc puts it back). **Overlays** (top left) opens the layers to show, each remembered in this browser, drawn with players on top, then vehicles and predators, town names, events and deaths, and the grid. **Players** (on unless switched off) shows the players' arrows and names. **Grid** (on unless switched off) shows the 1 km lines, in the theme's border colour lit with its accent, and their numbers. **Vehicles** shows every car, motorbike and boat on the server, pointing the way it faces: blue with someone in it, green with its engine running. It needs recon-mod 0.0.1i or later. Clicking one shows where it is, its condition, fuel, who is in it and whether its engine runs; **Info…** opens its parts, damage zones (engine, fuel tank, body...) and cargo side by side, each with its condition (read from the mod when it opens; **Refresh** reads them again). **Delete** (in Info, or the right-click menu) removes it and everything in it, after you confirm; not while anyone is in it. **Towns** shows the map's place names (from the map's own config, sent by recon-mod 0.0.1i on), bigger for bigger places: zoomed out only the cities, closer the villages, then the smaller places. **Events** shows helicopter crashes and toxic zones (static, from an airstrike or a grenade; a circle as wide as the zone), updated every 10 s. **Predators** shows the bears, wolves and guard dogs alive on the server, each named (Bear, Wolf, Dog) beside a dot pointing the way it faces, updated every 2 s (recon-mod 0.0.1l on); hover the button for how many of each. **Right-click** a player for their tabs (Open, Inventory, Spawn an item), **Follow Player** (the map keeps them in the middle until you drag it or click the Following chip), **Teleport to…** (your next click on the map teleports them there; Esc cancels), Heal, Dry, Message and Kill; a vehicle for Info, Follow, teleporting a player beside it, and Delete. **Right-click** the map for that spot's position, to teleport any online player there, to spawn an item there (a search over every item the server has, vehicles whole; recon-mod 0.0.1j on; animals from 0.0.1k, with an A-Z bar to jump to a letter); the position at the top can be selected to copy it. **Deaths** puts a red X where each player died in the time picked beside it (the last hour to 30 days): hover one for who, how and when. It is a 1 km grid with the map's coordinates, over the
+  map's picture if there is one ([Map pictures](#map-pictures)). Above
+  the map, beside **Time & Weather**: the weather and the in-game time.
+- **Clicking a player** opens a popup on the map with their health, blood, water and food, whether they're bleeding or in a vehicle, and what they wear and hold (read from the mod while it's open; more than 5 scroll). **Info** opens their dialog, **Teleport** moves them to the next place you click on the map, and **Spawn** opens their Spawn item tab. In the dialog, drag Health, Blood, Water, Food or
+  Comfort left or right to set it (shock, stamina and temperature are read
+  only). They show health, blood, water and food in
+  DayZ's HUD colours (white, yellow, red, blinking red at the same
+  thresholds as the game), shock, stamina, temperature (the game's hot and
+  cold colours) and comfort (the heat buff, with its +/++/+++ stage and the
+  most their clothes allow), conditions with **Heal** and **Dry** (them and everything they carry) beside them, a
+  mini-map of the 1 km around them, what's in hand, vehicle, kills and
+  deaths, and the actions: Teleport (to X and Y or a mini-map click,
+  this player to another, or another to this player; the button stays
+  grey until there's somewhere to go; **Previous** sends them back) and a message box. Each action's result shows below
+  them. The other tabs: **Inventory** (every equipment slot is always
+  listed, *Empty* when there's nothing in it; an item's condition can be set: pristine, worn, damaged, badly damaged or ruined), **Spawn item** (every item the server
+  has loaded, on the ground in front of them, into their inventory (what
+  doesn't fit goes on the ground) or into their empty hands; and its
+  vehicles, modded ones too, which come whole with their parts and full
+  fluids, one at a time, 8 m in front of them; the list fits the dialog's
+  height) and **Kills & deaths**, the latest 100 they were in
+  (when, who with what and how far, and where), with their all-time
+  totals, and **Kill**. Each death says what killed them (a player, an infected, an
+  animal, the environment: a fall, fire, drowning, cold, a vehicle, an
+  explosion or a trap; an ailment: bleeding out, thirst, hunger or
+  illness; a suicide or ReCON's Kill), with buttons to show only one kind.
+  That needs recon-mod 0.0.1h or later; older deaths say only who killed
+  them.
+- **World…** sets the in-game date and time, freezes the clock, and sets the
+  weather: overcast, rain, fog, snow, wind speed and direction, and
+  lightning, with presets (Clear, Cloudy, Rain, Thunderstorm, Fog, Snow),
+  over how many seconds the change happens and how long it holds; whether
+  the weather follows the map's rules, only what was set, or is frozen; and
+  the overcast range rain falls in.
+
+While the mod is connected, ReCON's Server Info page takes the in-game date
+from it (for sunrise and sunset) rather than from `SERVER_TIME`.
+
+#### Map pictures
+
+The page draws a 1 km grid with the map's coordinates; to draw the terrain under it, put the map's picture in the data folder's `maps` folder (with Docker, the `maps` folder next to the database): `maps/<world>.jpg` (or `.png`, `.webp`; square, north up) and its tiles, `maps/<world>/`. `<world>` is the world name the mod reports (`chernarusplus`, `enoch`, `sakhal`, `namalsk`, ...). The pictures come from the game's or the map mod's files, so they can't be shared: [satmap](https://github.com/MowMdown/satmap) makes them from your own copy of the game. Use one only if you have the right to: many DayZ map images online belong to their makers.
+
+The tiles are levels: `maps/<world>/0/` is the whole map in one tile, each level after it has twice the columns and rows (`<column>_<row>.jpg`, column 0 at the west edge, row 0 at the north) and the last has the picture's own pixels; `maps/<world>/tiles.json` (`px`, `tile`, `levels`, `ext`) describes them. Whatever the zoom, the page loads only the few tiles in view, from the least detailed level sharp enough, and draws a coarser one under any still loading. When there are tiles it never loads `maps/<world>.jpg`: a big whole picture (15360 px is about 1 GB once a browser decodes it) can crash the page, on a phone especially.
+
+**Calibrating.** If players aren't drawn where they are on the picture, calibrate it: stand somewhere you can pick out on the picture (a crossroads, a pier), open yourself on the Live Map, click **Calibrate** on the mini-map and click where you really are. One point moves the picture; do it again at a second spot 1 km or more away (the farther the better, such as across the map) and it is resized too. Calibrating near a point replaces it, and **Reset** (shown while calibrating) forgets them. The points are saved in `maps/<world>/calibration.json`, so the `maps` folder must be writable by ReCON (user 1001 in the container; don't mount it `:ro`). Re-slicing the map with satmap keeps the file, and it still fits: the points are where on the picture, not which tile. With several servers sharing one `maps` folder, each calibrates its own map. A picture within 2% of the map's size is taken as 1 px a metre from the map's north-west corner until it is calibrated (Deer Isle's picture is 16512 px for its 16384 m), any other is stretched over the whole map.
+
+The HUD colours and thresholds for health, blood, water, food and temperature are DayZ's, from its scripts (Bohemia Interactive, [DayZ Public License](https://www.bohemia.net/en/licenses/dayz-public-license-dpl)).
 ---
 
 ## 4. Flows
@@ -262,7 +362,8 @@ Move a step with its arrows, or drag it by the dotted handle on its left. Moving
 | `{players_online}` | How many players are online | Every flow |
 | `{player_name}` `{player_id}` | The player's name and number | On join, Player message |
 | `{player_ping}` `{player_ip}` `{player_guid}` | Their ping, IP address and GUID | On join, Player message |
-| `{player_role}` | Player, Mod or Admin | On join, Player message |
+| `{player_role}` | Player, Vehicles, Mod or Admin | On join, Player message |
+| `{player_vac_bans}` `{player_game_bans}` `{player_days_since_last_ban}` | Their VAC bans, game bans, and days since their last ban on Steam (below). `?` when ReCON has no Steam ban record for them | On join, Player message |
 | `{message}` | Everything they typed | Player message |
 
 ### If, Else if, Else
@@ -275,7 +376,15 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 | `{player_name}` `{player_ip}` | **is** / **is not** ignoring case, **matches** with `*` wildcards (`*admin*`, `192.168.*`), or **contains** |
 | `{player_id}` `{player_guid}` | **is** / **is not** |
 | `{player_ping}` `{players_online}` | `=` `!=` `>` `>=` `<` `<=` |
-| `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Mod or Admin (Player < Mod < Admin) |
+| `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Vehicles, Mod or Admin (Player < Vehicles < Mod < Admin) |
+| `{player_vac_bans}` `{player_game_bans}` `{player_days_since_last_ban}` | `=` `!=` `>` `>=` `<` `<=` |
+
+**Steam bans.** `{player_vac_bans}`, `{player_game_bans}` and `{player_days_since_last_ban}` come from the player's ban record on Steam, so they need `STEAM_API_KEY` and the player's SteamID (see [Steam profiles](#6-steam-profiles)). ReCON asks Steam once per player and keeps the answer 30 minutes. When there is no record to compare (no key, no SteamID found yet, Steam not answering), an If on one of them is **skipped**, its Else ifs and Else too, and the run log says so. A player with no bans has no "days since last ban", so an If on it is skipped for them as well. Steam's days count from the last VAC **or** game ban. For example, on an **On join** flow:
+
+- **If** `{player_vac_bans} >= 1`, **If** `{player_days_since_last_ban} < 365`: Kick *VAC ban in the last year*.
+- **If** `{player_vac_bans} > 1`, **If** `{player_days_since_last_ban} > 365`: Kick *Too many VAC bans*.
+
+A player whose SteamID isn't known when they join (no steam2guid table, or not in it) has no record until a search finds it, so these Ifs are skipped for them on that join.
 
 ![If / Else in the editor](docs/screenshots/flows-edit-if.png)
 
@@ -365,7 +474,7 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 
 | Command | Who | Does |
 | ------- | --- | ---- |
-| `!help` | Everyone | Lists the commands; `!help !vote` explains one |
+| `!help` | Everyone | Lists the commands the player's role may use (Players don't see the Mod commands); `!help !vote` explains one |
 | `!shout <message>` | Everyone | Sends the message to everyone |
 | `!whisper <number> <message>` | Everyone | Private message to that player |
 | `!players` | Everyone | Lists everyone online with their number |
@@ -374,15 +483,23 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 | `!kick <code or number> <reason>` | Mods, Admins | Kicks that player |
 | `!ban <code or number> <reason>` | Mods, Admins | Bans that player permanently; by code, even if they've left |
 | `!warning <code or number> <reason>` | Mods, Admins | Warns that player (see below) |
+| `!car`, `!truck`, `!boat`, `!vehicle <name> [colour]` | Vehicles, Mods, Admins | Spawns that vehicle whole in front of them (needs recon-mod; see below). Alone, lists the names |
 
 - **Code or number:** a player's code is the last 6 characters of their GUID (they can type `!code`); their number is the one `!players` shows (`12` or `#12`).
-- **Roles** are set on the Players page, under **Details → Role**, and are stored with the player's GUID, so they survive a name change. New players are Players.
-- Mods can kick, ban and warn Players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
+- **Roles** are set on the Players page, under **Details → Role**, and are stored with the player's GUID, so they survive a name change. Each includes everything below it: **Player** < **Vehicles** (adds `!car`, `!truck`, `!boat`, `!vehicle`) < **Mod** (adds `!kick`, `!ban`, `!warning`) < **Admin**. New players are Players.
+- Mods can kick, ban and warn Players and Vehicles players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
 - Every mod and admin online is told about each kick, ban and warning. With **Announce** on, everyone is told.
 - **Warnings:** each `!warning` is sent to the player with its reason and adds one to their warnings. Warnings are counted per visit: they start again at 0 when the player leaves. The warning that reaches the threshold (**Warnings until**, 2 by default, 1 or more) is followed 5 seconds later by a kick or a permanent ban with that warning's reason, whichever the **Kick / Ban** setting next to it says at that moment, and the count starts again.
-- Only a command that works gets a reply. A typo, a cooldown or a missing permission is silently ignored, though the line still appears in the player's chat history.
+- Only a command that works gets a reply. A typo, a cooldown or a missing permission is silently ignored, though the line still appears in the player's chat history. The vehicle commands are the exception: they say why they couldn't spawn one.
+- **Vehicles** (`!car olga black`) come from the map's `maps/<map>/vehicles.json` in ReCON's data folder: category (`car`, `truck`, `boat`, `vehicle`), then a short name, then colours, each naming a class:
 
-**Chat commands** on the Flows page turns each command on or off, sets its cooldown and edits the wording of everything ReCON sends. Cooldowns are server-wide: once anyone uses a command, it's ignored for everyone until the time is up.
+  ```json
+  {"car": {"olga": {"default": "CivilianSedan", "black": "CivilianSedan_Black"}}}
+  ```
+
+  No colour picks `default`, or a random colour if there's none. Case never matters. The first time recon-mod connects on a map with no file, ReCON writes one from the server's vehicles: colours grouped by display name, the name's first word as the short name, `boat` and `truck` by class name, DayZ's own five cars under `car`, and everything else under `vehicle`. ReCON never changes the file after that; edit it to rename, move or add vehicles, and the next command uses it. The **Chat commands** dialog lists vehicles on the server that the file doesn't have yet. Without recon-mod, no file is made, `!help` doesn't list these commands, and typing one answers that recon-mod isn't running.
+
+**Chat commands** on the Flows page (a tab for everyone's commands and one for Mods & Admins) turns each command on or off, sets its cooldown and edits the wording of everything ReCON sends. Cooldowns are server-wide: once anyone uses a command, it's ignored for everyone until the time is up.
 
 | Chat command settings | Role |
 | :---: | :---: |
@@ -400,7 +517,7 @@ BattlEye only reports a GUID, which is a one-way hash of the player's SteamID. R
 Without `STEAM_API_KEY`, the tab shows only the SteamID and a link to the profile. With a key it also shows:
 
 - VAC and game bans (from any game), community and trade bans
-- account age, Steam level, country, and when they were last online
+- account age, Steam level, country (its flag and name), and when they were last online
 - DayZ hours (total and the last two weeks), and a warning when DayZ isn't in their library, which can mean they're playing on a Family Sharing copy
 - games owned, friend count, and which of their Steam friends have played on your server
 
@@ -477,7 +594,7 @@ curl -X POST http://<host>:8080/rcon -d '#lock'                  # POST, plain t
 
 | Method | Path | Body | Description |
 | ------ | ---- | ---- | ----------- |
-| GET  | `/api/players` | | Online players, offline players and ban statuses |
+| GET  | `/api/players` | | Online players, offline players (banned players left out) and ban statuses |
 | GET  | `/api/players/all` | | Every player ever seen, from the database (works while RCON is down) |
 | POST | `/api/players/<id>/message` | `{"message": "..."}` | Private message, by player number |
 | POST | `/api/players/<id>/kick` | `{"reason": "..."}` | Kick, by player number |
@@ -538,6 +655,54 @@ curl -X POST http://<host>:8080/api/flows/3/run \
   -H "Content-Type: application/json" -d '{"minutes":10}'
 ```
 
+### Developer
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| GET | `/api/developer/players` | | Every player: GUID, name, SteamID, IPs, `onlineId` (null when offline), `banned` |
+| GET | `/api/developer/players/<guid>` | | Everything held about one player: `variables` (the flow placeholders) and `sources` (`kind`, `title`, `note`, `data`) |
+
+### Server Info
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| GET  | `/api/server` | | The server's latest answer (name, map, players, keywords, mods), sunrise and sunset, uptime, 7-day stats, mods with Steam's updates |
+| POST | `/api/server/refresh` | | Ask the server now, then the same as `GET /api/server` |
+| GET  | `/api/server/population` | `?range=12h`, `1d`, `7d`, `30d` or `all` | Players online over time, as steps |
+| GET  | `/api/server/busiest` | `?tz=America/New_York` | Average players per weekday and hour over the last 4 weeks |
+| GET  | `/api/server/settings` | | The Settings saved on the page, and the container's values the empty ones use |
+| POST | `/api/server/settings` | `{"queryPort", "serverTime", "latitude"}` | Save them (empty: the container's value) and ask the server |
+| POST | `/api/server/mods/<workshop id>/ack` | | Acknowledge a mod's update on Steam |
+
+### Live Map
+
+ReCON stores every death the mod reports (its own `mod_kills` table) and the SteamIDs it reports.
+
+| Method | Path | Body | Description |
+| ------ | ---- | ---- | ----------- |
+| POST | `/api/mod/sync` | the mod's sync | Used by the mod only: player data in, commands out (403 with the wrong password) |
+| GET  | `/api/mod/players` | | `mod` (`connected`, `lastSync`, `world`, in-game `date`), every online player's live state with their `guid`, and the recent commands |
+| GET  | `/api/mod/players/<guid>` | | One player: `live` and `player` (when online), `kills`, `deaths`, `recentKills` (the latest 100, each with its `cause` and `illnesses`), and the commands sent to them |
+| POST | `/api/mod/players/<guid>/<action>` | see below | Queue an action. The mod runs it on its next sync; its `status` (`queued`, `sent`, `done`, `failed`, `expired`) shows in the commands |
+| POST | `/api/mod/world/<action>` | see below | Queue a weather or time change, the same way |
+
+Actions: `heal` (full health, blood, shock, food and water; stops bleeding, cures illnesses, mends broken legs), `kill`, `teleport` `{"x", "z", "y"}` (`y` 0 = ground level), `teleportTo` `{"target": "<guid>"}`, `set` `{"stat": "health|blood|water|energy|heatBuffer", "value"}` (shock, stamina and temperature are read only), `message` `{"text", "title", "seconds"}`, `dry`, `condition` `{"text": "<item id>", "value": 0-4}` (0 pristine to 4 ruined), `spawn` `{"text": "<class>", "value": 1-20, "stat": "ground|inventory|hands"}` (a vehicle: one, whole, on the ground; hands: one). A command the mod hasn't answered within 30 seconds expires.
+
+World actions, modelled on Community Online Tools' weather module (`mod.weather` in `/api/mod/players` shows the weather now and where it is heading):
+
+- `weather` `{"stat", "value", "transition", "hold"}`: `stat` is `overcast`, `rain`, `fog`, `snow` (0 to 1), `windSpeed` (m/s) or `windDir` (degrees). It changes to `value` over `transition` seconds and stays at least `hold` seconds.
+- `weatherMode` `{"text"}`: `world` (the map's weather rules), `forecast` (only what was set) or `static` (frozen as it is).
+- `storm` `{"value", "min", "hold"}`: lightning density (0 to 1), the overcast it starts at, and the seconds between strikes.
+- `rainThresholds` `{"min", "max", "transition"}`: the overcast range rain falls in, and the seconds it takes to stop.
+- `date` `{"year", "month", "day", "hour", "minute"}`: the in-game date and time.
+- `freezeTime` `{"value"}`: 1 stops the in-game clock, 0 starts it again.
+
+Vehicles (recon-mod 0.0.1i on): `GET /api/mod/vehicles` is every vehicle on the server as the mod last sent them (every 5 s): `id`, `type`, `name`, `x`, `z`, `heading`, `health` and `fuel` (0 to 1; fuel -1 when it isn't a car), `crew`, `engine`, with `sent` false when the mod sends none. `GET /api/mod/vehicles/<id>?ask=1` asks the mod once for what is in it; without `ask` it reads what came in: `vehicle`, and `detail` (`zones`: each damage zone's `name` and `health`; `items`: its parts and cargo, as in a player's inventory) once it has. `POST /api/mod/world/deleteVehicle` `{"text": "<id>"}` deletes one (refused while anyone is in it). `POST /api/mod/world/spawnAt` `{"text": "<class>", "value": 1-20, "x", "z"}` spawns at a spot on the map (a vehicle: one, whole). `GET /api/mod/worldevents`: the map's dynamic events (`id`, `type`, `kind`: crash, gas or area, `x`, `z`, `radius`). `GET /api/mod/places`: the map's place names (`name`, `type`: Capital, City, Village, Local, Marine, Hill..., `x`, `z`). `GET /api/mod/deaths?hours=24`: every death in the last hours (1 to 720), as in `recentKills`.
+
+Calibration: `GET /api/mod/map/<world>/calibration` returns the map's `points` (`x`, `z`: where a player was; `u`, `v`: where they were on the picture, 0 to 1 from its west and north edges); `POST` the same with `{"points": [...]}` (at most 2, none to reset) sets them.
+
+The tiles: `GET /api/mod/map/<world>` (the whole picture), `GET /api/mod/map/<world>/tiles` (`tiles.json` and a `version`) and `GET /api/mod/map/<world>/tile/<level>/<column>_<row>.jpg`.
+
 ### Status
 
 `GET /health` returns `{"ok": true}`. `GET /api/status` returns the RCON state the pages show: `{"ok": true, "rcon": "connected"}` (or `retrying` / `unavailable`, with `"waiting": true` while ReCON waits for the server to answer its login, otherwise `retryInMs` until the next try).
@@ -550,7 +715,7 @@ Any tool with a "POST to a URI" action can call these routes. For example: URI `
 
 ## 9. Development
 
-ReCON is a single Go program with no dependencies besides the SQLite driver. It follows the standard Go layout: the program in `cmd/recon`, its packages under `internal/`.
+ReCON is a single Go program whose only dependencies are the SQLite driver and MaxMind's database reader (for the country flags). It follows the standard Go layout: the program in `cmd/recon`, its packages under `internal/`.
 
 ```bash
 go build -o recon ./cmd/recon   # build
@@ -559,13 +724,16 @@ go test ./...                   # test every package (tests are the *_test.go fi
 
 | Path | Contents |
 | ---- | -------- |
-| `cmd/recon/` | Startup (wiring the packages together) and the command-line tool |
+| `cmd/recon/` | Startup (wiring the packages together) and the command-line tool; `addons.go` starts the add-ons, and `livemap.go` the Live Map |
 | `internal/battleye/` | The BattlEye RCON protocol: packets, login, sessions, parsing server messages and replies, kickall |
 | `internal/game/` | The live game server and what ReCON mirrors from it: the web session, RCON settings, the console log and the server watch (`session.go`); who is online and their sessions, kept across a server restart for players back from the same IP within 5 minutes, and chat history (`players.go`); the ban list kept in step with BattlEye's, placing bans, export/import (`bans.go`) |
 | `internal/flows/` | Flows: loading, saving, validating and running them (`flows.go`), conditions, triggers and the chat commands (`commands.go`) |
 | `internal/steam/` | SteamID lookups (steam2guid tables and the search) and Steam profiles |
+| `internal/geoip/` | Where an IP is (country for the flags, city and point for the IP map), from MaxMind's GeoLite2-City database, and downloading it |
+| `internal/serverinfo/` | The Server Info page's data: Steam's server query (A2S) and DayZ's keywords and mod list, uptime, population and peak hours, and mod updates from the Steam Workshop |
 | `internal/store/` | The SQLite database: every SQL statement |
-| `internal/web/` | HTTP routes, the JSON API and page rendering; `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker) and the favicons and app icons (`assets/icons/`), both embedded into the binary at build time |
+| `internal/livemap/` | The Live Map and recon-mod's side: the API the mod syncs with, the command queue, its `mod_kills` table, the map pictures and tiles, and the page (`templates/live.html`) |
+| `internal/web/` | HTTP routes, the JSON API and page rendering (`addons.go`: the hooks an add-on adds its pages, routes and nav links with); `templates/` has the HTML pages and `assets/` the theme (stylesheets, icons, theme picker), the favicons and app icons (`assets/icons/`) and the country flags (`assets/flags/`), both embedded into the binary at build time |
 | `internal/test/` | Everything the tests share: a fake BattlEye server, a temporary database and test GUIDs. Only `_test.go` files use it, so it isn't built into the program |
 | `examples/flows.json` | Example flows to import |
 | `docs/rcon-login.md` | How the web session logs in again after a server shutdown or restart (flow chart, example, timings) |
@@ -585,3 +753,5 @@ This rewrites `docs/preview/players.html`, `bans.html`, `flows.html`, `data.js` 
 ## License
 
 [MIT](LICENSE)
+
+The country flags are from [flag-icons](https://github.com/lipis/flag-icons) by Panayiotis Lipiridis (MIT, `internal/web/assets/flags/LICENSE`). The icons are [Phosphor](https://phosphoricons.com) (MIT). The IP map is [Leaflet](https://leafletjs.com) (BSD 2-Clause, `internal/web/assets/leaflet/LICENSE`) with tiles and data from [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors. This product includes GeoLite2 data created by MaxMind, available from [https://www.maxmind.com](https://www.maxmind.com).

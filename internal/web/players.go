@@ -15,6 +15,7 @@ import (
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/geoip"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 )
@@ -56,13 +57,30 @@ func handlePlayersJSON(w http.ResponseWriter, r *http.Request) {
 			online[i].LastMessage, online[i].LastMessageChannel, online[i].LastMessageUnix = c.Chat.Text, c.Chat.Channel, c.Chat.At.Unix()
 		}
 	}
+	// Banned players are left out of the offline list: they are on the Bans
+	// page. The online list keeps everyone the server has on it.
+	bans := game.BanStatuses()
+	kept := offlinePlayers[:0]
+	for _, p := range offlinePlayers {
+		if !bans[strings.ToLower(p.GUID)].Banned {
+			kept = append(kept, p)
+		}
+	}
+	offlinePlayers = kept
+	// The flag next to each IP.
+	for i := range online {
+		online[i].Country = geoip.Country(online[i].IP)
+	}
+	for i := range offlinePlayers {
+		offlinePlayers[i].Country = geoip.Country(offlinePlayers[i].IP)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"connected":      connected,
 		"players":        online,
 		"count":          len(online),
 		"offlinePlayers": offlinePlayers,
-		"bans":           game.BanStatuses(),
+		"bans":           bans,
 	})
 }
 
@@ -225,6 +243,17 @@ func handlePlayerDetails(w http.ResponseWriter, r *http.Request) {
 		d.Player.Name = battleye.BareName(p.Name)
 	}
 	d.Ban = game.BanStatusOf(guid)
+	// The flag next to each IP.
+	d.Player.LastIPCountry = geoip.Country(d.Player.LastIP)
+	for i := range d.Sessions.Recent {
+		d.Sessions.Recent[i].Country = geoip.Country(d.Sessions.Recent[i].IP)
+	}
+	for i := range d.IPs {
+		d.IPs[i].Country = geoip.Country(d.IPs[i].IP)
+		if l, ok := geoip.Locate(d.IPs[i].IP); ok {
+			d.IPs[i].Location = l // the map in the IPs tab
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "details": d})
 }
 
@@ -264,7 +293,7 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "note": note})
 }
 
-// handleSetRole serves POST /api/players/{guid}/role {"role": 0|1|2}: the
+// handleSetRole serves POST /api/players/{guid}/role {"role": 0|1|2|3}: the
 // player's role for the chat commands (Player, Mod or Admin). The Details
 // dialog's Permissions tab saves it as soon as a role is clicked.
 func handleSetRole(w http.ResponseWriter, r *http.Request) {
@@ -276,11 +305,11 @@ func handleSetRole(w http.ResponseWriter, r *http.Request) {
 		Role *int `json:"role"`
 	}
 	if err := decodeBody(w, r, &req); err != nil || req.Role == nil {
-		fail(w, http.StatusBadRequest, `send {"role": 0, 1 or 2}`)
+		fail(w, http.StatusBadRequest, `send {"role": 0, 1, 2 or 3}`)
 		return
 	}
-	if *req.Role < flows.RolePlayer || *req.Role > flows.RoleAdmin {
-		fail(w, http.StatusBadRequest, "role must be 0 (Player), 1 (Mod) or 2 (Admin)")
+	if *req.Role < flows.RolePlayer || *req.Role > flows.RoleMax {
+		fail(w, http.StatusBadRequest, "role must be 0 (Player), 1 (Mod), 2 (Admin) or 3 (Vehicles)")
 		return
 	}
 	found, err := database.SetPlayerRole(guid, *req.Role)

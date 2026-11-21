@@ -18,6 +18,8 @@ import (
 	"github.com/MowMdown/ReCON/internal/battleye"
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
+	"github.com/MowMdown/ReCON/internal/geoip"
+	"github.com/MowMdown/ReCON/internal/serverinfo"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
 	"github.com/MowMdown/ReCON/internal/test"
@@ -61,7 +63,7 @@ func flowIDs(t *testing.T) []int64 {
 	return ids
 }
 
-func TestRootRedirectsToPlayers(t *testing.T) {
+func TestRootRedirectsToServerInfo(t *testing.T) {
 	mux := buildWebRoutes()
 	for path, want := range map[string]int{"/": http.StatusFound, "/plyers": http.StatusNotFound} {
 		rec := httptest.NewRecorder()
@@ -69,7 +71,7 @@ func TestRootRedirectsToPlayers(t *testing.T) {
 		if rec.Code != want {
 			t.Errorf("GET %s = %d, want %d", path, rec.Code, want)
 		}
-		if want == http.StatusFound && rec.Header().Get("Location") != "/players" {
+		if want == http.StatusFound && rec.Header().Get("Location") != "/server" {
 			t.Errorf("GET %s redirects to %q", path, rec.Header().Get("Location"))
 		}
 	}
@@ -428,5 +430,360 @@ func TestDeletePlayerRoute(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/players/"+test.GUID1+"/details", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("details after delete: %d, want 404", rec.Code)
+	}
+}
+
+// TestDeveloperRoutes checks the Developer page's API: the list shows who is
+// online and banned, and one player's data has every source, all their
+// rows (nothing trimmed), the tracker entry and the flow variables.
+func TestDeveloperRoutes(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(game.ResetTracker)
+	t0 := time.Now().Add(-time.Hour)
+	for i := 0; i < 3; i++ { // three past sessions
+		at := t0.Add(time.Duration(i) * 10 * time.Minute)
+		if err := db.OpenPlayerSession(test.GUID1, "Marrow", "1.2.3.4", 3, at); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ClosePlayerSession(test.GUID1, at.Add(time.Minute), "disconnected"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.RecordPlayerBan(test.GUID2, "Fenwick", "5.6.7.8", "cheating", false, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	game.Track(battleye.ParseServerMessage("Player #3 Marrow (1.2.3.4:2304) connected", time.Now()))
+	game.Track(battleye.ParseServerMessage("Player #3 Marrow - BE GUID: "+test.GUID1, time.Now()))
+	mux := buildWebRoutes()
+	get := func(path string, out any) int {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if out != nil {
+			if err := json.Unmarshal(rec.Body.Bytes(), out); err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+		}
+		return rec.Code
+	}
+
+	if code := get("/developer", nil); code != http.StatusOK {
+		t.Fatalf("/developer: %d", code)
+	}
+	var list struct {
+		Players []struct {
+			GUID     string `json:"guid"`
+			OnlineID *int   `json:"onlineId"`
+		} `json:"players"`
+	}
+	get("/api/developer/players", &list)
+	if len(list.Players) != 1 || list.Players[0].GUID != test.GUID1 || list.Players[0].OnlineID == nil || *list.Players[0].OnlineID != 3 {
+		t.Errorf("list: %+v, want Marrow online as #3", list.Players)
+	}
+
+	var one struct {
+		Name      string `json:"name"`
+		Variables []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+			Known bool   `json:"known"`
+		} `json:"variables"`
+		Sources []struct {
+			Title string          `json:"title"`
+			Data  json.RawMessage `json:"data"`
+		} `json:"sources"`
+	}
+	if code := get("/api/developer/players/"+strings.ToUpper(test.GUID1), &one); code != http.StatusOK {
+		t.Fatalf("player: %d", code)
+	}
+	src := map[string]json.RawMessage{}
+	for _, s := range one.Sources {
+		src[s.Title] = s.Data
+	}
+	var history []map[string]any
+	json.Unmarshal(src["session_history"], &history)
+	if one.Name != "Marrow" || len(history) != 3 {
+		t.Errorf("name %q, %d history rows, want Marrow and 3", one.Name, len(history))
+	}
+	if !strings.Contains(string(src["Player tracker (game tracker)"]), `"id":3`) {
+		t.Errorf("tracker: %s", src["Player tracker (game tracker)"])
+	}
+	vars := map[string]string{}
+	for _, v := range one.Variables {
+		if v.Known {
+			vars[v.Name] = v.Value
+		}
+	}
+	if vars["player_name"] != "Marrow" || vars["player_id"] != "3" || vars["player_role"] != "Player" {
+		t.Errorf("variables: %v", vars)
+	}
+
+	// The timed ban held in memory shows up for the banned player.
+	get("/api/developer/players/"+test.GUID2, &one)
+	for _, s := range one.Sources {
+		if s.Title == "Timed ban (store, memory only)" && !strings.Contains(string(s.Data), "cheating") {
+			t.Errorf("timed ban: %s", s.Data)
+		}
+	}
+	if code := get("/api/developer/players/nope", nil); code != http.StatusBadRequest {
+		t.Errorf("bad GUID: %d, want 400", code)
+	}
+}
+
+// TestOfflineListLastMessageNoBanned checks /api/players' offline list: a
+// banned player is left out, and each player has the newest line they wrote
+// in chat (not the messages sent to them).
+func TestOfflineListLastMessageNoBanned(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Now().Add(-time.Hour).Truncate(time.Second)
+	for _, p := range []struct{ guid, name string }{{test.GUID1, "Marrow"}, {test.GUID2, "Fenwick"}} {
+		if err := db.OpenPlayerSession(p.guid, p.name, "1.2.3.4", 3, t0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ClosePlayerSession(p.guid, t0.Add(time.Minute), "disconnected"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		at        time.Duration
+		dir, line string
+	}{
+		{1, store.ChatIn, "(Global) Marrow: first"},
+		{2, store.ChatIn, "(Side) Marrow: brb dinner"},
+		{3, store.ChatOut, "> say 3 welcome back"},
+	} {
+		if err := db.AddChatMessage(t0.Add(c.at*time.Second), test.GUID1, c.dir, c.line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.RecordPlayerBan(test.GUID2, "Fenwick", "1.2.3.4", "cheating", true, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/players", nil))
+	var d struct {
+		Offline []battleye.Player `json:"offlinePlayers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Offline) != 1 || d.Offline[0].GUID != test.GUID1 {
+		t.Fatalf("offline list: %+v, want only Marrow (Fenwick is banned)", d.Offline)
+	}
+	p := d.Offline[0]
+	if p.LastMessage != "brb dinner" || p.LastMessageChannel != "Side" || p.LastMessageUnix != t0.Add(2*time.Second).Unix() {
+		t.Errorf("last message %q (%s, %d), want \"brb dinner\" (Side, %d)", p.LastMessage, p.LastMessageChannel, p.LastMessageUnix, t0.Add(2*time.Second).Unix())
+	}
+}
+
+// TestServerInfoRoutes checks the Server Info API: the page and its data
+// answer with nothing recorded yet, a mod update is acknowledged, and a bad
+// range or unknown mod is refused.
+func TestServerInfoRoutes(t *testing.T) {
+	db := testDB(t)
+	serverinfo.SetDatabase(db)
+	t.Cleanup(func() { serverinfo.SetDatabase(nil) })
+	if err := db.SaveModFromSteam(store.ModUpdate{WorkshopID: "1559212036", Name: "CF", SteamUpdated: 100}); err != nil {
+		t.Fatal(err)
+	}
+	// Steam has a newer one.
+	if _, err := db.Exec("UPDATE mod_updates SET steam_updated = 200"); err != nil {
+		t.Fatal(err)
+	}
+	mux := buildWebRoutes()
+	do := func(method, path string) int {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+		return rec.Code
+	}
+	for path, want := range map[string]int{
+		"/server": 200, "/api/server": 200, "/api/server/population?range=7d": 200, "/api/server/population?range=30d": 200, "/api/server/population?range=12h": 200, "/api/server/population?range=1w": 400, "/api/server/population?range=all": 200,
+		"/api/server/population?range=3y": 400, "/api/server/busiest?tz=America/New_York": 200, "/api/server/busiest?tz=nope": 200,
+	} {
+		if code := do(http.MethodGet, path); code != want {
+			t.Errorf("GET %s = %d, want %d", path, code, want)
+		}
+	}
+	if code := do(http.MethodPost, "/api/server/mods/1559212036/ack"); code != 200 {
+		t.Errorf("ack = %d", code)
+	}
+	if rows, _ := db.ModUpdates(); rows["1559212036"].AckedUpdated != 200 {
+		t.Errorf("not acknowledged: %+v", rows)
+	}
+	if code := do(http.MethodPost, "/api/server/mods/42/ack"); code != 404 {
+		t.Errorf("unknown mod ack = %d, want 404", code)
+	}
+}
+
+// TestDetailsIPLocation checks that the Details dialog's IPs come with
+// where GeoLite2-City puts them, for the map, and none for an unknown IP.
+func TestDetailsIPLocation(t *testing.T) {
+	db := testDB(t)
+	path := filepath.Join(t.TempDir(), geoip.FileName)
+	if err := os.WriteFile(path, test.GeoIPCityDatabase(t, "81.2.69.0", "GB", "Leeds", "England", 53.8, -1.55, 20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := geoip.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Now().Add(-time.Hour)
+	for _, ip := range []string{"81.2.69.160", "10.0.0.2"} {
+		if err := db.OpenPlayerSession(test.GUID1, "Marrow", ip, 3, t0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ClosePlayerSession(test.GUID1, t0.Add(time.Minute), "disconnected"); err != nil {
+			t.Fatal(err)
+		}
+		t0 = t0.Add(2 * time.Minute)
+	}
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/players/"+test.GUID1+"/details", nil))
+	var d struct {
+		Details struct {
+			IPs []struct {
+				IP       string          `json:"ip"`
+				Location *geoip.Location `json:"location"`
+			} `json:"ips"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, i := range d.Details.IPs {
+		switch i.IP {
+		case "81.2.69.160":
+			if i.Location == nil || i.Location.City != "Leeds" || i.Location.RadiusKm != 20 {
+				t.Errorf("81.2.69.160: %+v", i.Location)
+			}
+			found++
+		case "10.0.0.2":
+			if i.Location != nil {
+				t.Errorf("10.0.0.2 has a location: %+v", i.Location)
+			}
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("IPs: %s", rec.Body.String())
+	}
+}
+
+// TestPopulationAll checks the population graph's All: it starts at the
+// oldest session and covers the ones in it.
+func TestPopulationAll(t *testing.T) {
+	db := testDB(t)
+	t0 := time.Now().Add(-40 * 24 * time.Hour).Truncate(time.Second)
+	if err := db.OpenPlayerSession(test.GUID1, "Marrow", "1.2.3.4", 3, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ClosePlayerSession(test.GUID1, t0.Add(time.Hour), "disconnected"); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/server/population?range=all", nil))
+	var d struct {
+		OK     bool               `json:"ok"`
+		From   int64              `json:"from"`
+		Points []serverinfo.Point `json:"points"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil || rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	peak := 0
+	for _, p := range d.Points {
+		peak = max(peak, p.Players)
+	}
+	if d.From != t0.Unix() || peak != 1 {
+		t.Errorf("from %d (want %d), peak %d (want 1)", d.From, t0.Unix(), peak)
+	}
+}
+
+// TestServerSettingsRoutes checks GET and POST /api/server/settings.
+func TestServerSettingsRoutes(t *testing.T) {
+	db := testDB(t)
+	serverinfo.SetDatabase(db)
+	t.Cleanup(func() { serverinfo.SaveSettings(serverinfo.Settings{}); serverinfo.SetDatabase(nil) })
+	mux := buildWebRoutes()
+	do := func(method, body string) (int, string) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(method, "/api/server/settings", strings.NewReader(body)))
+		return rec.Code, rec.Body.String()
+	}
+	if code, body := do(http.MethodGet, ""); code != 200 || !strings.Contains(body, `"defaults"`) {
+		t.Fatalf("GET: %d %s", code, body)
+	}
+	if code, _ := do(http.MethodPost, `{"queryPort": "abc"}`); code != 400 {
+		t.Errorf("bad port: %d, want 400", code)
+	}
+	if code, body := do(http.MethodPost, `{"queryPort": "27999", "latitude": "33"}`); code != 200 || !strings.Contains(body, `"queryPort":"27999"`) {
+		t.Errorf("save: %d %s", code, body)
+	}
+}
+
+// TestChatCommandsGetHasVehicleFields checks GET /api/chat-commands says
+// whether the mod is connected, lists the vehicles missing from the map's
+// vehicles.json, and marks the vehicle commands as needing the mod.
+func TestChatCommandsGetHasVehicleFields(t *testing.T) {
+	testDB(t)
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/chat-commands", nil))
+	var out struct {
+		ModConnected     *bool             `json:"modConnected"`
+		UnlistedVehicles []json.RawMessage `json:"unlistedVehicles"`
+		Commands         []struct {
+			Cmd      string `json:"cmd"`
+			NeedsMod bool   `json:"needsMod"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.ModConnected == nil || *out.ModConnected || out.UnlistedVehicles == nil || len(out.UnlistedVehicles) != 0 {
+		t.Errorf("got %s", rec.Body.String())
+	}
+	for _, c := range out.Commands {
+		if c.Cmd == "car" && !c.NeedsMod {
+			t.Error("!car doesn't need the mod")
+		}
+	}
+}
+
+// TestStatusHasVersions checks GET /api/status says ReCON's version (set at
+// build time) and the connected mod's (empty while it isn't connected), for
+// the version line at the bottom right of every page.
+func TestStatusHasVersions(t *testing.T) {
+	old := Version
+	Version = "v9.9.9-test"
+	t.Cleanup(func() { Version = old })
+	rec := httptest.NewRecorder()
+	buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	var out struct {
+		Version *string `json:"version"`
+		Mod     *string `json:"mod"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Version == nil || *out.Version != "v9.9.9-test" || out.Mod == nil || *out.Mod != "" {
+		t.Errorf("got %s", rec.Body.String())
+	}
+}
+
+// TestSetRoleVehicles checks the role route takes Vehicles (3) and refuses 4.
+func TestSetRoleVehicles(t *testing.T) {
+	db := testDB(t)
+	if err := db.OpenPlayerSession(test.GUID1, "Driver", "1.2.3.4", 3, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	post := func(role int) int {
+		rec := httptest.NewRecorder()
+		buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/players/"+test.GUID1+"/role", strings.NewReader(fmt.Sprintf(`{"role": %d}`, role))))
+		return rec.Code
+	}
+	if code := post(3); code != http.StatusOK || db.GetPlayerRole(test.GUID1) != 3 {
+		t.Errorf("Vehicles: %d, stored %d", code, db.GetPlayerRole(test.GUID1))
+	}
+	if code := post(4); code != http.StatusBadRequest {
+		t.Errorf("role 4: %d, want 400", code)
 	}
 }

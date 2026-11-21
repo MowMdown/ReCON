@@ -1,0 +1,622 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DayZ Server Info</title>
+{{template "icons" .}}
+{{template "style" .}}
+<style>
+/* Server Info: what the server tells Steam's server query, and ReCON's own history */
+.gi { display: grid; gap: 12px; }
+.gihead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gihead h2 { margin: 0; font-size: 20px; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.gihead .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #81c995; box-shadow: 0 0 8px #81c995; }
+.gihead .dot.down { background: #f28b82; box-shadow: 0 0 8px #f28b82; }
+.gihead .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.gihead .right button { margin: 0; }
+.gisub { font: 12px ui-monospace, Consolas, monospace; color: #aaa; letter-spacing: .04em; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; text-transform: uppercase; }
+.gisub .tag { border: 1px solid #555; border-radius: 3px; padding: 1px 6px; color: #ddd; text-transform: none; }
+.gisub .bad { color: #f28b82; text-transform: none; }
+.when { color: #888; font-size: 12px; }
+.row { display: grid; gap: 12px; }
+.r4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.r3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.r2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { .r4, .r3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .r4, .r3, .r2 { grid-template-columns: minmax(0, 1fr); } }
+/* Peak hours and Mods side by side only when there's room: on a portrait or
+   narrow screen the mods go under the heatmap. */
+@media (max-width: 1100px), (orientation: portrait) { .r2.hm { grid-template-columns: minmax(0, 1fr); } }
+.card { border: 1px solid #333; border-radius: 8px; padding: 14px 16px; min-width: 0; position: relative; }
+.card h3 { margin: 0 0 8px; font: 600 11px ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: #999; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card h3 .r { margin-left: auto; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.big { font: 32px/1.15 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.big small { font-size: 15px; color: #999; }
+.big.m { font-size: 22px; }
+.note { color: #888; font-size: 12px; margin-top: 4px; }
+.pill { display: inline-flex; gap: 4px; align-items: center; border: 1px solid #444; border-radius: 6px; padding: 2px 8px; font: 12px ui-monospace, Consolas, monospace; color: #ccc; }
+.pills { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.bar { height: 6px; background: #2a2a2a; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: #81c995; }
+.daybar { position: relative; height: 10px; border-radius: 5px; margin: 30px 0 42px; }
+/* Sunrise and sunset: a tick through the bar, labelled above it */
+.daybar .tick { position: absolute; top: -4px; width: 2px; height: 18px; background: #ddd; }
+.daybar .tick span { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); font: 12px ui-monospace, Consolas, monospace; color: #aaa; white-space: nowrap; }
+/* The hour scale under the bar: a mark every hour, labelled every 4 (the end as 23:59) */
+.daybar .hr { position: absolute; top: 13px; width: 1px; height: 4px; background: #555; }
+.daybar .hr.major { height: 7px; background: #888; }
+.daybar .hr span { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); font: 11px ui-monospace, Consolas, monospace; color: #888; white-space: nowrap; }
+.daybar .hr.first span { transform: none; left: 0; }
+.daybar .hr.last span { transform: translateX(-100%); left: 0; }
+@media (max-width: 560px) { .daybar .hr.side span { display: none; } }
+.daybar .now { position: absolute; top: -6px; width: 4px; height: 22px; background: #fff; border-radius: 2px; box-shadow: 0 0 6px rgba(0, 0, 0, .6); }
+/* Under the title, as on Players: Settings on the left */
+.toolbar { display: flex; margin: 0 0 16px; }
+.toolbar .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+.hdrbtn { width: 104px; justify-content: center; box-sizing: border-box; margin: 0; }
+/* Server Info Settings: empty fields use the container's values, shown as the placeholders */
+#siSettingsModal { z-index: 50; } /* above the page's positioned boxes */
+.siset { width: min(460px, 92vw); }
+.siset input::placeholder { color: #666; }
+.siset .row { display: flex; gap: 10px; }
+.siset .row > div:first-child { flex: 1; min-width: 0; }
+.siset .row > div:last-child { width: 130px; }
+.siset .now { font-size: 13px; margin: -4px 0 14px; }
+.siset .now.on { color: #81c995; }
+.siset .now.off { color: #f28b82; }
+.siset .now b { font-weight: 600; }
+.siset #sisMsg { font-size: 13px; margin: 0 0 10px; min-height: 1em; white-space: pre-line; }
+.siset #sisMsg.ok { color: #81c995; }
+.siset #sisMsg.err { color: #f28b82; }
+.siset .buttons { display: flex; gap: 8px; align-items: center; }
+.siset .buttons .spacer { flex: 1; }
+/* Day and night: the bar and boxes, and the sky circle to their right */
+.dn { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 12px; align-items: stretch; }
+.dn .dnmain { min-width: 0; }
+/* The sky dial fills its box (the box keeps the size the column gives it) */
+.sky { display: flex; align-items: center; justify-content: center; padding: 8px; }
+.sky svg { width: 100%; max-width: 194px; height: auto; aspect-ratio: 1; display: block; }
+@media (max-width: 900px) { .dn { grid-template-columns: minmax(0, 1fr); } }
+.mods { display: flex; flex-wrap: wrap; gap: 8px; }
+.mods a { display: inline-flex; gap: 6px; align-items: center; border: 1px solid #444; border-radius: 6px; padding: 5px 10px; font-size: 13px; color: #ddd; text-decoration: none; }
+.mods a:hover { border-color: #8ab4f8; }
+.mods a .k { font-size: 11px; color: #999; }
+.mods a.upd, html[data-theme] .mods a.upd { border-color: #f28b82 !important; box-shadow: 0 0 0 1px rgba(242, 139, 130, .35), 0 0 12px rgba(242, 139, 130, .45); animation: updglow 2.4s ease-in-out infinite; }
+.mods a.upd .u { color: #f28b82; }
+@keyframes updglow { 50% { box-shadow: 0 0 0 1px rgba(242, 139, 130, .2), 0 0 6px rgba(242, 139, 130, .25); } }
+.seg { display: inline-flex; border: 1px solid #444; border-radius: 6px; overflow: hidden; }
+.seg button { margin: 0; border: 0; border-radius: 0; padding: 3px 10px; font-size: 12px; background: none; color: #aaa; }
+.seg button.on { background: #333; color: #fff; }
+svg.chart { width: 100%; height: 200px; display: block; }
+.stats { display: flex; gap: 28px; margin-top: 10px; flex-wrap: wrap; }
+.stats div b { display: block; font: 11px ui-monospace, Consolas, monospace; color: #999; letter-spacing: .06em; }
+.stats div span { font: 16px ui-monospace, Consolas, monospace; }
+.heat { display: grid; grid-template-columns: 36px repeat(24, minmax(0, 1fr)); gap: 3px; font: 11px ui-monospace, Consolas, monospace; color: #999; align-items: center; }
+.heat i { display: block; height: 18px; border-radius: 3px; background: #1d2033; }
+.legend { display: flex; gap: 6px; align-items: center; margin-top: 10px; font: 12px ui-monospace, Consolas, monospace; color: #999; flex-wrap: wrap; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.empty { color: #888; font-size: 13px; }
+html[data-theme]:not([data-theme="default"]) .card, html[data-theme]:not([data-theme="default"]) .mods a:not(.upd),
+html[data-theme]:not([data-theme="default"]) .seg, html[data-theme]:not([data-theme="default"]) .pill { border-color: var(--color-divider); }
+html[data-theme]:not([data-theme="default"]) .bar i { background: var(--color-accent); }
+html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-text, #fff); }
+</style>
+{{template "theme" .}}
+</head>
+<body>
+<nav>{{template "navlinks" "server"}}</nav>
+{{template "statusbar" .}}
+<div class="top"><h1>Server Info</h1></div>
+<div class="toolbar">
+	<button type="button" class="icon-btn hdrbtn" onclick="openServerSettings()" title="Server Info Settings">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+		Settings
+	</button>
+</div>
+
+<!-- Server Info Settings: the same as the container's QUERY_PORT,
+     SERVER_TIME and SERVER_LATITUDE; empty fields use those. The public IP
+     comes from Steam only. -->
+<div id="siSettingsModal" class="modal" onclick="if (event.target === this) closeServerSettings()">
+	<div class="box siset" role="dialog" aria-labelledby="sisTitle">
+		<h2 id="sisTitle">Server Info Settings</h2>
+		<p class="now" id="sisNow"></p>
+		<label for="sisPort">Query port</label>
+		<input id="sisPort" type="text" inputmode="numeric" autocomplete="off">
+		<div class="row">
+			<div><label for="sisTime">Server time (serverTime)</label><input id="sisTime" type="text" autocomplete="off" spellcheck="false"></div>
+			<div><label for="sisLat">Latitude</label><input id="sisLat" type="text" inputmode="decimal" autocomplete="off"></div>
+		</div>
+		<p id="sisMsg"></p>
+		<div class="buttons">
+			<span class="spacer"></span>
+			<button type="button" onclick="closeServerSettings()">Cancel</button>
+			<button type="button" id="sisSave" onclick="saveServerSettings()">Save</button>
+		</div>
+	</div>
+</div>
+<div class="gi" id="gi">
+	<div class="gihead">
+		<h2><span class="dot" id="dot"></span><span id="sname">Asking the server...</span></h2>
+		<span class="right"><span class="when" id="when"></span></span>
+	</div>
+	<div class="gisub" id="ssub"></div>
+
+	<div class="row r3">
+		<div class="card"><h3>Players</h3><div class="big" id="players">-</div><div class="bar"><i id="pbar" style="width:0"></i></div><div class="note" id="queue"></div></div>
+		<div class="card"><h3>In-game time</h3><div class="big" id="gtime">-</div><div class="note" id="gtimenote"></div>
+			<div class="pills"><span class="pill" title="Day speed (serverTimeAcceleration)" id="dayx"></span><span class="pill" id="nightx"></span></div></div>
+		<div class="card"><h3>Uptime</h3><div class="big" id="uptime">-</div><div class="note" id="uptimenote"></div></div>
+	</div>
+
+	<div class="card"><h3>Day &amp; night <span class="r note" id="sunnote"></span></h3>
+		<div class="dn">
+			<div class="dnmain">
+				<div class="daybar" id="daybar"></div>
+				<div class="row r4">
+					<div class="card"><h3 id="first">Sunset in</h3><div class="big m" id="firstv">-</div><div class="note">real time</div></div>
+					<div class="card"><h3 id="second">Sunrise in</h3><div class="big m" id="secondv">-</div><div class="note">real time</div></div>
+					<div class="card"><h3>Day lasts</h3><div class="big m" id="daylen">-</div><div class="note" id="daynote"></div></div>
+					<div class="card"><h3>Night lasts</h3><div class="big m" id="night">-</div><div class="note" id="nightnote"></div></div>
+				</div>
+			</div>
+			<div class="card sky" id="sky"><svg id="skysvg" viewBox="10 10 160 160" role="img" aria-label="The sky: the sun and moon over the horizon"></svg></div>
+		</div>
+	</div>
+
+	<div class="card"><h3>Population <span class="r"><span class="seg" id="ranges"><button data-r="12h">12h</button><button data-r="1d" class="on">1d</button><button data-r="7d">7d</button><button data-r="30d">30d</button><button data-r="all">All</button></span></span></h3>
+		<svg class="chart" id="pop" viewBox="0 0 1000 200"></svg>
+		<div class="stats"><div><b>PEAK 7D</b><span id="speak">-</span></div><div><b>AVERAGE 7D</b><span id="savg">-</span></div><div><b>UNIQUE PLAYERS 7D</b><span id="suniq">-</span></div><div><b>SESSIONS 7D</b><span id="ssess">-</span></div></div>
+	</div>
+
+	<div class="row r2 hm">
+		<div class="card"><h3>Peak hours <span class="r note" id="tz"></span></h3><div class="heat" id="heat"></div>
+			<div class="legend" id="legend"></div></div>
+		<div class="card"><h3><span id="modtitle">Mods</span> <span class="r note" id="modnote"></span></h3>
+			<div class="mods" id="mods"><span class="empty">No mods listed yet.</span></div>
+		</div>
+	</div>
+</div>
+<script>
+(function () {
+	var MAPS = { chernarusplus: 'Chernarus', enoch: 'Livonia', sakhal: 'Sakhal', deerisle: 'Deer Isle', namalsk: 'Namalsk', takistanplus: 'Takistan', banov: 'Banov', esseker: 'Esseker', pripyat: 'Pripyat' };
+	var $ = function (id) { return document.getElementById(id); };
+	var data = null, range = '1d';
+
+	function hours(hhmm) { var p = String(hhmm || '').split(':'); return p.length === 2 ? +p[0] + +p[1] / 60 : NaN; }
+	function dur(h) { if (!isFinite(h) || h < 0) return '-'; var m = Math.round(h * 60); return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; }
+	function bytes(n) { if (!n) return ''; return n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? Math.round(n / 1e6) + ' MB' : Math.round(n / 1e3) + ' KB'; }
+	function day(unix) { var d = new Date(unix * 1000); return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+	function ago(iso) { var s = (Date.now() - Date.parse(iso)) / 1000; return s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; }
+	function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+	// The in-game clock: the time the server reported on its last answer
+	// (every 5 seconds). The clock and countdowns show it at once; the bar's
+	// marker and the sky glide to it from the time shown before over
+	// glideMs (the short way across midnight), or jump if it moved more than
+	// 2 game hours (a restart).
+	var clock = { t0: NaN, running: false, from: NaN, startedAt: 0, shown: NaN };
+	var glideMs = 1000;
+	function gameTime() { return clock.t0; }
+	function anchorClock(srv, t) {
+		clock.from = isFinite(clock.shown) ? clock.shown : t;
+		clock.t0 = t;
+		clock.startedAt = performance.now();
+		clock.running = !!srv.answered;
+	}
+	// shownTime is where the marker and sky are now: on the way from the
+	// previous time to the reported one.
+	function shownTime(nowMs) {
+		var c = clock;
+		if (!isFinite(c.t0) || !isFinite(c.from)) return c.t0;
+		var d = ((c.t0 - c.from + 36) % 24) - 12; // the short way, in game hours
+		if (Math.abs(d) > 2) return c.t0;
+		var f = Math.min(1, (nowMs - c.startedAt) / glideMs), e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2;
+		return ((c.from + d * e) % 24 + 24) % 24;
+	}
+	// glide redraws the marker and the sky until they reach the reported time.
+	function glide() {
+		var c = clock;
+		if (!c.sun) return;
+		var t = shownTime(performance.now());
+		c.shown = t;
+		if (isFinite(t)) {
+			if (c.marker) c.marker.style.left = 'calc(' + (t / 24 * 100).toFixed(3) + '% - 2px)';
+			drawSky(c.sun, t, c.rise, c.set);
+		}
+		cancelAnimationFrame(c.raf); // one glide at a time
+		if (isFinite(t) && t !== c.t0) c.raf = requestAnimationFrame(glide);
+	}
+	function showClock() {
+		var c = clock;
+		if (!c.sun) return;
+		var t = gameTime(), ok = isFinite(t);
+		var hh = ok ? Math.floor(t) : 0, mm = ok ? Math.floor((t - hh) * 60) : 0;
+		$('gtime').textContent = ok ? String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') : '-';
+		if (c.marker) c.marker.style.display = ok ? '' : 'none';
+		var isDay = c.sun.polar === 'day' || (c.sun.polar !== 'night' && t >= c.rise && t < c.set);
+		$('gtimenote').textContent = !ok ? '' : (isDay ? 'Daytime' : 'Night') + (c.running ? '' : ' · not answering');
+		if (!ok || c.sun.polar) {
+			$('first').textContent = 'Sunset in'; $('second').textContent = 'Sunrise in';
+			$('firstv').textContent = $('secondv').textContent = c.sun.polar ? 'None' : '-';
+		} else if (isDay) {
+			$('first').textContent = 'Sunset in'; $('firstv').textContent = dur((c.set - t) / c.dx);
+			$('second').textContent = 'Sunrise in'; $('secondv').textContent = dur((c.set - t) / c.dx + c.nightLen);
+		} else {
+			var left = (t >= c.set ? 24 - t + c.rise : c.rise - t) / (c.dx * c.nx);
+			$('first').textContent = 'Sunrise in'; $('firstv').textContent = dur(left);
+			$('second').textContent = 'Sunset in'; $('secondv').textContent = dur(left + c.dayLen);
+		}
+		glide(); // the marker and the sky
+	}
+
+	function render() {
+		var s = data.server, info = s.info || {}, k = s.keywords || {};
+		var known = !!info.name;
+		$('dot').className = 'dot' + (s.answered ? '' : ' down');
+		$('sname').textContent = known ? info.name : 'Waiting for the server to answer its query port';
+		$('when').textContent = s.readAt && s.readAt.indexOf('0001') !== 0 ? 'Read at ' + new Date(s.readAt).toLocaleTimeString() : '';
+		var sub = $('ssub');
+		sub.textContent = '';
+		var parts = [];
+		if (known) {
+			parts.push(MAPS[String(info.map).toLowerCase()] || info.map);
+			parts.push(k.firstPerson ? '1PP' : '3PP');
+			if (info.version) parts.push('v' + info.version);
+			if (k.battleye) parts.push('BattlEye');
+			if (info.password) parts.push('Password');
+		}
+		parts.forEach(function (p, i) { if (i) sub.append(el('span', '', '·')); sub.append(el('span', '', p)); });
+		if (data.mods.length) sub.append(el('span', 'tag', data.mods.length + ' mods' + (data.modsBytes ? ' · ' + bytes(data.modsBytes) : '')));
+		if (!s.answered) sub.append(el('span', 'bad', known ? 'Not answering (last answer ' + ago(s.lastSeen) + ')' : (s.error || 'No answer yet')));
+
+		$('players').innerHTML = '';
+		$('players').append(document.createTextNode(known ? info.players : '-'));
+		if (known) $('players').append(el('small', '', '/' + info.maxPlayers));
+		$('pbar').style.width = known && info.maxPlayers ? Math.min(100, 100 * info.players / info.maxPlayers) + '%' : '0';
+		$('queue').textContent = known ? (k.queue || 0) + ' in the queue' : '';
+
+		var sun = data.sun || {}, t = hours(k.time), rise = hours(sun.sunrise), set = hours(sun.sunset);
+		anchorClock(s, t);
+		// A polar day or night: no sunrise or sunset, all day or all night.
+		if (sun.polar === 'day') { rise = 0; set = 24; } else if (sun.polar === 'night') { rise = set = 12; }
+		var dx = k.dayAccel || 1, nx = k.nightAccel || 1;
+		$('dayx').textContent = '☀ ×' + dx;
+		// Night runs at the day speed times the night speed: show the result.
+		var nightSpeed = +(dx * nx).toFixed(2);
+		$('nightx').textContent = '☾ ×' + nightSpeed;
+		$('nightx').title = 'Night speed: ×' + dx + ' (serverTimeAcceleration) × ×' + nx + ' (serverNightTimeAcceleration)';
+
+		if (data.uptime) {
+			$('uptime').innerHTML = '';
+			$('uptime').append(document.createTextNode(data.uptime.percent >= 99.95 ? '100' : data.uptime.percent.toFixed(1).replace(/\.0$/, '')), el('small', '', '%'));
+			// Short times in seconds or minutes, so a new install doesn't read "down 0h 0m".
+			var span = function (sec) { return sec < 60 ? Math.round(sec) + 's' : sec < 3600 ? Math.round(sec / 60) + 'm' : dur(sec / 3600); };
+			var week = 7 * 86400;
+			$('uptimenote').textContent = (data.uptime.seenSeconds >= week - 3600 ? 'last 7 days' : 'over ' + span(data.uptime.seenSeconds) + ' so far') +
+				' · down ' + span(data.uptime.downSeconds);
+		} else { $('uptime').textContent = '-'; $('uptimenote').textContent = 'not measured yet'; }
+
+		// Day and night: 24 game hours, sunrise and sunset ticks, the time marker.
+		var bar = $('daybar');
+		bar.textContent = '';
+		var pct = function (h) { return (Math.max(0, Math.min(24, h)) / 24 * 100).toFixed(2) + '%'; };
+		if (sun.polar === 'day') bar.style.background = '#7fd3ee';
+		else if (sun.polar === 'night') bar.style.background = '#1d2340';
+		else {
+			// The fades scale with the day and night, so a short Arctic day
+			// keeps its colours in order: dawn, daylight, dusk.
+			var dayH = set - rise, nightH = 24 - dayH;
+			var dawn = Math.min(2.5, dayH * 0.4), dusk = Math.min(1.5, dayH * 0.3), twi = Math.min(2, nightH * 0.25);
+			bar.style.background = 'linear-gradient(90deg, #1d2340 0%, #2a2f55 ' + pct(rise - twi) + ', #d6935a ' + pct(rise) + ', #7fd3ee ' + pct(rise + dawn) +
+				', #7fd3ee ' + pct(set - dusk) + ', #e07a4a ' + pct(set) + ', #3a2f55 ' + pct(set + twi) + ', #1d2340 100%)';
+		}
+		var tick = function (h, cls, label) { var d = el('div', cls); d.style.left = 'calc(' + pct(h) + ' - 1px)'; if (label) d.append(el('span', '', label)); bar.append(d); };
+		if (!sun.polar) {
+			tick(rise, 'tick', '\u2600 ' + sun.sunrise);
+			tick(set, 'tick', '\u263E ' + sun.sunset);
+		}
+		for (var h = 0; h <= 24; h++) {
+			var hr = el('div', 'hr' + (h % 4 ? '' : ' major') + (h === 0 ? ' first' : h === 24 ? ' last' : '') + (h === 4 || h === 20 ? ' side' : ''));
+			hr.style.left = 'calc(' + pct(h) + (h === 24 ? ' - 1px' : '') + ')';
+			if (h % 4 === 0) hr.append(el('span', '', h === 24 ? '23:59' : String(h).padStart(2, '0') + ':00'));
+			bar.append(hr);
+		}
+		bar.append(clock.marker = el('div', 'now'));
+		var when = sun.date ? new Date(2000, +sun.date.slice(0, 2) - 1, +sun.date.slice(3)).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
+		var lat = sun.latitude != null ? Math.abs(sun.latitude) + '\u00b0' + (sun.latitude >= 0 ? 'N' : 'S') : '';
+		$('sunnote').textContent = (sun.polar === 'day' ? 'midnight sun' : sun.polar === 'night' ? 'polar night' : 'sunrise ' + sun.sunrise + ' · sunset ' + sun.sunset) +
+			' · ' + when + ' at ' + lat + (sun.mapKnown ? '' : ' (default: set SERVER_LATITUDE for this map)');
+		var dayLen = (set - rise) / dx, nightLen = (24 - set + rise) / (dx * nx);
+		$('daylen').textContent = sun.polar === 'night' ? 'No day' : dur(dayLen);
+		$('daynote').textContent = sun.polar === 'night' ? 'polar night' : (set - rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + dx;
+		$('night').textContent = sun.polar === 'day' ? 'No night' : dur(nightLen);
+		$('nightnote').textContent = sun.polar === 'day' ? 'midnight sun' : (24 - set + rise).toFixed(1).replace(/\.0$/, '') + ' game hours at \u00d7' + +(dx * nx).toFixed(2);
+		Object.assign(clock, { sun: sun, rise: rise, set: set, dx: dx, nx: nx, dayLen: dayLen, nightLen: nightLen, readAt: s.readAt });
+		showClock();
+
+		if (data.week) {
+			$('speak').textContent = data.week.peak; $('savg').textContent = data.week.average.toFixed(data.week.average < 1 ? 2 : 1);
+			$('suniq').textContent = data.week.unique; $('ssess').textContent = data.week.sessions;
+		}
+
+		// Mods: red when Steam has an update not acknowledged yet; clicking
+		// a red one acknowledges it, any other opens its Workshop page.
+		var mods = $('mods');
+		mods.textContent = '';
+		$('modtitle').textContent = 'Mods · ' + data.mods.length;
+		var upd = data.mods.filter(function (m) { return m.updated; }).length;
+		var note = $('modnote');
+		note.textContent = '';
+		if (upd) { var us = el('span', '', upd + ' updated on Steam · '); us.style.color = '#f28b82'; note.append(us); }
+		if (data.modsBytes) note.append(bytes(data.modsBytes) + ' to download');
+		if (!data.mods.length) mods.append(el('span', 'empty', known ? (data.modsKnown ? 'No mods.' : 'The mod list could not be read.') : 'No mods listed yet.'));
+		data.mods.forEach(function (m) {
+			var a = el('a', m.updated ? 'upd' : '', m.name);
+			a.href = 'https://steamcommunity.com/sharedfiles/filedetails/?id=' + m.workshopId;
+			a.target = '_blank'; a.rel = 'noopener';
+			a.title = m.updated ? 'Updated on Steam ' + day(m.steamUpdated) + ' · click to acknowledge' : 'Opens its Steam Workshop page' + (m.sizeBytes ? ' · ' + bytes(m.sizeBytes) : '');
+			if (m.updated) a.append(el('span', 'k u', 'updated ' + day(m.steamUpdated)));
+			a.addEventListener('click', async function (e) {
+				if (!a.classList.contains('upd')) return;
+				e.preventDefault();
+				var r = await fetch('/api/server/mods/' + m.workshopId + '/ack', { method: 'POST' });
+				if (r.ok) { m.updated = false; render(); }
+			});
+			mods.append(a);
+		});
+	}
+
+	// drawSky draws the sky dial: the sky's colour follows the sun's height
+	// (night blue, an orange glow at dawn and dusk, daylight blue); the sun
+	// and moon go round one path, opposite each other, crossing the horizon at
+	// sunrise and sunset. The path's height follows the sun's noon height for
+	// the date and latitude: a full circle with the sun overhead, flat when it
+	// barely rises. The sun
+	// fades out as it sets and the moon fades in, and the other way round;
+	// fixed stars fade in at night. South of the equator it is mirrored: you
+	// face north to watch the sun, so east is on the right.
+	var STARS = (function () {
+		var out = [], seed = 7, rnd = function () { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+		for (var i = 0; i < 90; i++) { var a = (rnd() * 176 - 88) * Math.PI / 180, d = 6 + rnd() * 70; out.push([Math.sin(a) * d, Math.cos(a) * d, 0.35 + rnd() * rnd() * 1.1]); }
+		return out;
+	})();
+	function drawSky(sun, t, rise, set) {
+		var svg = $('skysvg'), box = $('sky');
+		if (!isFinite(t) || !sun.dayOfYear) { svg.textContent = ''; box.title = ''; return; }
+		var r = Math.PI / 180, lat = sun.latitude, decl = -23.44 * Math.cos(2 * Math.PI / 365 * (sun.dayOfYear + 10));
+		var alt = function (h) { return Math.asin(Math.sin(lat * r) * Math.sin(decl * r) + Math.cos(lat * r) * Math.cos(decl * r) * Math.cos((h - 12) * 15 * r)) / r; };
+		var mix = function (a, b, f) { f = Math.max(0, Math.min(1, f)); return a.map(function (v, i) { return Math.round(v + (b[i] - v) * f); }); };
+		var rgb = function (c) { return 'rgb(' + c.join(',') + ')'; };
+		var a = alt(t);
+		// 1 in full day, 0 in full night, twilight between -8 and +6 degrees.
+		var day = Math.max(0, Math.min(1, (a + 8) / 14)), glow = Math.max(0, 1 - Math.abs(a + 1) / 7);
+		var NT = [18, 22, 44], NB = [36, 40, 74], DT = [58, 52, 96], DB = [224, 122, 74], LT = [96, 190, 232], LB = [196, 236, 250];
+		var top = day > 0.5 ? mix(DT, LT, (day - 0.5) * 2) : mix(NT, DT, day * 2);
+		var bot = day > 0.5 ? mix(DB, LB, (day - 0.5) * 2) : mix(NB, DB, Math.min(1, day * 2 + glow * 0.4));
+		// Where on the path: sunrise on the left horizon, noon at the top, sunset
+		// on the right; day and night each take half the path in their own time.
+		var th;
+		if (sun.polar === 'day') th = (t - 12) * 15;
+		else if (sun.polar === 'night') th = 180 + (t - 12) * 15;
+		else if (t >= rise && t <= set) th = -90 + 180 * (t - rise) / (set - rise);
+		else th = 90 + 180 * ((t > set ? t - set : t + 24 - set) / (24 - set + rise));
+		th *= r;
+		// The path's height follows the sun's height at noon on this date at this
+		// latitude (as a height on a dome: sin), so a winter sun stays low and a
+		// summer one climbs; it still crosses the horizon at sunrise and sunset.
+		var A = 56, B = 56 * Math.max(0.06, Math.sin(Math.max(0, alt(12)) * r));
+		var sx = 90 + A * Math.sin(th), sy = 90 - B * Math.cos(th), mx = 90 - A * Math.sin(th), my = 90 + B * Math.cos(th);
+		var sunOp = Math.max(0, Math.min(1, (a + 4) / 6)), starOp = Math.max(0, Math.min(1, (-a - 2) / 8));
+		var south = lat < 0, dawnSide = (t < 12) !== south ? 0.08 : 0.92;
+		var html = '<defs><clipPath id="skydome"><circle cx="90" cy="90" r="78"/></clipPath>' +
+			'<linearGradient id="skyfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + rgb(top) + '"/><stop offset="0.5" stop-color="' + rgb(bot) + '"/></linearGradient>' +
+			'<radialGradient id="skyglow" cx="' + dawnSide + '" cy="0.5" r="0.6"><stop offset="0" stop-color="rgb(255,170,90)" stop-opacity="' + (glow * 0.55).toFixed(2) + '"/><stop offset="1" stop-color="rgb(255,170,90)" stop-opacity="0"/></radialGradient>' +
+			'<radialGradient id="moonglow"><stop offset="0" stop-color="#fff" stop-opacity="0.55"/><stop offset="0.4" stop-color="#fff" stop-opacity="0.22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>' +
+			'<radialGradient id="sunglow"><stop offset="0" stop-color="#fff3b0"/><stop offset="0.45" stop-color="#fdd663"/><stop offset="1" stop-color="#fdd663" stop-opacity="0"/></radialGradient></defs>' +
+			'<g' + (south ? ' transform="translate(180 0) scale(-1 1)"' : '') + '><g clip-path="url(#skydome)">' +
+			'<rect x="0" y="0" width="180" height="180" fill="url(#skyfill)"/><rect x="0" y="0" width="180" height="180" fill="url(#skyglow)"/>' +
+			STARS.map(function (st) { return '<circle cx="' + (90 + st[0]).toFixed(1) + '" cy="' + (90 - st[1]).toFixed(1) + '" r="' + st[2].toFixed(2) + '" fill="#fff" opacity="' + (starOp * 0.9).toFixed(2) + '"/>'; }).join('') +
+			'<ellipse cx="90" cy="90" rx="' + A + '" ry="' + B.toFixed(1) + '" fill="none" stroke="#fff" stroke-opacity="0.12" stroke-dasharray="2 3"/>' +
+			'<g opacity="' + sunOp.toFixed(2) + '"><circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="22" fill="url(#sunglow)"/><circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="9" fill="#fdd663"/></g>' +
+			'<g opacity="' + (1 - sunOp).toFixed(2) + '"><circle cx="' + mx.toFixed(1) + '" cy="' + my.toFixed(1) + '" r="20" fill="url(#moonglow)"/><circle cx="' + mx.toFixed(1) + '" cy="' + my.toFixed(1) + '" r="8" fill="#f1efe6"/></g>' +
+			'<rect x="0" y="90" width="180" height="90" fill="#15171c" opacity="0.94"/>' +
+			'<line x1="0" x2="180" y1="90" y2="90" stroke="#d6935a" stroke-width="1.5"/></g></g>' +
+			'<circle cx="90" cy="90" r="78" fill="none" stroke="#444"/>' +
+			'<text x="16" y="86" fill="#d6935a" font-size="9" font-family="ui-monospace, Consolas, monospace">' + (south ? 'W' : 'E') + '</text>' +
+			'<text x="158" y="86" fill="#d6935a" font-size="9" font-family="ui-monospace, Consolas, monospace">' + (south ? 'E' : 'W') + '</text>';
+		svg.innerHTML = html;
+		var deg = function (v) { return Math.abs(v).toFixed(1) + '° ' + (v >= -0.05 ? 'above' : 'below'); };
+		box.title = 'Sun ' + deg(a) + ' the horizon (highest today ' + Math.max(0, alt(12)).toFixed(1) + '° at 12:00)';
+	}
+
+	// The graph is a smooth line (see below), drawn at the card's real width
+	// (not stretched) so its
+	// labels keep their shape; it is redrawn when the window is resized.
+	var popData = null;
+	async function loadPop() {
+		try {
+			var d = await (await fetch('/api/server/population?range=' + range)).json();
+			if (!d.ok) return;
+			popData = d;
+			drawPop();
+		} catch (e) { }
+	}
+	function drawPop() {
+		var svg = $('pop'), ns = 'http://www.w3.org/2000/svg', d = popData;
+		if (!d) return;
+		{
+			svg.textContent = '';
+			var pts = d.points, W = Math.max(300, Math.round(svg.getBoundingClientRect().width)), top = 12, bot = 176, L = 30, max = 1;
+			pts.forEach(function (p) { max = Math.max(max, p.n); });
+			var x = function (t) { return L + (W - L) * (t - d.from) / Math.max(1, d.to - d.from); };
+			var y = function (n) { return bot - (bot - top) * n / max; };
+			var add = function (tag, a, text) { var e = document.createElementNS(ns, tag); for (var k in a) e.setAttribute(k, a[k]); if (text != null) e.textContent = text; svg.append(e); return e; };
+			var accent = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim() || '#f28b5a';
+			if (document.documentElement.getAttribute('data-theme') === 'default' || !document.documentElement.getAttribute('data-theme')) accent = '#f28b5a';
+			var step = Math.max(1, Math.ceil(max / 4));
+			for (var n = 0; n <= max; n += step) {
+				add('line', { x1: L, x2: W, y1: y(n), y2: y(n), stroke: '#2c2c2c' });
+				add('text', { x: 0, y: y(n) + 4, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace' }, n);
+			}
+			// A smooth line through the most players online at any moment in
+			// each slice (a few pixels wide), so short visits still reach their
+			// real count and the line's peak matches the axis; the curve between
+			// slices never overshoots (monotone cubic), so it stays between 0
+			// and the real numbers.
+			var slices = Math.max(20, Math.floor((W - L) / 10)), span = Math.max(1, d.to - d.from), avg = [], k = 0;
+			for (var b = 0; b < slices; b++) {
+				var a0 = d.from + span * b / slices, a1 = d.from + span * (b + 1) / slices, most = 0;
+				while (k + 1 < pts.length && pts[k + 1].t <= a0) k++;
+				for (var j = k; j < pts.length && pts[j].t < a1; j++) {
+					var s1 = j + 1 < pts.length ? pts[j + 1].t : d.to;
+					if (s1 > a0) most = Math.max(most, pts[j].n);
+				}
+				avg.push([x((a0 + a1) / 2), y(most)]);
+			}
+			var m = [], dl = [];
+			for (var q = 0; q + 1 < avg.length; q++) dl.push((avg[q + 1][1] - avg[q][1]) / (avg[q + 1][0] - avg[q][0]));
+			for (var q = 0; q < avg.length; q++) {
+				if (q === 0) m.push(dl[0]); else if (q === avg.length - 1) m.push(dl[q - 1]);
+				else m.push(dl[q - 1] * dl[q] <= 0 ? 0 : 2 / (1 / dl[q - 1] + 1 / dl[q]));
+			}
+			var dpath = 'M' + avg[0][0].toFixed(1) + ' ' + avg[0][1].toFixed(1);
+			for (var q = 0; q + 1 < avg.length; q++) {
+				var h = (avg[q + 1][0] - avg[q][0]) / 3;
+				dpath += ' C' + (avg[q][0] + h).toFixed(1) + ' ' + (avg[q][1] + m[q] * h).toFixed(1) + ' ' + (avg[q + 1][0] - h).toFixed(1) + ' ' +
+					(avg[q + 1][1] - m[q + 1] * h).toFixed(1) + ' ' + avg[q + 1][0].toFixed(1) + ' ' + avg[q + 1][1].toFixed(1);
+			}
+			var last = avg[avg.length - 1], first = avg[0];
+			add('path', { d: dpath + ' L' + last[0].toFixed(1) + ' ' + bot + ' L' + first[0].toFixed(1) + ' ' + bot + 'Z', fill: accent, 'fill-opacity': 0.12, stroke: 'none' });
+			add('path', { d: dpath, fill: 'none', stroke: accent, 'stroke-width': 1.8, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+			// Fewer date labels on a narrow card, so they don't run into each other.
+			var nt = W < 520 ? 2 : W < 900 ? 3 : 4;
+			for (var i = 0; i <= nt; i++) {
+				var t = d.from + (d.to - d.from) * i / nt, dt = new Date(t * 1000);
+				var span = d.to - d.from;
+				var label = span <= 600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) :
+					span <= 13 * 3600 ? dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) :
+					span <= 2 * 86400 ? dt.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' }) :
+					dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
+				add('text', { x: L + (W - L) * i / nt, y: 196, fill: '#888', 'font-size': 11, 'font-family': 'ui-monospace, Consolas, monospace', 'text-anchor': i === 0 ? 'start' : i === nt ? 'end' : 'middle' }, label);
+			}
+			svg.setAttribute('viewBox', '0 0 ' + W + ' 200');
+		}
+	}
+
+	// Peak hours: average players per weekday and hour, in this browser's time zone.
+	async function loadBusiest() {
+		var tz = '';
+		try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { }
+		try {
+			var d = await (await fetch('/api/server/busiest?tz=' + encodeURIComponent(tz))).json();
+			if (!d.ok) return;
+			$('tz').textContent = 'average players · ' + d.tz + ' · last 4 weeks';
+			// The day bar's colours: night purple when quiet, through dusk red, to
+			// sunrise orange when busiest. Empty slots stay near the background.
+			var heat = $('heat'), shades = ['#1d2033', '#2a2f55', '#5b3a63', '#e07a4a', '#ffa64d'];
+			heat.textContent = '';
+			heat.append(el('span'));
+			for (var h = 0; h < 24; h++) heat.append(el('span', '', h % 6 ? '' : String(h)));
+			['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(function (name, di) {
+				heat.append(el('span', '', name));
+				for (var h = 0; h < 24; h++) {
+					var v = d.days[di][h], lv = d.peak > 0 && v > 0 ? Math.max(1, Math.round(4 * v / d.peak)) : 0;
+					var c = el('i'); c.style.background = shades[lv];
+					c.title = name + ' ' + String(h).padStart(2, '0') + ':00 · avg ' + v.toFixed(1) + ' players';
+					heat.append(c);
+				}
+			});
+			var lg = $('legend');
+			lg.textContent = '';
+			lg.append('quietest ');
+			shades.forEach(function (c) { var i = el('i'); i.style.background = c; lg.append(i); });
+			lg.append(' busiest · peak ' + (d.peak >= 1 ? d.peak.toFixed(1) : d.peak.toFixed(2)) + ' players');
+		} catch (e) { }
+	}
+
+	// load re-reads the page's data; it redraws only when something changed,
+	// so hovering a mod or reading a value isn't disturbed every 5 seconds.
+	var lastText = '';
+	async function load() {
+		try {
+			var r = await fetch('/api/server');
+			var text = await r.text(), d = JSON.parse(text);
+			if (d.ok && text !== lastText) { lastText = text; data = d; render(); }
+		} catch (e) { /* the status bar shows that ReCON can't be reached */ }
+	}
+
+	document.querySelectorAll('#ranges button').forEach(function (b) {
+		b.onclick = function () {
+			range = b.dataset.r;
+			document.querySelectorAll('#ranges button').forEach(function (x) { x.classList.toggle('on', x === b); });
+			loadPop();
+		};
+	});
+	// ReCON asks the game server every 5 seconds and the page reads what it
+	// has as often; the graphs every minute. Nothing is read while the
+	// tab is hidden.
+	var popResize = null;
+	window.addEventListener('resize', function () { clearTimeout(popResize); popResize = setTimeout(drawPop, 150); });
+	window.reloadServerInfo = function () { lastText = ''; load(); loadPop(); loadBusiest(); };
+	load();
+	loadPop();
+	loadBusiest();
+	setInterval(function () { if (!document.hidden) load(); }, 5000);
+	setInterval(function () { if (!document.hidden) { loadPop(); loadBusiest(); } }, 60000);
+})();
+
+// Server Info Settings (GET/POST /api/server/settings): what is saved here
+// overrides the container's variables; empty fields use those, shown greyed out.
+function sisMsg(text, cls) { var m = document.getElementById('sisMsg'); m.textContent = text; m.className = cls || ''; }
+var SIS = { queryPort: 'sisPort', serverTime: 'sisTime', latitude: 'sisLat' };
+function showServerNow(d) {
+	var now = document.getElementById('sisNow'), b = document.createElement('b');
+	b.textContent = d.address;
+	now.className = 'now ' + (d.answered ? 'on' : 'off');
+	now.textContent = d.answered ? 'Answering on ' : 'No answer from ';
+	now.append(b);
+}
+async function openServerSettings() {
+	sisMsg('');
+	document.getElementById('sisNow').textContent = '';
+	document.getElementById('siSettingsModal').style.display = 'flex';
+	var d;
+	try { d = await (await fetch('/api/server/settings', { cache: 'no-store' })).json(); }
+	catch (e) { sisMsg('ReCON could not be reached.', 'err'); return; }
+	if (!d.ok) { sisMsg(d.error || 'Could not read the settings.', 'err'); return; }
+	for (var k in SIS) {
+		var f = document.getElementById(SIS[k]);
+		f.value = d.settings[k] || '';
+		f.placeholder = d.defaults[k] || '';
+	}
+	showServerNow(d);
+	document.getElementById('sisPort').focus();
+}
+function closeServerSettings() { document.getElementById('siSettingsModal').style.display = 'none'; }
+async function saveServerSettings() {
+	var btn = document.getElementById('sisSave');
+	if (btn.disabled) return;
+	btn.disabled = true;
+	sisMsg('Saving and asking the server...');
+	var body = {}, d;
+	for (var k in SIS) body[k] = document.getElementById(SIS[k]).value;
+	try {
+		d = await (await fetch('/api/server/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+	} catch (e) {
+		d = { ok: false, error: 'ReCON could not be reached; nothing was changed.' };
+	} finally {
+		btn.disabled = false;
+	}
+	if (!d.ok) { sisMsg(d.error || 'Save failed.', 'err'); return; }
+	showServerNow(d);
+	sisMsg(d.answered ? 'Saved.' : 'Saved, but the server isn\'t answering on that port' + (d.error ? ' (' + d.error + ')' : '') + '.', d.answered ? 'ok' : 'err');
+	if (window.reloadServerInfo) window.reloadServerInfo();
+}
+document.getElementById('siSettingsModal').addEventListener('keydown', function (e) {
+	if (e.key === 'Enter' && e.target.tagName === 'INPUT') saveServerSettings();
+	if (e.key === 'Escape') closeServerSettings();
+});
+</script>
+</body>
+</html>

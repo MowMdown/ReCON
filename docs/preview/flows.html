@@ -179,7 +179,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 .step.dragging { opacity: .4; }
 .step.drop-above { box-shadow: 0 -3px 0 var(--accent); }
 .step.drop-below { box-shadow: 0 3px 0 var(--accent); }
-.step.has-err { border-color: #6b3632; }
+ 
+.step.has-err, .step:has(> .sentence[data-err-inside]), .step:has(> * > .sentence[data-err-inside]) { border-color: #6b3632; }
 .step.joint { padding: 4px 8px; background: #1c1922; border-style: dashed; border-color: #3d3350; }
 .step.joint .num { visibility: hidden; }
 .step.hl { border-color: var(--c-logic); }
@@ -187,18 +188,20 @@ button:disabled { opacity: 0.4; cursor: default; }
 .grip { display: inline-flex; width: 15px; height: 15px; padding: 2px 4px; color: var(--faint); user-select: none; }
 .grip.handle { cursor: grab; }
  
-.fb .fold { background: none; border: 0; padding: 0 2px; margin: 0; width: 24px; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.fb .fold { display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; padding: 0; margin: 0; width: 24px; height: 24px; color: var(--muted); line-height: 1; cursor: pointer; }
+.fb .fold svg { display: block; }
 .fb .fold:hover { color: var(--fg); }
-.folded { color: var(--muted); font-size: 12.5px; padding-left: 4px; }
-.folded.bad { color: var(--err); }
 .grip.handle::before { content: ""; width: 15px; height: 15px; background: radial-gradient(circle, currentColor 1.4px, transparent 1.7px) 0 0 / 5px 5px; }
-.num { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
+.num { color: var(--faint); font-size: 16px; font-variant-numeric: tabular-nums; width: 2ch; text-align: right; }
 .body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .sentence .w { color: var(--muted); }
 .fb .sentence input.text { flex: 1 1 220px; }
 .fb .sentence input.dur { width: 96px; font-family: var(--mono); font-size: 13px; }
-.fb .sentence input.val { flex: 1 1 140px; max-width: 320px; }
+ 
+.fb .sentence input.val { flex: 1 1 100%; }
+.fb .sentence.block { flex-wrap: nowrap; }
+.fb .sentence.block > .sentence { flex: 1 1 auto; }
 .pill { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; white-space: nowrap; border: 1px solid; }
 .pill.msg { color: var(--c-msg); border-color: #36507a; background: #1a2333; }
 .pill.time { color: var(--c-time); border-color: #5c5126; background: #2a2614; }
@@ -209,7 +212,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .sends { font: 12px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
 .err { font-size: 12px; color: var(--err); }
 .tools { display: flex; gap: 2px; }
-.fb .tools button { padding: 3px 7px; font-size: 13px; background: transparent; border: 1px solid transparent; color: var(--muted); }
+.fb .tools button { padding: 3px 7px; font-size: 16px; line-height: 1; background: transparent; border: 1px solid transparent; color: var(--muted); }
 .fb .tools button:hover:not(:disabled) { background: #333; color: var(--fg); }
 .fb .tools button.addelse { font-size: 12px; color: var(--c-logic); }
 .empty { color: var(--faint); font-size: 13px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 6px; text-align: center; }
@@ -233,8 +236,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 .fb .menu button:disabled small { color: var(--warn); }
  
 .fb-foot .menu { top: auto; bottom: calc(100% + 6px); max-height: min(70vh, 560px); overflow-y: auto; }
- 
-.counters { display: none; }
 .steps.drop-into { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 6px; }
 .box.valuesbox { width: min(640px, 95vw); height: auto; max-height: 88vh; }
 .valuesbox td:first-child { white-space: nowrap; }
@@ -277,7 +278,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 <script src="assets/recon-icons.js" defer></script>
 </head>
 <body>
-<nav><a href="/players">Players</a><a href="/bans">Server Bans</a><a class="active" href="/flows">Flows</a></nav>
+<nav><a href="/server">Server Info</a><a href="/players">Players</a><a href="/bans">Server Bans</a><a class="active" href="/flows">Flows</a></nav>
 <div class="statusbar">
 	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
@@ -550,8 +551,6 @@ var setStatusCount;
 				<thead><tr><th>Placeholder</th><th>Is</th><th>Works in</th></tr></thead>
 				<tbody>
 					<tr><td><code>{players_online}</code></td><td>How many players are online</td><td>Every flow</td></tr>
-					<tr class="counters"><td><code>{counter}</code></td><td>The player's counter in this run (see <i>If / Else</i>)</td><td>With a player</td></tr>
-					<tr class="counters"><td><code>{threshold}</code></td><td>This flow's counter threshold</td><td>Every flow</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_id}</code></td><td>The player's name and number</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_ping}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td>Their ping, IP address and GUID</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_role}</code></td><td>Player, Mod or Admin (set on the Players page)</td><td>On join, Player message</td></tr>
@@ -574,9 +573,6 @@ var setStatusCount;
 			</ul>
 			<p>Players BattlEye hasn't verified yet are left out. Stop flow inside it ends the whole run. A For each can't go inside another one. The run log lists each player a condition matched, not every one checked.</p>
 			<p>Examples for a Schedule flow every minute (<code>* * * * *</code>): <b>For each</b> player, <b>If</b> <code>{player_ping} &gt; 500</code>, <b>Kick</b> the Player, reason <i>Ping too high ({player_ping})</i>. Or <b>For each</b> message, <b>If</b> <code>{message}</code> contains <code>noob</code>, <b>Message</b> the Player <i>Please keep chat friendly</i>. In a flow without a player of its own, Add step puts an If inside the For each at the end of the list, and Kick, Ban and Message into the innermost block there, so three clicks build either one.</p>
-			<h3 class="counters">Counter</h3>
-			<p class="counters">Each run of a flow keeps a <b>counter</b> for every player, starting at 0. Every If, Else if and Else has a <b>counter</b> setting for what it does to the player's counter when it runs: <b>0</b> nothing, <b>++</b> add 1, <b>--</b> take 1 away (not below 0), <b>reset</b> back to 0. <code>{counter}</code> is the value, and an If can compare it with a number or with <code>{threshold}</code>, the flow's <b>Counter threshold</b> (next to the delay; optional, and <code>{threshold}</code> works only once it's set to 1 or more). Counters are only kept while the run lasts, so put the checks in one run: several For each blocks with Waits between them.</p>
-			<p class="counters">Example, Schedule every minute, threshold 4: <b>For each</b> player, <b>If</b> <code>{player_ping} &gt;= 500</code> counter <b>++</b>, then inside it <b>If</b> <code>{counter} &gt;= {threshold}</code> Kick, reason <i>Ping {player_ping} over the limit</i>, <b>Else</b> Message the Player <i>Warning {counter}/{threshold}: ping {player_ping}</i>; the outer <b>Else</b> counter <b>reset</b>, so only high pings in a row count. Duplicate the For each block with a <b>Wait 10s</b> between copies.</p>
 			<h3>What you can compare</h3>
 			<table>
 				<thead><tr><th>Compare</th><th>Operators</th></tr></thead>
@@ -584,7 +580,7 @@ var setStatusCount;
 					<tr><td><code>{message}</code></td><td><b>contains</b>: any of the words, or a <code>"quoted phrase"</code>, as whole words (<code>noob</code> matches "you noob!" but not "noobish"). <b>starts with</b>: the first word of the message is one of the words, so <code>!discord</code> catches "!discord please" but not "!discordx". <b>is exactly</b>: the whole message is the value. Case is ignored.</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_ip}</code></td><td><b>is</b> / <b>is not</b> ignoring case, <b>matches</b> with <code>*</code> for any characters (<code>*admin*</code>, <code>192.168.*</code>), or <b>contains</b> any part of it</td></tr>
 					<tr><td><code>{player_id}</code> <code>{player_guid}</code></td><td><b>is</b> / <b>is not</b></td></tr>
-					<tr><td><code>{player_ping}</code> <code>{players_online}</code><span class="counters"> <code>{counter}</code></span></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code><span class="counters">, with a whole number or <code>{threshold}</code></span></td></tr>
+					<tr><td><code>{player_ping}</code> <code>{players_online}</code></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td></tr>
 					<tr><td><code>{player_role}</code></td><td><b>is</b>, <b>is not</b>, <b>is at least</b> or <b>is at most</b> Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
 				</tbody>
 			</table>
@@ -1146,10 +1142,6 @@ setInterval(tickCountdowns, 1000);
 (function () {
 'use strict';
 const TRIGGERS = [['schedule', 'Schedule'], ['join', 'On join'], ['chat', 'Player message'], ['manual', 'Manual']];
-
-
-
-const SHOW_COUNTERS = false;
 const TRIGGER_NAME = Object.fromEntries(TRIGGERS);
 
 
@@ -1164,15 +1156,15 @@ const TOKENS = [
 	{ tok: '{player_ip}', need: 'player', title: 'Their IP address' },
 	{ tok: '{player_guid}', need: 'player', title: 'Their BattlEye GUID' },
 	{ tok: '{player_role}', need: 'player', title: 'Their role: Player, Mod or Admin' },
+	{ tok: '{player_vac_bans}', need: 'player', title: 'Their VAC bans on Steam (needs STEAM_API_KEY and their SteamID; an If on it is skipped without)' },
+	{ tok: '{player_game_bans}', need: 'player', title: 'Their game bans on Steam (as above)' },
+	{ tok: '{player_days_since_last_ban}', need: 'player', title: 'Days since their last VAC or game ban on Steam (none for a player with no bans)' },
 	{ tok: '{message}', need: 'chat', title: 'What they typed (Player message), or the chat line in a For each' },
-	{ tok: '{players_online}', need: '', title: 'How many players are online (any flow)' },
-	{ tok: '{counter}', need: 'player', counters: true, title: 'The player\'s counter in this run: starts at 0, changed by the counter setting on If, Else if and Else' },
-	{ tok: '{threshold}', need: 'threshold', counters: true, title: 'This flow\'s Counter threshold (only once one is set)' }
+	{ tok: '{players_online}', need: '', title: 'How many players are online (any flow)' }
 ];
 const NEED_TEXT = {
 	player: 'needs a player: put it inside a For each, or use the On join or Player message trigger',
-	chat: 'needs the Player message trigger',
-	threshold: 'needs a Counter threshold: enter one (1 or more) next to the delay'
+	chat: 'needs the Player message trigger'
 };
 
 
@@ -1192,12 +1184,13 @@ const SUBJECTS = [
 	['player_guid', '{player_guid}', 'ident', 'player'],
 	['player_role', '{player_role}', 'role', 'player'],
 	['players_online', '{players_online}', 'num', ''],
-	['counter', '{counter}', 'num', 'player']
+	
+	['player_vac_bans', '{player_vac_bans}', 'num', 'player'],
+	['player_game_bans', '{player_game_bans}', 'num', 'player'],
+	['player_days_since_last_ban', '{player_days_since_last_ban}', 'num', 'player']
 ];
 
-const COUNTER_OPS = [['', '0'], ['inc', '++'], ['dec', '--'], ['reset', 'reset']];
-
-const numValueOk = (v) => /^\d+$/.test(String(v).trim()) || String(v).trim() === '{threshold}';
+const numValueOk = (v) => /^\d+$/.test(String(v).trim());
 const subjectOf = (s) => SUBJECTS.find((x) => x[0] === s.subject) || SUBJECTS[1];
 const OPS_BY_KIND = { word: WORD_OPS, text: TEXT_OPS, ident: IDENT_OPS, num: NUM_OPS, role: ROLE_OPS };
 const opsFor = (sub) => OPS_BY_KIND[sub[2]] || NUM_OPS;
@@ -1282,13 +1275,10 @@ function el(tag, attrs, ...kids) {
 
 
 function ctx(f, inLoop) {
-	const t = f.trigger.type, threshold = thresholdSet(f.counterThreshold);
-	if (inLoop) return { '': true, player: true, chat: true, threshold };
-	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat', threshold };
+	const t = f.trigger.type;
+	if (inLoop) return { '': true, player: true, chat: true };
+	return { '': true, player: t === 'join' || t === 'chat', chat: t === 'chat' };
 }
-
-const thresholdSet = (v) => /^\d+$/.test(String(v).trim()) && +v >= 1 && +v <= 1000;
-const thresholdOk = (v) => String(v).trim() === '' || thresholdSet(v);
 const secsOf = (v) => parseDur(v) || 0;
 
 
@@ -1342,10 +1332,8 @@ function stepNeeds(s) {
 function condErr(c, b) {
 	const sub = subjectOf(b);
 	if (!c[sub[3]]) return sub[1] + ' ' + NEED_TEXT[sub[3]];
-	if (sub[2] === 'num' && !numValueOk(b.value)) return 'Enter a whole number or {threshold}';
-	if (sub[2] === 'num' && String(b.value).trim() === '{threshold}' && !c.threshold) return '{threshold} ' + NEED_TEXT.threshold;
+	if (sub[2] === 'num' && !numValueOk(b.value)) return 'Enter a whole number';
 	if (sub[0] === 'player_id' && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
-	if (b.counter && !c.player) return 'The counter is kept for each player: ' + NEED_TEXT.player;
 	if (sub[2] === 'role' && !ROLES.some(([v]) => v === String(b.value).trim())) return 'Pick Player, Mod or Admin';
 	if (sub[0] === 'player_guid' && !/^[0-9a-fA-F]{32}$/.test(String(b.value).trim())) return 'Enter a GUID (32 letters and digits, 0-9 and a-f)';
 	if (sub[2] === 'word' && !terms(b.value).length) return 'Enter a word, several words, or a "quoted phrase"';
@@ -1356,7 +1344,7 @@ function stepErr(c, s) {
 	if (s.type === 'message' && !String(s.text || '').trim()) return 'Add the message text';
 	if (s.type === 'command' && !String(s.cmd || '').trim()) return 'Type the command to send';
 	if (s.type === 'wait' && !(secsOf(s.time) > 0)) return 'Enter a time: 30 (seconds), 90s, 1m20s or 1h';
-	if (s.type === 'if' && subjectOf(s)[2] === 'num' && !numValueOk(s.value)) return 'Enter a whole number or {threshold}';
+	if (s.type === 'if' && subjectOf(s)[2] === 'num' && !numValueOk(s.value)) return 'Enter a whole number';
 	return '';
 }
 
@@ -1483,6 +1471,12 @@ function findParent(root, target) {
 	return null;
 }
 
+
+
+
+const FOLD_DOWN = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5.33h10L8 13.33z" fill="currentColor"/></svg>';
+const FOLD_RIGHT = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.33 3v10l8-5z" fill="currentColor"/></svg>';
+
 function renderSteps(key) {
 	const box = key === 'steps' ? $('steps') : $('onStop');
 	const list = ed[key];
@@ -1506,17 +1500,29 @@ function renderSteps(key) {
 			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill ' + def.cat, text: def.label }));
 			if (isBlock(s)) {
 				const folded = collapsed.has(s);
-				sentence.prepend(el('button', { type: 'button', class: 'fold', 'aria-expanded': String(!folded),
+				const fold = el('button', { type: 'button', class: 'fold', 'aria-expanded': String(!folded),
 					title: folded ? 'Show the steps inside' : 'Hide the steps inside', 'aria-label': (folded ? 'Expand' : 'Collapse') + ' step ' + n,
-					onclick: () => { if (folded) collapsed.delete(s); else collapsed.add(s); changed(true); }, text: folded ? '▸' : '▾' }));
+					onclick: () => { if (folded) collapsed.delete(s); else collapsed.add(s); changed(true); } });
+				fold.innerHTML = folded ? FOLD_RIGHT : FOLD_DOWN;
+				sentence.prepend(fold);
 			}
 			const obj = s.type === 'if' ? s.branches[0] : s;
 			for (const p of def.parts) sentence.append(typeof p === 'string' ? el('span', { class: 'w', text: p }) : field(obj, p, key, r.inLoop));
-			if (s.type === 'if') sentence.append(counterField(obj, 'counter', r.inLoop) || ''); 
+			
+			
 			if (isFolded(s)) {
 				const c = insideCount(s, errs, nums);
-				sentence.append(el('span', { class: 'folded' + (c.bad.length ? ' bad' : ''),
-					text: c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' + (c.bad.length ? ', error: step' + (c.bad.length === 1 ? ' ' : 's ') + c.bad.join(', ') : '') }));
+				sentence.firstChild.title = 'Show the ' + c.steps + ' step' + (c.steps === 1 ? '' : 's') + ' inside' +
+					(c.bad.length ? ' (error: step' + (c.bad.length === 1 ? ' ' : 's ') + c.bad.join(', ') + ')' : '');
+				if (c.bad.length) sentence.dataset.errInside = '1';
+			}
+			
+			
+			if (isBlock(s)) {
+				const fold = sentence.firstChild, inner = el('div', { class: 'sentence' });
+				while (fold.nextSibling) inner.append(fold.nextSibling);
+				sentence.append(inner);
+				sentence.classList.add('block');
 			}
 			const sends = el('div', { class: 'sends' });
 			const err = el('div', { class: 'err' });
@@ -1542,12 +1548,10 @@ function renderSteps(key) {
 			rowRefs[key].push({ row, sends, err, s, ek: obj });
 		} else if (r.kind === 'elif') {
 			const b = r.b, k = r.k;
-			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill logic', text: 'Else if' }));
 			
-			for (const p of STEPS.if.parts) sentence.append(p.k === 'subject'
-				? el('span', { class: 'w', title: 'Set by the If: change it there', style: 'color:var(--fg);font-family:var(--mono);font-size:12.5px;padding:0 4px', text: subjectOf(b)[1] })
-				: field(b, p, key, r.inLoop));
-			sentence.append(counterField(b, 'counter', r.inLoop) || '');
+			
+			const sentence = el('div', { class: 'sentence' }, el('span', { class: 'pill logic', text: 'Else if', title: 'Compares ' + subjectOf(b)[1] + ', set by the If' }));
+			for (const p of STEPS.if.parts) if (p.k !== 'subject') sentence.append(field(b, p, key, r.inLoop));
 			const err = el('div', { class: 'err' });
 			const what = 'Else if ' + k + ' of step ' + n;
 			row = el('div', { class: 'step joint branch', 'data-r': ri, 'data-if': ifId(s), style },
@@ -1569,7 +1573,7 @@ function renderSteps(key) {
 				el('span', { class: 'num' }),
 				el('div', { class: 'body' }, el('div', { class: 'sentence' },
 					el('span', { class: 'pill logic', text: isElse ? 'Else' : s.type === 'forEach' ? 'End for each' : 'End if' }),
-					jointLabel(key, s, isElse), isElse ? counterField(s, 'elseCounter', r.inLoop) : null)),
+					jointLabel(key, s, isElse))),
 				el('div', { class: 'tools' }, isElse ? el('button', {
 					type: 'button', title: 'Remove the Else (its steps move below the End if)', 'aria-label': 'Remove Else of step ' + n,
 					onclick: () => { const moved = s.else; s.else = null; r.list.splice(r.i + 1, 0, ...moved); changed(true); }, text: '✕'
@@ -1583,18 +1587,6 @@ function renderSteps(key) {
 
 
 
-
-
-function counterField(obj, k, inLoop) {
-	if ((!SHOW_COUNTERS || !ctx(ed, inLoop).player) && !obj[k]) return null;
-	const sel = el('select', { 'aria-label': 'Counter', title: 'What this does to the player\'s counter when it runs: 0 nothing, ++ add 1, -- take 1 away, reset back to 0' },
-		COUNTER_OPS.map(([v, l]) => el('option', { value: v, text: l, selected: (obj[k] || '') === v })));
-	sel.addEventListener('change', () => { if (sel.value) obj[k] = sel.value; else delete obj[k]; changed(true); });
-	return el('span', { class: 'w counter' }, 'counter ', sel);
-}
-
-
-
 function field(s, p, key, inLoop) {
 	if (p.kind === 'select') {
 		let opts = p.opts;
@@ -1604,8 +1596,7 @@ function field(s, p, key, inLoop) {
 		
 		if (opts === 'subjects') {
 			const c = ctx(ed, inLoop);
-			opts = SUBJECTS.filter((x) => SHOW_COUNTERS || x[0] !== 'counter' || x[0] === s.subject)
-				.map(([v, l, , need]) => [v, l, !c[need] && v !== s.subject]);
+			opts = SUBJECTS.map(([v, l, , need]) => [v, l, !c[need] && v !== s.subject]);
 		}
 		if (opts === 'ops') opts = opsFor(subjectOf(s));
 		if (opts === 'to') opts = toOpts(inLoop ? 'join' : ed.trigger.type);
@@ -1909,7 +1900,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus
 window.openValues = function () {
 	const body = $('valuesRows');
 	body.textContent = '';
-	for (const t of TOKENS.filter((x) => SHOW_COUNTERS || !x.counters)) body.append(el('tr', null, el('td', null, el('code', { text: t.tok })), el('td', { text: t.title })));
+	for (const t of TOKENS) body.append(el('tr', null, el('td', null, el('code', { text: t.tok })), el('td', { text: t.title })));
 	$('valuesModal').style.display = 'flex';
 };
 window.closeValues = function () { $('valuesModal').style.display = 'none'; };
@@ -1929,8 +1920,7 @@ function toEditor(f) {
 		
 		id: typeof f.id === 'number' ? f.id : null, name: f.name || '', scheduleEnabled: !!f.scheduleEnabled,
 		trigger: { type: f.trigger || 'manual', cron: f.trigger === 'schedule' ? (f.schedule || '') : '', delay: f.delay || '' },
-		steps: clone(f.steps || []), onStop: clone(f.onStop || []),
-		counterThreshold: f.counterThreshold ? String(f.counterThreshold) : ''
+		steps: clone(f.steps || []), onStop: clone(f.onStop || [])
 	};
 }
 function fromEditor() {
@@ -1938,8 +1928,7 @@ function fromEditor() {
 	return {
 		id: ed.id, name: ed.name, scheduleEnabled: ed.scheduleEnabled, trigger: t.type,
 		schedule: t.type === 'schedule' ? t.cron : '', delay: t.delay || '',
-		steps: ed.steps, onStop: t.type === 'schedule' || t.type === 'manual' ? ed.onStop : [],
-		counterThreshold: thresholdSet(ed.counterThreshold) ? +ed.counterThreshold : thresholdOk(ed.counterThreshold) ? 0 : -1
+		steps: ed.steps, onStop: t.type === 'schedule' || t.type === 'manual' ? ed.onStop : []
 	};
 }
 const edChanged = () => !!ed && JSON.stringify(fromEditor()) !== edSaved;
@@ -2008,14 +1997,6 @@ function renderTrigger() {
 	d.addEventListener('input', () => { t.delay = d.value; check(); queuePreview(); });
 	check();
 	box.append(el('label', { class: 'f' }, 'Delay (optional)', d));
-	
-	if (SHOW_COUNTERS || String(ed.counterThreshold).trim()) {
-		const ct = el('input', { class: 'dur', value: ed.counterThreshold, inputmode: 'numeric', autocomplete: 'off', title: 'Optional: a whole number from 1 to 1000, used as {threshold}', style: 'font-family:var(--mono);font-size:13px', 'aria-label': 'Counter threshold' });
-		const ctCheck = () => ct.classList.toggle('bad', !thresholdOk(ct.value));
-		ct.addEventListener('input', () => { ed.counterThreshold = ct.value; ctCheck(); changed(false); });
-		ctCheck();
-		box.append(el('label', { class: 'f', title: 'Each player\'s counter starts at 0 every run; If, Else if and Else can change it. Set a threshold to compare with {counter} >= {threshold}.' }, 'Counter threshold (optional)', ct));
-	}
 	$('stopSection').hidden = !(t.type === 'schedule' || t.type === 'manual');
 	updateTrigHint();
 }
@@ -2146,7 +2127,7 @@ function renderCmds() {
 	list.textContent = '';
 	for (const c of CMDS) {
 		const s = draft[c.cmd];
-		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.staff ? el('span', { class: 'who', text: 'MODS & ADMINS' }) : null));
+		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.role ? el('span', { class: 'who', text: c.role >= 2 ? 'ADMINS' : 'MODS & ADMINS' }) : null));
 		const on = el('input', { type: 'checkbox', checked: s.on, id: 'on-' + c.cmd });
 		head.append(el('label', { class: 'opt', for: 'on-' + c.cmd }, on, 'On'));
 		head.append(el('label', { class: 'opt', for: 'cool-' + c.cmd }, 'Cooldown', durInput('cool-' + c.cmd, s.cool, '0', true, (v) => { s.cool = v; })));

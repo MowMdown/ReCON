@@ -9,14 +9,32 @@ import (
 	"unicode/utf8"
 )
 
-// Roles, by number: what is stored in players.role.
+// Roles, by number: what is stored in players.role. Vehicles came later, so
+// its number is 3 though it ranks between Player and Mod: compare roles with
+// RoleRank, never by number.
 const (
-	RolePlayer = 0
-	roleMod    = 1
-	RoleAdmin  = 2
+	RolePlayer   = 0
+	roleMod      = 1
+	RoleAdmin    = 2
+	RoleVehicles = 3
+	RoleMax      = 3
 )
 
-var roleNames = []string{"Player", "Mod", "Admin"}
+var roleNames = []string{"Player", "Mod", "Admin", "Vehicles"}
+
+// RoleRank orders the roles, each including the ones below it: Player 0,
+// Vehicles 1, Mod 2, Admin 3 (an unknown number ranks as Player).
+func RoleRank(r int) int {
+	switch r {
+	case RoleVehicles:
+		return 1
+	case roleMod:
+		return 2
+	case RoleAdmin:
+		return 3
+	}
+	return 0
+}
 
 func RoleName(r int) string {
 	if r < 0 || r >= len(roleNames) {
@@ -26,19 +44,16 @@ func RoleName(r int) string {
 }
 
 // What a placeholder or If subject needs: nothing (any trigger), "player"
-// (On join or Player message) or "chat" (Player message only), or, for
-// {threshold}, a flow with a Counter threshold.
+// (On join or Player message) or "chat" (Player message only).
 const (
-	needNothing   = ""
-	needPlayer    = "player"
-	needChat      = "chat"
-	needThreshold = "threshold"
+	needNothing = ""
+	needPlayer  = "player"
+	needChat    = "chat"
 )
 
 var needText = map[string]string{
-	needPlayer:    "needs a player: put it inside a For each, or use the On join or Player message trigger",
-	needChat:      "needs the Player message trigger",
-	needThreshold: "needs a Counter threshold: enter one (1 or more) next to the delay",
+	needPlayer: "needs a player: put it inside a For each, or use the On join or Player message trigger",
+	needChat:   "needs the Player message trigger",
 }
 
 // flowTokens are the placeholders steps can use, and what each needs.
@@ -46,7 +61,7 @@ var flowTokens = map[string]string{
 	"player_name": needPlayer, "player_id": needPlayer, "player_ping": needPlayer,
 	"player_ip": needPlayer, "player_guid": needPlayer, "player_role": needPlayer,
 	"message": needChat, "players_online": needNothing,
-	"counter": needPlayer, "threshold": needThreshold,
+	"player_vac_bans": needPlayer, "player_game_bans": needPlayer, "player_days_since_last_ban": needPlayer,
 }
 
 var tokenRe = regexp.MustCompile(`\{(\w+)\}`)
@@ -72,9 +87,18 @@ var condSubjects = map[string]condSubject{
 	// How many players are online (the player tracker, package players). Works on
 	// every trigger: "If {players_online} > 0, Kick everyone, else Shut down".
 	"players_online": {"num", needNothing},
-	// The player's counter in this run of the flow (see Branch.Counter).
-	"counter": {"num", needPlayer},
+	// The player's Steam ban record (steamBanSubjects). An If on one of these
+	// is skipped, Else included, when the record can't be had.
+	"player_vac_bans":            {"num", needPlayer},
+	"player_game_bans":           {"num", needPlayer},
+	"player_days_since_last_ban": {"num", needPlayer},
 }
+
+// steamBanSubjects are the subjects and placeholders that come from the
+// player's Steam ban record (package steam, BanRecord): it needs
+// STEAM_API_KEY and their SteamID. Without the record they have no value: an
+// If on one is skipped and the placeholder is filled with "?".
+var steamBanSubjects = map[string]bool{"player_vac_bans": true, "player_game_bans": true, "player_days_since_last_ban": true}
 
 var condOps = map[string][]string{
 	"word":  {"has", "starts", "exact"},
@@ -213,11 +237,15 @@ func evaluateIfCondition(b Branch, v string) bool {
 		}
 		return same == (b.Op == "eq")
 	}
-	// num and role: role values are compared as 0 Player, 1 Mod, 2 Admin.
+	// num and role: roles are compared by rank (Player < Vehicles < Mod <
+	// Admin), though stored as 0 Player, 1 Mod, 2 Admin, 3 Vehicles.
 	a, err1 := strconv.Atoi(v)
 	c, err2 := strconv.Atoi(strings.TrimSpace(b.Value))
 	if err1 != nil || err2 != nil {
 		return false
+	}
+	if condSubjects[b.Subject].kind == "role" {
+		a, c = RoleRank(a), RoleRank(c)
 	}
 	switch b.Op {
 	case "eq":

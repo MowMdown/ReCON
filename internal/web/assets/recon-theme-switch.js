@@ -22,6 +22,6 @@ s.style.cssText='padding:4px 8px;font-size:12px;width:auto;margin:0';
 T.forEach(function(t){var o=document.createElement('option');o.value=t[0];o.textContent=t[1];s.append(o)});
 s.value=cur;s.onchange=function(){cur=s.value;apply()};
 var nav=document.querySelector('nav'),r=document.getElementById('resetCols');
-if(nav){nav.style.setProperty('display','flex','important');nav.style.setProperty('align-items','center');var w=document.createElement('span');w.style.cssText='display:inline-flex;align-items:center;gap:8px;';w.style.setProperty('margin-left','auto','important');if(r){r.style.marginLeft='0';r.style.float='none';nav.insertBefore(w,r);w.append(r,s)}else{w.append(s);nav.append(w)}}else{s.style.cssText+=';position:fixed;right:16px;top:16px;z-index:101';document.body.append(s)}}
+if(nav){nav.style.setProperty('display','flex','important');nav.style.setProperty('align-items','center');nav.style.setProperty('flex-wrap','wrap');nav.style.setProperty('row-gap','8px');var w=document.createElement('span');w.style.cssText='display:inline-flex;align-items:center;gap:8px;';w.style.setProperty('margin-left','auto','important');if(r){r.style.marginLeft='0';r.style.float='none';nav.insertBefore(w,r);w.append(r,s)}else{w.append(s);nav.append(w)}}else{s.style.cssText+=';position:fixed;right:16px;top:16px;z-index:101';document.body.append(s)}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',build);else build();
 })();

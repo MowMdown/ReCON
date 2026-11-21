@@ -62,6 +62,8 @@ td.act button:last-child { margin-right: 0; }
 .importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
 .importbox .buttons { margin-top: 12px; flex: none; }
 </style>
+<link rel="stylesheet" href="assets/leaflet/leaflet.css">
+<script src="assets/leaflet/leaflet.js"></script>
 <style>
 td:nth-child(2) { white-space: nowrap; text-overflow: ellipsis; }
 td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; }
@@ -94,13 +96,17 @@ td { white-space: nowrap; }
 #onlineTable { min-width: 1400px; }
 #offlineTable { min-width: 1400px; }
  
-td.ban-cell { text-overflow: ellipsis; }
 td.lastmsg { text-overflow: ellipsis; color: #ccc; }
 .ban-on { color: #f28b82; font-weight: 600; }
 .ban-off { color: #888; }
 #onlineMsg { margin: 4px 0 0; font-size: 14px; }
  
+img.flag { display: inline-block; width: 16px; height: 12px; margin-right: 7px; vertical-align: -1px; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px rgba(127, 127, 127, .35); }
+ 
 #delName::placeholder { color: #777; opacity: 1; }
+ 
+.detnav { margin-left: auto; display: flex; gap: 6px; }
+.detnav button { margin: 0; }
 
  
 #modal { z-index: 20; }
@@ -147,6 +153,29 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 .callout.warn { background: #2a2614; border: 1px solid #5c5224; }
 .callout.warn b { color: #fdd663; }
 .dt { table-layout: auto; }
+ 
+#detIPs tr.iprow.has { cursor: pointer; }
+#detIPs tr.iprow.has:hover td { background: rgba(255, 255, 255, .04); }
+#detIPs tr.iprow td:first-child::before { content: ''; display: inline-block; width: 14px; color: #888; }
+#detIPs tr.iprow.has td:first-child::before { content: '\25B8'; }
+#detIPs tr.iprow.open td:first-child::before { content: '\25BE'; }
+#detIPs tr.iprow.open td { background: rgba(138, 180, 248, .08); }
+#detIPs tr.ipmap > td { padding: 0 0 10px; }
+.ipmapbox { display: grid; grid-template-columns: minmax(0, 1fr) 230px; border: 1px solid #333; border-radius: 6px; overflow: hidden; margin: 0 4px; }
+@media (max-width: 640px) { .ipmapbox { grid-template-columns: minmax(0, 1fr); } }
+.ipmapbox .map { height: 240px; background: #1a1a1a; }
+.ipmapbox .info { white-space: normal; overflow-wrap: anywhere; padding: 12px 14px; font-size: 13px; line-height: 1.6; border-left: 1px solid #333; }
+.ipmapbox .info .place { font-size: 15px; font-weight: 600; }
+.ipmapbox .info .dim { color: #999; }
+.ipmapbox .info a { color: #8ab4f8; }
+.ipmapbox .leaflet-container { font: inherit; background: #1a1a1a; }
+ 
+.ipmapbox .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+.ipmapbox .leaflet-control-attribution { background: rgba(0, 0, 0, .6) !important; color: #aaa; }
+.ipmapbox .leaflet-control-attribution a { color: #8ab4f8; }
+html[data-theme]:not([data-theme="default"]) .ipmapbox, html[data-theme]:not([data-theme="default"]) .ipmapbox .info { border-color: var(--color-divider); }
+html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+
 .dt th, .dt td { height: auto; padding: 7px 9px; font-size: 13px; }
 .linkbtn { background: none; border: none; padding: 0; margin: 0 8px 0 0; color: #fdd663; cursor: pointer; font-size: 13px; text-decoration: underline; }
 .dim { color: #888; }
@@ -222,7 +251,7 @@ td .badge { margin-left: 6px; vertical-align: 1px; }
 <script src="assets/recon-icons.js" defer></script>
 </head>
 <body>
-<nav><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
+<nav><a href="/server">Server Info</a><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <div class="statusbar">
 	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
@@ -324,7 +353,7 @@ var setStatusCount;
 		<col style="width: 300px">
 		<col style="width: 160px">
 		<col>
-		<col class="act" style="width: 274px">
+		<col class="act" style="width: 221px">
 	</colgroup>
 	<thead>
 		<tr><th>ID</th><th>Player</th><th>IP</th><th>GUID</th><th>Ping</th><th>Last Message</th><th class="act">Actions</th></tr>
@@ -332,7 +361,7 @@ var setStatusCount;
 	<tbody id="players"></tbody>
 </table>
 </div>
-<p id="onlineMsg" class="ban-off" hidden>The game server isn't answering, so online players can't be shown. Everyone ReCON has seen is listed under Offline Players.</p>
+<p id="onlineMsg" class="ban-off" hidden>The game server isn't answering, so online players can't be shown. Everyone ReCON has seen (except banned players) is listed under Offline Players.</p>
 
 <div class="offline-section">
 	<h2>Offline Players</h2>
@@ -348,7 +377,7 @@ var setStatusCount;
 			<col class="act" style="width: 84px">
 		</colgroup>
 		<thead>
-			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Ban Status | Reason</th><th class="act">Actions</th></tr>
+			<tr><th>Player</th><th>Last IP</th><th>GUID</th><th>Time On Server</th><th>Last Seen</th><th>Last Message</th><th class="act">Actions</th></tr>
 		</thead>
 		<tbody id="offlinePlayers"></tbody>
 	</table>
@@ -363,6 +392,10 @@ var setStatusCount;
 			<span id="detBadge" class="badge"></span>
 			<span id="detRole" class="badge" hidden></span>
 			<span id="detGuid" class="sub"></span>
+			<div class="detnav">
+				<button type="button" onclick="stepDetails(-1)" title="Previous player"><i class="ph ph-caret-left" aria-hidden="true"></i>Prev</button>
+				<button type="button" onclick="stepDetails(1)" title="Next player">Next<i class="ph ph-caret-right" aria-hidden="true"></i></button>
+			</div>
 		</div>
 		<div class="dtabs" id="detTabs">
 			<button type="button" data-tab="overview">Overview</button>
@@ -533,11 +566,61 @@ function esc(s) {
 const ROLE_NAMES = ['Player', 'Mod', 'Admin'];
 
 
+
+
+const regionNames = (function () { try { return new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) { return null; } })();
+function countryName(cc) {
+	try { return (regionNames && regionNames.of(cc.toUpperCase())) || cc.toUpperCase(); } catch (e) { return cc.toUpperCase(); }
+}
+
+
+
+
+
+function flagEl(cc) {
+	if (!/^[a-z]{2}$/.test(cc || '')) return null;
+	let img = document.createElement('img');
+	img.className = 'flag';
+	img.src = 'assets/flags/' + cc + '.svg';
+	img.alt = cc.toUpperCase();
+	img.title = countryName(cc);
+	img.onerror = function () { img.remove(); };
+	return img;
+}
+function flagHTML(cc) { let f = flagEl(cc); return f ? f.outerHTML.replace('<img ', '<img onerror="this.remove()" ') : ''; }
+
+
 function roleBadge(role) {
 	return role > 0 ? ' <span class="badge role-' + role + '">' + ROLE_NAMES[role] + '</span>' : '';
 }
 
 async function api(url, opt = {}) { return fetch(url, opt); }
+
+
+
+
+
+
+
+const wideColumnMax = 600;
+function fitWideColumn(table) {
+	if (!table.dataset.baseMin) table.dataset.baseMin = parseFloat(getComputedStyle(table).minWidth) || 0;
+	let cols = Array.prototype.slice.call(table.querySelectorAll('col'));
+	let flex = cols.findIndex(c => !c.style.width);
+	if (flex < 0) return;
+	let fixed = 0;
+	cols.forEach((c, i) => { if (i !== flex) fixed += parseFloat(getComputedStyle(c).width) || 0; });
+	let need = 0;
+	table.querySelectorAll('tbody tr').forEach(function (tr) {
+		if (tr.children.length === cols.length) need = Math.max(need, tr.children[flex].scrollWidth);
+	});
+	let min = Math.max(Number(table.dataset.baseMin), Math.ceil(fixed + Math.min(need, wideColumnMax)));
+	if (table.style.minWidth !== min + 'px') table.style.minWidth = min + 'px';
+}
+
+
+
+let navOnline = [], navOffline = [];
 
 async function refresh() {
 	try {
@@ -555,23 +638,25 @@ async function refresh() {
 			return '<tr>' +
 				'<td>' + p.id + '</td>' +
 				'<td title="' + n + '">' + n + roleBadge(p.role) + '</td>' +
-				'<td class="mono">' + esc(p.ip) + '</td>' +
+				'<td class="mono">' + flagHTML(p.country) + esc(p.ip) + '</td>' +
 				'<td class="mono">' + g + '</td>' +
 				'<td>' + p.ping + '</td>' +
 				lastMessageCell(p) +
 				'<td class="act">' +
 					'<button data-id="' + p.id + '" data-guid="' + g + '" data-action="message" data-name="' + n + '" onclick="handleActionClick(this)">Message</button>' +
 					'<button data-id="' + p.id + '" data-action="kick" data-name="' + n + '" onclick="handleActionClick(this)">Kick</button>' +
-					'<button data-id="' + p.id + '" data-action="ban" data-name="' + n + '" onclick="handleActionClick(this)">Ban</button>' +
 					'<button data-guid="' + g + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button>' +
 				'</td>' +
 			'</tr>';
 		}).join('');
 
 		
-		let bans = d.bans || {};
+		
+		
+		setTimeout(() => fitWideColumn(document.getElementById('onlineTable')), 0);
+		navOnline = d.connected ? (d.players || []).slice().sort((a, b) => a.id - b.id) : [];
+		navOffline = d.offlinePlayers || [];
 		document.getElementById('offlinePlayers').innerHTML = (d.offlinePlayers || []).map(function(p) {
-			let ban = bans[String(p.guid).toLowerCase()];
 			let seconds = Math.max(0, Number(p.totalPlaytimeSeconds) || 0);
 			let days = Math.floor(seconds / 86400);
 			let hours = Math.floor((seconds % 86400) / 3600);
@@ -580,18 +665,60 @@ async function refresh() {
 
 			return '<tr>' +
 				'<td title="' + esc(p.name) + '">' + esc(p.name) + roleBadge(p.role) + '</td>' +
-				'<td class="mono">' + esc(p.ip) + '</td>' +
+				'<td class="mono">' + flagHTML(p.country) + esc(p.ip) + '</td>' +
 				'<td class="mono">' + esc(p.guid) + '</td>' +
 				'<td>' + playtime + '</td>' +
 				'<td>' + fmtLastSeen(p.lastSeenUnix) + '</td>' +
-				'<td class="ban-cell ' + (ban ? 'ban-on' : 'ban-off') + '" title="' + esc(banWithReason(ban)) + '">' + esc(banWithReason(ban)) + '</td>' +
+				lastMessageCell(p) +
 				'<td class="act"><button data-guid="' + esc(p.guid) + '" onclick="openDetails(this.getAttribute(\'data-guid\'))">Details</button></td>' +
 			'</tr>';
 		}).join('');
+		setTimeout(() => fitWideColumn(document.getElementById('offlineTable')), 0);
 	} catch(e) {
 		setStatusCount(''); 
 	}
 }
+
+
+
+
+let ipMap = null;
+function toggleIPMap(tr, i) {
+	let wasOpen = tr.classList.contains('open');
+	if (ipMap) { ipMap.remove(); ipMap = null; }
+	document.querySelectorAll('#detIPs tr.ipmap').forEach(r => r.remove());
+	document.querySelectorAll('#detIPs tr.iprow.open').forEach(r => r.classList.remove('open'));
+	if (wasOpen) return;
+	tr.classList.add('open');
+	let l = i.location, row = document.createElement('tr'), td = document.createElement('td');
+	row.className = 'ipmap';
+	td.colSpan = 4;
+	let box = document.createElement('div'); box.className = 'ipmapbox';
+	let map = document.createElement('div'); map.className = 'map';
+	let info = document.createElement('div'); info.className = 'info';
+	let line = (cls, text) => { let d = document.createElement('div'); if (cls) d.className = cls; d.textContent = text; info.append(d); return d; };
+	let cc = l.country || i.country;
+	line('place', [l.city, l.region].filter(Boolean).join(', ') || countryName(cc) || 'Unknown place');
+	let cn = line('', ''), f = flagEl(cc);
+	if (f) cn.append(f, ' ');
+	cn.append(countryName(cc) || '');
+	line('dim', 'Within about ' + l.radiusKm + ' km');
+	line('dim mono', l.lat.toFixed(2) + ', ' + l.lon.toFixed(2));
+	let a = document.createElement('a');
+	a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Open in OpenStreetMap';
+	a.href = 'https://www.openstreetmap.org/?mlat=' + l.lat + '&mlon=' + l.lon + '#map=10/' + l.lat + '/' + l.lon;
+	line('', '').append(a);
+	info.lastChild.style.marginTop = '8px';
+	box.append(map, info); td.append(box); row.append(td);
+	tr.after(row);
+	if (typeof L === 'undefined') { map.textContent = ''; return; } 
+	ipMap = L.map(map, { scrollWheelZoom: false }).setView([l.lat, l.lon], l.radiusKm > 200 ? 5 : l.radiusKm > 50 ? 7 : 8);
+	ipMap.attributionControl.setPrefix(false);
+	L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 12, attribution: '&copy; OpenStreetMap' }).addTo(ipMap);
+	L.circle([l.lat, l.lon], { radius: l.radiusKm * 1000, color: '#8ab4f8', weight: 1, fillOpacity: .15 }).addTo(ipMap);
+	L.circleMarker([l.lat, l.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#8ab4f8', fillOpacity: 1 }).addTo(ipMap);
+}
+
 
 
 
@@ -630,13 +757,6 @@ function banText(b) {
 	if (b.perm) return 'Banned (Perm)';
 	if (b.minutesLeft < 0) return 'Banned';
 	return 'Banned (' + fmtMinutesLeft(b.minutesLeft) + ' left)';
-}
-
-
-
-function banWithReason(b) {
-	let s = banText(b);
-	return b && b.banned && b.reason ? s + ' - ' + b.reason : s;
 }
 
 function fmtMinutesLeft(min) {
@@ -1023,6 +1143,22 @@ async function openDetails(guid) {
 
 
 
+
+
+function stepDetails(dir) {
+	let seen = {}, list = [];
+	navOnline.concat(navOffline).forEach(function (p) {
+		let g = String(p.guid || '').toLowerCase();
+		if (g && !seen[g]) { seen[g] = true; list.push(g); }
+	});
+	if (!list.length) return;
+	let i = list.indexOf(String(detOpenGuid || '').toLowerCase());
+	let next = i < 0 ? 0 : (i + dir + list.length) % list.length;
+	openDetails(list[next]);
+}
+
+
+
 let closing = false;
 async function closeDetails() {
 	if (closing) return;
@@ -1084,7 +1220,7 @@ function renderDetails(keepDraft) {
 		['Time on server', fmtDuration(p.playtimeSeconds)],
 		['Sessions', String(s.count + (p.online ? 1 : 0))],
 		['Average session', s.count ? fmtDuration(s.avgSeconds) : '—'],
-		['Last IP', p.lastIp || '—']
+		['Last IP', p.lastIp || '—', p.lastIpCountry]
 	];
 	let tl = document.getElementById('detTiles');
 	tl.textContent = '';
@@ -1093,6 +1229,8 @@ function renderDetails(keepDraft) {
 		el.className = 'tile';
 		let k = document.createElement('div'); k.className = 'k'; k.textContent = t[0];
 		let v = document.createElement('div'); v.className = 'v'; v.textContent = t[1];
+		let f = flagEl(t[2]); 
+		if (f) v.prepend(f);
 		el.append(k, v);
 		tl.append(el);
 	});
@@ -1137,7 +1275,11 @@ function renderDetails(keepDraft) {
 		[fmtStamp(x.connected), left, fmtDuration(x.seconds), x.ip].forEach(function (v, i) {
 			let td = document.createElement('td');
 			td.textContent = v;
-			if (i === 3) td.className = 'mono';
+			if (i === 3) {
+				td.className = 'mono';
+				let f = flagEl(x.country);
+				if (f) td.prepend(f);
+			}
 			if (x.current && i === 1) td.style.color = '#81c995';
 			tr.append(td);
 		});
@@ -1149,10 +1291,17 @@ function renderDetails(keepDraft) {
 	ib.textContent = '';
 	det.ips.forEach(function (i) {
 		let tr = document.createElement('tr');
+		tr.className = 'iprow' + (i.location ? ' has' : '');
+		tr.title = i.location ? 'Show where this IP is' : '';
+		if (i.location) tr.addEventListener('click', function (e) { if (!e.target.closest('a')) toggleIPMap(tr, i); });
 		[i.ip, fmtDay(i.firstUsed), fmtDay(i.lastUsed)].forEach(function (v, n) {
 			let td = document.createElement('td');
 			td.textContent = v;
-			if (n === 0) td.className = 'mono';
+			if (n === 0) {
+				td.className = 'mono';
+				let f = flagEl(i.country);
+				if (f) td.prepend(f);
+			}
 			tr.append(td);
 		});
 		let td = document.createElement('td');
@@ -1601,7 +1750,7 @@ function renderSteam(d) {
 	let tiles = [
 		['Account created', p.createdUnix ? fmtDay(p.createdUnix) + ' (' + fmtAge(p.createdUnix) + ')' : 'Hidden'],
 		['Steam level', p.level == null ? 'Hidden' : String(p.level)],
-		['Country', p.countryCode || (p.public ? 'Not set' : 'Hidden')],
+		['Country', p.countryCode ? countryName(p.countryCode) : (p.public ? 'Not set' : 'Hidden'), (p.countryCode || '').toLowerCase()],
 		['DayZ on Steam', dayz],
 		['DayZ, last 2 weeks', dayz2],
 		['Last online on Steam', lastOnline],
@@ -1616,6 +1765,8 @@ function renderSteam(d) {
 		el.className = 'tile';
 		let k = document.createElement('div'); k.className = 'k'; k.textContent = t[0];
 		let v = document.createElement('div'); v.className = 'v'; v.textContent = t[1];
+		let f = flagEl(t[2]); 
+		if (f) v.prepend(f);
 		el.append(k, v);
 		tl.append(el);
 	});
@@ -1787,6 +1938,16 @@ document.addEventListener('keydown', (e) => {
 
 refresh();
 setInterval(refresh, 5000);
+
+
+
+(function () {
+	let m = /^#details=([0-9a-fA-F]{32})$/.exec(location.hash);
+	if (m) {
+		history.replaceState(null, '', location.pathname + location.search);
+		openDetails(m[1].toLowerCase());
+	}
+})();
 </script>
 <script>
 
