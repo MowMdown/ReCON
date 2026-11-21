@@ -584,7 +584,7 @@ async function poll() {
 
 // Each map's size in metres; one the list doesn't know is sized to fit
 // the players on it.
-const SIZES = { chernarusplus: 15360, enoch: 12800, namalsk: 12800, deerisle: 16384, sakhal: 15360, esseker: 12800, takistanplus: 12800, banov: 15360, chiemsee: 10240, pripyat: 20480, rostow: 14336, iztek: 8192, alteria: 8192 };
+const SIZES = { chernarusplus: 15360, enoch: 12800, namalsk: 12800, deerisle: 16384, sakhal: 15360, esseker: 12800, takistanplus: 12800, banov: 15360, chiemsee: 10240, pripyat: 20480, rostow: 14336, iztek: 8192, alteria: 8192, nasdara: 16384 };
 const NAMES = { chernarusplus: 'Chernarus', enoch: 'Livonia', namalsk: 'Namalsk', deerisle: 'Deer Isle', sakhal: 'Sakhal', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', pripyat: 'Pripyat', rostow: 'Rostow', iztek: 'Iztek', alteria: 'Alteria', nasdara: 'Nasdara' };
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
 
@@ -790,7 +790,9 @@ function setWorld(w, s) {
 	}
 	L.polyline([[0, 0], [0, size], [size, size], [size, 0], [0, 0]], { color: '#4a5a4d', weight: 1, interactive: false }).addTo(gridLayer);
 	map.setMaxBounds([[-size * 0.25, -size * 0.25], [size * 1.25, size * 1.25]]);
-	if (!fitted) map.fitBounds([[0, 0], [size, size]]);
+	// The whole map once, when it is first known; never again on its own
+	// (a player joining used to zoom the map back out).
+	if (!fitted) { map.fitBounds([[0, 0], [size, size]]); fitted = true; }
 	drawLabels();
 }
 
@@ -1411,7 +1413,6 @@ function render() {
 	setStatusCount(connected ? players.length + ' player(s) on the map' : '');
 	renderList();
 	drawMarkers();
-	if (!fitted && players.length && size) { fitAll(); fitted = true; }
 	if (selGuid) renderPlayer();
 	if (document.getElementById('wModal').style.display === 'flex') renderWorld();
 }
