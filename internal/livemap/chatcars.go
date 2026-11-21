@@ -80,6 +80,8 @@ func keepChatCars(found []chatCarResult, untracked bool, now time.Time) {
 		}
 	}
 	if untracked {
-		oldModOnce.Do(func() { log.Printf("recon-mod: tracking chat vehicles needs recon-mod 0.0.1m (vehicles spawn, but the next one won't replace them)") })
+		oldModOnce.Do(func() {
+			log.Printf("recon-mod: tracking chat vehicles needs recon-mod 0.0.1m (vehicles spawn, but the next one won't replace them)")
+		})
 	}
 }

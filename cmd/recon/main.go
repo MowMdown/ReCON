@@ -23,6 +23,7 @@ import (
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
 	"github.com/MowMdown/ReCON/internal/geoip"
+	"github.com/MowMdown/ReCON/internal/modbundle"
 	"github.com/MowMdown/ReCON/internal/serverinfo"
 	"github.com/MowMdown/ReCON/internal/steam"
 	"github.com/MowMdown/ReCON/internal/store"
@@ -70,6 +71,14 @@ func main() {
 		}
 		runCommandLine(os.Args[1:])
 		return
+	}
+	// The recon-mod this ReCON needs, into the data folder for the admin to
+	// copy to the game server (only in the image, which carries it).
+	dataDir := filepath.Dir(dbPath)
+	if written, v, err := modbundle.Install(modbundle.BundleDir(), dataDir); err != nil {
+		log.Printf("writing recon-mod to %s: %v", filepath.Join(dataDir, "@ReCON"), err)
+	} else if written {
+		log.Printf("wrote recon-mod %s to %s: copy it to the game server", v, filepath.Join(dataDir, "@ReCON"))
 	}
 	// The web pages still start without a password, so one can be entered
 	// in RCON Settings; until then every RCON call fails with ErrNoPassword.
