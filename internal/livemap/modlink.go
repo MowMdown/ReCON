@@ -369,6 +369,9 @@ var state struct {
 	worldEvents []WorldEvent
 	// The map whose vehicles.json was looked for this connection.
 	vehFileFor string
+	// The map the mod last reported, kept in the database (mapstate.go), so
+	// the Live Map can show it while the mod isn't connected.
+	lastWorld string
 	// The predators as last sent (nil: never, so a mod before 0.0.1l).
 	predators []Predator
 	places    []Place
@@ -408,7 +411,11 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	var newSteam [][2]string
 	var chatCars []chatCarResult // chat cars the results reported, kept after the lock
 	untracked := false
+	saveWorld := ""
 	state.Lock()
+	if w := strings.ToLower(req.World); w != "" && w != state.lastWorld {
+		state.lastWorld, saveWorld = w, w
+	}
 	if state.lastSync.IsZero() || now.Sub(state.lastSync) > staleAfter {
 		log.Printf("recon-mod: the mod (version %s) connected (%s, %d players)", req.Mod, req.World, len(req.Players))
 		// The server may have restarted with other mods: fetch the item list again.
@@ -562,6 +569,9 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	state.Unlock()
 
 	keepChatCars(chatCars, untracked, now)
+	if saveWorld != "" {
+		saveLastWorld(saveWorld)
+	}
 	if saveSteamID != nil {
 		for _, g := range newSteam {
 			if err := saveSteamID(g[0], g[1]); err != nil {
@@ -757,6 +767,9 @@ func Current(now time.Time) (Status, []Player) {
 	state.Lock()
 	defer state.Unlock()
 	st := Status{LastSync: state.lastSync, Mod: state.mod, World: state.world, Date: state.date, Weather: state.weather}
+	if st.World == "" {
+		st.World = state.lastWorld // the mod isn't connected (or not since a restart): its last map
+	}
 	st.Connected = !state.lastSync.IsZero() && now.Sub(state.lastSync) <= staleAfter
 	out := []Player{}
 	if st.Connected {
@@ -1100,7 +1113,7 @@ func reset() {
 	state.nextID, state.commands, state.steamSaved, state.refused = 0, nil, nil, ""
 	state.watch, state.inventory, state.previous = nil, nil, nil
 	state.catalog, state.catalogTotal, state.catalogTypes = nil, 0, nil
-	state.predators, state.vehFileFor = nil, ""
+	state.predators, state.vehFileFor, state.lastWorld = nil, "", ""
 }
 
 // battlEyeGUID is the BattlEye GUID of a SteamID64: md5("BE" + the ID as 8

@@ -664,6 +664,10 @@ async function poll() {
 // the players on it.
 const SIZES = { chernarusplus: 15360, enoch: 12800, namalsk: 12800, deerisle: 16384, sakhal: 15360, esseker: 12800, takistanplus: 12800, banov: 15360, chiemsee: 10240, pripyat: 20480, rostow: 14336, iztek: 8192, alteria: 8192, nasdara: 16384 };
 const NAMES = { chernarusplus: 'Chernarus', enoch: 'Livonia', namalsk: 'Namalsk', deerisle: 'Deer Isle', sakhal: 'Sakhal', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', pripyat: 'Pripyat', rostow: 'Rostow', iztek: 'Iztek', alteria: 'Alteria', nasdara: 'Nasdara' };
+// dataMaps: the maps with a picture in ReCON's data folder (for a map to
+// show before the mod has ever said which it is).
+let dataMaps = [];
+api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).catch(() => { });
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
 
 function initMap() {
@@ -1573,6 +1577,10 @@ function render() {
 		line.title = last ? 'recon-mod last sent at ' + last.toLocaleTimeString() : 'recon-mod hasn\'t connected';
 		document.getElementById('worldBtn').disabled = true;
 		document.getElementById('wxBadge').hidden = document.getElementById('timeBadge').hidden = true;
+		// The map's picture and grid don't need the mod: the map it last
+		// reported (ReCON keeps it), or the only map picture in the data folder.
+		const w = ((mod && mod.world) || (dataMaps.length === 1 ? dataMaps[0] : '')).toLowerCase();
+		if (w) setWorld(w, SIZES[w] || (w === world && size) || 15360);
 	} else {
 		dot.className = 'dot';
 		const w = (mod.world || '').toLowerCase();

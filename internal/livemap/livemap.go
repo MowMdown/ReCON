@@ -42,6 +42,9 @@ func Start(h Host) error {
 	if h.DB == nil || h.RCONPassword == nil || h.AddRoute == nil || h.Page == nil {
 		return errors.New("recon-mod: ReCON didn't give the Live Map its database, RCON password, routes or pages")
 	}
+	if err := openMapState(h.DB); err != nil {
+		return fmt.Errorf("recon-mod: creating its live_map_state table: %w", err)
+	}
 	if err := openChatCars(h.DB); err != nil {
 		return fmt.Errorf("recon-mod: creating its chat_vehicles table: %w", err)
 	}
@@ -56,6 +59,7 @@ func Start(h Host) error {
 		return err
 	}
 	h.AddRoute("GET /live", h.Page(page, "live.html"))
+	h.AddRoute("GET /api/mod/maps", mapList(h.DataDir))                            // the maps with a picture in the data folder
 	h.AddRoute("GET /api/mod/map/{world}", mapImage(h.DataDir))                    // maps/<world>.jpg|png|webp from the data folder
 	h.AddRoute("GET /api/mod/map/{world}/tiles", mapTileList(h.DataDir))           // maps/<world>/tiles.json: the tiles' levels and size
 	h.AddRoute("GET /api/mod/map/{world}/tile/{level}/{file}", mapTile(h.DataDir)) // one of them: maps/<world>/<level>/<column>_<row>.jpg
