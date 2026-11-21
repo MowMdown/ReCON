@@ -172,10 +172,10 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar .ovmenu button.on::before { background: var(--lm-accent); border-color: var(--lm-accent);
 	box-shadow: inset 0 0 0 2px var(--lm-surface); }
 .mapbar .ovmenu button:hover { background: var(--lm-sel); }
-/* The grid's lines take the theme's border colour; the map's edge a step
-   stronger. */
-.leaflet-overlay-pane path.gridline { stroke: var(--lm-line2); stroke-opacity: .7; }
-.leaflet-overlay-pane path.gridedge { stroke: var(--lm-line2); }
+/* The grid's lines: the theme's border colour lit with its accent, so they
+   stand out on the map's picture; the map's edge a step stronger. */
+.leaflet-overlay-pane path.gridline { stroke: color-mix(in srgb, var(--lm-accent) 45%, var(--lm-line2)); stroke-opacity: .85; }
+.leaflet-overlay-pane path.gridedge { stroke: color-mix(in srgb, var(--lm-accent) 70%, var(--lm-line2)); stroke-width: 1.5; }
 /* The grid's numbers: a small bubble, like a button that isn't one. */
 .gridlbl span { display: inline-block; white-space: nowrap; font-size: 10.5px; line-height: 1.3; padding: 1px 5px; color: var(--lm-text);
 	background: var(--lm-overlay); border: 1px solid var(--lm-line2); border-radius: 4px; }
