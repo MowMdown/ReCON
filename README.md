@@ -92,7 +92,7 @@ Run one ReCON container per game server. Copy the service and give each copy its
 
 [ReCON-Mod](https://github.com/MowMdown/ReCON-Mod) is a DayZ server-side mod that sends ReCON every player's live state (position, health, stats) every second and runs actions on them and on the weather and time. ReCON shows it on the [Live Map](#live-map-live) page. Install the mod on the game server (see its README). The ReCON image carries the recon-mod it needs and puts it in its data folder as `@ReCON` on start (on Unraid, for example `/mnt/user/appdata/recon/<server>/@ReCON`), replacing it whenever a ReCON update needs a newer one: copy that folder to the game server. ReCON needs nothing more, but for the map's terrain put its pictures in the data folder's `maps` folder (see [Map pictures](#map-pictures)).
 
-The published images `:mod` and `:testing-mod` (and `:v1.2.0-mod`) are the same as `:latest` and `:testing`: they were a separate build with the Live Map in, which every image has now.
+The old image tags `:mod` and `:testing-mod` (and `:v1.2.0-mod`) were the same as `:latest` and `:testing` and stopped updating at v3.0.0: every image has the Live Map, so pull `:latest` (releases) or `:testing` (pre-releases).
 
 ### Updating
 
