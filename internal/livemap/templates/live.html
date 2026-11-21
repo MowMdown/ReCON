@@ -121,6 +121,11 @@ html[data-theme]:not([data-theme="default"]) {
 .ctx .msg { padding: 4px 8px; font-size: 12px; }
 .ctx .msg:empty { display: none; }
 .ctx button.bad { color: #f28b82; }
+/* A player in a teleport list, asked: their name, then Confirm and Cancel. */
+.ctx .ask { display: flex; align-items: center; gap: 4px; padding: 2px 0 2px 8px; }
+.ctx .ask span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--lm-text-hi); }
+.ctx .ask button { display: inline-block; width: auto; padding: 3px 8px; border: 1px solid var(--lm-line); }
+.ctx .ask button.ok { color: var(--lm-accent); border-color: var(--lm-accent); }
 .mapbar .pick { font-size: 12px; background: var(--lm-sel); border: 1px solid var(--lm-accent); border-radius: 4px; padding: 4px 9px; color: var(--lm-text); }
 .mapbar .pick[hidden] { display: none; }
 .mapbar button[hidden] { display: none; }
@@ -1257,6 +1262,26 @@ function ctxTeleportList(label, except) {
 	return '<div class="lbl">' + label + '</div><div class="plist">' + (alive.length
 		? alive.map(p => ctxItem('tp:' + p.guid, esc(p.name))).join('') : '<div class="muted">Nobody is online.</div>') + '</div>';
 }
+// ctxAsk handles a click on a player in a menu's teleport list: their name
+// turns into Confirm and Cancel (one slip would move the wrong player), and
+// Cancel puts the name back. True when it handled a (tp: or tpno:).
+function ctxAsk(a) {
+	const menu = document.getElementById('ctx');
+	const restore = row => { const g = row.dataset.ask, p = byGuid[g]; row.outerHTML = ctxItem('tp:' + g, esc(p ? p.name : g)); };
+	if (a.startsWith('tp:')) {
+		menu.querySelectorAll('.ask').forEach(restore); // one at a time
+		const g = a.slice(3), b = menu.querySelector('[data-a="tp:' + g + '"]'), p = byGuid[g];
+		if (b) b.outerHTML = '<div class="ask" data-ask="' + g + '"><span>' + esc(p ? p.name : g) + '</span>' +
+			'<button type="button" data-a="tpok:' + g + '" class="ok">Confirm</button><button type="button" data-a="tpno:' + g + '">Cancel</button></div>';
+		return true;
+	}
+	if (a.startsWith('tpno:')) {
+		const row = menu.querySelector('.ask[data-ask="' + a.slice(5) + '"]');
+		if (row) restore(row);
+		return true;
+	}
+	return false;
+}
 // ctxRun sends an action, says so in the menu, and closes it a moment later.
 async function ctxRun(text, path, body) {
 	const at = ctxAt;
@@ -1282,12 +1307,8 @@ function showCtx(e) {
 		'<div class="hd">' + Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z) + '</div>' + ctxTeleportList('Teleport here') +
 		'<div class="lbl">This spot</div>' + ctxItem('spawn', 'Spawn an item here…'),
 		a => {
-			if (a.startsWith('tp:')) {
-				// Asked first: one slip in the list would move the wrong player.
-				const p = byGuid[a.slice(3)], who = p ? p.name : 'them';
-				if (!confirm('Teleport ' + who + ' to ' + Math.round(x) + ', ' + Math.round(z) + ' (' + grid(x, z) + ')?')) return;
-				ctxRun('Teleporting ' + who, '/api/mod/players/' + a.slice(3) + '/teleport', { x, z, y: 0 });
-			}
+			if (ctxAsk(a)) return;
+			if (a.startsWith('tpok:')) { const p = byGuid[a.slice(5)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(5) + '/teleport', { x, z, y: 0 }); }
 			else if (a === 'spawn') { closeCtx(); openSpawnAt(x, z); }
 		});
 }
@@ -1330,11 +1351,8 @@ function showVehicleCtx(id, e) {
 			if (a === 'info') { closeCtx(); openVehicleInfo(id); }
 			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'vehicle', id }); }
 			// Beside it (3 m east), not on top of it.
-			else if (a.startsWith('tp:')) {
-				const p = byGuid[a.slice(3)], who = p ? p.name : 'them';
-				if (!confirm('Teleport ' + who + ' beside this ' + catLabel(v) + '?')) return;
-				ctxRun('Teleporting ' + who, '/api/mod/players/' + a.slice(3) + '/teleport', { x: v.x + 3, z: v.z, y: 0 });
-			}
+			else if (ctxAsk(a)) return;
+			else if (a.startsWith('tpok:')) { const p = byGuid[a.slice(5)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(5) + '/teleport', { x: v.x + 3, z: v.z, y: 0 }); }
 			else if (a === 'delete') { closeCtx(); deleteVehicle(id); }
 		});
 }
