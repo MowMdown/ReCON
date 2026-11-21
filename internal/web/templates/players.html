@@ -67,6 +67,7 @@ img.flag { display: inline-block; width: 16px; height: 12px; margin-right: 7px; 
 /* Role badges: next to the name in the tables and in the Details header. */
 .badge.role-1 { color: #111; background: #fdd663; }
 .badge.role-2 { color: #111; background: #f28b82; }
+.badge.role-3 { color: #111; background: #8ab4f8; }
 td .badge { margin-left: 6px; vertical-align: 1px; }
 
 /* Permissions tab */
@@ -435,7 +436,10 @@ function esc(s) {
 }
 
 // Roles for the chat commands, by number (Players page: Details, Permissions).
-const ROLE_NAMES = ['Player', 'Mod', 'Admin'];
+// By the number stored (Vehicles came later, as 3); ROLE_ORDER is the order
+// they rank and are listed in.
+const ROLE_NAMES = ['Player', 'Mod', 'Admin', 'Vehicles'];
+const ROLE_ORDER = [0, 3, 1, 2];
 
 // countryName is a country's name from its ISO code ("gb" -> "United
 // Kingdom"), in the browser's own country names; the code itself if the
@@ -1217,8 +1221,9 @@ function renderDetails(keepDraft) {
 // What each role can do, shown under its name. [x] is shown as code.
 const ROLE_INFO = [
 	{ tag: 'normal user (default)', can: ['Can use ', ['!help'], ', ', ['!shout'], ', ', ['!whisper'], ', ', ['!players'], ', ', ['!vote'], ' and ', ['!code'], '.'] },
-	{ tag: 'moderator', can: ['Everything a Player can, plus ', ['!kick'], ' and ', ['!ban'], ' on Players. Gets every ', ['!code'], ' and every kick and ban notice.'] },
-	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['!kick'], ' and ', ['!ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] }
+	{ tag: 'moderator', can: ['Everything a Vehicles player can, plus ', ['!kick'], ', ', ['!ban'], ' and ', ['!warning'], ' on Players and Vehicles players. Gets every ', ['!code'], ' and every kick and ban notice.'] },
+	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['!kick'], ' and ', ['!ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] },
+	{ tag: 'vehicle spawner', can: ['Everything a Player can, plus ', ['!car'], ', ', ['!truck'], ', ', ['!boat'], ' and ', ['!vehicle'], ' (with recon-mod on the server). One vehicle at a time: the next replaces it.'] }
 ];
 
 function renderRoleBadge() {
@@ -1234,7 +1239,8 @@ function renderRoles() {
 	box.textContent = '';
 	if (!det) return;
 	let cur = det.player.role || 0;
-	ROLE_INFO.forEach(function (info, v) {
+	ROLE_ORDER.forEach(function (v) {
+		let info = ROLE_INFO[v];
 		let input = document.createElement('input');
 		input.type = 'radio';
 		input.name = 'role';

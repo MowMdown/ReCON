@@ -309,7 +309,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 <div id="cmdModal" class="modal">
 	<div class="box cmdbox" role="dialog" aria-labelledby="cmdTitle">
 		<h2 id="cmdTitle">Chat commands</h2>
-		<div class="tabs" id="cmdTabs"><button type="button" data-ctab="all" class="active">All Players</button><button type="button" data-ctab="staff">Mods &amp; Admins</button></div>
+		<div class="tabs" id="cmdTabs"><button type="button" data-ctab="all" class="active">All Players</button><button type="button" data-ctab="vehicles">Vehicles</button><button type="button" data-ctab="staff">Mods &amp; Admins</button></div>
 		<div class="cmdlist" id="cmdList"></div>
 		<div class="cmdfoot">
 			<button type="button" id="cmdReset">Reset to defaults</button>
@@ -438,7 +438,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td><code>{players_online}</code></td><td>How many players are online</td><td>Every flow</td></tr>
 					<tr><td><code>{player_name}</code> <code>{player_id}</code></td><td>The player's name and number</td><td>On join, Player message</td></tr>
 					<tr><td><code>{player_ping}</code> <code>{player_ip}</code> <code>{player_guid}</code></td><td>Their ping, IP address and GUID</td><td>On join, Player message</td></tr>
-					<tr><td><code>{player_role}</code></td><td>Player, Mod or Admin (set on the Players page)</td><td>On join, Player message</td></tr>
+					<tr><td><code>{player_role}</code></td><td>Player, Vehicles, Mod or Admin (set on the Players page)</td><td>On join, Player message</td></tr>
 					<tr><td><code>{message}</code></td><td>Everything they typed</td><td>Player message</td></tr>
 				</tbody>
 			</table>
@@ -466,7 +466,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td><code>{player_name}</code> <code>{player_ip}</code></td><td><b>is</b> / <b>is not</b> ignoring case, <b>matches</b> with <code>*</code> for any characters (<code>*admin*</code>, <code>192.168.*</code>), or <b>contains</b> any part of it</td></tr>
 					<tr><td><code>{player_id}</code> <code>{player_guid}</code></td><td><b>is</b> / <b>is not</b></td></tr>
 					<tr><td><code>{player_ping}</code> <code>{players_online}</code></td><td><code>=</code> <code>!=</code> <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td></tr>
-					<tr><td><code>{player_role}</code></td><td><b>is</b>, <b>is not</b>, <b>is at least</b> or <b>is at most</b> Player, Mod or Admin (Player &lt; Mod &lt; Admin)</td></tr>
+					<tr><td><code>{player_role}</code></td><td><b>is</b>, <b>is not</b>, <b>is at least</b> or <b>is at most</b> Player, Vehicles, Mod or Admin (Player &lt; Vehicles &lt; Mod &lt; Admin)</td></tr>
 				</tbody>
 			</table>
 			<h3>Examples</h3>
@@ -518,11 +518,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 		<div class="helppane" data-pane="chat">
 			<h3>Built-in chat commands</h3>
-			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) has a tab for the commands everyone can use and one for Mods &amp; Admins. There you turn each on or off, set its cooldown and change the wording and order of what ReCON sends.</p>
+			<p>Players type these in game chat. <b>Chat commands</b> (next to Import) has a tab for the commands everyone can use, one for the Vehicles role's and one for Mods &amp; Admins. There you turn each on or off, set its cooldown and change the wording and order of what ReCON sends.</p>
 			<ul>
 				<li>A cooldown is server-wide: after anyone uses the command, it's ignored for everyone until the time is up. 0 means none. Times are seconds, or h m s such as <code>1m30s</code>.</li>
 				<li>Words in braces such as <code>{player_name}</code> are filled in when the message is sent.</li>
-				<li>Who may use the Mods &amp; Admins commands is set on the Players page: <b>Details</b>, <b>Permissions</b>.</li>
+				<li>Who may use the Vehicles and Mods &amp; Admins commands is set on the Players page: <b>Details</b>, <b>Permissions</b>. Roles: Player &lt; Vehicles &lt; Mod &lt; Admin, each with everything below it.</li>
 			</ul>
 			<table>
 				<thead><tr><th>Command</th><th>Does</th></tr></thead>
@@ -535,13 +535,13 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td><code>!code</code></td><td>Sends the player's code (last 6 characters of their GUID) to the mods and admins online</td></tr>
 					<tr><td><code>!kick &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
 					<tr><td><code>!ban &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently; by code, even if they have left</td></tr>
-					<tr><td><code>!car</code>, <code>!truck</code>, <code>!boat</code>, <code>!vehicle &lt;name&gt; [colour]</code></td><td>Mods and Admins, with recon-mod on the server: spawns that vehicle whole in front of them, from the map's <code>maps/&lt;map&gt;/vehicles.json</code> in ReCON's data folder. Alone (<code>!car</code>), lists the names. No colour picks <code>default</code>, or a random one. Case doesn't matter. ReCON writes a first file from the server's vehicles once the mod connects, and never changes it after; edits take effect straight away</td></tr>
+					<tr><td><code>!car</code>, <code>!truck</code>, <code>!boat</code>, <code>!vehicle &lt;name&gt; [colour]</code></td><td>Vehicles players, Mods and Admins, with recon-mod on the server: spawns that vehicle whole in front of them, from the map's <code>maps/&lt;map&gt;/vehicles.json</code> in ReCON's data folder. Alone (<code>!car</code>), lists the names. No colour picks <code>default</code>, or a random one. Case doesn't matter. ReCON writes a first file from the server's vehicles once the mod connects, and never changes it after; edits take effect straight away</td></tr>
 					<tr><td><code>!warning &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: warns that player. The warning that reaches the threshold (2 by default, counted per visit) is followed 5 seconds later by a kick or a permanent ban with its reason, as set in the settings</td></tr>
 				</tbody>
 			</table>
 			<ul>
 				<li>A player's code is the last 6 characters of their GUID (they can type <code>!code</code>); their number is in <code>!players</code>.</li>
-				<li>Mods can kick, ban and warn Players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat; the Kick and Ban buttons on these pages work on everyone.</li>
+				<li>Mods can kick, ban and warn Players and Vehicles players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat; the Kick and Ban buttons on these pages work on everyone.</li>
 				<li>Every mod and admin online is told about each kick, ban and warning. <b>Announce</b> also tells everyone.</li>
 				<li>Only a command that works gets an answer. Anything else (a typo, a cooldown, no permission) is ignored; the line is still in the player's chat history. The vehicle commands also say why they couldn't spawn one (no recon-mod, a name it doesn't have, an error in <code>vehicles.json</code>).</li>
 			</ul>
@@ -1065,7 +1065,7 @@ const TEXT_OPS = [['eq', 'is'], ['ne', 'is not'], ['wild', 'matches'], ['has', '
 const IDENT_OPS = [['eq', 'is'], ['ne', 'is not']];
 const NUM_OPS = [['eq', '='], ['ne', '!='], ['gt', '>'], ['ge', '>='], ['lt', '<'], ['le', '<=']];
 const ROLE_OPS = [['eq', 'is'], ['ne', 'is not'], ['ge', 'is at least'], ['le', 'is at most']];
-const ROLES = [['0', 'Player'], ['1', 'Mod'], ['2', 'Admin']];
+const ROLES = [['0', 'Player'], ['3', 'Vehicles'], ['1', 'Mod'], ['2', 'Admin']]; // in rank order; Vehicles is stored as 3
 const SUBJECTS = [
 	['message', '{message}', 'word', 'chat'],
 	['player_name', '{player_name}', 'text', 'player'],
@@ -1225,7 +1225,7 @@ function condErr(c, b) {
 	if (!c[sub[3]]) return sub[1] + ' ' + NEED_TEXT[sub[3]];
 	if (sub[2] === 'num' && !numValueOk(b.value)) return 'Enter a whole number';
 	if (sub[0] === 'player_id' && !/^\d+$/.test(String(b.value).trim())) return 'Enter a whole number';
-	if (sub[2] === 'role' && !ROLES.some(([v]) => v === String(b.value).trim())) return 'Pick Player, Mod or Admin';
+	if (sub[2] === 'role' && !ROLES.some(([v]) => v === String(b.value).trim())) return 'Pick Player, Vehicles, Mod or Admin';
 	if (sub[0] === 'player_guid' && !/^[0-9a-fA-F]{32}$/.test(String(b.value).trim())) return 'Enter a GUID (32 letters and digits, 0-9 and a-f)';
 	if (sub[2] === 'word' && !terms(b.value).length) return 'Enter a word, several words, or a "quoted phrase"';
 	return '';
@@ -2018,7 +2018,7 @@ function renderCmds() {
 	list.textContent = '';
 	for (const c of CMDS) {
 		const s = draft[c.cmd];
-		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.role ? el('span', { class: 'who', text: c.role >= 2 ? 'ADMINS' : 'MODS & ADMINS' }) : null,
+		const head = el('div', { class: 'cmdhead' }, el('div', { class: 'cmdname' }, '!' + c.cmd, c.role ? el('span', { class: 'who', text: c.role === 3 ? 'VEHICLES & UP' : c.role === 2 ? 'ADMINS' : 'MODS & ADMINS' }) : null,
 			c.needsMod ? el('span', { class: 'need', text: 'NEEDS RECON-MOD' }) : null));
 		const on = el('input', { type: 'checkbox', checked: s.on, id: 'on-' + c.cmd });
 		head.append(el('label', { class: 'opt', for: 'on-' + c.cmd }, on, 'On'));
@@ -2048,7 +2048,7 @@ function renderCmds() {
 			head.append(el('label', { class: 'opt', for: 'ann-' + c.cmd }, annBox, 'Announce to everyone'));
 		}
 		const fields = el('div', { class: 'fields' });
-		const row = el('div', { class: 'cmd' + (s.on ? '' : ' off'), 'data-ctab': c.role ? 'staff' : 'all' }, head, fields);
+		const row = el('div', { class: 'cmd' + (s.on ? '' : ' off'), 'data-ctab': c.role === 3 ? 'vehicles' : c.role ? 'staff' : 'all' }, head, fields);
 		// Every tab's rows are kept (hidden), so Save still checks them all.
 		row.hidden = row.getAttribute('data-ctab') !== cmdTab;
 		if (c.cmd === 'vehicle' && UNLISTED.length) {

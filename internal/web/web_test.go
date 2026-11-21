@@ -768,3 +768,22 @@ func TestStatusHasVersions(t *testing.T) {
 		t.Errorf("got %s", rec.Body.String())
 	}
 }
+
+// TestSetRoleVehicles checks the role route takes Vehicles (3) and refuses 4.
+func TestSetRoleVehicles(t *testing.T) {
+	db := testDB(t)
+	if err := db.OpenPlayerSession(test.GUID1, "Driver", "1.2.3.4", 3, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	post := func(role int) int {
+		rec := httptest.NewRecorder()
+		buildWebRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/players/"+test.GUID1+"/role", strings.NewReader(fmt.Sprintf(`{"role": %d}`, role))))
+		return rec.Code
+	}
+	if code := post(3); code != http.StatusOK || db.GetPlayerRole(test.GUID1) != 3 {
+		t.Errorf("Vehicles: %d, stored %d", code, db.GetPlayerRole(test.GUID1))
+	}
+	if code := post(4); code != http.StatusBadRequest {
+		t.Errorf("role 4: %d, want 400", code)
+	}
+}

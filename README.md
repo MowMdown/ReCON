@@ -197,7 +197,7 @@ Details works for online and offline players. **Prev** and **Next** in its top r
 | Steam Profile | Their Steam account (see [Steam profiles](#6-steam-profiles)) |
 | Chat          | Their chat history. While they're online you can message them from here |
 | Notes         | A private admin note of up to 500 characters. It saves when you close the dialog or switch players |
-| Role          | Their role for the chat commands: Player, Mod or Admin. Clicking a role saves it |
+| Role          | Their role for the chat commands: Player, Vehicles, Mod or Admin. Clicking a role saves it |
 | Danger        | **Delete Player** (below) |
 
 The **Ban** / **Unban** button at the bottom works whether the player is online or not.
@@ -362,7 +362,7 @@ Move a step with its arrows, or drag it by the dotted handle on its left. Moving
 | `{players_online}` | How many players are online | Every flow |
 | `{player_name}` `{player_id}` | The player's name and number | On join, Player message |
 | `{player_ping}` `{player_ip}` `{player_guid}` | Their ping, IP address and GUID | On join, Player message |
-| `{player_role}` | Player, Mod or Admin | On join, Player message |
+| `{player_role}` | Player, Vehicles, Mod or Admin | On join, Player message |
 | `{player_vac_bans}` `{player_game_bans}` `{player_days_since_last_ban}` | Their VAC bans, game bans, and days since their last ban on Steam (below). `?` when ReCON has no Steam ban record for them | On join, Player message |
 | `{message}` | Everything they typed | Player message |
 
@@ -376,7 +376,7 @@ An If compares one thing, such as `{player_ping}`, and runs its steps when the c
 | `{player_name}` `{player_ip}` | **is** / **is not** ignoring case, **matches** with `*` wildcards (`*admin*`, `192.168.*`), or **contains** |
 | `{player_id}` `{player_guid}` | **is** / **is not** |
 | `{player_ping}` `{players_online}` | `=` `!=` `>` `>=` `<` `<=` |
-| `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Mod or Admin (Player < Mod < Admin) |
+| `{player_role}` | **is**, **is not**, **is at least** or **is at most** Player, Vehicles, Mod or Admin (Player < Vehicles < Mod < Admin) |
 | `{player_vac_bans}` `{player_game_bans}` `{player_days_since_last_ban}` | `=` `!=` `>` `>=` `<` `<=` |
 
 **Steam bans.** `{player_vac_bans}`, `{player_game_bans}` and `{player_days_since_last_ban}` come from the player's ban record on Steam, so they need `STEAM_API_KEY` and the player's SteamID (see [Steam profiles](#6-steam-profiles)). ReCON asks Steam once per player and keeps the answer 30 minutes. When there is no record to compare (no key, no SteamID found yet, Steam not answering), an If on one of them is **skipped**, its Else ifs and Else too, and the run log says so. A player with no bans has no "days since last ban", so an If on it is skipped for them as well. Steam's days count from the last VAC **or** game ban. For example, on an **On join** flow:
@@ -483,11 +483,11 @@ Players type these in game chat. They start with `!` because DayZ drops chat mes
 | `!kick <code or number> <reason>` | Mods, Admins | Kicks that player |
 | `!ban <code or number> <reason>` | Mods, Admins | Bans that player permanently; by code, even if they've left |
 | `!warning <code or number> <reason>` | Mods, Admins | Warns that player (see below) |
-| `!car`, `!truck`, `!boat`, `!vehicle <name> [colour]` | Mods, Admins | Spawns that vehicle whole in front of them (needs recon-mod; see below). Alone, lists the names |
+| `!car`, `!truck`, `!boat`, `!vehicle <name> [colour]` | Vehicles, Mods, Admins | Spawns that vehicle whole in front of them (needs recon-mod; see below). Alone, lists the names |
 
 - **Code or number:** a player's code is the last 6 characters of their GUID (they can type `!code`); their number is the one `!players` shows (`12` or `#12`).
-- **Roles** are set on the Players page, under **Details → Role**, and are stored with the player's GUID, so they survive a name change. New players are Players.
-- Mods can kick, ban and warn Players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
+- **Roles** are set on the Players page, under **Details → Role**, and are stored with the player's GUID, so they survive a name change. Each includes everything below it: **Player** < **Vehicles** (adds `!car`, `!truck`, `!boat`, `!vehicle`) < **Mod** (adds `!kick`, `!ban`, `!warning`) < **Admin**. New players are Players.
+- Mods can kick, ban and warn Players and Vehicles players. Admins can also kick, ban and warn Mods. Nobody can kick, ban or warn an Admin from chat. The web GUI's buttons act as the server owner and work on everyone.
 - Every mod and admin online is told about each kick, ban and warning. With **Announce** on, everyone is told.
 - **Warnings:** each `!warning` is sent to the player with its reason and adds one to their warnings. Warnings are counted per visit: they start again at 0 when the player leaves. The warning that reaches the threshold (**Warnings until**, 2 by default, 1 or more) is followed 5 seconds later by a kick or a permanent ban with that warning's reason, whichever the **Kick / Ban** setting next to it says at that moment, and the count starts again.
 - Only a command that works gets a reply. A typo, a cooldown or a missing permission is silently ignored, though the line still appears in the player's chat history. The vehicle commands are the exception: they say why they couldn't spawn one.

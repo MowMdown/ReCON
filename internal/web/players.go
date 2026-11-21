@@ -293,7 +293,7 @@ func handleSaveNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "note": note})
 }
 
-// handleSetRole serves POST /api/players/{guid}/role {"role": 0|1|2}: the
+// handleSetRole serves POST /api/players/{guid}/role {"role": 0|1|2|3}: the
 // player's role for the chat commands (Player, Mod or Admin). The Details
 // dialog's Permissions tab saves it as soon as a role is clicked.
 func handleSetRole(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +305,7 @@ func handleSetRole(w http.ResponseWriter, r *http.Request) {
 		Role *int `json:"role"`
 	}
 	if err := decodeBody(w, r, &req); err != nil || req.Role == nil {
-		fail(w, http.StatusBadRequest, `send {"role": 0, 1 or 2}`)
+		fail(w, http.StatusBadRequest, `send {"role": 0, 1, 2 or 3}`)
 		return
 	}
 	if *req.Role < flows.RolePlayer || *req.Role > flows.RoleMax {

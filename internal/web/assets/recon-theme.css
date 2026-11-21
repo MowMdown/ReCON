@@ -72,6 +72,7 @@ th.drag-over-left { box-shadow: inset 3px 0 0 var(--color-accent) !important; } 
 .badge.online { color: var(--rc-ok) !important; background: color-mix(in srgb, var(--rc-ok) 16%, transparent) !important; }
 .badge.banned, .badge.role-2 { color: var(--rc-err) !important; background: var(--rc-err-bg) !important; }
 .badge.role-1 { color: var(--rc-warn) !important; background: color-mix(in srgb, var(--rc-warn) 16%, transparent) !important; }
+.badge.role-3 { color: var(--color-accent) !important; background: color-mix(in srgb, var(--color-accent) 16%, transparent) !important; }
 
 /* dialogs */
 .modal { background: color-mix(in srgb, var(--color-bg) 70%, transparent) !important; backdrop-filter: blur(3px); }
