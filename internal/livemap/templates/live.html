@@ -1396,7 +1396,9 @@ document.getElementById('rGo').addEventListener('click', async () => {
 const PLACED_KINDS = [['base', 'Base building'], ['tent', 'Tents & shelters'], ['storage', 'Storage'], ['trap', 'Traps'], ['other', 'Other']];
 const PLACED_MIN_ZOOM = -2;
 let placedOn = layerPref('placed', '0') === '1', placedList = [], placedSent = true, placedMarkers = {}, placedOpen = null;
-const placedKindOn = Object.fromEntries(PLACED_KINDS.map(([k]) => [k, layerPref('placed.' + k, '1') === '1']));
+// Each kind is off until ticked (remembered): switching Placed objects on
+// draws nothing until you pick what to see.
+const placedKindOn = Object.fromEntries(PLACED_KINDS.map(([k]) => [k, layerPref('placed.' + k, '0') === '1']));
 const plcPopup = L.popup({ autoPan: false, offset: [0, -4] });
 function togglePlaced() { placedOn = !placedOn; setLayerPref('placed', placedOn ? '1' : '0'); drawPlaced(); loadPlaced(); }
 function togglePlacedKind(k) { placedKindOn[k] = !placedKindOn[k]; setLayerPref('placed.' + k, placedKindOn[k] ? '1' : '0'); drawPlaced(); }
@@ -1417,6 +1419,7 @@ function drawPlaced() {
 	const zoomedOut = map.getZoom() < PLACED_MIN_ZOOM;
 	layerButton('placedBtn', placedOn, 'Placed objects' + (placedOn && placedSent ? ' ' + shown : ''),
 		placedOn && !placedSent ? 'recon-mod doesn\'t send placed objects: it needs 1.0.1'
+			: placedOn && !PLACED_KINDS.some(([k]) => placedKindOn[k]) ? 'Tick the kinds to show below'
 			: placedOn && zoomedOut ? 'Zoom in to see placed objects' : 'Show what players placed: bases, tents, storage, traps');
 	const sub = document.getElementById('placedKinds');
 	sub.hidden = !placedOn;
