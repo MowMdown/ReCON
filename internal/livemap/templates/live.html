@@ -160,10 +160,12 @@ html[data-theme]:not([data-theme="default"]) {
 /* Overlays: one button, its menu of layers to switch on and off (a box,
    ticked when on), Deaths with how far back beside it. */
 .ovwrap { position: relative; }
-.ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 5px;
+.ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: 300px; display: flex; flex-direction: column; gap: 2px; padding: 5px;
 	background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
 .ovmenu[hidden] { display: none; }
-.ovmenu .ovrow { display: flex; gap: 6px; align-items: center; }
+.ovmenu .ovrow { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.ovmenu .ovrow select { flex: none; }
+.mapbar .ovmenu button { white-space: nowrap; }
 .ovmenu .ovrow button { flex: 1; }
 .mapbar .ovmenu button { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; text-align: left; border-color: transparent; background: transparent; padding: 5px 8px; }
 .mapbar .ovmenu button::before { content: ''; flex: none; width: 11px; height: 11px; border: 1px solid var(--lm-line2); border-radius: 3px; }
@@ -427,6 +429,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 			<div class="ovwrap">
 				<button type="button" id="ovBtn" onclick="toggleOvMenu()" aria-expanded="false" aria-controls="ovMenu" title="Show or hide what's drawn on the map">Overlays</button>
 				<div class="ovmenu" id="ovMenu" hidden data-noicon role="menu">
+					<button type="button" id="plyBtn" onclick="togglePlayers()" title="Show the players on the map">Players</button>
 					<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
 					<button type="button" id="predBtn" onclick="togglePredators()" title="Show the bears, wolves and guard dogs">Predators</button>
 					<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
@@ -1143,6 +1146,16 @@ function toggleOvMenu(open) {
 	b.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 document.addEventListener('mousedown', e => { if (!e.target.closest('.ovwrap')) toggleOvMenu(false); });
+
+// Players: their arrows and names (on unless switched off); hiding them
+// hides their pane, so nothing else about them changes.
+let playersOn = layerPref('players', '1') === '1';
+function togglePlayers() { playersOn = !playersOn; setLayerPref('players', playersOn ? '1' : '0'); drawPlayersToggle(); }
+function drawPlayersToggle() {
+	layerButton('plyBtn', playersOn, 'Players');
+	map.getPane('players').style.display = playersOn ? '' : 'none';
+	if (!playersOn) map.closePopup(plPopup);
+}
 
 // Grid: the 1 km lines and their numbers (on unless switched off).
 let gridOn = layerPref('grid', '1') === '1';
@@ -2695,6 +2708,7 @@ buildWorld();
 drawVehicles();
 loadVehicles();
 zoomBand();
+drawPlayersToggle();
 drawGridToggle();
 drawTowns(); loadPlaces();
 drawEvents(); loadEvents();
