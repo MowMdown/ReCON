@@ -274,9 +274,12 @@ type Command struct {
 	Text    string  `json:"text"`
 	// spawn: the vehicle to delete once the new one exists (persistent
 	// ID), for a chat car (chatcars.go); mod 0.0.1m on.
-	Replace string  `json:"replace,omitempty"`
-	Title   string  `json:"title"`
-	Seconds float64 `json:"seconds"`
+	Replace string `json:"replace,omitempty"`
+	// ...and its class: the mod deletes it only if both match, so an ID
+	// the game ever gave to another vehicle can't take that one with it.
+	ReplaceType string  `json:"replaceType,omitempty"`
+	Title       string  `json:"title"`
+	Seconds     float64 `json:"seconds"`
 	// World actions (QueueWorld).
 	Transition float64 `json:"transition"`
 	Hold       float64 `json:"hold"`

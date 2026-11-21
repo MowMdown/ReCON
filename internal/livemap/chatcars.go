@@ -29,11 +29,17 @@ func openChatCars(d *sql.DB) error {
 
 // ChatVehicleOf is the persistent ID (b1:b2:b3:b4) of the player's chat car.
 func ChatVehicleOf(guid string) (entity string, ok bool) {
+	entity, _, ok = chatCarOf(guid)
+	return entity, ok
+}
+
+// chatCarOf is the player's chat car: its persistent ID and its class.
+func chatCarOf(guid string) (entity, class string, ok bool) {
 	if db == nil {
-		return "", false
+		return "", "", false
 	}
-	err := db.QueryRow(`SELECT entity FROM chat_vehicles WHERE guid = ?`, strings.ToLower(guid)).Scan(&entity)
-	return entity, err == nil
+	err := db.QueryRow(`SELECT entity, type FROM chat_vehicles WHERE guid = ?`, strings.ToLower(guid)).Scan(&entity, &class)
+	return entity, class, err == nil
 }
 
 func saveChatCar(guid, entity, class string, at time.Time) error {
@@ -50,8 +56,8 @@ func saveChatCar(guid, entity, class string, at time.Time) error {
 // (guid) that replaces their chat car, and is tracked as the new one once
 // the mod reports it.
 func SpawnChatVehicle(guid, class string, now time.Time) (CommandStatus, error) {
-	old, _ := ChatVehicleOf(guid)
-	c, err := Queue(guid, Command{Action: "spawn", Text: class, Value: 1, Replace: old}, now)
+	old, oldClass, _ := chatCarOf(guid)
+	c, err := Queue(guid, Command{Action: "spawn", Text: class, Value: 1, Replace: old, ReplaceType: oldClass}, now)
 	if err != nil {
 		return c, err
 	}

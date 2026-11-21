@@ -33,18 +33,18 @@ func TestChatCarReplaceSent(t *testing.T) {
 	if err != nil || c.Replace != "" {
 		t.Fatalf("first: %+v %v", c, err)
 	}
-	if err := saveChatCar(guid(steamA), "1:2:3:4", "Hatchback_02", now); err != nil {
+	if err := saveChatCar(guid(steamA), "1:2:3:4", "OffroadHatchback", now); err != nil {
 		t.Fatal(err)
 	}
 	sync()
 	c, err = SpawnChatVehicle(guid(steamA), "Hatchback_02", now)
-	if err != nil || c.Replace != "1:2:3:4" || !c.ChatCar {
+	if err != nil || c.Replace != "1:2:3:4" || c.ReplaceType != "OffroadHatchback" || !c.ChatCar {
 		t.Errorf("second: %+v %v", c, err)
 	}
 	reply := sync()
 	found := false
 	for _, cmd := range reply.Commands {
-		found = found || (cmd.ID == c.ID && cmd.Replace == "1:2:3:4")
+		found = found || (cmd.ID == c.ID && cmd.Replace == "1:2:3:4" && cmd.ReplaceType == "OffroadHatchback")
 	}
 	if !found {
 		t.Errorf("replace not sent to the mod: %+v", reply.Commands)
