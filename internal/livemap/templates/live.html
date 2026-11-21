@@ -74,6 +74,8 @@
 /* A player's popup: their stats, then what they wear and hold. */
 .vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid #333; }
 .vpop .gear .row span:last-child { text-align: right; overflow-wrap: anywhere; }
+/* At most 5 rows, then it scrolls, so the popup fits near the map's edge. */
+.vpop .gear { max-height: calc(5 * 1.45em + 6px); overflow-y: auto; padding-right: 4px; }
 .vpop .muted { color: #888; font-size: 12px; }
 /* Town names: bigger for bigger places; zoomed out only the cities
    (#map's data-zb is far, mid or near). */
@@ -1542,7 +1544,11 @@ function renderPlayerPopup() {
 	if (worn) h += worn.length ? worn.map(it => row(slotLabel(it.slot), esc(itemName(it)))).join('') : '<div class="muted">Nothing worn or held</div>';
 	else h += (p.handsName || p.hands ? row('Hands', esc(p.handsName || item(p.hands))) : '') + '<div class="muted">Reading their gear…</div>';
 	h += '</div><div class="acts"><button type="button" onclick="event.stopPropagation(); openPlayer(\'' + p.guid + '\')" title="Their stats, inventory, spawning and actions">Info…</button></div></div>';
+	// Keep where the gear list was scrolled to across the redraws.
+	const old = plPopup.getElement() && plPopup.getElement().querySelector('.gear'), top = old ? old.scrollTop : 0;
 	plPopup.setLatLng([p.z, p.x]).setContent(h);
+	const now = plPopup.getElement() && plPopup.getElement().querySelector('.gear');
+	if (now) now.scrollTop = top;
 }
 
 // ---- A player's dialog --------------------------------------------------
