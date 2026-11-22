@@ -1532,7 +1532,7 @@ function drawEvents() {
 	for (const e of eventSpots) {
 		if (!eventCatOn[e.category] || !(e.on ? eventStateOn.active : eventStateOn.inactive)) continue;
 		const [, , c0] = eventCat(e.category), c = e.on ? c0 : '#7a7a7a';
-		const tip = esc(e.name) + ' · ' + (e.on ? (e.static ? 'always there' : 'up now') : e.checked ? 'not up' : 'not checked yet') +
+		const tip = esc(e.name) + ' · ' + (e.on ? 'Active' : e.checked ? 'Inactive' : 'Not checked yet') +
 			(e.on && e.radius ? ' · ' + Math.round(e.radius) + ' m' : '') + ' · ' + grid(e.x, e.z);
 		if (e.on && e.radius > 0)
 			L.circle([e.z, e.x], { radius: e.radius, color: c, weight: 1.5, dashArray: '5 4', fillColor: c, fillOpacity: 0.15, pane: 'events', interactive: false }).addTo(eventLayer);
