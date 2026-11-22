@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -125,6 +126,56 @@ func PlacedOf(id int, now time.Time) (p Placed, d PlacedDetail, haveDetail, ok b
 	d, haveDetail = placedState.detail[id]
 	placedState.Unlock()
 	return
+}
+
+// PlacedDetails is the contents of each of those objects the mod has sent
+// (left out: not yet). ask first has the mod send them again, as AskPlaced.
+func PlacedDetails(ids []int, ask bool, now time.Time) map[int]PlacedDetail {
+	if ask {
+		for _, id := range ids {
+			AskPlaced(id, now)
+		}
+	}
+	placedState.Lock()
+	defer placedState.Unlock()
+	out := map[int]PlacedDetail{}
+	for _, id := range ids {
+		if d, ok := placedState.detail[id]; ok {
+			out[id] = d
+		}
+	}
+	return out
+}
+
+// maxDetailIDs is how many objects one /api/mod/placed/details asks about.
+const maxDetailIDs = 200
+
+// handleModPlacedDetails serves GET /api/mod/placed/details?ids=1,2,3
+// (&ask=1: have the mod send them): the contents of several objects at
+// once, for a group of them.
+func handleModPlacedDetails(w http.ResponseWriter, r *http.Request) {
+	var ids []int
+	for _, s := range strings.Split(r.URL.Query().Get("ids"), ",") {
+		if s = strings.TrimSpace(s); s == "" {
+			continue
+		}
+		id, err := strconv.Atoi(s)
+		if err != nil {
+			fail(w, http.StatusBadRequest, "ids is a list of numbers")
+			return
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 || len(ids) > maxDetailIDs {
+		fail(w, http.StatusBadRequest, "ask about 1 to "+strconv.Itoa(maxDetailIDs)+" objects")
+		return
+	}
+	ds := PlacedDetails(ids, r.URL.Query().Get("ask") == "1", time.Now())
+	out := make(map[string]PlacedDetail, len(ds))
+	for id, d := range ds {
+		out[strconv.Itoa(id)] = d
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "details": out})
 }
 
 // handleModPlaced serves GET /api/mod/placed.

@@ -84,6 +84,7 @@ func Start(h Host) error {
 	h.AddRoute("POST /api/mod/saves/{id}/restore", handleModRestore)               // {"items": [ids]}: give those back (mod 1.0.1 on)
 	h.AddRoute("GET /api/mod/saves/{id}", handleModSave)                           // one, with its items
 	h.AddRoute("GET /api/mod/placed", handleModPlaced)                             // the objects players placed
+	h.AddRoute("GET /api/mod/placed/details", handleModPlacedDetails)              // several, with what is in them (?ids=1,2&ask=1)
 	h.AddRoute("GET /api/mod/placed/{id}", handleModPlacedOne)                     // one, with what is in it (?ask=1)
 	h.AddRoute("GET /api/mod/predators", handleModPredators)                       // bears, wolves and guard dogs
 	h.AddRoute("GET /api/mod/places", handleModPlaces)                             // the map's place names
