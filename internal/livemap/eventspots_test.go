@@ -39,7 +39,7 @@ func TestBuildSpots(t *testing.T) {
 	}
 	want := []struct {
 		event, cat string
-		x       float64
+		x          float64
 	}{{"StaticHeliCrash", "heli", 100.5}, {"StaticHeliCrash", "heli", 300}, {"StaticConvoys", "convoy", 500}, {"StaticContaminatedArea", "gas", 1000}}
 	for i, w := range want {
 		if list[i].Event != w.event || list[i].Category != w.cat || list[i].X != w.x || list[i].ID != i+1 {

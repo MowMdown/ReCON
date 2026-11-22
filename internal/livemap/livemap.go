@@ -54,6 +54,9 @@ func Start(h Host) error {
 	if err := openLastInv(h.DB); err != nil {
 		return fmt.Errorf("recon-mod: creating its last_inventory table: %w", err)
 	}
+	if err := openLoadouts(h.DB); err != nil {
+		return fmt.Errorf("recon-mod: creating its loadouts table: %w", err)
+	}
 	if err := openMapState(h.DB); err != nil {
 		return fmt.Errorf("recon-mod: creating its live_map_state table: %w", err)
 	}

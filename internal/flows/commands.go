@@ -76,6 +76,17 @@ var ChatCommandDefs = []chatCommandDef{
 	vehicleDef("truck", "that truck"),
 	vehicleDef("boat", "that boat"),
 	vehicleDef("vehicle", "that vehicle (bikes, ATVs, helicopters and the rest)"),
+	{Cmd: "save", Role: roleMod, Cool: "0", NeedsMod: true,
+		Help: "!save keeps everything you wear, carry and hold as your loadout, for !equip.",
+		Fields: []chatField{{"saved", "Saved (to the player)", "Loadout saved: {count} items", []string{"count"}}}},
+	{Cmd: "equip", Role: roleMod, Cool: "0", NeedsMod: true,
+		Help: "!equip replaces your gear with your !save loadout, every item pristine, once you type confirm.",
+		Fields: []chatField{
+			{"confirm", "Asks to confirm (to the player)", "Replace your gear with your saved loadout ({count} items)? Type confirm within 30 s", []string{"count"}},
+			{"equipped", "Equipped (to the player)", "Loadout equipped: {count} items", []string{"count"}},
+			{"cancelled", "Not confirmed (to the player: another message, or 30 s passed)", "Loadout not equipped", []string{}},
+			{"none", "No loadout (to the player)", "No loadout saved, use !save first", []string{}},
+		}},
 	{Cmd: "remove", Role: RoleVehicles, Cool: "0", NeedsMod: true,
 		Help: "!remove removes the vehicle your last !car, !truck, !boat or !vehicle spawned (anyone in it gets out first).",
 		Fields: []chatField{{"removing", "Removing (to the player)", "Removing your {vehicle}", []string{"vehicle"}}}},
@@ -503,6 +514,12 @@ func handleChatCommand(p battleye.Player, role int, text string) {
 
 	case "car", "truck", "boat", "vehicle":
 		runVehicleCommand(cmd, p, set, args)
+
+	case "save":
+		runSaveCommand(p, set)
+
+	case "equip":
+		runEquipCommand(p, set)
 
 	case "remove":
 		name, err := removeChatVehicle(p.GUID)

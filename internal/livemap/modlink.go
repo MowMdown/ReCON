@@ -1039,6 +1039,13 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 	}
 	c.SteamID = p.SteamID
 	back := false
+	if c.Action == "restore" && !modAtLeast(state.mod, "1.0.3") {
+		// An older mod doesn't know these keys (its JSON reader would fail).
+		if c.Clear {
+			return CommandStatus{}, errors.New("replacing their gear needs recon-mod 1.0.3")
+		}
+		c.Condition = ""
+	}
 	switch c.Action {
 	case "teleportTo":
 		t, ok := state.players[strings.ToLower(c.Target)]

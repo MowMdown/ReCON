@@ -233,7 +233,9 @@ func RestoreSaved(id int64, itemIDs []int, now time.Time) (CommandStatus, error)
 	if len(tree) == 0 {
 		return CommandStatus{}, errors.New("none of those items are in that saved inventory")
 	}
-	c, err := Queue(s.GUID, Command{Action: "restore", Items: noNulls(tree)}, now)
+	// Worn: a death restore makes up for a bug or a cheater, so gear ruined
+	// in the fight comes back usable (recon-mod 1.0.3 on; as saved before).
+	c, err := Queue(s.GUID, Command{Action: "restore", Items: noNulls(tree), Condition: "worn"}, now)
 	if err != nil {
 		return c, err
 	}
