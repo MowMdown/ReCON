@@ -159,10 +159,31 @@ html[data-theme]:not([data-theme="default"]) {
 :is(#vModal, #oModal) .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 :is(#vModal, #oModal) .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
 :is(#vModal, #oModal) .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
-:is(#vModal, #oModal) .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
-:is(#vModal, #oModal) .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:is(#vModal, #oModal) .part .lv { font-size: 12px; white-space: nowrap; }
-:is(#vModal, #oModal) .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+/* Placed objects close together: one 50 m square, one marker with ×N. */
+.gmark { position: relative; }
+.gmark svg { position: absolute; left: -6px; top: -6px; overflow: visible; cursor: pointer; }
+.gmark .n { position: absolute; left: 9px; top: -8px; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000; white-space: nowrap; cursor: pointer; }
+.gsquare { stroke: rgba(255, 255, 255, 0.45); stroke-dasharray: 4 4; fill: none; }
+.gpop .glist { display: flex; flex-direction: column; gap: 1px; margin: 4px 0 6px; max-height: calc(8 * 26px); overflow-y: auto; }
+.gpop .glist button { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 0; padding: 3px 4px; background: transparent; border: 0; border-radius: 4px; color: var(--lm-text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.gpop .glist button:hover { background: var(--lm-sel); }
+.gpop .glist .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpop .glist .ct { color: var(--lm-muted); font-size: 12px; white-space: nowrap; }
+#gModal .box { width: min(1000px, 95vw); }
+#gModal .ilist { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
+#gModal .idet { max-height: 62vh; overflow-y: auto; }
+#gModal .irow.gobj { font-weight: 600; }
+#gModal .irow.gobj .sl { color: var(--lm-muted); font-weight: 400; }
+#gModal .sub-items { display: flex; flex-direction: column; gap: 4px; }
+#gModal .ilist .sub-items { margin-left: 18px; }
+#gModal .idet h5 { margin: 12px 0 6px; font-size: 12px; color: var(--lm-muted); }
+#gModal .gacts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+#gModal .gacts button { margin: 0; }
+#gModal .dlg-err:empty { display: none; }
+:is(#vModal, #oModal, #gModal) .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
+:is(#vModal, #oModal, #gModal) .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(#vModal, #oModal, #gModal) .part .lv { font-size: 12px; white-space: nowrap; }
+:is(#vModal, #oModal, #gModal) .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 :is(#vModal, #oModal) .acts { display: flex; align-items: center; gap: 8px; }
 :is(#vModal, #oModal) .acts button { margin: 0; }
 :is(#vModal, #oModal) .st { font-size: 12.5px; }
@@ -597,6 +618,15 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div class="rtree" id="rTree"></div>
 		<div class="dlg-err" id="rErr"></div>
 		<div class="dfoot rfoot"><button type="button" class="go" id="rGo">Restore</button><button type="button" onclick="closeRestore()">Cancel</button></div>
+	</div>
+</div>
+
+<!-- Placed objects close together (one grid square): each one, what is in it (Info on the group's popup) -->
+<div id="gModal" class="modal">
+	<div class="box wide" role="dialog" aria-labelledby="gTitle">
+		<div class="dlg-head"><h2 id="gTitle">Placed objects</h2><span class="badge" id="gWhere"></span><span class="muted" id="gSum"></span><button type="button" class="dlg-x" onclick="closeGroupInfo()">Close</button></div>
+		<div class="inv"><div class="ilist" id="gList"></div><div class="idet" id="gDet"></div></div>
+		<div class="dlg-err" id="gErr"></div>
 	</div>
 </div>
 
@@ -1444,7 +1474,8 @@ let placedOn = layerPref('placed', '0') === '1', placedList = [], placedSent = t
 // Each kind is off until ticked (remembered): switching Placed objects on
 // draws nothing until you pick what to see.
 const placedKindOn = Object.fromEntries(PLACED_KINDS.map(([k]) => [k, layerPref('placed.' + k, '0') === '1']));
-const plcPopup = L.popup({ autoPan: false, offset: [0, -4] });
+// It opens below the map's top bar (Overlays, Fit...), which sits over the map.
+const plcPopup = L.popup({ autoPan: false, offset: [0, -4], autoPanPaddingTopLeft: [10, 60] });
 function togglePlaced() { placedOn = !placedOn; setLayerPref('placed', placedOn ? '1' : '0'); drawPlaced(); loadPlaced(); }
 function togglePlacedKind(k) { placedKindOn[k] = !placedKindOn[k]; setLayerPref('placed.' + k, placedKindOn[k] ? '1' : '0'); drawPlaced(); }
 async function loadPlaced() {
@@ -1475,22 +1506,49 @@ function drawPlaced() {
 		const b = map.getBounds().pad(0.2);
 		for (const o of placedList) if (placedKindOn[placedKind(o)] && b.contains([o.z, o.x])) want[o.id] = o;
 	}
-	for (const id in placedMarkers) if (!want[id]) { placedMarkers[id].remove(); delete placedMarkers[id]; }
-	for (const id in want) {
-		const o = want[id], [, c] = vehCondition(o.health);
-		const icon = L.divIcon({ className: 'omark', html: '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + c + '" stroke="#111" stroke-width="1"/></svg>', iconSize: [0, 0] });
-		let m = placedMarkers[id];
+	// Objects in one grid square are one marker (×N) until the square is
+	// SPLIT_PX wide on screen; then each shows, inside the square's outline.
+	const groups = {}, split = groupSplit(), keep = {};
+	for (const id in want) (groups[groupKey(want[id])] = groups[groupKey(want[id])] || []).push(want[id]);
+	for (const key in groups) {
+		const objs = groups[key];
+		if (objs.length === 1 || split) {
+			for (const o of objs) {
+				const [, c] = vehCondition(o.health);
+				const icon = L.divIcon({ className: 'omark', html: '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + c + '" stroke="#111" stroke-width="1"/></svg>', iconSize: [0, 0] });
+				let m = placedMarkers[o.id];
+				if (!m) {
+					m = placedMarkers[o.id] = L.marker([o.z, o.x], { pane: 'vehicles', icon, keyboard: false, title: placedName(o) }).addTo(map);
+					m.on('click', () => openPlacedPopup(o.id));
+				} else { m.setLatLng([o.z, o.x]); m.setIcon(icon); }
+				keep[o.id] = true;
+			}
+			if (objs.length > 1) {
+				const [i, j] = key.split(',').map(Number);
+				if (!placedMarkers['r' + key]) placedMarkers['r' + key] = L.rectangle([[j * GROUP_M, i * GROUP_M], [(j + 1) * GROUP_M, (i + 1) * GROUP_M]],
+					{ className: 'gsquare', weight: 1, interactive: false, fill: false }).addTo(map);
+				keep['r' + key] = true;
+			}
+			continue;
+		}
+		const [, c] = vehCondition(worstHealth(objs)), at = centreOf(objs);
+		const icon = L.divIcon({ className: 'gmark', iconSize: [0, 0], html: '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2" fill="' + c + '" stroke="#fff" stroke-width="2"/></svg><span class="n">×' + objs.length + '</span>' });
+		let m = placedMarkers['g' + key];
 		if (!m) {
-			m = placedMarkers[id] = L.marker([o.z, o.x], { pane: 'vehicles', icon, keyboard: false, title: placedName(o) }).addTo(map);
-			m.on('click', () => openPlacedPopup(o.id));
-		} else { m.setLatLng([o.z, o.x]); m.setIcon(icon); }
+			m = placedMarkers['g' + key] = L.marker([at[1], at[0]], { pane: 'vehicles', icon, keyboard: false, title: objs.length + ' placed objects' }).addTo(map);
+			m.on('click', () => openGroupPopup(key));
+		} else { m.setLatLng([at[1], at[0]]); m.setIcon(icon); m.options.title = objs.length + ' placed objects'; }
+		keep['g' + key] = true;
 	}
+	for (const id in placedMarkers) if (!keep[id]) { placedMarkers[id].remove(); delete placedMarkers[id]; }
 	if (placedOpen != null) { if (placedList.some(o => o.id === placedOpen)) renderPlacedPopup(); else map.closePopup(plcPopup); }
+	if (groupOpen != null) renderGroupPopup();
 	renderPlacedInfo();
+	renderGroupInfo();
 }
 function placedBy(o) { return o.placer ? esc(o.placer) : '<span class="muted">unknown</span>'; }
 function openPlacedPopup(id) {
-	placedOpen = id;
+	placedOpen = id; groupOpen = null;
 	renderPlacedPopup();
 	plcPopup.options.autoPan = true; plcPopup.openOn(map); plcPopup.options.autoPan = false;
 }
@@ -1561,6 +1619,193 @@ function renderPlacedInfo() {
 	document.getElementById('oActs').innerHTML = '<button type="button" onclick="askPlaced()" title="Read what is in and on it again">Refresh</button>' +
 		'<button type="button" class="bad" onclick="removePlaced(' + o.id + ')" title="Remove it, and everything in it">Remove</button>';
 }
+// ---- Placed objects close together -------------------------------------
+// A group is the shown objects in one GROUP_M square of the map (metres,
+// lined up with 0,0). Its popup and Info ask the mod for what is in each.
+const GROUP_M = 50, SPLIT_PX = 60, ZOOM_IN_M = 300;
+let groupOpen = null, groupInfo = null, groupSel = null, groupItemSel = null, groupExpand = {}, groupDetail = {}, groupRun = 0;
+function groupKey(o) { return Math.floor(o.x / GROUP_M) + ',' + Math.floor(o.z / GROUP_M); }
+function groupSplit() { return GROUP_M * Math.pow(2, map.getZoom()) >= SPLIT_PX; }
+function groupOf(key) {
+	return placedList.filter(o => placedKindOn[placedKind(o)] && groupKey(o) === key)
+		.sort((a, b) => placedName(a).localeCompare(placedName(b)) || a.id - b.id);
+}
+function worstHealth(objs) { return Math.min(...objs.map(o => o.health)); }
+function centreOf(objs) { return [objs.reduce((n, o) => n + o.x, 0) / objs.length, objs.reduce((n, o) => n + o.z, 0) / objs.length]; }
+function squareCentre(key) { const [i, j] = key.split(',').map(Number); return [(i + 0.5) * GROUP_M, (j + 0.5) * GROUP_M]; }
+function groupGrid(key) { const [x, z] = squareCentre(key); return grid(x, z); }
+// objCount is every item in and on an object, all levels.
+function objCount(d) { return (d.items || []).reduce((n, it) => n + 1 + countIn(it), 0); }
+function itemsText(n) { return n ? n + (n === 1 ? ' item' : ' items') : 'empty'; }
+function countText(id) { const d = groupDetail[id]; return !d ? 'Loading…' : d.failed ? '?' : itemsText(objCount(d)); }
+// askGroup has the mod send what is in these objects, then reads them back
+// each second until all came (or 15 tries: the rest show ?). Closing the
+// popup and the dialog stops it.
+async function askGroup(ids) {
+	ids = ids.slice(0, 200);
+	const run = groupRun;
+	ids.forEach(id => delete groupDetail[id]);
+	renderGroupViews();
+	for (let i = 0; i < 15 && run === groupRun; i++) {
+		try {
+			const d = await api('GET', '/api/mod/placed/details?ids=' + ids.join(',') + (i === 0 ? '&ask=1' : ''));
+			if (run !== groupRun) return;
+			for (const k in d.details || {}) groupDetail[k] = d.details[k];
+		} catch (e) { break; }
+		renderGroupViews();
+		if (ids.every(id => groupDetail[id])) return;
+		await new Promise(r => setTimeout(r, 1000));
+	}
+	if (run !== groupRun) return;
+	ids.forEach(id => { if (!groupDetail[id]) groupDetail[id] = { failed: true }; });
+	renderGroupViews();
+}
+function stopGroup() { groupRun++; groupDetail = {}; }
+function renderGroupViews() { if (groupOpen != null) renderGroupPopup(); renderGroupInfo(); }
+function openGroupPopup(key) {
+	stopGroup();
+	placedOpen = null; groupOpen = key;
+	renderGroupPopup();
+	plcPopup.options.autoPan = true; plcPopup.openOn(map); plcPopup.options.autoPan = false;
+	askGroup(groupOf(key).map(o => o.id));
+}
+function placersText(objs) {
+	const n = {};
+	for (const o of objs) n[o.placer || ''] = (n[o.placer || ''] || 0) + 1;
+	return Object.keys(n).sort((a, b) => (a === '') - (b === '') || n[b] - n[a] || a.localeCompare(b))
+		.map(p => (p ? esc(p) : 'unknown') + ' (' + n[p] + ')').join(', ');
+}
+function renderGroupPopup() {
+	const objs = groupOf(groupOpen);
+	if (!objs.length) { map.closePopup(plcPopup); return; }
+	if (objs.length === 1) { openPlacedPopup(objs[0].id); return; }
+	const el = plcPopup.getElement(), list = el && el.querySelector('.glist'), top = list ? list.scrollTop : 0;
+	const [x, z] = squareCentre(groupOpen), q = '\'' + groupOpen + '\'';
+	plcPopup.setLatLng([z, x]).setContent('<div class="vpop gpop" data-noicon><h4>' + objs.length + ' placed objects</h4><div class="ty">' + groupGrid(groupOpen) + '</div>' +
+		'<div class="glist">' + objs.map(o => '<button type="button" onclick="event.stopPropagation(); openPlacedPopup(' + o.id + ')" title="' + esc(o.type) + '">' +
+			'<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + vehCondition(o.health)[1] + '" stroke="#111" stroke-width="1"/></svg>' +
+			'<span class="nm">' + esc(placedName(o)) + '</span><span class="ct">' + countText(o.id) + '</span></button>').join('') + '</div>' +
+		'<div class="muted">Placed by ' + placersText(objs) + '</div>' +
+		'<div class="acts"><button type="button" onclick="event.stopPropagation(); zoomToGroup(' + q + ')" title="Zoom in so each object shows">Zoom in</button>' +
+		'<button type="button" onclick="event.stopPropagation(); openGroupInfo(' + q + ')" title="Each object and what is in it">Info</button></div></div>');
+	const nl = plcPopup.getElement() && plcPopup.getElement().querySelector('.glist');
+	if (nl) nl.scrollTop = top;
+}
+function zoomToGroup(key) {
+	map.closePopup(plcPopup);
+	const [x, z] = squareCentre(key);
+	// ZOOM_IN_M across, but always far enough in that the square splits
+	// (on a narrow map 300 m across can leave it just short).
+	const z0 = Math.max(Math.log2(map.getSize().x / ZOOM_IN_M), Math.log2(SPLIT_PX / GROUP_M));
+	map.setView([z, x], Math.min(map.getMaxZoom(), Math.ceil(z0 * 4) / 4));
+}
+function openGroupInfo(key) {
+	const ids = groupOf(key).map(o => o.id), have = groupOpen === key;
+	if (!have) stopGroup();
+	groupInfo = key; // before closing the popup, so its counts are kept
+	map.closePopup(plcPopup);
+	groupSel = ids[0] ?? null; groupItemSel = null; groupExpand = {};
+	if (groupSel != null) groupExpand[groupSel] = true;
+	document.getElementById('gErr').textContent = '';
+	document.getElementById('gModal').style.display = 'flex';
+	renderGroupInfo();
+	// The popup's counts may still be coming: ask again only for what is missing.
+	const missing = ids.filter(id => !groupDetail[id] || groupDetail[id].failed);
+	if (!have || missing.length) askGroup(have ? missing : ids);
+}
+function closeGroupInfo() { document.getElementById('gModal').style.display = 'none'; groupInfo = null; stopGroup(); }
+function gIrow(it, label, extra, obj) {
+	const [cn, cc] = condOf(it);
+	return '<button type="button" class="irow' + (it.id === groupItemSel && obj === groupSel ? ' sel' : '') + '" data-item="' + it.id + '" data-of="' + obj + '">' +
+		'<span class="sl">' + esc(label) + '</span><span class="nm">' + esc(itemName(it)) + '</span>' +
+		'<span class="ex">' + esc(extra || '') + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
+}
+function gItemRows(items, obj) {
+	return (items || []).slice().sort((a, b) => !!b.slot - !!a.slot || a.row - b.row || a.col - b.col).map(it => {
+		const n = countIn(it);
+		return gIrow(it, it.slot ? slotLabel(it.slot) : 'Cargo', n ? itemsText(n) : qty(it), obj);
+	}).join('');
+}
+function renderGroupInfo() {
+	if (groupInfo == null) return;
+	const objs = groupOf(groupInfo), list = document.getElementById('gList'), det = document.getElementById('gDet');
+	document.getElementById('gWhere').textContent = groupGrid(groupInfo);
+	if (!objs.length) {
+		document.getElementById('gTitle').textContent = 'Placed objects';
+		document.getElementById('gSum').textContent = '';
+		list.innerHTML = '<div class="empty">That isn\'t on the server any more.</div>'; det.innerHTML = '';
+		return;
+	}
+	document.getElementById('gTitle').textContent = objs.length + ' placed objects';
+	const pending = objs.some(o => !groupDetail[o.id]);
+	const total = objs.reduce((n, o) => n + (groupDetail[o.id] && !groupDetail[o.id].failed ? objCount(groupDetail[o.id]) : 0), 0);
+	document.getElementById('gSum').textContent = pending ? 'Loading…' : itemsText(total).replace('empty', 'nothing') + ' inside';
+	if (!objs.some(o => o.id === groupSel)) { groupSel = objs[0].id; groupItemSel = null; }
+	const top = list.scrollTop;
+	list.innerHTML = objs.map(o => {
+		const [cn, cc] = vehCondition(o.health), d = groupDetail[o.id], open = groupExpand[o.id];
+		const caret = d && !d.failed && d.items.length ? (open ? '▾ ' : '▸ ') : '';
+		return '<button type="button" class="irow gobj' + (o.id === groupSel && groupItemSel == null ? ' sel' : '') + '" data-obj="' + o.id + '">' +
+			'<span class="sl">' + caret + esc((PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1]) + '</span><span class="nm">' + esc(placedName(o)) + '</span>' +
+			'<span class="ex">' + countText(o.id) + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>' +
+			(open && d && !d.failed && d.items.length ? '<div class="sub-items">' + gItemRows(d.items, o.id) + '</div>' : '');
+	}).join('');
+	list.scrollTop = top;
+
+	const o = objs.find(x => x.id === groupSel), d = groupDetail[o.id];
+	const path = groupItemSel != null && d && !d.failed ? pathTo(d.items, groupItemSel) : null;
+	let h = '';
+	if (path) {
+		const it = path[path.length - 1], [cn, cc] = condOf(it);
+		h += '<div class="crumbs"><a data-obj="' + o.id + '">' + esc(placedName(o)) + '</a> ›' + path.slice(0, -1).map(x => ' <a data-item="' + x.id + '" data-of="' + o.id + '">' + esc(itemName(x)) + '</a> ›').join('') + '</div>';
+		h += '<h3>' + esc(itemName(it)) + '</h3><div class="ty">' + esc(it.type) + '</div><div class="props">';
+		const props = [['Where', it.slot ? slotLabel(it.slot) + ' (attached)' : 'Cargo, row ' + (it.row + 1) + ', column ' + (it.col + 1)],
+			['Condition', '<span style="color:' + cc + '">' + cn + '</span>']];
+		if (it.quantityMax) props.push([it.unit === 'rounds' ? 'Rounds' : 'Quantity', esc(qty(it))]);
+		h += props.map(([k, v]) => '<span class="k">' + k + '</span><span>' + v + '</span>').join('') + '</div>';
+		const att = it.attachments || [], cargo = it.cargo || [];
+		if (att.length) h += '<h5>Attachments · ' + att.length + '</h5><div class="sub-items">' + gItemRows(att, o.id) + '</div>';
+		if (cargo.length) h += '<h5>Contents · ' + cargo.length + '</h5><div class="sub-items">' + gItemRows(cargo, o.id) + '</div>';
+	} else {
+		groupItemSel = null;
+		const [cn, cc] = vehCondition(o.health), kind = (PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1];
+		h += '<h3>' + esc(placedName(o)) + '</h3><div class="ty">' + esc(o.type) + '</div><div class="props">' +
+			[['Kind', esc(kind)], ['Where', grid(o.x, o.z) + ' <span class="muted">' + Math.round(o.x) + ', ' + Math.round(o.z) + '</span>'],
+				['Condition', '<span style="color:' + cc + '">' + cn + '</span>'], ['Placed by', placedBy(o)],
+				['Placed', o.placedAt ? new Date(o.placedAt * 1000).toLocaleString() : '<span class="muted">unknown</span>'],
+				['Inside', countText(o.id)]].map(([k, v]) => '<span class="k">' + k + '</span><span>' + v + '</span>').join('') + '</div>';
+		if (d && d.failed) h += '<div class="muted" style="margin-top:10px">recon-mod didn\'t send what is in it.</div>';
+		else if (d) {
+			const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
+			if (d.zones.length) h += '<h5>Damage</h5>' + d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('');
+			if (d.items.length) h += '<h5>In and on it · ' + d.items.length + '</h5><div class="sub-items">' + gItemRows(d.items, o.id) + '</div>';
+		}
+	}
+	h += '<div class="gacts"><button type="button" data-act="show" data-of="' + o.id + '">Show on map</button>' +
+		'<button type="button" data-act="refresh" data-of="' + o.id + '">Refresh</button>' +
+		'<button type="button" class="bad" data-act="remove" data-of="' + o.id + '">Remove</button></div>';
+	det.innerHTML = h;
+}
+document.getElementById('gModal').addEventListener('click', e => {
+	const a = e.target.closest('[data-act]');
+	if (a) {
+		const id = +a.dataset.of, o = placedList.find(x => x.id === id);
+		if (a.dataset.act === 'refresh') askGroup([id]);
+		else if (a.dataset.act === 'remove') removePlaced(id);
+		else if (o) { closeGroupInfo(); map.setView([o.z, o.x], Math.min(map.getMaxZoom(), Math.log2(map.getSize().x / ZOOM_IN_M))); openPlacedPopup(id); }
+		return;
+	}
+	const it = e.target.closest('[data-item]');
+	if (it) { groupSel = +it.dataset.of; groupItemSel = +it.dataset.item; renderGroupInfo(); return; }
+	const ob = e.target.closest('[data-obj]');
+	if (ob) {
+		const id = +ob.dataset.obj;
+		if (id === groupSel && groupItemSel == null) groupExpand[id] = !groupExpand[id];
+		else groupExpand[id] = true;
+		groupSel = id; groupItemSel = null;
+		renderGroupInfo();
+	}
+});
 async function removePlaced(id) {
 	const o = placedList.find(x => x.id === id);
 	if (!o || !confirm('Remove this ' + placedName(o) + ' and everything in it? It can\'t be undone.')) return;
@@ -3006,16 +3251,17 @@ document.addEventListener('keydown', e => {
 	if (document.getElementById('vModal').style.display === 'flex') { closeVehicleInfo(); return; }
 	if (document.getElementById('rModal').style.display === 'flex') { closeRestore(); return; }
 	if (document.getElementById('oModal').style.display === 'flex') { closePlacedInfo(); return; }
+	if (document.getElementById('gModal').style.display === 'flex') { closeGroupInfo(); return; }
 	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
 	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
-for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'oModal', 'rModal']) document.getElementById(id).addEventListener('mousedown', e => {
-	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'oModal') closePlacedInfo(); else if (id === 'rModal') closeRestore(); else closeWorld(); }
+for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'oModal', 'gModal', 'rModal']) document.getElementById(id).addEventListener('mousedown', e => {
+	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'oModal') closePlacedInfo(); else if (id === 'gModal') closeGroupInfo(); else if (id === 'rModal') closeRestore(); else closeWorld(); }
 });
 
 initMap();
-map.on('popupclose', e => { if (e.popup === plcPopup) placedOpen = null; if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
+map.on('popupclose', e => { if (e.popup === plcPopup) { placedOpen = null; if (groupOpen != null) { groupOpen = null; if (groupInfo == null) stopGroup(); } } if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
 buildWorld();
 drawVehicles();
 loadVehicles();
