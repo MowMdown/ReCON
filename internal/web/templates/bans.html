@@ -27,9 +27,6 @@ select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; 
 <body>
 <nav>{{template "navlinks" "bans"}}<a href="#" id="resetCols">Reset columns</a></nav>
 {{template "statusbar" .}}
-<div class="top">
-	<h1>Server Bans</h1>
-</div>
 <div class="toolbar">
 	<div class="banbtns">
 		<button onclick="document.getElementById('banFile').click()" title="Add permanent bans from a bans.json file">Import</button>

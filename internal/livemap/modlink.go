@@ -428,6 +428,8 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	untracked := false
 	var forgetCars []string // chat cars !remove got rid of, forgotten after the lock
 	saveWorld := ""
+	var gotInv []Inventory // inventories the mod sent, saved as last known after the lock
+	var gotInvGUID []string
 	state.Lock()
 	if w := strings.ToLower(req.World); w != "" && w != state.lastWorld {
 		state.lastWorld, saveWorld = w, w
@@ -500,6 +502,8 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 				items = []Item{}
 			}
 			state.inventory[guid] = Inventory{Items: items, At: now}
+			gotInv = append(gotInv, Inventory{Items: items, At: now})
+			gotInvGUID = append(gotInvGUID, guid)
 		}
 		p.Inv, p.Inventory = false, nil
 		players[guid] = Player{GUID: guid, PlayerState: p, Illnesses: Illnesses(p.Agents)}
@@ -592,6 +596,12 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	trimCommands()
 	state.Unlock()
 
+	for i, g := range gotInvGUID {
+		if err := saveLastInventory(g, "watched", gotInv[i].Items, now); err != nil {
+			log.Printf("recon-mod: saving %s's last inventory: %v", g, err)
+		}
+	}
+
 	reply.WatchPlaced = takePlaced(req, now)
 	keepChatCars(chatCars, untracked, now)
 	for _, g := range forgetCars {
@@ -623,6 +633,9 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 			if k.VictimGUID != "" && len(e.Inventory) > 0 {
 				if err := saveDeath(k.VictimGUID, id, e.Inventory, now); err != nil {
 					log.Printf("recon-mod: saving %s's inventory at death: %v", k.VictimName, err)
+				}
+				if err := saveLastInventory(k.VictimGUID, "death", e.Inventory, now); err != nil {
+					log.Printf("recon-mod: saving %s's last inventory: %v", k.VictimName, err)
 				}
 			}
 		}

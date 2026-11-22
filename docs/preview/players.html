@@ -44,6 +44,9 @@ td.act button:last-child { margin-right: 0; }
 .top h1 { margin: 0; }
 .top button { margin-right: 0; }
 .statusbar b { font-weight: 600; }
+ 
+.verline { position: fixed; right: 10px; bottom: 6px; z-index: 900; font-size: 11px; color: #777; opacity: .75; pointer-events: none; white-space: nowrap; }
+html[data-theme]:not([data-theme="default"]) .verline { color: var(--color-neutral-500); }
 .st.connected { color: #81c995; }
 .st.retrying { color: #fdd663; }
 .st.unavailable { color: #f28b82; }
@@ -119,6 +122,7 @@ img.flag { display: inline-block; width: 16px; height: 12px; margin-right: 7px; 
  
 .badge.role-1 { color: #111; background: #fdd663; }
 .badge.role-2 { color: #111; background: #f28b82; }
+.badge.role-3 { color: #111; background: #8ab4f8; }
 td .badge { margin-left: 6px; vertical-align: 1px; }
 
  
@@ -256,6 +260,7 @@ html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { backgrou
 	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
 	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
 </div>
+<div class="verline" id="verLine" aria-label="Versions"></div>
 <script>
 
 
@@ -312,6 +317,7 @@ var setStatusCount;
 			waiting = !!d.waiting;
 			show('webStatus', 'connected');
 			show('rconStatus', d.rcon);
+			document.getElementById('verLine').textContent = 'ReCON ' + (d.version || '?') + ' · recon-mod ' + (d.mod || '—');
 		} catch (e) {
 			fails++;
 			retryAt = 0;
@@ -327,9 +333,6 @@ var setStatusCount;
 	setInterval(tickRetry, 1000);
 })();
 </script>
-<div class="top">
-	<h1>DayZ Players</h1>
-</div>
 <div class="toolbar">
 	<div>
 		<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
@@ -563,7 +566,12 @@ function esc(s) {
 }
 
 
-const ROLE_NAMES = ['Player', 'Mod', 'Admin'];
+
+
+const ROLE_NAMES = ['Player', 'Mod', 'Admin', 'Vehicles'];
+const ROLE_ORDER = [0, 3, 1, 2];
+
+const ROLE_SAVED = ['a Player', 'a Mod', 'an Admin', 'a Vehicles player'];
 
 
 
@@ -1345,8 +1353,9 @@ function renderDetails(keepDraft) {
 
 const ROLE_INFO = [
 	{ tag: 'normal user (default)', can: ['Can use ', ['!help'], ', ', ['!shout'], ', ', ['!whisper'], ', ', ['!players'], ', ', ['!vote'], ' and ', ['!code'], '.'] },
-	{ tag: 'moderator', can: ['Everything a Player can, plus ', ['!kick'], ' and ', ['!ban'], ' on Players. Gets every ', ['!code'], ' and every kick and ban notice.'] },
-	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['!kick'], ' and ', ['!ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] }
+	{ tag: 'moderator', can: ['Everything a Vehicles player can, plus ', ['!kick'], ', ', ['!ban'], ' and ', ['!warning'], ' on Players and Vehicles players. Gets every ', ['!code'], ' and every kick and ban notice.'] },
+	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['!kick'], ' and ', ['!ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] },
+	{ tag: 'vehicle spawner', can: ['Everything a Player can, plus ', ['!car'], ', ', ['!truck'], ', ', ['!boat'], ' and ', ['!vehicle'], ' (with recon-mod on the server). One vehicle at a time: the next replaces it.'] }
 ];
 
 function renderRoleBadge() {
@@ -1362,7 +1371,8 @@ function renderRoles() {
 	box.textContent = '';
 	if (!det) return;
 	let cur = det.player.role || 0;
-	ROLE_INFO.forEach(function (info, v) {
+	ROLE_ORDER.forEach(function (v) {
+		let info = ROLE_INFO[v];
 		let input = document.createElement('input');
 		input.type = 'radio';
 		input.name = 'role';
@@ -1407,7 +1417,7 @@ async function setRole(v) {
 		if (!d.ok) throw new Error(d.error || 'not saved');
 		if (det && det.guid === guid) det.player.role = d.role;
 		st.className = 'saved';
-		st.textContent = 'Saved: ' + name + ' is now ' + (v === 0 ? 'a Player' : v === 1 ? 'a Mod' : 'an Admin');
+		st.textContent = 'Saved: ' + name + ' is now ' + ROLE_SAVED[v];
 		refresh();
 	} catch (e) {
 		st.className = 'bad';

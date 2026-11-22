@@ -67,6 +67,10 @@ html[data-theme]:not([data-theme="default"]) {
    the dialogs still open over it. */
 .live .mapwrap.full { position: fixed; inset: 0; z-index: 900; border: none; border-radius: 0; height: auto; min-height: 0; max-height: none; aspect-ratio: auto; order: 0; }
 .leaflet-container { font: inherit; }
+/* The scale, bottom left of the map. */
+.mapscale { position: absolute; left: 10px; bottom: 10px; z-index: 500; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--lm-text); background: color-mix(in srgb, var(--lm-ground) 80%, transparent); border-radius: 4px; padding: 3px 8px; pointer-events: none; }
+.mapscale .bar { height: 5px; border: 1.5px solid currentColor; border-top: 0; box-sizing: border-box; }
+.mapscale .muted { font-size: 11.5px; }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .mapbar > * { pointer-events: auto; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
@@ -142,6 +146,11 @@ html[data-theme]:not([data-theme="default"]) {
 .ctx .muted { padding: 2px 8px; }
 #sModal .box { width: min(900px, 96vw); }
 #sModal .splist { max-height: min(640px, 62vh); }
+/* Close sits top right; the error and Sent lines take no room until they
+   have something to say, so the space under the item box matches the sides. */
+.dlg-head .dlg-x { margin: 0 0 0 auto; }
+#sModal .dlg-err:empty, #sModal #sLast:empty { display: none; }
+#sModal #sLast { margin-top: 8px; }
 .mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
 /* The vehicle dialog: its facts, then parts, damage and cargo side by
    side, each scrolling on its own; one under the other on a narrow screen. */
@@ -159,6 +168,7 @@ html[data-theme]:not([data-theme="default"]) {
 :is(#vModal, #oModal) .st { font-size: 12.5px; }
 @media (max-width: 760px) { :is(#vModal, #oModal) .vcols { grid-template-columns: minmax(0, 1fr); } :is(#vModal, #oModal) .vcols > div { max-height: none; } :is(#vModal, #oModal) .vfacts { grid-template-columns: auto auto; } :is(#vModal, #oModal) .vfacts .k { grid-row: auto; } }
 /* The weather and in-game time, beside Time & Weather above the map. */
+.top { justify-content: flex-end; }
 .worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .worldbar .badge { font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; padding: 3px 8px; color: var(--lm-text); }
 .worldbar .badge[hidden] { display: none; }
@@ -304,7 +314,12 @@ button.on { color: var(--lm-accent); border-color: var(--lm-accent); }
 .form.stats { display: block; }
 .form.stats[hidden] { display: none; }
 .form.stats .wrow input[type=range] { width: 100%; }
-.setfoot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+/* The spawn footer stays on one line: the item text shrinks (with ...) so
+   Count and Spawn never wrap below it. */
+.setfoot { display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; margin-top: 4px; }
+.setfoot > .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setfoot > * { flex-shrink: 0; }
+.setfoot > .muted { flex-shrink: 1; }
 .splist { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; margin: 10px 0 8px; }
 .sprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 5px; padding: 5px 9px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
 .sprow:hover { border-color: var(--lm-line2); }
@@ -444,7 +459,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 <body>
 <nav>{{template "navlinks" "live"}}</nav>
 {{template "statusbar" .}}
-<div class="top"><h1>Live Map</h1><div class="worldbar"><span class="badge" id="wxBadge" hidden></span><span class="badge" id="timeBadge" hidden></span><button type="button" id="worldBtn" onclick="openWorld()" disabled title="Change the in-game time and weather">Time &amp; Weather</button></div></div>
+<div class="top"><div class="worldbar"><span class="badge" id="wxBadge" hidden></span><span class="badge" id="timeBadge" hidden></span><button type="button" id="worldBtn" onclick="openWorld()" disabled title="Change the in-game time and weather">Time &amp; Weather</button></div></div>
 <div class="live">
 	<div class="side">
 		<div class="modline"><span class="dot off" id="modDot"></span><span id="modLine">No Connection to DayZ Server</span></div>
@@ -453,6 +468,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 	<div class="mapwrap">
 		<div id="map"></div>
+		<div class="mapscale" aria-hidden="true"><span class="bar" id="scaleBar"></span><span id="scaleLen"></span><span class="muted" id="scaleSpan"></span></div>
 		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
 		<div class="mapbar">
 			<div class="ovwrap">
@@ -538,7 +554,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="animal">Animals</option><option value="item">Other items</option></select></div>
 			<div class="spaz" id="spAZ" role="group" aria-label="Jump to a letter"></div>
 			<div class="splist" id="spList"></div>
-			<div class="setfoot"><span class="muted" id="spPick"></span><span class="grow"></span>
+			<div class="setfoot"><span class="muted" id="spPick"></span>
 				<select id="spWhere" aria-label="Where"><option value="ground">On the ground</option><option value="inventory">In their inventory</option><option value="hands">In their hands</option></select>
 				<span>Count</span><input id="spCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
 				<button type="button" class="go" onclick="doSpawn()">Spawn</button></div>
@@ -588,19 +604,19 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 <!-- Spawn an item at a spot on the map (the map's right-click menu) -->
 <div id="sModal" class="modal">
 	<div class="box wide" role="dialog" aria-labelledby="sTitle">
-		<div class="dlg-head"><h2 id="sTitle">Spawn here</h2><span class="badge" id="sWhere"></span></div>
+		<div class="dlg-head"><h2 id="sTitle">Spawn here</h2><span class="badge" id="sWhere"></span><button type="button" class="dlg-x" onclick="closeSpawnAt()">Close</button></div>
 		<div class="form stats">
 			<div class="inl"><input id="sFind" class="grow" type="search" placeholder="Find an item by name or class" aria-label="Find an item" autocomplete="off">
 				<select id="sKind" aria-label="Kind"><option value="">Everything</option><option value="weapon">Weapons</option><option value="magazine">Magazines</option>
 					<option value="ammo">Ammo</option><option value="clothing">Clothing</option><option value="vehicle">Vehicles</option><option value="animal">Animals</option><option value="item">Other items</option></select></div>
 			<div class="spaz" id="sAZ" role="group" aria-label="Jump to a letter"></div>
 			<div class="splist" id="sList"></div>
-			<div class="setfoot"><span class="muted" id="sPick"></span><span class="grow"></span>
+			<div class="setfoot"><span class="muted" id="sPick"></span>
 				<span>Count</span><input id="sCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
 				<button type="button" class="go" onclick="doSpawnAt()">Spawn</button></div>
 		</div>
 		<div class="dlg-err" id="sErr"></div>
-		<div class="dfoot"><span class="muted" id="sLast"></span><button type="button" onclick="closeSpawnAt()">Close</button></div>
+		<div class="muted" id="sLast"></div>
 	</div>
 </div>
 
@@ -719,6 +735,20 @@ let dataMaps = [];
 api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).catch(() => { });
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
 
+// viewSpan is how many metres across the map's view shows.
+function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoom())); }
+// drawScale shows a scale bar (a round length) and how much the view shows
+// across, like the player's mini-map.
+function drawScale() {
+	const span = viewSpan(), w = map.getSize().x, km = m => m >= 1000 ? (m / 1000).toFixed(1).replace(/\.0$/, '') + ' km' : m + ' m';
+	if (!(span > 0 && w > 0)) return;
+	// The longest 1, 2 or 5 × 10^n metres that fits in 100 px.
+	const most = span * 100 / w, p = Math.pow(10, Math.floor(Math.log10(most)));
+	const len = [5, 2, 1].map(k => k * p).find(v => v <= most) || p;
+	document.getElementById('scaleBar').style.width = Math.round(len * w / span) + 'px';
+	document.getElementById('scaleLen').textContent = km(len);
+	document.getElementById('scaleSpan').textContent = km(span) + ' across';
+}
 function initMap() {
 	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: 3, zoomSnap: 0.25, attributionControl: false, zoomControl: false });
 	L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -927,6 +957,7 @@ function setWorld(w, s) {
 	}
 	L.polyline([[0, 0], [0, size], [size, size], [size, 0], [0, 0]], { className: 'gridedge', weight: 1, interactive: false }).addTo(gridLayer);
 	map.setMaxBounds([[-size * 0.25, -size * 0.25], [size * 1.25, size * 1.25]]);
+	limitZoomOut();
 	// The whole map once, when it is first known; never again on its own
 	// (a player joining used to zoom the map back out).
 	if (!fitted) { map.fitBounds([[0, 0], [size, size]]); fitted = true; }
@@ -980,6 +1011,13 @@ function drawMarkers() {
 }
 
 // fitAll shows the whole map in the window.
+// limitZoomOut makes Fit's zoom (the whole map in view) the furthest out
+// the map goes; again whenever the map's box changes size.
+function limitZoomOut() {
+	const v = map.getSize();
+	if (!(v.x > 0 && v.y > 0)) return;
+	map.setMinZoom(map.getBoundsZoom([[0, 0], [size || 15360, size || 15360]]));
+}
 function fitAll() {
 	const s = size || 15360;
 	map.fitBounds([[0, 0], [s, s]]);
@@ -1176,7 +1214,6 @@ async function deleteVehicle(id) {
 	} catch (e) { alert('Not deleted: ' + e.message); return; }
 	renderVehicle();
 }
-setInterval(loadVehicles, 5000);
 
 // ---- Towns, events and deaths on the map ---------------------------------
 // Each layer is shown while its button is on (remembered in this browser).
@@ -1332,7 +1369,6 @@ function drawPredators() {
 	}
 	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
 }
-setInterval(loadPredators, 2000);
 
 // ---- Restore: give back chosen items from an inventory saved at death -----
 // Nothing is ticked at first. Ticking a container or a weapon ticks what is
@@ -1763,8 +1799,7 @@ function renderSpawnAt() {
 }
 function renderSpawnPick() {
 	const it = sSel && catalogBy[sSel], vehicle = it && it.kind === 'vehicle', cnt = document.getElementById('sCount');
-	document.getElementById('sPick').textContent = it ? catName(it) + (vehicle ? ', whole (parts and fluids), facing north' : ', on the ground here')
-		: (catalog ? catalog.length.toLocaleString() + ' items · pick one' : '');
+	document.getElementById('sPick').textContent = it ? catName(it) : (catalog ? catalog.length.toLocaleString() + ' items' : '');
 	if (vehicle) cnt.value = 1;
 	cnt.disabled = !!vehicle;
 }
@@ -2715,7 +2750,7 @@ function renderPick() {
 	const WHERE_TEXT = { ground: ', on the ground in front of them', inventory: ', into their inventory (what doesn\'t fit goes on the ground)', hands: ', into their hands (they must be empty)' };
 	document.getElementById('spPick').textContent = it
 		? catName(it) + (vehicle ? ', whole (parts and fluids), 8 m in front of them' : animal ? ', on the ground 4 m in front of them' : WHERE_TEXT[where])
-		: (catalog ? catalog.length.toLocaleString() + ' items · pick one' : '');
+		: (catalog ? catalog.length.toLocaleString() + ' items' : '');
 	// A vehicle or an animal goes in front of them; a vehicle and anything
 	// for their hands come one at a time.
 	if (vehicle || animal) whereEl.value = 'ground';
@@ -2981,12 +3016,29 @@ drawPlayersToggle();
 drawGridToggle();
 drawPlaced(); loadPlaced();
 map.on('moveend zoomend', drawPlaced);
+map.on('zoomend resize', drawScale); drawScale();
+map.on('resize', limitZoomOut); limitZoomOut();
 drawTowns(); loadPlaces();
 drawEvents(); loadEvents();
 drawPredators(); loadPredators();
 drawDeaths(); loadDeaths();
 poll();
-setInterval(poll, 1000);
+// How often players, vehicles and predators refresh goes with how much of
+// the map is in view (viewSpan): the whole map, every 10 s; between, 5 s;
+// close in (3 km across or less), players and vehicles every second and
+// predators every 2 s. A tick each second runs whichever is due, so
+// zooming in speeds things up within a second.
+const REFRESH = { far: { poll: 10000, veh: 10000, pred: 10000 }, mid: { poll: 5000, veh: 5000, pred: 5000 }, near: { poll: 1000, veh: 1000, pred: 2000 } };
+const lastRun = { poll: Date.now(), veh: Date.now(), pred: Date.now() };
+function refreshBand() {
+	const span = viewSpan(), ms = size || 15360;
+	return span >= ms / 2 ? 'far' : span > 3000 ? 'mid' : 'near';
+}
+setInterval(() => {
+	const every = REFRESH[refreshBand()], now = Date.now();
+	for (const [k, run] of [['poll', poll], ['veh', loadVehicles], ['pred', loadPredators]])
+		if (now - lastRun[k] >= every[k] - 50) { lastRun[k] = now; run(); }
+}, 1000);
 </script>
 </body>
 </html>
