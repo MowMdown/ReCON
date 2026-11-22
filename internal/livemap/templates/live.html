@@ -320,6 +320,14 @@ button.on { color: var(--lm-accent); border-color: var(--lm-accent); }
 .setfoot > .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setfoot > * { flex-shrink: 0; }
 .setfoot > .muted { flex-shrink: 1; }
+/* Spawn item (a player's) also has Where: on a narrow screen the item text
+   gets its own line and Where shrinks, so Count and Spawn still fit. */
+.setfoot select { flex: 0 1 auto; min-width: 0; }
+@media (max-width: 560px) {
+	#fSpawn .setfoot { flex-wrap: wrap; }
+	#fSpawn .setfoot > .muted { flex-basis: 100%; }
+	#fSpawn .setfoot select { flex: 1 1 0; }
+}
 .splist { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; margin: 10px 0 8px; }
 .sprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 5px; padding: 5px 9px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
 .sprow:hover { border-color: var(--lm-line2); }
