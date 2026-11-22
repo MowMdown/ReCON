@@ -1519,12 +1519,11 @@ async function loadEvents() {
 	drawEvents();
 }
 // bioSVG is the biohazard sign an active gas zone is drawn with: three
-// hooked lobes around a ring, on a dark disc so it reads on any ground.
+// hooked lobes, with a thin shadow so it reads on any ground.
 function bioSVG(c) {
 	const lobes = [0, 120, 240].map(r => '<g transform="rotate(' + r + ')"><circle cy="-3.7" r="4.3" fill="#fff"/><circle cy="-4.9" r="3.1" fill="#000"/></g>').join('');
 	return '<svg width="20" height="20" viewBox="-10 -10 20 20"><defs><mask id="bioM" maskUnits="userSpaceOnUse" x="-10" y="-10" width="20" height="20">' + lobes +
-		'<circle r="2.9" fill="#fff"/><circle r="1.3" fill="#000"/>' + [0, 120, 240].map(r => '<rect x="-0.45" y="-3.4" width="0.9" height="2.2" fill="#000" transform="rotate(' + (r + 60) + ')"/>').join('') +
-		'</mask></defs><circle r="9.5" fill="#111" stroke="' + c + '" stroke-width="1"/><rect x="-10" y="-10" width="20" height="20" fill="' + c + '" mask="url(#bioM)"/></svg>';
+		'</mask></defs><rect x="-10" y="-10" width="20" height="20" fill="' + c + '" mask="url(#bioM)" style="filter: drop-shadow(0 0 1px #000)"/></svg>';
 }
 function eventCat(k) { return EVENT_CATS.find(c => c[0] === k) || EVENT_CATS[EVENT_CATS.length - 1]; }
 function drawEvents() {
