@@ -163,6 +163,13 @@ func handleModPlayer(w http.ResponseWriter, r *http.Request) {
 			out["inventory"] = inv
 		}
 	}
+	// Their last known inventory (at most about 5 min old while they're
+	// online), shown until the live one comes in, or while they're offline.
+	if _, have := out["inventory"]; !have {
+		if li, ok, err := LastInventory(guid); err == nil && ok {
+			out["lastInventory"] = li
+		}
+	}
 	if prev, ok := Previous(guid); ok {
 		out["previous"] = prev
 	}

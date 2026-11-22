@@ -114,7 +114,7 @@ func handleDevPlayer(w http.ResponseWriter, r *http.Request) {
 	if inv, ok, err := livemap.LastInventory(guid); err != nil {
 		invNote = "reading it: " + err.Error()
 	} else if ok {
-		why := "while their dialog was open"
+		why := "read while they were online"
 		if inv.Why == "death" {
 			why = "what they died with"
 		}

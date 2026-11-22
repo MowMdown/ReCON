@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -621,6 +622,16 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		}
 		if p, ok := players[g]; ok {
 			reply.Watch = append(reply.Watch, p.SteamID)
+		}
+	}
+	// Keep everyone's last known inventory fresh (lastinv.go).
+	online := make(map[string]string, len(players))
+	for g, p := range players {
+		online[g] = p.SteamID
+	}
+	for _, steam := range pollInventories(online, now) {
+		if !slices.Contains(reply.Watch, steam) {
+			reply.Watch = append(reply.Watch, steam)
 		}
 	}
 	sort.Strings(reply.Watch)
