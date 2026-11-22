@@ -1814,7 +1814,9 @@ async function removePlaced(id) {
 	closePlacedInfo();
 	poll();
 }
-setInterval(loadPlaced, 30000);
+// recon-mod sends the list every 30 s; reading it every 10 s means a new one
+// shows within 10 s of reaching ReCON instead of up to 30 s.
+setInterval(loadPlaced, 10000);
 
 // Deaths: a red X where each death in the time picked was, every 30 s.
 let deathsOn = layerPref('deaths', '0') === '1', deathHours = +layerPref('deathHours', '24') || 24, deathList = [];
