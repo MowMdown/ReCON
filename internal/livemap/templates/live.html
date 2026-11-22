@@ -1568,14 +1568,18 @@ const BEHAVIOR = ['', 'Calm', 'Resting', 'Grazing', 'Travelling', 'Drinking', 'T
 const ACTIVITY = ['', 'Heading to safety', 'Grazing on the move', 'Grazing', 'Resting', 'Travelling', 'Eating', 'Drinking', 'Charging',
 	'Approaching', 'Closing in', 'Walking', 'Idle', 'Idle', 'Idle', 'Backing away from a threat', 'Stalking towards a threat', 'Watching a threat', 'Holding ground'];
 const HUNTING = [11, 15];
+// How far each can pick up a player, from the game's AI settings: a wolf
+// sees up to 200 m (ai.pbo visionRangeMax), a bear hears up to 110 m
+// (ai_bliss.pbo NoiseSystemParams rangeMax). Nobody that close: no line.
+const PRED_REACH = { wolf: 200, bear: 110, dog: 200 };
 function openPredator(id) {
 	if (!predators.some(x => x.id === id)) return;
 	predOpen = id; predErr = ''; confirming = null;
 	renderPredator();
 	predPopup.options.autoPan = true; predPopup.openOn(map); predPopup.options.autoPan = false;
 }
-function nearestPlayer(x, z) {
-	let best = null, bd = Infinity;
+function nearestPlayer(x, z, within) {
+	let best = null, bd = within || Infinity;
 	for (const p of players) {
 		if (!p.alive) continue;
 		const d = Math.hypot(p.x - x, p.z - z);
@@ -1599,7 +1603,7 @@ function renderPredator() {
 		if (act) h += row('Activity', act);
 		h += row('Attacking', a.attacking ? '<b style="color:#f28b82">Yes</b>' : 'No');
 		if (hunting || a.attacking) {
-			const n = nearestPlayer(a.x, a.z);
+			const n = nearestPlayer(a.x, a.z, PRED_REACH[a.kind] || 200);
 			if (n) h += row('Nearest player', esc(n[0].name) + ' · ' + Math.round(n[1]) + ' m');
 		}
 	} else h += '<div class="muted st">Health and what it\'s doing need recon-mod 1.0.3.</div>';
