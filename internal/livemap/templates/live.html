@@ -1514,7 +1514,8 @@ document.getElementById('rGo').addEventListener('click', async () => {
 // filtered by kind. Thousands are possible, so markers are drawn only for
 // what's in view, and only from mid zoom in.
 const PLACED_KINDS = [['base', 'Base building'], ['tent', 'Tents & shelters'], ['storage', 'Storage'], ['trap', 'Traps'], ['other', 'Other']];
-const PLACED_MIN_ZOOM = -2;
+// From zoom -1 (2 m per pixel: a 100 px scale bar reads 200 m).
+const PLACED_MIN_ZOOM = -1;
 let placedOn = layerPref('placed', '0') === '1', placedList = [], placedSent = true, placedMarkers = {}, placedOpen = null;
 // Each kind is off until ticked (remembered): switching Placed objects on
 // draws nothing until you pick what to see.
@@ -1537,7 +1538,7 @@ function drawPlaced() {
 	const count = {};
 	for (const o of placedList) count[placedKind(o)] = (count[placedKind(o)] || 0) + 1;
 	const shown = PLACED_KINDS.reduce((n, [k]) => n + (placedKindOn[k] ? count[k] || 0 : 0), 0);
-	const zoomedOut = map.getZoom() < PLACED_MIN_ZOOM;
+	const zoomedOut = map.getZoom() < PLACED_MIN_ZOOM - 1e-6;
 	layerButton('placedBtn', placedOn, 'Placed objects' + (placedOn && placedSent ? ' ' + shown : ''),
 		placedOn && !placedSent ? 'recon-mod doesn\'t send placed objects: it needs 1.0.1'
 			: placedOn && !PLACED_KINDS.some(([k]) => placedKindOn[k]) ? 'Tick the kinds to show below'
