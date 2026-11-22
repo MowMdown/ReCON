@@ -64,6 +64,14 @@ html[data-theme]:not([data-theme="default"]) .verline { color: var(--color-neutr
 .importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
 .importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
 .importbox .buttons { margin-top: 12px; flex: none; }
+ 
+button.danger { color: #f28b82; border-color: #5c3533; }
+button.danger.go { background: #5c3533; color: #fff; border-color: #f28b82; }
+.askpair { display: inline-flex; gap: 6px; }
+.pagemsg, .formerr { margin: 6px 0; font-size: 13px; white-space: pre-line; }
+.pagemsg:empty, .formerr:empty { display: none; }
+.pagemsg.bad, .formerr { color: #f28b82; }
+.pagemsg.warn { color: #fdd663; }
 </style>
 <style>
 :root {
@@ -290,6 +298,33 @@ button:disabled { opacity: 0.4; cursor: default; }
 </div>
 <div class="verline" id="verLine" aria-label="Versions"></div>
 <script>
+
+
+function inlineConfirm(btn, label, go) {
+	if (!btn || btn.dataset.asking) return;
+	btn.dataset.asking = '1';
+	var wrap = document.createElement('span');
+	wrap.className = 'askpair';
+	var no = document.createElement('button'), yes = document.createElement('button');
+	no.type = yes.type = 'button';
+	no.textContent = 'Cancel';
+	yes.textContent = label;
+	yes.className = 'danger go';
+	wrap.append(no, yes);
+	function done() { wrap.remove(); btn.hidden = false; delete btn.dataset.asking; }
+	no.onclick = function(e) { e.stopPropagation(); done(); };
+	yes.onclick = function(e) { e.stopPropagation(); done(); go(); };
+	btn.hidden = true;
+	btn.after(wrap);
+}
+
+function pageMsg(id, text, kind) {
+	var el = document.getElementById(id);
+	if (!el) return;
+	el.textContent = text || '';
+	el.className = el.className.replace(/\s*\b(bad|warn)\b/g, '') + (kind ? ' ' + kind : '');
+}
+
 
 
 

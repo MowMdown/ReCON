@@ -212,6 +212,7 @@ html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { backgrou
 		</button>
 	</div>
 </div>
+<div class="pagemsg" id="playersMsg" role="status"></div>
 <div class="tablewrap pin">
 <table id="onlineTable">
 	<colgroup>
@@ -340,6 +341,7 @@ html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { backgrou
 		</div>
 		<label>Reason</label>
 		<input id="text" type="text" maxlength="200" placeholder="Short message shown to the player">
+		<div class="formerr" id="modalErr" role="alert"></div>
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
 			<button id="submit"></button>
@@ -653,6 +655,7 @@ function openModal(id, a, name, guid) {
 	document.getElementById('durationWrap').style.display = a === 'ban' ? 'block' : 'none';
 	document.getElementById('text').value = '';
 	document.getElementById('minutes').value = '0';
+	pageMsg('modalErr', '');
 	document.getElementById('modal').style.display = 'flex';
 }
 
@@ -660,8 +663,9 @@ function closeModal() { document.getElementById('modal').style.display = 'none';
 
 document.getElementById('submit').onclick = async () => {
 	let body = { reason: document.getElementById('text').value, minutes: parseInt(document.getElementById('minutes').value, 10) };
+	pageMsg('modalErr', '');
 	if (action === 'ban' && (!Number.isInteger(body.minutes) || body.minutes < 0)) {
-		alert('Duration must be a whole number of minutes (0 = permanent).');
+		pageMsg('modalErr', 'Duration must be a whole number of minutes (0 = permanent).');
 		return;
 	}
 	// From the Details dialog a ban goes by GUID, so it works whether the
@@ -676,12 +680,13 @@ document.getElementById('submit').onclick = async () => {
 	});
 	let d = await r.json();
 	if (!d.ok) {
-		alert(d.error || d.guid_error || 'Action failed');
+		pageMsg('modalErr', d.error || d.guid_error || 'Action failed');
 		return;
 	}
 	closeModal();
 	if (action === 'ban' && d.online !== false && d.kicked === false) {
-		alert('Player was banned, but the kick was not confirmed.');
+		pageMsg('playersMsg', 'Player was banned, but the kick was not confirmed.', 'warn');
+		if (det) pageMsg('detErr', 'Banned, but the kick was not confirmed.');
 	}
 	if (action === 'ban') await bansChanged();
 	refresh();
@@ -1393,19 +1398,22 @@ document.getElementById('detBan').onclick = async function () {
 		openModal(p.online ? p.id : -1, 'ban', p.name, det.guid);
 		return;
 	}
-	if (!confirm('Unban ' + p.name + '?')) return;
 	let btn = this;
-	btn.disabled = true;
-	try {
-		let d = await (await fetch('/api/bans/' + encodeURIComponent(det.guid) + '/unban', { method: 'POST' })).json();
-		if (!d.ok) alert(d.error || 'Unban failed');
-	} catch (e) {
-		alert('ReCON could not be reached; the player was not unbanned.');
-	} finally {
-		btn.disabled = false;
-	}
-	await bansChanged();
-	refresh();
+	inlineConfirm(btn, 'Unban', async function () {
+		let err = document.getElementById('detErr');
+		err.textContent = '';
+		btn.disabled = true;
+		try {
+			let d = await (await fetch('/api/bans/' + encodeURIComponent(det.guid) + '/unban', { method: 'POST' })).json();
+			if (!d.ok) err.textContent = d.error || 'Unban failed';
+		} catch (e) {
+			err.textContent = 'ReCON could not be reached; the player was not unbanned.';
+		} finally {
+			btn.disabled = false;
+		}
+		await bansChanged();
+		refresh();
+	});
 };
 
 // ---------------------------------------------------------------------------

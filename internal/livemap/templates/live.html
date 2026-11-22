@@ -77,6 +77,9 @@ html[data-theme]:not([data-theme="default"]) {
 /* Vehicles on the map, and the popup a click on one opens. */
 .vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
 .amark svg { position: absolute; left: -6px; top: -6px; overflow: visible; }
+/* Who is in a vehicle (its driver), beside it, as a player's name. */
+.vpop a, .vfacts a { color: #8ab4f8; }
+.vmark .vname { position: absolute; left: 11px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
 /* The animal's name, beside its dot. */
 .amark span { position: absolute; left: 9px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--lm-surface); color: var(--lm-text); border: 1px solid var(--lm-line); box-shadow: 0 2px 10px rgba(0,0,0,.5); }
@@ -87,10 +90,20 @@ html[data-theme]:not([data-theme="default"]) {
 .vpop .row { display: flex; justify-content: space-between; gap: 12px; }
 .vpop .row span:first-child { color: var(--lm-muted); }
 .vpop .acts { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+.vpop .acts.split { justify-content: space-between; }
 /* The popup's Info button: the popup's own look, not the page theme's. */
 .vpop .acts button { margin: 0; padding: 4px 10px; font: inherit; font-size: 12.5px; color: var(--lm-text); background: var(--lm-raised); border: 1px solid var(--lm-line); border-radius: 4px; cursor: pointer; }
 .vpop .acts button:hover { background: var(--lm-sel); border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vpop .st { font-size: 12px; }
+/* A button that removes or kills: red; asked again in place (Cancel and the
+   red action, where the button was), never in a browser pop-up. */
+button.danger { color: #f28b82 !important; border-color: #5c3533 !important; }
+button.danger.go { background: #5c3533 !important; color: #fff !important; border-color: #f28b82 !important; }
+.vpop .err, .lm-err { color: #f28b82; font-size: 12px; margin-top: 4px; }
+.askpair { display: inline-flex; gap: 6px; }
+.ctxpair { display: flex; gap: 4px; }
+.ctxpair button { flex: 1; }
+.vpop .err:empty, .lm-err:empty { display: none; }
 /* A player's popup: their stats two to a line (label, value, label, value). */
 .vpop .stats2 { display: grid; grid-template-columns: auto 1fr auto auto 1fr; gap: 1px 8px; align-items: baseline; }
 .vpop .stats2 .k { color: var(--lm-muted); }
@@ -212,6 +225,14 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar .ovmenu button.on::before { background: var(--lm-accent); border-color: var(--lm-accent);
 	box-shadow: inset 0 0 0 2px var(--lm-surface); }
 .mapbar .ovmenu button:hover { background: var(--lm-sel); }
+/* A heading (Events, Placed objects) opens and closes its filters; what
+   shows is only what is ticked under it. */
+.mapbar .ovmenu button.ovhead::before { content: '\25B8'; width: 11px; height: auto; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--lm-muted); font-size: 11px; line-height: 1; text-align: center; }
+.mapbar .ovmenu button.ovhead.open::before { content: '\25BE'; }
+.mapbar .ovmenu button.ovhead.on { color: var(--lm-text); font-weight: 600; }
+.ovmenu .ovsub .ovpair { display: flex; gap: 2px; }
+.ovmenu .ovsub .ovpair button { flex: 1; }
+.ovmenu .ovsub .ovsep { height: 1px; background: var(--lm-line); margin: 3px 8px; }
 /* A layer's own filter (Placed objects' kinds), indented under it. */
 .ovmenu .ovsub { display: flex; flex-direction: column; gap: 1px; padding-left: 18px; }
 .ovmenu .ovsub[hidden] { display: none; }
@@ -506,10 +527,11 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 					<button type="button" id="plyBtn" onclick="togglePlayers()" title="Show the players on the map">Players</button>
 					<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
 					<button type="button" id="predBtn" onclick="togglePredators()" title="Show the bears, wolves and guard dogs">Predators</button>
-					<button type="button" id="placedBtn" onclick="togglePlaced()" title="Show what players placed: bases, tents, storage, traps">Placed objects</button>
+					<button type="button" id="placedBtn" class="ovhead" onclick="togglePlacedOpen()" aria-expanded="false" aria-controls="placedKinds" title="What players placed: bases, tents, storage, traps">Placed objects</button>
 					<div class="ovsub" id="placedKinds" hidden></div>
 					<button type="button" id="townBtn" onclick="toggleTowns()" title="Show the map's town and place names">Towns</button>
-					<button type="button" id="eventBtn" onclick="toggleEvents()" title="Show helicopter crashes and toxic zones">Events</button>
+					<button type="button" id="eventBtn" class="ovhead" onclick="toggleEventsOpen()" aria-expanded="false" aria-controls="eventKinds" title="Where events spawn: crashes, convoys, police, gas zones…">Events</button>
+					<div class="ovsub" id="eventKinds" hidden></div>
 					<button type="button" id="gridBtn" onclick="toggleGrid()" title="Show the 1 km grid and its numbers">Grid</button>
 					<div class="ovrow"><button type="button" id="deathBtn" onclick="toggleDeaths()" title="Show where players died">Deaths</button>
 					<select id="deathHours" aria-label="Deaths in the last" hidden><option value="1">last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select></div>
@@ -590,7 +612,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		</div>
 		</div>
 		<div class="ppane" data-ppane="kills" hidden>
-		<h4 class="killhead">Kills and deaths <span class="muted" id="pKillSum"></span><button type="button" class="bad" onclick="killPlayer()" title="Their character dies and they start again fresh">Kill</button></h4>
+		<h4 class="killhead">Kills and deaths <span class="muted" id="pKillSum"></span><button type="button" class="bad" onclick="killPlayer(this)" title="Their character dies and they start again fresh">Kill</button></h4>
 		<div class="killkinds" id="pKillKinds" role="group" aria-label="Show only"></div>
 		<table class="dt kills"><tbody id="pKills"></tbody></table>
 		</div>
@@ -606,6 +628,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	<div class="box wide" role="dialog" aria-labelledby="vTitle" style="width:min(1000px, 95vw)">
 		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="sub" id="vType"></span></div>
 		<div id="vBody"></div>
+		<div class="dlg-err" id="vErr"></div>
 		<div class="dfoot"><div class="acts" id="vActs"></div><button type="button" onclick="closeVehicleInfo()">Close</button></div>
 	</div>
 </div>
@@ -635,6 +658,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	<div class="box wide" role="dialog" aria-labelledby="oTitle" style="width:min(1000px, 95vw)">
 		<div class="dlg-head"><h2 id="oTitle">Placed object</h2><span class="sub" id="oType"></span></div>
 		<div id="oBody"></div>
+		<div class="dlg-err" id="oErr"></div>
 		<div class="dfoot"><div class="acts" id="oActs"></div><button type="button" onclick="closePlacedInfo()">Close</button></div>
 	</div>
 </div>
@@ -1083,6 +1107,9 @@ function drawMarkers() {
 			el.querySelector('span').textContent = p.name;
 			el.classList.toggle('sel', p.guid === selGuid);
 			el.style.opacity = p.alive ? 1 : 0.45;
+			// In a vehicle the map shows: the vehicle stands for them (in
+			// their colour), so their arrow isn't drawn on top of it.
+			el.style.display = inShownVehicle(p) ? 'none' : '';
 		}
 	});
 	for (const g in markers) if (!seen[g]) { markers[g].remove(); delete markers[g]; }
@@ -1124,7 +1151,7 @@ function toggleFull(on) {
 
 let vehOn = false, vehicles = [], vehSent = true, vehLayer = null, vehMarkers = {}, vehOpen = null, vehPending = {}, vehDetail = null;
 try { vehOn = localStorage.getItem('live.vehicles') === '1'; } catch (e) { }
-const vehPopup = L.popup({ autoPan: false, offset: [0, -6] });
+const vehPopup = L.popup({ autoPan: false, offset: [0, -6], autoPanPaddingTopLeft: [10, 60] });
 function toggleVehicles() {
 	vehOn = !vehOn;
 	try { localStorage.setItem('live.vehicles', vehOn ? '1' : '0'); } catch (e) { }
@@ -1141,12 +1168,43 @@ async function loadVehicles() {
 	} catch (e) { return; }
 	drawVehicles();
 }
-// vehColor: someone in it blue, the engine running green, else grey.
-function vehColor(v) { return v.crew ? '#8ab4f8' : v.engine ? '#81c995' : '#e8eaed'; }
+// loadCrewVehicles moves the vehicles with someone in them (recon-mod 1.0.3
+// sends them every second; an older mod: nothing, the 10 s list moves them).
+async function loadCrewVehicles() {
+	if (!vehOn) return;
+	try {
+		const d = await api('GET', '/api/mod/vehicles?occupied=1');
+		if (!d.sent) return;
+		const at = new Map(vehicles.map((v, i) => [v.id, i]));
+		for (const v of d.vehicles || []) { if (at.has(v.id)) vehicles[at.get(v.id)] = v; else vehicles.push(v); }
+	} catch (e) { return; }
+	drawVehicles();
+}
+// crewOf is who is in vehicle v (recon-mod 1.0.3 sends each player's
+// vehicle), the driver first, then by seat.
+function crewOf(v) {
+	return players.filter(p => p.seat != null && p.seat >= 0 && p.vehicleId === v.id)
+		.sort((a, b) => (b.driver ? 1 : 0) - (a.driver ? 1 : 0) || a.seat - b.seat);
+}
+// drawArrowsShown hides the arrows of players in a shown vehicle, and shows
+// the rest (after the vehicles change).
+function drawArrowsShown() {
+	for (const p of players) { const m = markers[p.guid], el = m && m.getElement(); if (el) el.style.display = inShownVehicle(p) ? 'none' : ''; }
+}
+function inShownVehicle(p) { return vehOn && p.seat != null && p.seat >= 0 && vehicles.some(v => v.id === p.vehicleId); }
+// vehColor: the driver's colour (else the first in it), someone in it but
+// not known who blue, the engine running green, else grey.
+function vehColor(v) {
+	const crew = crewOf(v);
+	if (crew.length) return colorOf(crew[0].guid);
+	return v.crew ? '#8ab4f8' : v.engine ? '#81c995' : '#e8eaed';
+}
 function vehSVG(v) {
+	const crew = crewOf(v);
 	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><g transform="rotate(' + Math.round(v.heading || 0) + ')">' +
 		'<rect x="-4.5" y="-7.5" width="9" height="15" rx="2.5" fill="' + vehColor(v) + '" stroke="#111" stroke-width="1.2"/>' +
-		'<rect x="-3" y="-5" width="6" height="3.5" rx="1" fill="#111" opacity=".55"/></g></svg>';
+		'<rect x="-3" y="-5" width="6" height="3.5" rx="1" fill="#111" opacity=".55"/></g></svg>' +
+		(crew.length ? '<span class="vname">' + esc(crew[0].name) + (crew.length > 1 ? ' +' + (crew.length - 1) : '') + '</span>' : '');
 }
 function drawVehicles() {
 	const btn = document.getElementById('vehBtn');
@@ -1156,7 +1214,7 @@ function drawVehicles() {
 	btn.title = vehOn && !vehSent ? 'The mod on the server doesn\'t send vehicles: it needs recon-mod 0.0.1i or later'
 		: 'Show every car, motorbike and boat on the server';
 	if (!vehLayer) vehLayer = L.layerGroup();
-	if (!vehOn) { vehLayer.remove(); return; }
+	if (!vehOn) { vehLayer.remove(); drawArrowsShown(); return; }
 	if (!map.hasLayer(vehLayer)) vehLayer.addTo(map);
 	const seen = {};
 	for (const v of vehicles) {
@@ -1234,7 +1292,8 @@ function vehFacts(v) {
 	return [['Where', grid(v.x, v.z) + ' <span class="muted">' + Math.round(v.x) + ', ' + Math.round(v.z) + '</span>'],
 		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'],
 		['Fuel', v.fuel >= 0 ? Math.round(v.fuel * 100) + '%' : '—'],
-		['Inside', v.crew ? v.crew + (v.crew === 1 ? ' person' : ' people') : 'Nobody'],
+		['Inside', crewOf(v).length ? crewOf(v).map(p => '<a href="#" onclick="event.preventDefault(); event.stopPropagation(); openPlayerPopup(\'' + p.guid + '\')">' + esc(p.name) + '</a>' + (p.driver ? ' <span class="muted">driving</span>' : '')).join(', ')
+			: v.crew ? v.crew + (v.crew === 1 ? ' person' : ' people') : 'Nobody'],
 		['Engine', v.engine ? 'Running' : 'Off']];
 }
 // vehDeleteState is how deleting v went, if it was asked.
@@ -1246,8 +1305,8 @@ function vehDeleteState(v) {
 }
 function deleteButton(v) {
 	// Allowed with people in it: the mod puts them out first (mod 1.0.1).
-	return '<button type="button" class="bad" onclick="event.stopPropagation(); deleteVehicle(' + v.id + ')"' +
-		(v.crew ? ' title="' + v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they get out first"' : '') + '>Delete</button>';
+	return confirmPair('veh:' + v.id, 'Delete', 'deleteVehicle(' + v.id + ')',
+		v.crew ? v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they get out first' : 'Delete it and everything in it');
 }
 function renderVehicle() {
 	const v = vehicles.find(x => x.id === vehOpen);
@@ -1255,6 +1314,7 @@ function renderVehicle() {
 		vehFacts(v).map(([k, x]) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>').join('') +
 		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage, cargo and Delete">Info…</button></div></div>');
 	renderVehicleInfo();
+	drawArrowsShown();
 }
 // renderVehicleInfo draws the dialog: the facts, then parts, damage and
 // cargo side by side (each column keeps where it was scrolled to).
@@ -1287,20 +1347,51 @@ function renderVehicleInfo() {
 	document.getElementById('vActs').innerHTML = '<button type="button" onclick="askVehicle()" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + vehDeleteState(v);
 }
 async function deleteVehicle(id) {
-	const v = vehicles.find(x => x.id === id);
-	const inIt = v && v.crew ? ' ' + v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they\'ll be put out first.' : '';
-	if (!v || !confirm('Delete this ' + catLabel(v) + ' and everything in it?' + inIt + ' It can\'t be undone.')) return;
+	const v = vehicles.find(x => x.id === id), err = document.getElementById('vErr');
+	if (!v) return;
+	err.textContent = '';
 	try {
 		const d = await api('POST', '/api/mod/world/deleteVehicle', { text: String(id) });
 		if (d.command) vehPending[id] = d.command.id;
 		await poll();
-	} catch (e) { alert('Not deleted: ' + e.message); return; }
+	} catch (e) { err.textContent = 'Not deleted: ' + e.message; if (vehInfo == null) openVehicleInfo(id); return; }
 	renderVehicle();
 }
 
 // ---- Towns, events and deaths on the map ---------------------------------
 // Each layer is shown while its button is on (remembered in this browser).
 
+// confirmPair is a button that asks again in place: clicked, it becomes
+// Cancel and the red action (no question, no browser pop-up). key names what
+// it is for (one at a time); go is the JavaScript that does it.
+let confirming = null;
+function confirmPair(key, label, go, title) {
+	if (confirming === key)
+		return '<button type="button" onclick="event.stopPropagation(); cancelConfirm()">Cancel</button>' +
+			'<button type="button" class="danger go" onclick="event.stopPropagation(); confirming = null; ' + go + '">' + label + '</button>';
+	return '<button type="button" class="danger" onclick="event.stopPropagation(); askConfirm(\'' + key + '\')"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</button>';
+}
+// inlineConfirm does the same for a button that stays put (not redrawn):
+// it hides the button and puts Cancel and the red action after it.
+function inlineConfirm(btn, label, go) {
+	if (!btn || btn.dataset.asking) return;
+	btn.dataset.asking = '1';
+	const wrap = document.createElement('span');
+	wrap.className = 'askpair';
+	wrap.innerHTML = '<button type="button">Cancel</button><button type="button" class="danger go">' + esc(label) + '</button>';
+	const done = () => { wrap.remove(); btn.hidden = false; delete btn.dataset.asking; };
+	wrap.children[0].onclick = e => { e.stopPropagation(); done(); };
+	wrap.children[1].onclick = e => { e.stopPropagation(); done(); go(); };
+	btn.hidden = true;
+	btn.after(wrap);
+}
+function askConfirm(key) { confirming = key; rerenderConfirms(); }
+function cancelConfirm() { confirming = null; rerenderConfirms(); }
+// rerenderConfirms redraws whatever may hold a confirmPair.
+function rerenderConfirms() {
+	for (const f of [renderPredator, renderVehicle, renderVehicleInfo, renderPlacedPopup, renderPlacedInfo, renderGroupInfo])
+		try { f(); } catch (e) { }
+}
 function layerPref(k, dflt) { try { const v = localStorage.getItem('live.' + k); return v == null ? dflt : v; } catch (e) { return dflt; } }
 function setLayerPref(k, v) { try { localStorage.setItem('live.' + k, v); } catch (e) { } }
 function layerButton(id, on, text, title) {
@@ -1313,7 +1404,7 @@ function layerButton(id, on, text, title) {
 // The Overlays button says how many layers are on; its menu opens below it
 // and closes with a click anywhere else.
 function renderOvBtn() {
-	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length; // not a layer's own filter
+	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length; // not a layer's own filter (a heading is on while it shows something)
 	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
 }
 function toggleOvMenu(open) {
@@ -1382,35 +1473,74 @@ function zoomBand() {
 }
 setInterval(loadPlaces, 10000);
 
-// Events: helicopter crashes and toxic zones, every 10 s.
-let eventsOn = layerPref('events', '0') === '1', worldEvents = [], eventsSent = true;
+// Event spots (recon-mod 1.0.3 on), every 10 s: every place the mission spawns an event,
+// up ones in their category's colour, the rest grey. The heading opens and
+// closes the filters: Active / Inactive and one per category. A mod before
+// 1.0.3 has only the events that are up (crashes and gas zones).
+const EVENT_CATS = [['heli', 'Heli crashes', '#f2a65a'], ['convoy', 'Convoys', '#8ab4f8'], ['police', 'Police', '#a78bfa'],
+	['medical', 'Medical', '#f28b82'], ['gas', 'Gas zones', '#c5d86d'], ['other', 'Other', '#e0e0e0']];
+const EVENT_DEFAULT = { heli: '1', convoy: '1', gas: '1' };
+let eventSpots = [], eventsSent = true, eventsExpanded = layerPref('events.open', '0') === '1';
+const eventCatOn = Object.fromEntries(EVENT_CATS.map(([k]) => [k, layerPref('events.' + k, EVENT_DEFAULT[k] || '0') === '1']));
+const eventStateOn = { active: layerPref('events.active', '1') === '1', inactive: layerPref('events.inactive', '1') === '1' };
 const eventLayer = L.layerGroup();
-const EVENT_NAMES = { Wreck_UH1Y: 'Helicopter crash (UH-1Y)', Wreck_Mi8_Crashed: 'Helicopter crash (Mi-8)', Wreck_Mi8: 'Helicopter crash (Mi-8)',
-	Wreck_SantasSleigh: 'Santa\'s sleigh', ContaminatedArea_Static: 'Toxic zone', ContaminatedArea_Dynamic: 'Toxic zone (airstrike)', ContaminatedArea_Local: 'Toxic gas (grenade)' };
-function eventName(e) { return EVENT_NAMES[e.type] || (e.kind === 'crash' ? 'Crash (' + item(e.type) + ')' : item(e.type)); }
-function toggleEvents() { eventsOn = !eventsOn; setLayerPref('events', eventsOn ? '1' : '0'); drawEvents(); loadEvents(); }
+function eventsWanted() { return (eventStateOn.active || eventStateOn.inactive) && EVENT_CATS.some(([k]) => eventCatOn[k]); }
+function toggleEventsOpen() { eventsExpanded = !eventsExpanded; setLayerPref('events.open', eventsExpanded ? '1' : '0'); drawEvents(); }
+function toggleEventCat(k) {
+	const was = eventsWanted();
+	eventCatOn[k] = !eventCatOn[k]; setLayerPref('events.' + k, eventCatOn[k] ? '1' : '0');
+	drawEvents(); if (!was && eventsWanted()) loadEvents();
+}
+function toggleEventState(k) {
+	const was = eventsWanted();
+	eventStateOn[k] = !eventStateOn[k]; setLayerPref('events.' + k, eventStateOn[k] ? '1' : '0');
+	drawEvents(); if (!was && eventsWanted()) loadEvents();
+}
 async function loadEvents() {
-	if (!eventsOn) return;
+	if (!eventsWanted()) return;
 	try {
-		const d = await api('GET', '/api/mod/worldevents');
-		worldEvents = d.events || []; eventsSent = !!d.sent;
+		const d = await api('GET', '/api/mod/eventspots');
+		if (d.sent) { eventSpots = d.spots || []; eventsSent = true; }
+		else {
+			// An older mod: only what is up, from its world events.
+			const w = await api('GET', '/api/mod/worldevents');
+			eventsSent = !!w.sent;
+			eventSpots = (w.events || []).map((e, i) => ({ id: i + 1, name: e.kind === 'crash' ? 'Heli crash' : e.kind === 'area' ? 'Hot zone' : 'Gas zone',
+				category: e.kind === 'crash' ? 'heli' : 'gas', x: e.x, z: e.z, on: true, checked: true, radius: e.kind === 'crash' ? 0 : e.radius, static: e.kind !== 'crash' }));
+		}
 	} catch (e) { return; }
 	drawEvents();
 }
+function eventCat(k) { return EVENT_CATS.find(c => c[0] === k) || EVENT_CATS[EVENT_CATS.length - 1]; }
 function drawEvents() {
-	layerButton('eventBtn', eventsOn, 'Events' + (eventsOn && eventsSent ? ' ' + worldEvents.length : ''),
-		eventsOn && !eventsSent ? 'recon-mod doesn\'t send events: it needs 0.0.1i or later' : 'Show helicopter crashes and toxic zones');
+	const on = eventsWanted(), up = {}, all = {};
+	for (const e of eventSpots) { all[e.category] = (all[e.category] || 0) + 1; if (e.on) up[e.category] = (up[e.category] || 0) + 1; }
+	const shownUp = EVENT_CATS.reduce((n, [k]) => n + (eventCatOn[k] ? up[k] || 0 : 0), 0);
+	layerButton('eventBtn', on, 'Events' + (on && eventsSent ? ' ' + shownUp : ''),
+		on && !eventsSent ? 'recon-mod doesn\'t send events: it needs 0.0.1i or later' : 'Where events spawn: tick what to show');
+	const btn = document.getElementById('eventBtn');
+	btn.classList.toggle('open', eventsExpanded); btn.setAttribute('aria-expanded', eventsExpanded ? 'true' : 'false');
+	const sub = document.getElementById('eventKinds');
+	sub.hidden = !eventsExpanded;
+	sub.innerHTML = '<div class="ovpair">' + [['active', 'Active'], ['inactive', 'Inactive']].map(([k, label]) =>
+		'<button type="button" class="' + (eventStateOn[k] ? 'on' : '') + '" onclick="toggleEventState(\'' + k + '\')">' + label + '</button>').join('') + '</div><div class="ovsep"></div>' +
+		EVENT_CATS.map(([k, label]) => '<button type="button" class="' + (eventCatOn[k] ? 'on' : '') + '" onclick="toggleEventCat(\'' + k + '\')">' + label +
+			(eventsSent && all[k] ? ' ' + (up[k] || 0) + '/' + all[k] : '') + '</button>').join('');
 	eventLayer.clearLayers();
-	if (!eventsOn) { eventLayer.remove(); return; }
+	if (!on) { eventLayer.remove(); return; }
 	eventLayer.addTo(map);
-	for (const e of worldEvents) {
-		const tip = eventName(e) + (e.radius ? ' · ' + Math.round(e.radius) + ' m across' : '') + ' · ' + grid(e.x, e.z);
-		if (e.kind !== 'crash' && e.radius > 0)
-			L.circle([e.z, e.x], { radius: e.radius, color: '#c5d86d', weight: 1.5, dashArray: '5 4', fillColor: '#c5d86d', fillOpacity: 0.15, pane: 'events', interactive: false }).addTo(eventLayer);
-		const html = e.kind === 'crash'
-			? '<svg width="18" height="18" viewBox="-9 -9 18 18"><path d="M0 -8 L8 0 L0 8 L-8 0 Z" fill="#f2a65a" stroke="#111" stroke-width="1.2"/><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="#111" stroke-width="1.8"/></svg>'
-			: '<svg width="18" height="18" viewBox="-9 -9 18 18"><circle r="6.5" fill="#c5d86d" stroke="#111" stroke-width="1.2"/><text y="3.5" text-anchor="middle" font-size="10" font-weight="700" fill="#111">!</text></svg>';
-		L.marker([e.z, e.x], { pane: 'events', icon: L.divIcon({ className: 'emark', html, iconSize: [0, 0] }), keyboard: false }).bindTooltip(esc(tip), { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
+	for (const e of eventSpots) {
+		if (!eventCatOn[e.category] || !(e.on ? eventStateOn.active : eventStateOn.inactive)) continue;
+		const [, , c0] = eventCat(e.category), c = e.on ? c0 : '#7a7a7a';
+		const tip = esc(e.name) + ' · ' + (e.on ? (e.static ? 'always there' : 'up now') : e.checked ? 'not up' : 'not checked yet') +
+			(e.on && e.radius ? ' · ' + Math.round(e.radius) + ' m' : '') + ' · ' + grid(e.x, e.z);
+		if (e.on && e.radius > 0)
+			L.circle([e.z, e.x], { radius: e.radius, color: c, weight: 1.5, dashArray: '5 4', fillColor: c, fillOpacity: 0.15, pane: 'events', interactive: false }).addTo(eventLayer);
+		const sz = e.on ? 14 : 10, h = sz / 2 - 1;
+		const html = '<svg width="' + sz + '" height="' + sz + '" viewBox="' + (-sz / 2) + ' ' + (-sz / 2) + ' ' + sz + ' ' + sz + '"' + (e.on ? '' : ' opacity="0.75"') + '>' +
+			'<path d="M0 ' + (-h) + ' L' + h + ' 0 L0 ' + h + ' L' + (-h) + ' 0 Z" fill="' + c + '" stroke="#111" stroke-width="1.2"/></svg>';
+		L.marker([e.z, e.x], { pane: 'events', icon: L.divIcon({ className: 'emark', html, iconSize: [0, 0] }), keyboard: false })
+			.bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
 	}
 }
 setInterval(loadEvents, 10000);
@@ -1428,6 +1558,61 @@ async function loadPredators() {
 		predators = d.predators || []; predSent = !!d.sent;
 	} catch (e) { return; }
 	drawPredators();
+}
+// A predator's popup: its health and what its AI is doing (recon-mod 1.0.3
+// on), the nearest player while it hunts, and Remove.
+const predPopup = L.popup({ autoPan: false, offset: [0, -6], autoPanPaddingTopLeft: [10, 60] });
+let predOpen = null, predErr = '';
+const BEHAVIOR = ['', 'Calm', 'Resting', 'Grazing', 'Travelling', 'Drinking', 'Threatened', 'Threatened', 'Alerted', 'Attracted', 'Scared',
+	'Hunting', 'Eating', 'Besieging', 'Keeping away from fire', 'Enraged', 'Enraged, lost target', 'Attracted', 'Intimidating'];
+const ACTIVITY = ['', 'Heading to safety', 'Grazing on the move', 'Grazing', 'Resting', 'Travelling', 'Eating', 'Drinking', 'Charging',
+	'Approaching', 'Closing in', 'Walking', 'Idle', 'Idle', 'Idle', 'Backing away from a threat', 'Stalking towards a threat', 'Watching a threat', 'Holding ground'];
+const HUNTING = [11, 15];
+function openPredator(id) {
+	if (!predators.some(x => x.id === id)) return;
+	predOpen = id; predErr = ''; confirming = null;
+	renderPredator();
+	predPopup.options.autoPan = true; predPopup.openOn(map); predPopup.options.autoPan = false;
+}
+function nearestPlayer(x, z) {
+	let best = null, bd = Infinity;
+	for (const p of players) {
+		if (!p.alive) continue;
+		const d = Math.hypot(p.x - x, p.z - z);
+		if (d < bd) { bd = d; best = p; }
+	}
+	return best ? [best, bd] : null;
+}
+function renderPredator() {
+	if (predOpen == null) return;
+	const a = predators.find(x => x.id === predOpen);
+	if (!a) { map.closePopup(predPopup); return; }
+	const [name, c] = PRED[a.kind] || [item(a.type), '#ccc'];
+	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
+	let h = '<div class="vpop" data-noicon><h4>' + esc(name) + '</h4><div class="ty">' + esc(a.type) + '</div>';
+	if (a.health != null) {
+		const [, hc] = vehCondition(a.health);
+		h += row('Health', '<span style="color:' + hc + '">' + Math.round(a.health * 100) + '%</span>');
+		const b = BEHAVIOR[a.behaviour] || '', act = ACTIVITY[a.activity] || '';
+		const hunting = HUNTING.includes(a.behaviour);
+		if (b) h += row('Behavior', hunting ? '<b style="color:#f28b82">' + b + '</b>' : b);
+		if (act) h += row('Activity', act);
+		h += row('Attacking', a.attacking ? '<b style="color:#f28b82">Yes</b>' : 'No');
+		if (hunting || a.attacking) {
+			const n = nearestPlayer(a.x, a.z);
+			if (n) h += row('Nearest player', esc(n[0].name) + ' · ' + Math.round(n[1]) + ' m');
+		}
+	} else h += '<div class="muted st">Health and what it\'s doing need recon-mod 1.0.3.</div>';
+	h += '<div class="err">' + esc(predErr) + '</div><div class="acts" style="justify-content:flex-end">' +
+		confirmPair('pred:' + a.id, 'Remove', 'removePredator(' + a.id + ')', 'Remove this animal from the server') + '</div></div>';
+	predPopup.setLatLng([a.z, a.x]).setContent(h);
+}
+async function removePredator(id) {
+	predErr = '';
+	try { await api('POST', '/api/mod/world/deleteAnimal', { text: String(id) }); }
+	catch (e) { predErr = 'Not removed: ' + e.message; renderPredator(); return; }
+	map.closePopup(predPopup);
+	setTimeout(loadPredators, 1500);
 }
 function predSVG(a) {
 	const [name, c] = PRED[a.kind] || [item(a.type), '#ccc'];
@@ -1447,10 +1632,14 @@ function drawPredators() {
 		seen[a.id] = true;
 		const icon = L.divIcon({ className: 'amark', html: predSVG(a), iconSize: [0, 0] }), tip = esc((PRED[a.kind] || [item(a.type)])[0] + ' · ' + grid(a.x, a.z));
 		let m = predMarkers[a.id];
-		if (!m) m = predMarkers[a.id] = L.marker([a.z, a.x], { pane: 'vehicles', icon, keyboard: false }).bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(predLayer);
-		else { m.setLatLng([a.z, a.x]); m.setIcon(icon); m.setTooltipContent(tip); }
+		if (!m) {
+			m = predMarkers[a.id] = L.marker([a.z, a.x], { pane: 'vehicles', icon, keyboard: false }).bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(predLayer);
+			const pid = a.id;
+			m.on('click', () => openPredator(pid));
+		} else { m.setLatLng([a.z, a.x]); m.setIcon(icon); m.setTooltipContent(tip); }
 	}
 	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
+	renderPredator();
 }
 
 // ---- Restore: give back chosen items from an inventory saved at death -----
@@ -1500,8 +1689,8 @@ document.getElementById('rGo').addEventListener('click', async () => {
 	const s = restoreSave;
 	if (!s) return;
 	const picked = [...document.querySelectorAll('#rTree input:checked')].map(c => +c.dataset.id);
-	const p = byGuid[s.guid], err = document.getElementById('rErr');
-	if (!picked.length || !confirm('Give back ' + picked.length + (picked.length === 1 ? ' item' : ' items') + ' to ' + (p ? p.name : 'them') + '?')) return;
+	const err = document.getElementById('rErr');
+	if (!picked.length) return;
 	err.textContent = '';
 	try { await api('POST', '/api/mod/saves/' + s.id + '/restore', { items: picked }); }
 	catch (e) { err.textContent = e.message; return; }
@@ -1516,16 +1705,23 @@ document.getElementById('rGo').addEventListener('click', async () => {
 const PLACED_KINDS = [['base', 'Base building'], ['tent', 'Tents & shelters'], ['storage', 'Storage'], ['trap', 'Traps'], ['other', 'Other']];
 // From zoom -1 (2 m per pixel: a 100 px scale bar reads 200 m).
 const PLACED_MIN_ZOOM = -1;
-let placedOn = layerPref('placed', '0') === '1', placedList = [], placedSent = true, placedMarkers = {}, placedOpen = null;
-// Each kind is off until ticked (remembered): switching Placed objects on
-// draws nothing until you pick what to see.
+let placedList = [], placedSent = true, placedMarkers = {}, placedOpen = null;
+// Each kind is off until ticked (remembered); the heading only opens and
+// closes the list (remembered too). Nothing ticked: nothing is read.
 const placedKindOn = Object.fromEntries(PLACED_KINDS.map(([k]) => [k, layerPref('placed.' + k, '0') === '1']));
+let placedExpanded = layerPref('placed.open', '0') === '1';
+function placedWanted() { return PLACED_KINDS.some(([k]) => placedKindOn[k]); }
 // It opens below the map's top bar (Overlays, Fit...), which sits over the map.
 const plcPopup = L.popup({ autoPan: false, offset: [0, -4], autoPanPaddingTopLeft: [10, 60] });
-function togglePlaced() { placedOn = !placedOn; setLayerPref('placed', placedOn ? '1' : '0'); drawPlaced(); loadPlaced(); }
-function togglePlacedKind(k) { placedKindOn[k] = !placedKindOn[k]; setLayerPref('placed.' + k, placedKindOn[k] ? '1' : '0'); drawPlaced(); }
+function togglePlacedOpen() { placedExpanded = !placedExpanded; setLayerPref('placed.open', placedExpanded ? '1' : '0'); drawPlaced(); }
+function togglePlacedKind(k) {
+	const was = placedWanted();
+	placedKindOn[k] = !placedKindOn[k]; setLayerPref('placed.' + k, placedKindOn[k] ? '1' : '0');
+	drawPlaced();
+	if (!was && placedWanted()) loadPlaced();
+}
 async function loadPlaced() {
-	if (!placedOn) return;
+	if (!placedWanted()) return;
 	try {
 		const d = await api('GET', '/api/mod/placed');
 		placedList = d.placed || []; placedSent = !!d.sent;
@@ -1538,13 +1734,14 @@ function drawPlaced() {
 	const count = {};
 	for (const o of placedList) count[placedKind(o)] = (count[placedKind(o)] || 0) + 1;
 	const shown = PLACED_KINDS.reduce((n, [k]) => n + (placedKindOn[k] ? count[k] || 0 : 0), 0);
-	const zoomedOut = map.getZoom() < PLACED_MIN_ZOOM - 1e-6;
+	const zoomedOut = map.getZoom() < PLACED_MIN_ZOOM - 1e-6, placedOn = placedWanted();
 	layerButton('placedBtn', placedOn, 'Placed objects' + (placedOn && placedSent ? ' ' + shown : ''),
 		placedOn && !placedSent ? 'recon-mod doesn\'t send placed objects: it needs 1.0.1'
-			: placedOn && !PLACED_KINDS.some(([k]) => placedKindOn[k]) ? 'Tick the kinds to show below'
-			: placedOn && zoomedOut ? 'Zoom in to see placed objects' : 'Show what players placed: bases, tents, storage, traps');
+			: placedOn && zoomedOut ? 'Zoom in to see placed objects (200 m on the scale bar)' : 'What players placed: tick the kinds to show');
+	const btn = document.getElementById('placedBtn');
+	btn.classList.toggle('open', placedExpanded); btn.setAttribute('aria-expanded', placedExpanded ? 'true' : 'false');
 	const sub = document.getElementById('placedKinds');
-	sub.hidden = !placedOn;
+	sub.hidden = !placedExpanded;
 	sub.innerHTML = PLACED_KINDS.map(([k, label]) => '<button type="button" class="' + (placedKindOn[k] ? 'on' : '') + '" onclick="togglePlacedKind(\'' + k + '\')">' +
 		label + (placedSent ? ' ' + (count[k] || 0) : '') + '</button>').join('');
 	const want = {};
@@ -1552,13 +1749,14 @@ function drawPlaced() {
 		const b = map.getBounds().pad(0.2);
 		for (const o of placedList) if (placedKindOn[placedKind(o)] && b.contains([o.z, o.x])) want[o.id] = o;
 	}
-	// Objects in one grid square are one marker (×N) until the square is
-	// SPLIT_PX wide on screen; then each shows, inside the square's outline.
-	const groups = {}, split = groupSplit(), keep = {};
-	for (const id in want) (groups[groupKey(want[id])] = groups[groupKey(want[id])] || []).push(want[id]);
+	// By the scale bar: from 140 m one block per 100 m square (a click zooms
+	// in on it), from 70 m one per 50 m square (a click opens its popup),
+	// closer each object, inside its 50 m square's outline.
+	const level = groupLevel(), keep = {}, groups = {};
+	for (const id in want) { const k = groupKey(want[id], level || GROUP_M); (groups[k] = groups[k] || []).push(want[id]); }
 	for (const key in groups) {
 		const objs = groups[key];
-		if (objs.length === 1 || split) {
+		if (objs.length === 1 || !level) {
 			for (const o of objs) {
 				const [, c] = vehCondition(o.health);
 				const icon = L.divIcon({ className: 'omark', html: '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + c + '" stroke="#111" stroke-width="1"/></svg>', iconSize: [0, 0] });
@@ -1570,20 +1768,27 @@ function drawPlaced() {
 				keep[o.id] = true;
 			}
 			if (objs.length > 1) {
-				const [i, j] = key.split(',').map(Number);
-				if (!placedMarkers['r' + key]) placedMarkers['r' + key] = L.rectangle([[j * GROUP_M, i * GROUP_M], [(j + 1) * GROUP_M, (i + 1) * GROUP_M]],
+				const [m, i, j] = keyParts(key);
+				if (!placedMarkers['r' + key]) placedMarkers['r' + key] = L.rectangle([[j * m, i * m], [(j + 1) * m, (i + 1) * m]],
 					{ className: 'gsquare', weight: 1, interactive: false, fill: false }).addTo(map);
 				keep['r' + key] = true;
 			}
 			continue;
+		}
+		if (level === GROUP_M) {
+			const [m, i, j] = keyParts(key);
+			if (!placedMarkers['r' + key]) placedMarkers['r' + key] = L.rectangle([[j * m, i * m], [(j + 1) * m, (i + 1) * m]],
+				{ className: 'gsquare', weight: 1, interactive: false, fill: false }).addTo(map);
+			keep['r' + key] = true;
 		}
 		const [, c] = vehCondition(worstHealth(objs)), at = centreOf(objs);
 		const icon = L.divIcon({ className: 'gmark', iconSize: [0, 0], html: '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2" fill="' + c + '" stroke="#fff" stroke-width="2"/></svg><span class="n">×' + objs.length + '</span>' });
 		let m = placedMarkers['g' + key];
 		if (!m) {
 			m = placedMarkers['g' + key] = L.marker([at[1], at[0]], { pane: 'vehicles', icon, keyboard: false, title: objs.length + ' placed objects' }).addTo(map);
-			m.on('click', () => openGroupPopup(key));
+			m.on('click', () => level === GROUP_M ? openGroupPopup(key) : zoomToBlock(key));
 		} else { m.setLatLng([at[1], at[0]]); m.setIcon(icon); m.options.title = objs.length + ' placed objects'; }
+		if (m.getElement()) m.getElement().title = objs.length + ' placed objects' + (level === GROUP_M ? '' : ' · click to zoom in');
 		keep['g' + key] = true;
 	}
 	for (const id in placedMarkers) if (!keep[id]) { placedMarkers[id].remove(); delete placedMarkers[id]; }
@@ -1663,22 +1868,32 @@ function renderPlacedInfo() {
 	body.innerHTML = h;
 	body.querySelectorAll('.vcols > div').forEach((c, i) => { c.scrollTop = tops[i] || 0; });
 	document.getElementById('oActs').innerHTML = '<button type="button" onclick="askPlaced()" title="Read what is in and on it again">Refresh</button>' +
-		'<button type="button" class="bad" onclick="removePlaced(' + o.id + ')" title="Remove it, and everything in it">Remove</button>';
+		confirmPair('plc:' + o.id, 'Remove', 'removePlaced(' + o.id + ')', 'Remove it, and everything in it');
 }
 // ---- Placed objects close together -------------------------------------
 // A group is the shown objects in one GROUP_M square of the map (metres,
 // lined up with 0,0). Its popup and Info ask the mod for what is in each.
-const GROUP_M = 50, SPLIT_PX = 60, ZOOM_IN_M = 300;
+// Placed objects group by 50 m squares, and by 100 m (BLOCK_M) further out.
+const GROUP_M = 50, BLOCK_M = 100, ZOOM_IN_M = 300;
 let groupOpen = null, groupInfo = null, groupSel = null, groupItemSel = null, groupExpand = {}, groupDetail = {}, groupRun = 0;
-function groupKey(o) { return Math.floor(o.x / GROUP_M) + ',' + Math.floor(o.z / GROUP_M); }
-function groupSplit() { return GROUP_M * Math.pow(2, map.getZoom()) >= SPLIT_PX; }
+// groupKey names the square of size m (metres) an object is in: "50:12,40".
+function groupKey(o, m) { m = m || GROUP_M; return m + ':' + Math.floor(o.x / m) + ',' + Math.floor(o.z / m); }
+function keyParts(key) { const [m, ij] = key.split(':'), [i, j] = ij.split(',').map(Number); return [+m, i, j]; }
+// groupLevel is the square size placed objects group by at this zoom: by
+// the scale bar's length (100 px), 140 m or more: BLOCK_M; 70 m or more:
+// GROUP_M; closer 0 (each on its own).
+function groupLevel() {
+	const bar = 100 / Math.pow(2, map.getZoom());
+	return bar >= 140 ? BLOCK_M : bar >= 70 ? GROUP_M : 0;
+}
 function groupOf(key) {
-	return placedList.filter(o => placedKindOn[placedKind(o)] && groupKey(o) === key)
+	const [m] = keyParts(key);
+	return placedList.filter(o => placedKindOn[placedKind(o)] && groupKey(o, m) === key)
 		.sort((a, b) => placedName(a).localeCompare(placedName(b)) || a.id - b.id);
 }
 function worstHealth(objs) { return Math.min(...objs.map(o => o.health)); }
 function centreOf(objs) { return [objs.reduce((n, o) => n + o.x, 0) / objs.length, objs.reduce((n, o) => n + o.z, 0) / objs.length]; }
-function squareCentre(key) { const [i, j] = key.split(',').map(Number); return [(i + 0.5) * GROUP_M, (j + 0.5) * GROUP_M]; }
+function squareCentre(key) { const [m, i, j] = keyParts(key); return [(i + 0.5) * m, (j + 0.5) * m]; }
 function groupGrid(key) { const [x, z] = squareCentre(key); return grid(x, z); }
 // objCount is every item in and on an object, all levels.
 function objCount(d) { return (d.items || []).reduce((n, it) => n + 1 + countIn(it), 0); }
@@ -1732,18 +1947,22 @@ function renderGroupPopup() {
 			'<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + vehCondition(o.health)[1] + '" stroke="#111" stroke-width="1"/></svg>' +
 			'<span class="nm">' + esc(placedName(o)) + '</span><span class="ct">' + countText(o.id) + '</span></button>').join('') + '</div>' +
 		'<div class="muted">Placed by ' + placersText(objs) + '</div>' +
-		'<div class="acts"><button type="button" onclick="event.stopPropagation(); zoomToGroup(' + q + ')" title="Zoom in so each object shows">Zoom in</button>' +
+		'<div class="acts split"><button type="button" onclick="event.stopPropagation(); zoomToGroup(' + q + ')" title="Zoom in so each object shows">Zoom in</button>' +
 		'<button type="button" onclick="event.stopPropagation(); openGroupInfo(' + q + ')" title="Each object and what is in it">Info</button></div></div>');
 	const nl = plcPopup.getElement() && plcPopup.getElement().querySelector('.glist');
 	if (nl) nl.scrollTop = top;
 }
+// zoomToGroup centres a 50 m square at the 50 m step, where each object
+// shows; zoomToBlock a 100 m block at the 100 m step, where its 50 m
+// squares show.
 function zoomToGroup(key) {
 	map.closePopup(plcPopup);
 	const [x, z] = squareCentre(key);
-	// ZOOM_IN_M across, but always far enough in that the square splits
-	// (on a narrow map 300 m across can leave it just short).
-	const z0 = Math.max(Math.log2(map.getSize().x / ZOOM_IN_M), Math.log2(SPLIT_PX / GROUP_M));
-	map.setView([z, x], Math.min(map.getMaxZoom(), Math.ceil(z0 * 4) / 4));
+	map.setView([z, x], Math.min(map.getMaxZoom(), zoomForBar(50)));
+}
+function zoomToBlock(key) {
+	const [x, z] = squareCentre(key);
+	map.setView([z, x], Math.min(map.getMaxZoom(), zoomForBar(100)));
 }
 function openGroupInfo(key) {
 	const ids = groupOf(key).map(o => o.id), have = groupOpen === key;
@@ -1829,7 +2048,7 @@ function renderGroupInfo() {
 	}
 	h += '<div class="gacts"><button type="button" data-act="show" data-of="' + o.id + '">Show on map</button>' +
 		'<button type="button" data-act="refresh" data-of="' + o.id + '">Refresh</button>' +
-		'<button type="button" class="bad" data-act="remove" data-of="' + o.id + '">Remove</button></div>';
+		confirmPair('plc:' + o.id, 'Remove', 'removePlaced(' + o.id + ')', 'Remove it, and everything in it') + '</div>';
 	det.innerHTML = h;
 }
 document.getElementById('gModal').addEventListener('click', e => {
@@ -1837,7 +2056,6 @@ document.getElementById('gModal').addEventListener('click', e => {
 	if (a) {
 		const id = +a.dataset.of, o = placedList.find(x => x.id === id);
 		if (a.dataset.act === 'refresh') askGroup([id]);
-		else if (a.dataset.act === 'remove') removePlaced(id);
 		else if (o) { closeGroupInfo(); map.setView([o.z, o.x], Math.min(map.getMaxZoom(), Math.log2(map.getSize().x / ZOOM_IN_M))); openPlacedPopup(id); }
 		return;
 	}
@@ -1854,9 +2072,11 @@ document.getElementById('gModal').addEventListener('click', e => {
 });
 async function removePlaced(id) {
 	const o = placedList.find(x => x.id === id);
-	if (!o || !confirm('Remove this ' + placedName(o) + ' and everything in it? It can\'t be undone.')) return;
+	if (!o) return;
+	const err = document.getElementById(groupInfo != null ? 'gErr' : 'oErr');
+	err.textContent = '';
 	try { await api('POST', '/api/mod/world/removeEntity', { text: o.pid, stat: o.type }); }
-	catch (e) { alert('Not removed: ' + e.message); return; }
+	catch (e) { err.textContent = 'Not removed: ' + e.message; rerenderConfirms(); return; }
 	closePlacedInfo();
 	poll();
 }
@@ -1920,6 +2140,22 @@ function openCtx(pt, at, html, handle) {
 	el.style.top = Math.max(4, Math.min(pt.y, wrap.height - h - 4)) + 'px';
 }
 function ctxMsg(text, bad) { const m = document.getElementById('ctxMsg'); if (m) { m.style.color = bad ? '#f28b82' : ''; m.textContent = text; } }
+// ctxConfirm turns a menu item (a) into Cancel and the red action in its
+// place; the action's own click then comes back as a + '!'. True when it
+// handled the click.
+function ctxConfirm(clicked, a, label) {
+	const menu = document.getElementById('ctx'), row = menu.querySelector('[data-a="' + a + '"]');
+	if (clicked === a && row) {
+		row.outerHTML = '<div class="ctxpair">' + ctxItem(a + '?no', 'Cancel') + ctxItem(a + '!', label, 'bad go') + '</div>';
+		return true;
+	}
+	if (clicked === a + '?no') {
+		const pair = menu.querySelector('.ctxpair');
+		if (pair) pair.outerHTML = ctxItem(a, label, 'bad');
+		return true;
+	}
+	return false;
+}
 function ctxItem(a, text, cls) { return '<button type="button" data-a="' + a + '"' + (cls ? ' class="' + cls + '"' : '') + '>' + text + '</button>'; }
 // ctxTeleportList is a button per online player, to send them there.
 function ctxTeleportList(label, except) {
@@ -1999,7 +2235,8 @@ function showPlayerCtx(guid, e) {
 			else if (a === 'send') { closeCtx(); startPick(guid); }
 			else if (a === 'heal') ctxRun('Healing ' + p.name, '/api/mod/players/' + guid + '/heal');
 			else if (a === 'dry') ctxRun('Drying ' + p.name, '/api/mod/players/' + guid + '/dry');
-			else if (a === 'kill') { if (confirm('Kill ' + p.name + '? Their character dies and they start again fresh.')) ctxRun('Killing ' + p.name, '/api/mod/players/' + guid + '/kill'); }
+			else if (ctxConfirm(a, 'kill', 'Kill')) return;
+			else if (a === 'kill!') ctxRun('Killing ' + p.name, '/api/mod/players/' + guid + '/kill');
 		});
 }
 
@@ -2018,7 +2255,8 @@ function showVehicleCtx(id, e) {
 			// Beside it (3 m east), not on top of it.
 			else if (ctxAsk(a)) return;
 			else if (a.startsWith('tpok:')) { const p = byGuid[a.slice(5)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(5) + '/teleport', { x: v.x + 3, z: v.z, y: 0 }); }
-			else if (a === 'delete') { closeCtx(); deleteVehicle(id); }
+			else if (ctxConfirm(a, 'delete', 'Delete')) return;
+			else if (a === 'delete!') { closeCtx(); deleteVehicle(id); }
 		});
 }
 
@@ -2069,7 +2307,7 @@ async function pickClick(e) {
 	if (!(x > 0 && z > 0) || (size && (x > size || z > size))) { b.textContent = 'That spot is off the map: click on it · Esc cancels'; return; }
 	endPick();
 	try { await api('POST', '/api/mod/players/' + guid + '/teleport', { x, z, y: 0 }); poll(); }
-	catch (err) { alert('Not sent: ' + err.message); }
+	catch (err) { b.hidden = false; b.textContent = 'Not sent: ' + err.message; setTimeout(() => { if (!pickSend) b.hidden = true; }, 5000); }
 }
 
 // Spawn at a spot: the item list, searched, and how many.
@@ -2183,6 +2421,7 @@ function render() {
 	setStatusCount(connected ? players.length + ' player(s) on the map' : '');
 	renderList();
 	drawMarkers();
+	if (vehOn && players.some(p => p.seat != null && p.seat >= 0)) drawVehicles(); // in their colours
 	if (selGuid) renderPlayer();
 	if (document.getElementById('wModal').style.display === 'flex') renderWorld();
 }
@@ -2530,7 +2769,7 @@ function renderPlayer() {
 let invSel = null, invAsked = 0;
 // The player's slots, in the order DayZ's inventory shows them.
 const SLOTS = [['Hands', 'Hands'], ['Headgear', 'Head'], ['Mask', 'Face'], ['Eyewear', 'Eyes'], ['Gloves', 'Gloves'], ['Armband', 'Armband'],
-	['Body', 'Top'], ['Vest', 'Vest'], ['Back', 'Back'], ['Hips', 'Belt'], ['Legs', 'Pants'], ['Feet', 'Shoes'], ['Shoulder', 'Shoulder'], ['Melee', 'Melee']];
+	['Body', 'Top'], ['Vest', 'Vest'], ['Back', 'Back'], ['Hips', 'Belt'], ['Legs', 'Pants'], ['Feet', 'Shoes'], ['Shoulder', 'Left Shoulder'], ['Melee', 'Right Shoulder']];
 const SLOT_LABEL = Object.fromEntries(SLOTS);
 const SLOT_RANK = Object.fromEntries(SLOTS.map(([k], i) => [k, i]));
 const CONDITION = [['Pristine', '#81c995'], ['Worn', '#b5d07a'], ['Damaged', '#fdd663'], ['Badly damaged', '#f2a65a'], ['Ruined', '#f28b82']];
@@ -2570,10 +2809,17 @@ function irow(it, label, extra) {
 		'<span class="ex">' + esc(extra || '') + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
 }
 
+function agoText(at) {
+	const s = Math.max(0, Math.round((Date.now() - new Date(at)) / 1000));
+	return s < 90 ? s + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : new Date(at).toLocaleString();
+}
 function renderInv(p) {
 	const list = document.getElementById('iList'), det = document.getElementById('iDet'), when = document.getElementById('invWhen');
-	const inv = detail && detail.inventory;
-	if (!p) {
+	// Until the live inventory comes (or while they're offline): their last
+	// known one, at most about 5 min old while they're online.
+	const live = detail && detail.inventory, cached = !live && detail && detail.lastInventory;
+	const inv = live || cached;
+	if (!p && !cached) {
 		when.textContent = '';
 		list.innerHTML = '<div class="empty">They aren\'t on the server now.</div>';
 		det.innerHTML = '';
@@ -2595,7 +2841,8 @@ function renderInv(p) {
 		det.innerHTML = '';
 		return;
 	}
-	when.textContent = '· updated ' + Math.max(0, Math.round((Date.now() - new Date(inv.at)) / 1000)) + ' s ago';
+	when.textContent = cached ? '· as of ' + agoText(inv.at) + (p ? ' · loading…' : ' (last known)')
+		: '· updated ' + Math.max(0, Math.round((Date.now() - new Date(inv.at)) / 1000)) + ' s ago';
 
 	const path = invSel != null ? pathTo(items, invSel) : null;
 	if (!path) {
@@ -2934,8 +3181,8 @@ function calPick(at) {
 		? 'Moved the picture. To fix its size too, calibrate again 1 km or more away (the farther the better).'
 		: 'Moved and resized the picture from 2 points ' + (Math.hypot(pts[1].x - pts[0].x, pts[1].z - pts[0].z) / 1000).toFixed(1) + ' km apart.');
 }
-document.getElementById('miniCalReset').addEventListener('click', () => {
-	if (confirm('Forget this map\'s calibration and draw its picture over the whole map again?')) saveCal([], 'Calibration reset.');
+document.getElementById('miniCalReset').addEventListener('click', e => {
+	inlineConfirm(e.currentTarget, 'Reset', () => saveCal([], 'Calibration reset.'));
 });
 // The wheel: 200 m per notch (a trackpad's small steps add up to notches).
 let miniWheel = 0;
@@ -3093,10 +3340,7 @@ async function act(action, body, keepOpen, guid) {
 		return true;
 	} catch (e) { err.textContent = e.message; return false; }
 }
-function killPlayer() {
-	const p = byGuid[selGuid];
-	if (confirm('Kill ' + (p ? p.name : 'this player') + '? Their character dies and they start again fresh.')) act('kill');
-}
+function killPlayer(btn) { inlineConfirm(btn, 'Kill', () => act('kill')); }
 // The teleport panel is always open; it empties after each teleport. Its
 // three ways: to a spot (typed, or a mini-map click), this player to
 // another (to), or another to this player (from). Typing or picking in one
@@ -3309,7 +3553,7 @@ for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'oModal', 'gModal', 'r
 });
 
 initMap();
-map.on('popupclose', e => { if (e.popup === plcPopup) { placedOpen = null; if (groupOpen != null) { groupOpen = null; if (groupInfo == null) stopGroup(); } } if (e.popup === vehPopup) vehOpen = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
+map.on('popupclose', e => { if (e.popup === plcPopup) { placedOpen = null; if (groupOpen != null) { groupOpen = null; if (groupInfo == null) stopGroup(); } } if (e.popup === vehPopup) vehOpen = null; if (e.popup === predPopup) predOpen = null; confirming = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
 buildWorld();
 drawVehicles();
 loadVehicles();
@@ -3325,21 +3569,22 @@ drawEvents(); loadEvents();
 drawPredators(); loadPredators();
 drawDeaths(); loadDeaths();
 poll();
-// How often players, vehicles and predators refresh goes with how much of
-// the map is in view (viewSpan): the whole map, every 10 s; between, 5 s;
-// close in (3 km across or less), players and vehicles every second and
-// predators every 2 s. A tick each second runs whichever is due, so
-// zooming in speeds things up within a second.
-const REFRESH = { far: { poll: 10000, veh: 10000, pred: 10000 }, mid: { poll: 5000, veh: 5000, pred: 5000 }, near: { poll: 1000, veh: 1000, pred: 2000 } };
-const lastRun = { poll: Date.now(), veh: Date.now(), pred: Date.now() };
-function refreshBand() {
-	const span = viewSpan(), ms = size || 15360;
-	return span >= ms / 2 ? 'far' : span > 3000 ? 'mid' : 'near';
+// How often players, predators and the vehicles with someone in them
+// refresh goes with the scale bar (100 px): 1 km or more, every 10 s;
+// 500 m, 5 s; 200 m, 2 s; closer, every second. Every vehicle (parked ones
+// too) is read every 10 s at any zoom. A tick each second runs whichever is
+// due, so zooming in speeds things up within a second.
+const REFRESH_BANDS = [[1000, 10000], [500, 5000], [200, 2000], [0, 1000]];
+const lastRun = { poll: Date.now(), crew: Date.now(), veh: Date.now(), pred: Date.now() };
+function refreshEvery() {
+	const bar = 100 / Math.pow(2, map.getZoom());
+	for (const [m, ms] of REFRESH_BANDS) if (bar >= m * 0.99) return ms;
+	return 1000;
 }
 setInterval(() => {
-	const every = REFRESH[refreshBand()], now = Date.now();
-	for (const [k, run] of [['poll', poll], ['veh', loadVehicles], ['pred', loadPredators]])
-		if (now - lastRun[k] >= every[k] - 50) { lastRun[k] = now; run(); }
+	const every = refreshEvery(), now = Date.now();
+	for (const [k, run, ms] of [['poll', poll, every], ['crew', loadCrewVehicles, every], ['pred', loadPredators, every], ['veh', loadVehicles, 10000]])
+		if (now - lastRun[k] >= ms - 50) { lastRun[k] = now; run(); }
 }, 1000);
 </script>
 </body>

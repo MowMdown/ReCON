@@ -64,6 +64,14 @@ html[data-theme]:not([data-theme="default"]) .verline { color: var(--color-neutr
 .importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
 .importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
 .importbox .buttons { margin-top: 12px; flex: none; }
+ 
+button.danger { color: #f28b82; border-color: #5c3533; }
+button.danger.go { background: #5c3533; color: #fff; border-color: #f28b82; }
+.askpair { display: inline-flex; gap: 6px; }
+.pagemsg, .formerr { margin: 6px 0; font-size: 13px; white-space: pre-line; }
+.pagemsg:empty, .formerr:empty { display: none; }
+.pagemsg.bad, .formerr { color: #f28b82; }
+.pagemsg.warn { color: #fdd663; }
 </style>
 <style>
 td:nth-child(2), td:nth-child(3), td:nth-child(5) { white-space: nowrap; text-overflow: ellipsis; }
@@ -94,6 +102,33 @@ select { box-sizing: border-box; width: 100%; margin: 6px 0 14px; padding: 9px; 
 </div>
 <div class="verline" id="verLine" aria-label="Versions"></div>
 <script>
+
+
+function inlineConfirm(btn, label, go) {
+	if (!btn || btn.dataset.asking) return;
+	btn.dataset.asking = '1';
+	var wrap = document.createElement('span');
+	wrap.className = 'askpair';
+	var no = document.createElement('button'), yes = document.createElement('button');
+	no.type = yes.type = 'button';
+	no.textContent = 'Cancel';
+	yes.textContent = label;
+	yes.className = 'danger go';
+	wrap.append(no, yes);
+	function done() { wrap.remove(); btn.hidden = false; delete btn.dataset.asking; }
+	no.onclick = function(e) { e.stopPropagation(); done(); };
+	yes.onclick = function(e) { e.stopPropagation(); done(); go(); };
+	btn.hidden = true;
+	btn.after(wrap);
+}
+
+function pageMsg(id, text, kind) {
+	var el = document.getElementById(id);
+	if (!el) return;
+	el.textContent = text || '';
+	el.className = el.className.replace(/\s*\b(bad|warn)\b/g, '') + (kind ? ' ' + kind : '');
+}
+
 
 
 
@@ -173,6 +208,7 @@ var setStatusCount;
 	</div>
 	<div class="right"><button onclick="openBan()">Ban Player</button></div>
 </div>
+<div class="pagemsg" id="banMsg" role="status"></div>
 <div class="tablewrap pin">
 <table id="bansTable">
 	<colgroup>
@@ -199,6 +235,7 @@ var setStatusCount;
 		<input id="banMinutes" type="number" min="0" step="1" value="0">
 		<label>Reason</label>
 		<input id="banReason" type="text" maxlength="200" placeholder="Short message shown to the player">
+		<div class="formerr" id="banErr" role="alert"></div>
 		<div class="buttons">
 			<button onclick="closeBan()">Cancel</button>
 			<button id="banSubmit">Ban</button>
@@ -244,6 +281,8 @@ async function refresh() {
 		banned = {};
 		d.bans.forEach(function(b) { banned[b.guid] = true; });
 		permBans = d.bans.filter(function(b) { return b.perm; });
+		
+		if (document.querySelector('#bans .askpair')) return;
 		document.getElementById('bans').innerHTML = d.bans.map(function(b) {
 			let n = esc(b.name);
 			return '<tr>' +
@@ -260,17 +299,18 @@ async function refresh() {
 	}
 }
 
-async function unban(btn) {
+function unban(btn) { inlineConfirm(btn, 'Unban', function() { doUnban(btn); }); }
+async function doUnban(btn) {
 	let guid = btn.getAttribute('data-guid');
 	let name = btn.getAttribute('data-name');
-	if (!confirm('Unban ' + name + '?')) return;
 	btn.disabled = true;
+	pageMsg('banMsg', '');
 	try {
 		let r = await fetch('/api/bans/' + encodeURIComponent(guid) + '/unban', { method: 'POST' });
 		let d = await r.json();
-		if (!d.ok) alert(d.error || 'Unban failed');
+		if (!d.ok) pageMsg('banMsg', name + ' not unbanned: ' + (d.error || 'Unban failed'), 'bad');
 	} catch(e) {
-		alert('Request failed');
+		pageMsg('banMsg', 'ReCON could not be reached; ' + name + ' was not unbanned.', 'bad');
 	}
 	refresh();
 }
@@ -280,6 +320,7 @@ async function openBan() {
 	sel.innerHTML = '<option value="">Loading...</option>';
 	document.getElementById('banMinutes').value = '0';
 	document.getElementById('banReason').value = '';
+	pageMsg('banErr', '');
 	document.getElementById('banModal').style.display = 'flex';
 	try {
 		let r = await fetch('/api/players/all');
@@ -305,9 +346,10 @@ document.getElementById('banSubmit').onclick = async function() {
 	let btn = this;
 	let guid = document.getElementById('banPlayer').value;
 	let minutes = parseInt(document.getElementById('banMinutes').value, 10);
-	if (!guid) { alert('Select a player first.'); return; }
+	pageMsg('banErr', '');
+	if (!guid) { pageMsg('banErr', 'Select a player first.'); return; }
 	if (!Number.isInteger(minutes) || minutes < 0) {
-		alert('Duration must be a whole number of minutes (0 = permanent).');
+		pageMsg('banErr', 'Duration must be a whole number of minutes (0 = permanent).');
 		return;
 	}
 	btn.disabled = true;
@@ -319,13 +361,13 @@ document.getElementById('banSubmit').onclick = async function() {
 		});
 		let d = await r.json();
 		if (!d.ok) {
-			alert(d.error || d.guid_error || 'Ban failed');
+			pageMsg('banErr', d.error || d.guid_error || 'Ban failed');
 			return;
 		}
 		closeBan();
-		if (d.online && !d.kicked) alert('Player was banned, but the kick was not confirmed.');
+		pageMsg('banMsg', d.online && !d.kicked ? 'Player was banned, but the kick was not confirmed.' : '', 'warn');
 	} catch(e) {
-		alert('Request failed');
+		pageMsg('banErr', 'ReCON could not be reached; nobody was banned.');
 	} finally {
 		btn.disabled = false;
 		refresh();
@@ -399,7 +441,7 @@ function closePick() { document.getElementById('pickModal').style.display = 'non
 
 
 function exportBans() {
-	if (!permBans.length) { alert('There are no permanent bans to export.'); return; }
+	if (!permBans.length) { pageMsg('banMsg', 'There are no permanent bans to export.', ''); return; }
 	let rows = permBans.map(function(b) {
 		let r = { guid: b.guid, name: b.name, reason: b.reason, checked: true };
 		if (!/^[0-9a-f]{32}$/.test(String(b.guid))) { r.locked = true; r.note = 'not a valid GUID'; }
@@ -421,8 +463,8 @@ async function importBans(input) {
 	input.value = '';
 	if (!file) return;
 	let data;
-	try { data = JSON.parse(await file.text()); } catch(e) { alert('That file is not valid JSON.'); return; }
-	if (!data || !Array.isArray(data.bans) || !data.bans.length) { alert('No bans in that file.'); return; }
+	try { data = JSON.parse(await file.text()); } catch(e) { pageMsg('banMsg', file.name + ' is not valid JSON.', 'bad'); return; }
+	if (!data || !Array.isArray(data.bans) || !data.bans.length) { pageMsg('banMsg', 'No bans in ' + file.name + '.', 'bad'); return; }
 	let rows = data.bans.map(function(b) {
 		let guid = String((b && b.guid) || '').trim().toLowerCase();
 		let r = { guid: guid, name: b && b.name, reason: b && b.reason, ip: b && b.ip, steamId: b && b.steamId, checked: true };
@@ -443,12 +485,12 @@ async function importBans(input) {
 			d = await r.json();
 		} catch(e) { d = { ok: false, error: 'ReCON could not be reached; nothing was imported.' }; }
 		closePick();
-		if (!d.ok) { alert(d.error || 'Import failed'); return; }
+		if (!d.ok) { pageMsg('banMsg', d.error || 'Import failed', 'bad'); return; }
 		let msg = 'Imported ' + d.added + ' permanent ban(s).';
 		if (d.added) msg += d.onServer ? ' They are on the server\'s ban list now.' : ' The server isn\'t answering: they go on its ban list when ReCON next connects.';
 		if (d.kicked) msg += '\n' + d.kicked + ' of them were online and were kicked.';
 		if (d.skipped && d.skipped.length) msg += '\n\nSkipped:\n' + d.skipped.join('\n');
-		alert(msg);
+		pageMsg('banMsg', msg, '');
 		refresh();
 	});
 }

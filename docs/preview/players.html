@@ -64,6 +64,14 @@ html[data-theme]:not([data-theme="default"]) .verline { color: var(--color-neutr
 .importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
 .importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
 .importbox .buttons { margin-top: 12px; flex: none; }
+ 
+button.danger { color: #f28b82; border-color: #5c3533; }
+button.danger.go { background: #5c3533; color: #fff; border-color: #f28b82; }
+.askpair { display: inline-flex; gap: 6px; }
+.pagemsg, .formerr { margin: 6px 0; font-size: 13px; white-space: pre-line; }
+.pagemsg:empty, .formerr:empty { display: none; }
+.pagemsg.bad, .formerr { color: #f28b82; }
+.pagemsg.warn { color: #fdd663; }
 </style>
 <link rel="stylesheet" href="assets/leaflet/leaflet.css">
 <script src="assets/leaflet/leaflet.js"></script>
@@ -264,6 +272,33 @@ html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { backgrou
 <script>
 
 
+function inlineConfirm(btn, label, go) {
+	if (!btn || btn.dataset.asking) return;
+	btn.dataset.asking = '1';
+	var wrap = document.createElement('span');
+	wrap.className = 'askpair';
+	var no = document.createElement('button'), yes = document.createElement('button');
+	no.type = yes.type = 'button';
+	no.textContent = 'Cancel';
+	yes.textContent = label;
+	yes.className = 'danger go';
+	wrap.append(no, yes);
+	function done() { wrap.remove(); btn.hidden = false; delete btn.dataset.asking; }
+	no.onclick = function(e) { e.stopPropagation(); done(); };
+	yes.onclick = function(e) { e.stopPropagation(); done(); go(); };
+	btn.hidden = true;
+	btn.after(wrap);
+}
+
+function pageMsg(id, text, kind) {
+	var el = document.getElementById(id);
+	if (!el) return;
+	el.textContent = text || '';
+	el.className = el.className.replace(/\s*\b(bad|warn)\b/g, '') + (kind ? ' ' + kind : '');
+}
+
+
+
 
 
 
@@ -347,6 +382,7 @@ var setStatusCount;
 		</button>
 	</div>
 </div>
+<div class="pagemsg" id="playersMsg" role="status"></div>
 <div class="tablewrap pin">
 <table id="onlineTable">
 	<colgroup>
@@ -474,6 +510,7 @@ var setStatusCount;
 		</div>
 		<label>Reason</label>
 		<input id="text" type="text" maxlength="200" placeholder="Short message shown to the player">
+		<div class="formerr" id="modalErr" role="alert"></div>
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
 			<button id="submit"></button>
@@ -786,6 +823,7 @@ function openModal(id, a, name, guid) {
 	document.getElementById('durationWrap').style.display = a === 'ban' ? 'block' : 'none';
 	document.getElementById('text').value = '';
 	document.getElementById('minutes').value = '0';
+	pageMsg('modalErr', '');
 	document.getElementById('modal').style.display = 'flex';
 }
 
@@ -793,8 +831,9 @@ function closeModal() { document.getElementById('modal').style.display = 'none';
 
 document.getElementById('submit').onclick = async () => {
 	let body = { reason: document.getElementById('text').value, minutes: parseInt(document.getElementById('minutes').value, 10) };
+	pageMsg('modalErr', '');
 	if (action === 'ban' && (!Number.isInteger(body.minutes) || body.minutes < 0)) {
-		alert('Duration must be a whole number of minutes (0 = permanent).');
+		pageMsg('modalErr', 'Duration must be a whole number of minutes (0 = permanent).');
 		return;
 	}
 	
@@ -809,12 +848,13 @@ document.getElementById('submit').onclick = async () => {
 	});
 	let d = await r.json();
 	if (!d.ok) {
-		alert(d.error || d.guid_error || 'Action failed');
+		pageMsg('modalErr', d.error || d.guid_error || 'Action failed');
 		return;
 	}
 	closeModal();
 	if (action === 'ban' && d.online !== false && d.kicked === false) {
-		alert('Player was banned, but the kick was not confirmed.');
+		pageMsg('playersMsg', 'Player was banned, but the kick was not confirmed.', 'warn');
+		if (det) pageMsg('detErr', 'Banned, but the kick was not confirmed.');
 	}
 	if (action === 'ban') await bansChanged();
 	refresh();
@@ -1526,19 +1566,22 @@ document.getElementById('detBan').onclick = async function () {
 		openModal(p.online ? p.id : -1, 'ban', p.name, det.guid);
 		return;
 	}
-	if (!confirm('Unban ' + p.name + '?')) return;
 	let btn = this;
-	btn.disabled = true;
-	try {
-		let d = await (await fetch('/api/bans/' + encodeURIComponent(det.guid) + '/unban', { method: 'POST' })).json();
-		if (!d.ok) alert(d.error || 'Unban failed');
-	} catch (e) {
-		alert('ReCON could not be reached; the player was not unbanned.');
-	} finally {
-		btn.disabled = false;
-	}
-	await bansChanged();
-	refresh();
+	inlineConfirm(btn, 'Unban', async function () {
+		let err = document.getElementById('detErr');
+		err.textContent = '';
+		btn.disabled = true;
+		try {
+			let d = await (await fetch('/api/bans/' + encodeURIComponent(det.guid) + '/unban', { method: 'POST' })).json();
+			if (!d.ok) err.textContent = d.error || 'Unban failed';
+		} catch (e) {
+			err.textContent = 'ReCON could not be reached; the player was not unbanned.';
+		} finally {
+			btn.disabled = false;
+		}
+		await bansChanged();
+		refresh();
+	});
 };
 
 

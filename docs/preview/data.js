@@ -390,6 +390,66 @@ window.RECON_PREVIEW_DATA = {
 			]
 		},
 		{
+			"cmd": "save",
+			"role": 1,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!save keeps everything you wear, carry and hold as your loadout, for !equip.",
+			"fields": [
+				{
+					"key": "saved",
+					"label": "Saved (to the player)",
+					"def": "Loadout saved: {count} items",
+					"ph": [
+						"count"
+					]
+				}
+			]
+		},
+		{
+			"cmd": "equip",
+			"role": 1,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!equip replaces your gear with your !save loadout, every item pristine, once you type confirm.",
+			"fields": [
+				{
+					"key": "confirm",
+					"label": "Asks to confirm (to the player)",
+					"def": "Replace your gear with your saved loadout ({count} items)? Type confirm within 30 s",
+					"ph": [
+						"count"
+					]
+				},
+				{
+					"key": "equipped",
+					"label": "Equipped (to the player)",
+					"def": "Loadout equipped: {count} items",
+					"ph": [
+						"count"
+					]
+				},
+				{
+					"key": "cancelled",
+					"label": "Not confirmed (to the player: another message, or 30 s passed)",
+					"def": "Loadout not equipped",
+					"ph": []
+				},
+				{
+					"key": "none",
+					"label": "No loadout (to the player)",
+					"def": "No loadout saved, use !save first",
+					"ph": []
+				}
+			]
+		},
+		{
 			"cmd": "remove",
 			"role": 3,
 			"cool": "0",
@@ -453,6 +513,16 @@ window.RECON_PREVIEW_DATA = {
 				"staff": "Code for {player_name} (#{player_id}): {code}"
 			}
 		},
+		"equip": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"cancelled": "Loadout not equipped",
+				"confirm": "Replace your gear with your saved loadout ({count} items)? Type confirm within 30 s",
+				"equipped": "Loadout equipped: {count} items",
+				"none": "No loadout saved, use !save first"
+			}
+		},
 		"help": {
 			"on": true,
 			"cool": "0",
@@ -481,6 +551,13 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"msgs": {
 				"removing": "Removing your {vehicle}"
+			}
+		},
+		"save": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"saved": "Loadout saved: {count} items"
 			}
 		},
 		"shout": {
