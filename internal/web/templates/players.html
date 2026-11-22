@@ -1425,7 +1425,7 @@ async function loadDetSteam(refresh, quiet) {
 	let box = document.getElementById('detSteam');
 	let btn = document.getElementById('steamRefresh');
 	if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
-	else if (!quiet) { box.textContent = ''; box.append(steamHint('Loading the Steam profile...')); }
+	else if (!quiet) { box.textContent = ''; box.append(steamHint('Loading...')); }
 	let d = await steamCall('/api/players/' + encodeURIComponent(guid) + '/steam' + (refresh ? '?refresh=1' : ''), { cache: 'no-store' });
 	if (detOpenGuid !== guid) return; // another player was opened meanwhile
 	renderSteam(d);

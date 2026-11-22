@@ -257,8 +257,8 @@ html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { backgrou
 <body>
 <nav><a href="/server">Server Info</a><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <div class="statusbar">
-	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
-	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
+	<span>RCON Status - <b id="rconStatus" class="st">Loading...</b><span id="rconRetry" class="retry"></span></span>
+	<span>WebGUI Status - <b id="webStatus" class="st">Loading...</b></span>
 </div>
 <div class="verline" id="verLine" aria-label="Versions"></div>
 <script>
@@ -1558,7 +1558,7 @@ async function loadDetSteam(refresh, quiet) {
 	let box = document.getElementById('detSteam');
 	let btn = document.getElementById('steamRefresh');
 	if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
-	else if (!quiet) { box.textContent = ''; box.append(steamHint('Loading the Steam profile...')); }
+	else if (!quiet) { box.textContent = ''; box.append(steamHint('Loading...')); }
 	let d = await steamCall('/api/players/' + encodeURIComponent(guid) + '/steam' + (refresh ? '?refresh=1' : ''), { cache: 'no-store' });
 	if (detOpenGuid !== guid) return; 
 	renderSteam(d);

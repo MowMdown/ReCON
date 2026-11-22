@@ -1192,7 +1192,7 @@ function renderVehicleInfo() {
 	const tops = [...body.querySelectorAll('.vcols > div')].map(c => c.scrollTop);
 	let h = '<div class="vfacts">' + vehFacts(v).map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
 	const d = vehDetail;
-	if (!d) h += '<div class="muted">Asking recon-mod for its parts, damage and cargo…</div>';
+	if (!d) h += '<div class="muted">Loading…</div>';
 	else if (d.failed) h += '<div class="muted">recon-mod didn\'t send its parts, damage and cargo (it needs 0.0.1i or later).</div>';
 	else {
 		const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
@@ -1544,7 +1544,7 @@ function renderPlacedInfo() {
 		['Placed', o.placedAt ? new Date(o.placedAt * 1000).toLocaleString() : '<span class="muted">unknown</span>']];
 	let h = '<div class="vfacts">' + facts.map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
 	const d = placedDetail;
-	if (!d) h += '<div class="muted">Asking recon-mod what is in and on it…</div>';
+	if (!d) h += '<div class="muted">Loading…</div>';
 	else if (d.failed) h += '<div class="muted">recon-mod didn\'t send what is in it (it needs 1.0.1 or later).</div>';
 	else {
 		const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
@@ -1795,7 +1795,7 @@ function closeSpawnAt() { document.getElementById('sModal').style.display = 'non
 // renderSpawnAt lists every match, with the A-Z bar, like Spawn item.
 function renderSpawnAt() {
 	const list = document.getElementById('sList');
-	if (!catalog) { list.innerHTML = '<div class="empty">The item list is still coming in from recon-mod…</div>'; document.getElementById('sAZ').innerHTML = ''; renderSpawnPick(); return; }
+	if (!catalog) { list.innerHTML = '<div class="empty">Loading…</div>'; document.getElementById('sAZ').innerHTML = ''; renderSpawnPick(); return; }
 	const words = document.getElementById('sFind').value.toLowerCase().split(/\s+/).filter(Boolean);
 	const kind = document.getElementById('sKind').value;
 	const hits = catalog.filter(it => (!kind || it.kind === kind) && words.every(w => it.find.includes(w)));
@@ -1984,7 +1984,7 @@ function renderPlayerPopup() {
 		'<div class="gear">';
 	const worn = plInv && (plInv.items || []).filter(it => it.slot).sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99));
 	if (worn) h += worn.length ? worn.map(it => row(slotLabel(it.slot), esc(itemName(it)))).join('') : '<div class="muted">Nothing worn or held</div>';
-	else h += (p.handsName || p.hands ? row('Hands', esc(p.handsName || item(p.hands))) : '') + '<div class="muted">Reading their gear…</div>';
+	else h += (p.handsName || p.hands ? row('Hands', esc(p.handsName || item(p.hands))) : '') + '<div class="muted">Loading…</div>';
 	const g = '\'' + p.guid + '\'';
 	h += '</div><div class="acts">' +
 		'<button type="button" onclick="event.stopPropagation(); openPlayer(' + g + ')" title="Their stats, inventory, spawning and actions">Info</button>' +
@@ -2298,7 +2298,7 @@ function renderInv(p) {
 	if (!inv) {
 		when.textContent = Date.now() - invAsked > 10000
 			? '· recon-mod hasn\'t sent their inventory (the mod on the server may be a version without it)'
-			: '· asking recon-mod…';
+			: '· loading…';
 		det.innerHTML = '';
 		return;
 	}
@@ -2720,7 +2720,7 @@ const AZ = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 function letterOf(it) { const c = (catName(it)[0] || '').toUpperCase(); return c >= 'A' && c <= 'Z' ? c : '#'; }
 function renderItems() {
 	const list = document.getElementById('spList'), az = document.getElementById('spAZ');
-	if (!catalog) { list.innerHTML = '<div class="empty">The item list is still coming in from recon-mod…</div>'; az.innerHTML = ''; renderPick(); return; }
+	if (!catalog) { list.innerHTML = '<div class="empty">Loading…</div>'; az.innerHTML = ''; renderPick(); return; }
 	const words = document.getElementById('spFind').value.toLowerCase().split(/\s+/).filter(Boolean);
 	const kind = document.getElementById('spKind').value;
 	const hits = catalog.filter(it => (!kind || it.kind === kind) && words.every(w => it.find.includes(w)));
