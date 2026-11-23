@@ -132,3 +132,56 @@ func TestMergeVehicles(t *testing.T) {
 		t.Fatalf("merge = %+v (all now %+v)", out, all)
 	}
 }
+
+// A gas spot never seen up has no radius; once one there has been up, its
+// radius is kept for while it is down; only a ContaminatedArea_Static is
+// static.
+func TestGasSpotRadiusAndStatic(t *testing.T) {
+	resetSpots()
+	defer resetSpots()
+	gasRadii.Lock()
+	oldRadii := gasRadii.m
+	gasRadii.m = map[string]float64{}
+	gasRadii.Unlock()
+	defer func() { gasRadii.Lock(); gasRadii.m = oldRadii; gasRadii.Unlock() }()
+	now := time.Now()
+	spots.Lock()
+	spots.world, spots.built = "chernarusplus", true
+	spots.list = []EventSpot{{ID: 1, Event: "StaticContaminatedArea", Name: "Gas zone", Category: "gas", X: 1000, Z: 1000}}
+	spots.on, spots.seen = map[int]bool{}, map[int]bool{}
+	spots.Unlock()
+	state.Lock()
+	oldSync, oldEvents := state.lastSync, state.worldEvents
+	state.lastSync = now
+	state.worldEvents = []WorldEvent{}
+	state.Unlock()
+	defer func() { state.Lock(); state.lastSync, state.worldEvents = oldSync, oldEvents; state.Unlock() }()
+	setEvents := func(es []WorldEvent) { state.Lock(); state.worldEvents = es; state.Unlock() }
+
+	list, _ := EventSpots(now)
+	if len(list) != 1 || list[0].On || list[0].Radius != 0 {
+		t.Fatalf("never up: %+v, want off with no radius", list)
+	}
+	setEvents([]WorldEvent{{ID: 9, Type: "ContaminatedArea_Dynamic", Kind: "gas", X: 1040, Z: 990, Radius: 120},
+		{ID: 10, Type: "ContaminatedArea_Static", Kind: "gas", X: 5000, Z: 5000, Radius: 80},
+		{ID: 11, Type: "ContaminatedArea_Dynamic", Kind: "gas", X: 9000, Z: 9000, Radius: 100}})
+	list, _ = EventSpots(now)
+	if !list[0].On || list[0].Radius != 120 {
+		t.Fatalf("up: %+v", list[0])
+	}
+	if len(list) != 3 || !list[1].Static || list[2].Static {
+		t.Fatalf("static flags: %+v (want the _Static zone static, the stray dynamic one not)", list[1:])
+	}
+	// A new connection (a server restart) doesn't forget it.
+	resetSpots()
+	spots.Lock()
+	spots.world, spots.built = "chernarusplus", true
+	spots.list = []EventSpot{{ID: 1, Event: "StaticContaminatedArea", Name: "Gas zone", Category: "gas", X: 1000, Z: 1000}}
+	spots.on, spots.seen = map[int]bool{}, map[int]bool{}
+	spots.Unlock()
+	setEvents([]WorldEvent{})
+	list, _ = EventSpots(now)
+	if list[0].On || list[0].Radius != 120 {
+		t.Fatalf("down again: %+v, want the 120 m it had", list[0])
+	}
+}
