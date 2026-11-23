@@ -3384,8 +3384,8 @@ function setMiniPicture() {
 	miniPic = new PictureLayer({ bounds: [[P.N - P.L, P.W], [P.N, P.W + P.L]] }).addTo(miniMap);
 	miniPic.bringToBack();
 }
-// drawMiniGrid: 10 m lines close in, 100 m further out, 500 m at the
-// widest; every 100 m (10 m grid) or km brighter. And the map's edges.
+// drawMiniGrid: 100 m lines (500 m, then 1 km, for the whole map's view);
+// every km brighter. And the map's edges.
 function drawMiniGrid() {
 	if (!miniMap) return;
 	miniGrid.clearLayers();
@@ -3405,7 +3405,7 @@ function miniHud() {
 	document.getElementById('miniScale').textContent = (step >= 1000 ? step / 1000 + ' km' : step + ' m') + ' grid · ' + (span >= 1000 ? (span / 1000).toFixed(1).replace(/\.0$/, '') + ' km' : span + ' m') + ' across';
 	document.getElementById('miniFollow').hidden = mini.fit || (mini.follow && Math.abs(miniBar() - MINI_HOME) < 0.5);
 }
-function miniStep(span) { return span <= 300 ? 10 : span <= 1500 ? 100 : span <= 6000 ? 500 : 1000; }
+function miniStep(span) { return span <= 1500 ? 100 : span <= 6000 ? 500 : 1000; }
 function drawMini(p) {
 	if (!ensureMini()) return;
 	if (mini.fit) { // back from the whole map: on them at the 50 m step
@@ -3884,16 +3884,21 @@ drawPredators(); loadPredators();
 drawDeaths(); loadDeaths();
 poll();
 // How often players, predators and the vehicles with someone in them
-// refresh goes with the scale bar (100 px): 600 m or more, every 10 s;
-// 300-500 m, 5 s; 200 m, 2 s; 100 m and closer, every second. Every vehicle (parked ones
-// too) is read every 10 s at any zoom. A tick each second runs whichever is
-// due, so zooming in speeds things up within a second.
-const REFRESH_BANDS = [[600, 10000], [300, 5000], [200, 2000], [0, 1000]];
+// refresh goes with the scale bar (100 px): 1 km or more, every 10 s;
+// 500-900 m, 5 s; 200-400 m, 2 s; closer, every second. While a player's
+// dialog is open, every second whatever the zoom (their stats, mini-map and
+// what an action did show at once). Every vehicle (parked ones too) is read
+// every 10 s at any zoom. A tick each second runs whichever is due, so zooming
+// in speeds things up within a second.
+const REFRESH_BANDS = [[1000, 10000], [500, 5000], [200, 2000], [0, 1000]];
 const lastRun = { poll: Date.now(), crew: Date.now(), veh: Date.now(), pred: Date.now() };
-function refreshEvery() {
-	const bar = 100 / Math.pow(2, map.getZoom());
+function bandFor(bar) {
 	for (const [m, ms] of REFRESH_BANDS) if (bar >= m * 0.99) return ms;
 	return 1000;
+}
+function refreshEvery() {
+	if (selGuid && document.getElementById('pModal').style.display === 'flex') return 1000;
+	return bandFor(100 / Math.pow(2, map.getZoom()));
 }
 setInterval(() => {
 	const every = refreshEvery(), now = Date.now();
