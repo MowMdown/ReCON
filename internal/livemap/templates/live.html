@@ -1559,7 +1559,7 @@ function legendHTML() {
 	const row = (icon, text, wide) => '<div class="lgrow' + (wide ? ' wide' : '') + '"><span class="lgi">' + icon + '</span><span class="lgt">' + text + '</span></div>';
 	const sec = (title, rows) => '<div class="lgsec"><h5>' + title + '</h5>' + rows.join('') + '</div>';
 	const pristine = CONDITION[0][1], worst = CONDITION[3][1];
-	const EVENT_NAMES = { heli: 'Heli crash', convoy: 'Convoy', police: 'Police', medical: 'Medical', other: 'Other event' };
+	const EVENT_NAMES = { heli: 'Heli crash', convoy: 'Convoy', police: 'Police', medical: 'Medical', other: 'Other' };
 	return sec('Players', [
 			row(arrowSVG('#c58af9'), 'Player'),
 			row('<span class="lgdead">' + arrowSVG('#c58af9') + '</span>', 'Dead player'),
