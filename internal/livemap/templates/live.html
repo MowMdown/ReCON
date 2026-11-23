@@ -104,7 +104,11 @@ html[data-theme]:not([data-theme="default"]) {
 .vpop .ty { color: var(--lm-muted); font-size: 11.5px; font-family: ui-monospace, Consolas, monospace; margin-bottom: 6px; overflow-wrap: anywhere; }
 .vpop .row { display: flex; justify-content: space-between; gap: 12px; }
 .vpop .row span:first-child { color: var(--lm-muted); }
-.vpop .acts { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+.vpop .acts { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Two buttons a row (a player's popup, a vehicle's). */
+.vpop .acts.pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.vpop .acts.pairs button { width: 100%; }
+.vpop .acts button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vpop .acts.split { justify-content: space-between; }
 /* The popup's Info button: the popup's own look, not the page theme's. */
 .vpop .acts button { margin: 0; padding: 4px 10px; font: inherit; font-size: 12.5px; color: var(--lm-text); background: var(--lm-raised); border: 1px solid var(--lm-line); border-radius: 4px; cursor: pointer; }
@@ -1423,7 +1427,10 @@ function renderVehicle() {
 	const v = vehicles.find(x => x.id === vehOpen);
 	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop" data-noicon><h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
 		vehFacts(v).map(([k, x]) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>').join('') +
-		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage, cargo and Delete">Info…</button></div></div>');
+		'<div class="acts pairs"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage, cargo and Delete">Info…</button>' +
+		(track && track.kind === 'vehicle' && track.id === v.id
+			? '<button type="button" class="on" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Stop keeping the map on it">Stop</button>'
+			: '<button type="button" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Keep the map on it as it moves">Follow</button>') + '</div></div>');
 	renderVehicleInfo();
 	drawArrowsShown();
 }
@@ -2742,6 +2749,19 @@ async function loadPlayerPopup() {
 setInterval(() => { if (plOpen) loadPlayerPopup(); }, 2000);
 // playerPopupAct is the popup's Teleport (pick a spot on the map) and
 // Spawn (their Spawn item tab), as on their right-click menu.
+// vehicleFollow keeps the map on a vehicle (or stops), from its popup.
+function vehicleFollow(id) {
+	const following = track && track.kind === 'vehicle' && track.id === id;
+	setTrack(following ? null : { kind: 'vehicle', id });
+	renderVehicle();
+}
+// playerFollow keeps the map on them (or stops), from their popup, which
+// stays open: a moving player is hard to long-press for the map's menu.
+function playerFollow(guid) {
+	const following = track && track.kind === 'player' && track.id === guid;
+	setTrack(following ? null : { kind: 'player', id: guid });
+	renderPlayerPopup();
+}
 function playerPopupAct(guid, a) {
 	map.closePopup(plPopup);
 	if (a === 'send') startPick(guid);
@@ -2765,11 +2785,13 @@ function renderPlayerPopup() {
 	const worn = plInv && (plInv.items || []).filter(it => it.slot).sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99));
 	if (worn) h += worn.length ? worn.map(it => row(slotLabel(it.slot), esc(itemName(it)))).join('') : '<div class="muted">Nothing worn or held</div>';
 	else h += (p.handsName || p.hands ? row('Hands', esc(p.handsName || item(p.hands))) : '') + '<div class="muted">Loading…</div>';
-	const g = '\'' + p.guid + '\'';
-	h += '</div><div class="acts">' +
+	const g = '\'' + p.guid + '\'', following = track && track.kind === 'player' && track.id === p.guid;
+	h += '</div><div class="acts pairs">' +
 		'<button type="button" onclick="event.stopPropagation(); openPlayer(' + g + ')" title="Their stats, inventory, spawning and actions">Info</button>' +
 		'<button type="button" onclick="event.stopPropagation(); playerPopupAct(' + g + ', \'send\')" title="Click a place on the map to move them there">Teleport</button>' +
-		'<button type="button" onclick="event.stopPropagation(); playerPopupAct(' + g + ', \'spawn\')" title="Spawn an item for them">Spawn</button></div></div>';
+		'<button type="button" onclick="event.stopPropagation(); playerPopupAct(' + g + ', \'spawn\')" title="Spawn an item for them">Spawn</button>' +
+		(following ? '<button type="button" class="on" onclick="event.stopPropagation(); playerFollow(' + g + ')" title="Stop keeping the map on them">Stop</button>'
+			: '<button type="button" onclick="event.stopPropagation(); playerFollow(' + g + ')" title="Keep the map on them as they move">Follow</button>') + '</div></div>';
 	// Keep where the gear list was scrolled to across the redraws.
 	const old = plPopup.getElement() && plPopup.getElement().querySelector('.gear'), top = old ? old.scrollTop : 0;
 	plPopup.setLatLng([p.z, p.x]).setContent(h);
