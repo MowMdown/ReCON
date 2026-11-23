@@ -640,7 +640,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 			<div class="setfoot"><span class="muted" id="spPick"></span>
 				<select id="spWhere" aria-label="Where"><option value="ground">On the ground</option><option value="inventory">In their inventory</option><option value="hands">In their hands</option></select>
 				<span>Count</span><input id="spCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
-				<span class="muted" id="spOff" hidden>Not on the server now</span><button type="button" class="go" onclick="doSpawn()">Spawn</button></div>
+				<button type="button" class="go" onclick="doSpawn()">Spawn</button></div>
 		</div>
 		</div>
 		<div class="ppane" data-ppane="kills" hidden>
@@ -2875,7 +2875,6 @@ function renderPlayer() {
 	const spawnBtn = document.querySelector('#fSpawn .setfoot button.go');
 	spawnBtn.disabled = !p;
 	spawnBtn.title = p ? '' : 'They aren\'t on the server now';
-	document.getElementById('spOff').hidden = !!p;
 	document.getElementById('pPos').innerHTML = p ? 'Grid <b>' + grid(p.x, p.z) + '</b> · ' + Math.round(p.x) + ', ' + Math.round(p.z) + ' · facing <b>' + compass(p.heading) + '</b> ' + Math.round(p.heading) + '°' : '';
 	if (p) {
 		let h = '';
