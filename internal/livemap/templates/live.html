@@ -640,7 +640,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 			<div class="setfoot"><span class="muted" id="spPick"></span>
 				<select id="spWhere" aria-label="Where"><option value="ground">On the ground</option><option value="inventory">In their inventory</option><option value="hands">In their hands</option></select>
 				<span>Count</span><input id="spCount" type="number" min="1" max="20" value="1" style="width:64px" aria-label="How many">
-				<button type="button" class="go" onclick="doSpawn()">Spawn</button></div>
+				<span class="muted" id="spOff" hidden>Not on the server now</span><button type="button" class="go" onclick="doSpawn()">Spawn</button></div>
 		</div>
 		</div>
 		<div class="ppane" data-ppane="kills" hidden>
@@ -2868,11 +2868,14 @@ function renderPlayer() {
 	document.getElementById('pGuid').textContent = selGuid;
 	document.getElementById('pWhen').textContent = p && mod && mod.connected ? 'Live from recon-mod · updated ' + Math.max(0, Math.round((Date.now() - new Date(mod.lastSync)) / 1000)) + ' s ago'
 		: 'Not on the server now' + (o && o.lastSeen ? ' · last seen ' + agoText(o.lastSeen * 1000) + ' · ' + playedText(o.played) : '') + ' · what ReCON has on file';
-	// Offline: only what ReCON keeps (their last known inventory, kills and
-	// deaths); Stats and Spawn need them on the server.
-	document.querySelectorAll('#pTabs [data-ptab="stats"], #pTabs [data-ptab="spawn"]').forEach(b => { b.hidden = !p; });
-	document.querySelector('#pModal .pbox').classList.toggle('offline', !p); // and no Kill, Restore or Set condition
-	if (!p && (pTab === 'stats' || pTab === 'spawn')) showPTab('inventory');
+	// Offline: what ReCON keeps (their last known inventory, kills and
+	// deaths); every tab stays where it is, but nothing that needs them on
+	// the server: no Kill, Restore or Set condition, and Spawn is off.
+	document.querySelector('#pModal .pbox').classList.toggle('offline', !p);
+	const spawnBtn = document.querySelector('#fSpawn .setfoot button.go');
+	spawnBtn.disabled = !p;
+	spawnBtn.title = p ? '' : 'They aren\'t on the server now';
+	document.getElementById('spOff').hidden = !!p;
 	document.getElementById('pPos').innerHTML = p ? 'Grid <b>' + grid(p.x, p.z) + '</b> · ' + Math.round(p.x) + ', ' + Math.round(p.z) + ' · facing <b>' + compass(p.heading) + '</b> ' + Math.round(p.heading) + '°' : '';
 	if (p) {
 		let h = '';
@@ -3501,6 +3504,7 @@ document.getElementById('spList').addEventListener('click', e => {
 });
 function doSpawn() {
 	const err = document.getElementById('pErr');
+	if (!byGuid[selGuid]) { err.textContent = 'They aren\'t on the server now.'; return; }
 	if (!spSel) { err.textContent = 'Pick an item to spawn.'; return; }
 	const n = parseInt(document.getElementById('spCount').value, 10);
 	if (!(n >= 1 && n <= 20)) { err.textContent = 'Spawn 1 to 20 at a time.'; return; }
