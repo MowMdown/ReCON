@@ -62,6 +62,14 @@ html[data-theme]:not([data-theme="default"]) {
 .hb i { display: block; height: 100%; }
 .empty { color: var(--lm-muted); font-size: 13px; line-height: 1.5; }
 .mapwrap { position: relative; border: 1px solid var(--lm-line); border-radius: 6px; overflow: hidden; background: var(--lm-ground); min-height: 420px; }
+/* A long press on the map (a phone's right-click: the map's menu) doesn't
+   select its labels or bring up the phone's own copy menu; the menu's
+   position line can still be selected and copied. */
+.mapwrap { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.mapwrap .ctx .hd { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.twohint { position: absolute; inset: 0; z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center;
+	background: rgba(0, 0, 0, .45); color: #fff; font-size: 16px; font-weight: 600; pointer-events: none; opacity: 0; transition: opacity .25s; }
+.twohint.on { opacity: 1; }
 #map { position: absolute; inset: 0; background: var(--lm-ground); }
 /* Full screen: the map covers the browser's window (not the monitor);
    the dialogs still open over it. */
@@ -75,12 +83,13 @@ html[data-theme]:not([data-theme="default"]) {
 .mapscale #scaleXY:not(:empty)::before { content: '·'; margin-right: 8px; color: var(--lm-muted); }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .mapbar > * { pointer-events: auto; }
+.mapbar.menuopen { z-index: 1001; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 /* Vehicles on the map, and the popup a click on one opens. */
 .vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
 .amark svg { position: absolute; left: -6px; top: -6px; overflow: visible; }
 /* Who is in a vehicle (its driver), beside it, as a player's name. */
-.vpop a, .vfacts a { color: #8ab4f8; }
+.vpop a, .idet .props a { color: #8ab4f8; }
 .vmark .vname { position: absolute; left: 11px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
 /* The animal's name, beside its dot. */
 .amark span { position: absolute; left: 9px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
@@ -169,11 +178,6 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
 /* The vehicle dialog: its facts, then parts, damage and cargo side by
    side, each scrolling on its own; one under the other on a narrow screen. */
-#vModal .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
-#vModal .vfacts .k { color: var(--lm-muted); font-size: 12px; grid-row: 1; }
-#vModal .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-#vModal .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
-#vModal .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
 /* Placed objects close together: one 50 m square, one marker with ×N. */
 .gmark { position: relative; }
 .gmark svg { position: absolute; left: -6px; top: -6px; overflow: visible; cursor: pointer; }
@@ -184,25 +188,27 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .gpop .glist button:hover { background: var(--lm-sel); }
 .gpop .glist .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gpop .glist .ct { color: var(--lm-muted); font-size: 12px; white-space: nowrap; }
-#gModal .box { width: min(1000px, 95vw); }
-#gModal .ilist { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
-#gModal .idet { max-height: 62vh; overflow-y: auto; }
-#gModal .irow.gobj { font-weight: 600; }
-#gModal .irow.gobj .sl { color: var(--lm-muted); font-weight: 400; }
-#gModal .sub-items { display: flex; flex-direction: column; gap: 4px; }
-#gModal .ilist .sub-items { margin-left: 18px; }
-#gModal .idet h5 { margin: 12px 0 6px; font-size: 12px; color: var(--lm-muted); }
-#gModal .gacts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
-#gModal .gacts button { margin: 0; }
-#gModal .dlg-err:empty { display: none; }
+:is(#gModal, #vModal) .box { width: min(1000px, 95vw); }
+:is(#gModal, #vModal) .ilist { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
+:is(#gModal, #vModal) .idet { max-height: 62vh; overflow-y: auto; }
+:is(#gModal, #vModal) .irow.gobj { font-weight: 600; }
+:is(#gModal, #vModal) .irow.gobj .sl { color: var(--lm-muted); font-weight: 400; }
+:is(#gModal, #vModal) .sub-items { display: flex; flex-direction: column; gap: 4px; }
+:is(#gModal, #vModal) .ilist .sub-items { margin-left: 18px; }
+:is(#gModal, #vModal) .idet h5 { margin: 12px 0 6px; font-size: 12px; color: var(--lm-muted); }
+:is(#gModal, #vModal) .sechead { margin-top: 10px; text-transform: none; }
+#gModal .gnear { margin: 10px 0 2px; padding-top: 10px; border-top: 1px solid var(--lm-line); font-size: 12px; font-weight: 600; color: var(--lm-muted); }
+:is(#gModal, #vModal) .sechead .sl { color: var(--lm-text); font-weight: 600; overflow: visible; }
+:is(#gModal, #vModal) .seclist { margin-top: 6px; }
+:is(#gModal, #vModal) .dmglist { padding: 0 10px 0 14px; }
+:is(#gModal, #vModal) .gacts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+:is(#gModal, #vModal) .gacts button { margin: 0; }
+:is(#gModal, #vModal) .dlg-err:empty { display: none; }
 :is(#vModal, #gModal) .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
 :is(#vModal, #gModal) .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :is(#vModal, #gModal) .part .lv { font-size: 12px; white-space: nowrap; }
 :is(#vModal, #gModal) .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-#vModal .acts { display: flex; align-items: center; gap: 8px; }
-#vModal .acts button { margin: 0; }
-#vModal .st { font-size: 12.5px; }
-@media (max-width: 760px) { #vModal .vcols { grid-template-columns: minmax(0, 1fr); } #vModal .vcols > div { max-height: none; } #vModal .vfacts { grid-template-columns: auto auto; } #vModal .vfacts .k { grid-row: auto; } }
+#vModal .gacts .st { font-size: 12.5px; margin-right: auto; align-self: center; }
 /* The weather and in-game time, beside Time & Weather above the map. */
 .top { justify-content: flex-end; }
 .worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
@@ -215,7 +221,8 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 /* Overlays: one button, its menu of layers to switch on and off (a box,
    ticked when on), Deaths with how far back beside it. */
 .ovwrap { position: relative; }
-.ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: 300px; display: flex; flex-direction: column; gap: 2px; padding: 5px;
+.ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: min(300px, calc(100vw - 40px)); display: flex; flex-direction: column; gap: 2px; padding: 5px;
+	overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; box-sizing: border-box;
 	background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
 .ovmenu[hidden] { display: none; }
 .ovmenu .ovrow { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
@@ -236,6 +243,23 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .ovmenu .ovsub .ovpair button { flex: 1; }
 .ovmenu .ovsub .ovsep { height: 1px; background: var(--lm-line); margin: 3px 8px; }
 /* A layer's own filter (Placed objects' kinds), indented under it. */
+.ovmenu.legend { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 0 22px; width: 640px; padding: 10px 12px; }
+/* two columns side by side; one under the other when the map is narrow */
+.legend .lgcol { flex: 1 1 260px; min-width: 0; }
+.legend .lgsec { margin-bottom: 10px; }
+.ovmenu.legend[hidden] { display: none; }
+.legend .lgsec h5 { margin: 0 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--lm-muted); font-weight: 600; }
+.legend .lgrow { display: flex; align-items: center; gap: 10px; padding: 2px 0; font-size: 13px; }
+.legend .lgi { flex: none; width: 34px; height: 20px; display: flex; align-items: center; justify-content: center; gap: 3px; }
+.legend .lgi svg { overflow: visible; }
+.legend .lgi .lgname { font-size: 10px; font-weight: 700; text-shadow: 0 0 3px #000, 0 0 2px #000; white-space: nowrap; }
+.legend .lgrow.wide .lgi { width: auto; min-width: 34px; }
+.legend .lgt { min-width: 0; }
+.legend .lgi .dx { display: none; }
+.legend .lgdead .dx { display: inline; }
+.legend .lgdead .arr { display: none; }
+.legend .lgscale { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 3px 0 0 44px; font-size: 11.5px; color: var(--lm-muted); }
+.legend .lgscale i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
 .ovmenu .ovsub { display: flex; flex-direction: column; gap: 1px; padding-left: 18px; }
 .ovmenu .ovsub[hidden] { display: none; }
 .mapbar .ovmenu .ovsub button { padding: 3px 8px; font-size: 12px; }
@@ -434,6 +458,14 @@ table.dt a { color: var(--lm-accent); text-decoration: none; cursor: pointer; }
 .killkinds { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; }
 .killkinds button { margin: 0; padding: 2px 10px; font-size: 12px; border-radius: 10px; background: transparent; border: 1px solid var(--lm-line); color: var(--lm-muted); }
 .killkinds button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
+/* An offline player's dialog shows what is on file only: none of the
+   actions that need them on the server. */
+.pbox.offline .setcond, .pbox.offline .killhead button, .pbox.offline button.rs { display: none; }
+/* Online / Offline above the player list. */
+.ptoggle { display: flex; gap: 6px; }
+.ptoggle button { flex: 1; margin: 0; padding: 5px 8px; font-size: 12.5px; background: transparent; border: 1px solid var(--lm-line); color: var(--lm-muted); border-radius: 6px; }
+.ptoggle button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
+.prow.off .d { background: var(--lm-faint, #5f6368); }
 .killkinds button:disabled { opacity: .35; }
 .chip.violet { border-color: #5b3f7a; color: #c58af9; }
 /* The stats fill the height beside the mini-map: taller bars, more room. */
@@ -520,12 +552,14 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	<div class="side">
 		<div class="modline"><span class="dot off" id="modDot"></span><span id="modLine">No Connection to DayZ Server</span></div>
 		<input id="find" type="search" placeholder="Find a player" aria-label="Find a player" autocomplete="off">
+		<div class="ptoggle" role="tablist" aria-label="Which players"><button type="button" role="tab" data-plist="online">Online <span id="nOnline">0</span></button><button type="button" role="tab" data-plist="offline">Offline <span id="nOffline">…</span></button></div>
 		<div class="plist" id="plist"></div>
 	</div>
 	<div class="mapwrap">
 		<div id="map"></div>
 		<div class="mapscale" aria-hidden="true"><span class="bar" id="scaleBar"></span><span id="scaleLen"></span><span class="muted" id="scaleSpan"></span><span id="scaleXY"></span></div>
 		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
+		<div class="twohint" id="twoHint" aria-hidden="true">Use two fingers to move the map</div>
 		<div class="mapbar">
 			<div class="ovwrap">
 				<button type="button" id="ovBtn" onclick="toggleOvMenu()" aria-expanded="false" aria-controls="ovMenu" title="Show or hide what's drawn on the map">Overlays</button>
@@ -542,6 +576,10 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 					<div class="ovrow"><button type="button" id="deathBtn" onclick="toggleDeaths()" title="Show where players died">Deaths</button>
 					<select id="deathHours" aria-label="Deaths in the last" hidden><option value="1">last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select></div>
 				</div>
+			</div>
+			<div class="ovwrap" id="lgWrap">
+				<button type="button" id="lgBtn" onclick="toggleLegend()" aria-expanded="false" aria-controls="lgMenu" title="What each mark on the map means">Legend</button>
+				<div class="ovmenu legend" id="lgMenu" hidden data-noicon></div>
 			</div>
 			<button type="button" id="trackBtn" class="on" hidden onclick="setTrack(null)" title="Stop following"></button>
 			<span class="badge pick" id="pickBanner" hidden></span>
@@ -631,11 +669,10 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 <!-- The weather and the in-game time -->
 <!-- A vehicle's parts, damage and cargo (Info… on its popup) -->
 <div id="vModal" class="modal">
-	<div class="box wide" role="dialog" aria-labelledby="vTitle" style="width:min(1000px, 95vw)">
-		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="sub" id="vType"></span></div>
-		<div id="vBody"></div>
+	<div class="box wide" role="dialog" aria-labelledby="vTitle">
+		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="badge" id="vWhere"></span><span class="muted" id="vSum"></span><button type="button" class="dlg-x" onclick="closeVehicleInfo()">Close</button></div>
+		<div class="inv"><div class="ilist" id="vList"></div><div class="idet" id="vDet"></div></div>
 		<div class="dlg-err" id="vErr"></div>
-		<div class="dfoot"><div class="acts" id="vActs"></div><button type="button" onclick="closeVehicleInfo()">Close</button></div>
 	</div>
 </div>
 
@@ -865,6 +902,8 @@ function drawScale() {
 function initMap() {
 	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
 	stepWheel();
+	setTouchDrag();
+	map.getContainer().addEventListener('touchmove', e => { if (TOUCH && !map.dragging.enabled() && e.touches.length === 1) twoFingerHint(); }, { passive: true });
 	L.control.zoom({ position: 'bottomright' }).addTo(map);
 	// What covers what, top first: players, vehicles and predators, town
 	// names, events and deaths, the grid's numbers; then the grid lines
@@ -1104,7 +1143,7 @@ function arrowSVG(color) {
 	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><circle r="8.5" fill="none" stroke="#8ab4f8" stroke-width="1.5" style="display:none"/>' +
 		'<path class="arr" d="M0,-8 L5.6,6.4 L0,2.8 L-5.6,6.4 Z" fill="' + color + '" stroke="#111" stroke-width="1.2"/>' +
 		// Dead: a skull instead of the arrow.
-		'<g class="dx" stroke="#111" stroke-width="2" transform="scale(.5)"><circle cy="-1.8" r="6" fill="#e8eaed"/><rect x="-3.6" y="2" width="7.2" height="4.6" rx="1.4" fill="#e8eaed"/>' +
+		'<g class="dx" stroke="#111" stroke-width="1.6" transform="scale(1)"><circle cy="-1.8" r="6" fill="#e8eaed"/><rect x="-3.6" y="2" width="7.2" height="4.6" rx="1.4" fill="#e8eaed"/>' +
 		'<circle cx="-2.3" cy="-1.6" r="1.7" fill="#111" stroke="none"/><circle cx="2.3" cy="-1.6" r="1.7" fill="#111" stroke="none"/>' +
 		'<path d="M0 0.6 L-0.9 2 L0.9 2 Z" fill="#111" stroke="none"/><path d="M-1.2 3.4 V6.2 M1.2 3.4 V6.2" stroke-width="1.4"/></g></svg>';
 }
@@ -1155,6 +1194,21 @@ function fitAll() {
 	map.fitBounds([[0, 0], [s, s]]);
 }
 // toggleFull makes the map fill the browser's window, or puts it back.
+// Touch screens: one finger scrolls the page, two move and zoom the map
+// (as with a map in any page); in full screen, with no page to scroll, one
+// finger moves it too. A one-finger drag on the map says how.
+const TOUCH = matchMedia('(pointer: coarse)').matches;
+function setTouchDrag() {
+	if (!TOUCH || !map) return;
+	if (document.querySelector('.mapwrap').classList.contains('full')) map.dragging.enable(); else map.dragging.disable();
+}
+let hintTimer = 0;
+function twoFingerHint() {
+	const h = document.getElementById('twoHint');
+	h.classList.add('on');
+	clearTimeout(hintTimer);
+	hintTimer = setTimeout(() => h.classList.remove('on'), 1200);
+}
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
@@ -1166,6 +1220,7 @@ function toggleFull(on) {
 	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
 	map.invalidateSize({ pan: false });
 	map.panTo(c, { animate: false });
+	setTouchDrag();
 }
 // ---- Vehicles: every car, motorbike and boat on the server (mod 0.0.1i) -
 // Shown while the Vehicles button is on (remembered in this browser), read
@@ -1214,18 +1269,23 @@ function drawArrowsShown() {
 	for (const p of players) { const m = markers[p.guid], el = m && m.getElement(); if (el) el.style.display = inShownVehicle(p) ? 'none' : ''; }
 }
 function inShownVehicle(p) { return vehOn && p.seat != null && p.seat >= 0 && vehicles.some(v => v.id === p.vehicleId); }
-// vehColor: the driver's colour (else the first in it), someone in it but
-// not known who blue, the engine running green, else grey.
+// vehColor: occupied by a driver, the driver's colour; by passengers only
+// (or by someone not known), blue; parked with the engine running, green;
+// parked with it off, grey.
 function vehColor(v) {
-	const crew = crewOf(v);
-	if (crew.length) return colorOf(crew[0].guid);
-	return v.crew ? '#8ab4f8' : v.engine ? '#81c995' : '#e8eaed';
+	const driver = crewOf(v).find(p => p.driver);
+	if (driver) return colorOf(driver.guid);
+	return v.crew || crewOf(v).length ? '#8ab4f8' : v.engine ? '#81c995' : '#e8eaed';
+}
+// vehShape is a vehicle's marker: a car seen from above, front first.
+function vehShape(color, heading) {
+	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><g transform="rotate(' + Math.round(heading || 0) + ')">' +
+		'<rect x="-4.5" y="-7.5" width="9" height="15" rx="2.5" fill="' + color + '" stroke="#111" stroke-width="1.2"/>' +
+		'<rect x="-3" y="-5" width="6" height="3.5" rx="1" fill="#111" opacity=".55"/></g></svg>';
 }
 function vehSVG(v) {
 	const crew = crewOf(v);
-	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><g transform="rotate(' + Math.round(v.heading || 0) + ')">' +
-		'<rect x="-4.5" y="-7.5" width="9" height="15" rx="2.5" fill="' + vehColor(v) + '" stroke="#111" stroke-width="1.2"/>' +
-		'<rect x="-3" y="-5" width="6" height="3.5" rx="1" fill="#111" opacity=".55"/></g></svg>' +
+	return vehShape(vehColor(v), v.heading) +
 		(crew.length ? '<span class="vname">' + esc(crew[0].name) + (crew.length > 1 ? ' +' + (crew.length - 1) : '') + '</span>' : '');
 }
 function drawVehicles() {
@@ -1270,15 +1330,19 @@ function openVehicle(id) {
 	vehPopup.openOn(map);
 	vehPopup.options.autoPan = false;
 }
-// The vehicle dialog (Info…): its parts, damage and cargo, asked of the
-// mod when it opens and on Refresh, not otherwise.
-let vehInfo = null, vehAsk = 0;
+// The vehicle dialog (Info…): laid out like a placed object's. The
+// vehicle on the left; on the right its facts, damage, parts and cargo
+// (asked of the mod when it opens and on Refresh, not otherwise), and any
+// item picked in them (vehItemSel), with what is on and in it.
+let vehInfo = null, vehAsk = 0, vehItemSel = null;
 function openVehicleInfo(id) {
-	vehInfo = id;
+	map.closePopup(vehPopup);
+	vehInfo = id; vehItemSel = null;
+	document.getElementById('vErr').textContent = '';
 	document.getElementById('vModal').style.display = 'flex';
 	askVehicle();
 }
-function closeVehicleInfo() { document.getElementById('vModal').style.display = 'none'; vehInfo = null; vehDetail = null; vehAsk++; }
+function closeVehicleInfo() { document.getElementById('vModal').style.display = 'none'; vehInfo = null; vehDetail = null; vehItemSel = null; vehAsk++; }
 // askVehicle asks the mod, once, for what is in the vehicle in the dialog
 // (its damage zones, parts and cargo), then reads it as soon as it has
 // come (a sync or two): no more asking after that, until Refresh.
@@ -1338,36 +1402,106 @@ function renderVehicle() {
 	renderVehicleInfo();
 	drawArrowsShown();
 }
-// renderVehicleInfo draws the dialog: the facts, then parts, damage and
-// cargo side by side (each column keeps where it was scrolled to).
+// The details' sections that fold away (Damage; a vehicle's Parts and
+// Inventory): a row like an item's; a click shows or hides what is in
+// it, each remembered on its own.
+const SEC_DEFAULT = { damage: '0', parts: '0', cargo: '1' };
+const secOpen = Object.fromEntries(Object.keys(SEC_DEFAULT).map(k => [k, layerPref('sec.' + k, SEC_DEFAULT[k]) === '1']));
+function toggleSec(k) { secOpen[k] = !secOpen[k]; setLayerPref('sec.' + k, secOpen[k] ? '1' : '0'); renderVehicleInfo(); renderGroupInfo(); }
+function secHead(k, label) {
+	const open = secOpen[k];
+	return '<button type="button" class="irow sechead' + (open ? ' open' : '') + '" onclick="toggleSec(\'' + k + '\')" aria-expanded="' + open + '" title="' + (open ? 'Hide' : 'Show') + '">' +
+		'<span class="sl">' + (open ? '▾' : '▸') + ' ' + label + '</span><span class="nm"></span><span class="ex"></span></button>';
+}
+function damageBlock(zones) {
+	if (!zones || !zones.length) return '';
+	const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
+	const sorted = zones.slice().sort((a, b) => a.health - b.health);
+	return secHead('damage', 'Damage') +
+		(secOpen.damage ? '<div class="seclist dmglist">' + sorted.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('') + '</div>' : '');
+}
+// itemsBlock is a folding section of item rows (a vehicle's Parts or
+// Inventory, a placed object's Inventory); rows draws them (default: the
+// vehicle dialog's).
+function itemsBlock(k, label, items, none, rows) {
+	return secHead(k, label + ' · ' + items.length) +
+		(secOpen[k] ? (items.length ? '<div class="sub-items seclist">' + (rows || vItemRows)(items) + '</div>' : '<div class="muted seclist">' + none + '</div>') : '');
+}
+// vIrow is a row for an item in the vehicle dialog (click: its details).
+function vIrow(it, label, extra) {
+	const [cn, cc] = condOf(it);
+	return '<button type="button" class="irow' + (it.id === vehItemSel ? ' sel' : '') + '" data-vitem="' + it.id + '">' +
+		'<span class="sl">' + esc(label) + '</span><span class="nm">' + esc(itemName(it)) + '</span>' +
+		'<span class="ex">' + esc(extra || '') + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
+}
+function vItemRows(items) {
+	return (items || []).slice().sort((a, b) => !!b.slot - !!a.slot || a.row - b.row || a.col - b.col).map(it => {
+		const n = countIn(it);
+		return vIrow(it, it.slot ? slotLabel(it.slot) : 'Cargo', n ? itemsText(n) : qty(it));
+	}).join('');
+}
+// renderVehicleInfo draws the dialog (each side keeps where it was
+// scrolled to: it is redrawn with every vehicle update).
 function renderVehicleInfo() {
 	if (vehInfo == null) return;
-	const v = vehicles.find(x => x.id === vehInfo), body = document.getElementById('vBody');
-	if (!v) { body.innerHTML = '<div class="empty">That vehicle isn\'t on the server any more.</div>'; document.getElementById('vActs').innerHTML = ''; return; }
-	document.getElementById('vTitle').textContent = catLabel(v);
-	document.getElementById('vType').textContent = v.type;
-	const tops = [...body.querySelectorAll('.vcols > div')].map(c => c.scrollTop);
-	let h = '<div class="vfacts">' + vehFacts(v).map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
-	const d = vehDetail;
-	if (!d) h += '<div class="muted">Loading…</div>';
-	else if (d.failed) h += '<div class="muted">recon-mod didn\'t send its parts, damage and cargo (it needs 0.0.1i or later).</div>';
-	else {
-		const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
-		const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
-		h += '<div class="vcols"><div><h5>Parts · ' + parts.length + '</h5>' +
-			(parts.length ? parts.map(it => partRow(itemName(it), it.healthLevel | 0)).join('') : '<div class="muted">None fitted</div>') +
-			'</div><div><h5>Damage</h5>' +
-			(d.zones.length ? d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('') : '<div class="muted">No zones</div>') +
-			'</div><div><h5>Cargo · ' + cargo.length + '</h5>' +
-			(cargo.length ? cargo.map(it => {
-				const n = countIn(it);
-				return partRow(itemName(it), it.healthLevel | 0, n ? n + (n === 1 ? ' item inside' : ' items inside') : qty(it));
-			}).join('') : '<div class="muted">Empty</div>') + '</div></div>';
+	const v = vehicles.find(x => x.id === vehInfo), list = document.getElementById('vList'), det = document.getElementById('vDet');
+	if (!v) {
+		document.getElementById('vTitle').textContent = 'Vehicle';
+		document.getElementById('vWhere').textContent = ''; document.getElementById('vSum').textContent = '';
+		list.innerHTML = '<div class="empty">That vehicle isn\'t on the server any more.</div>'; det.innerHTML = '';
+		return;
 	}
-	body.innerHTML = h;
-	body.querySelectorAll('.vcols > div').forEach((c, i) => { c.scrollTop = tops[i] || 0; });
-	document.getElementById('vActs').innerHTML = '<button type="button" onclick="askVehicle()" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + vehDeleteState(v);
+	const d = vehDetail, has = d && !d.failed, count = !d ? 'Loading…' : d.failed ? '?' : itemsText(objCount(d));
+	document.getElementById('vTitle').textContent = catLabel(v);
+	document.getElementById('vWhere').textContent = grid(v.x, v.z);
+	document.getElementById('vSum').textContent = !d ? 'Loading…' : d.failed ? '' : itemsText(objCount(d)).replace('empty', 'nothing') + ' inside';
+	const [cn, cc] = vehCondition(v.health);
+	list.innerHTML = '<button type="button" class="irow gobj' + (vehItemSel == null ? ' sel' : '') + '" data-vobj="1">' +
+		'<span class="sl">' + (v.fuel < 0 ? 'Boat' : 'Vehicle') + '</span><span class="nm">' + esc(catLabel(v)) + '</span>' +
+		'<span class="ex">' + count + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
+	const top = det.scrollTop, path = vehItemSel != null && has ? pathTo(d.items, vehItemSel) : null;
+	let h = '';
+	if (path) {
+		const it = path[path.length - 1], [icn, icc] = condOf(it);
+		h += '<div class="crumbs"><a data-vobj="1">' + esc(catLabel(v)) + '</a> ›' + path.slice(0, -1).map(x => ' <a data-vitem="' + x.id + '">' + esc(itemName(x)) + '</a> ›').join('') + '</div>';
+		h += '<h3>' + esc(itemName(it)) + '</h3><div class="ty">' + esc(it.type) + '</div><div class="props">';
+		const props = [['Where', it.slot ? slotLabel(it.slot) + ' (fitted)' : 'Cargo, row ' + (it.row + 1) + ', column ' + (it.col + 1)],
+			['Condition', '<span style="color:' + icc + '">' + icn + '</span>']];
+		if (it.quantityMax) props.push([it.unit === 'rounds' ? 'Rounds' : 'Quantity', esc(qty(it))]);
+		h += props.map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
+		const att = it.attachments || [], cargo = it.cargo || [];
+		if (att.length) h += '<h5>Attachments · ' + att.length + '</h5><div class="sub-items">' + vItemRows(att) + '</div>';
+		if (cargo.length) h += '<h5>Contents · ' + cargo.length + '</h5><div class="sub-items">' + vItemRows(cargo) + '</div>';
+	} else {
+		vehItemSel = null;
+		h += '<h3>' + esc(catLabel(v)) + '</h3><div class="ty">' + esc(v.type) + '</div><div class="props">' +
+			vehFacts(v).concat([['Contents', count]]).map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
+		if (!d) h += '<div class="muted" style="margin-top:10px">Loading…</div>';
+		else if (d.failed) h += '<div class="muted" style="margin-top:10px">recon-mod didn\'t send its parts, damage and cargo (it needs 0.0.1i or later).</div>';
+		else {
+			const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
+			const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
+			h += damageBlock(d.zones);
+			h += itemsBlock('parts', 'Parts', parts, 'None fitted') + itemsBlock('cargo', 'Inventory', cargo, 'Empty');
+		}
+	}
+	h += '<div class="gacts">' + vehDeleteState(v) + '<button type="button" data-vact="show">Show on map</button>' +
+		'<button type="button" data-vact="refresh" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + '</div>';
+	det.innerHTML = h;
+	det.scrollTop = top;
 }
+document.getElementById('vModal').addEventListener('click', e => {
+	const a = e.target.closest('[data-vact]');
+	if (a) {
+		const v = vehicles.find(x => x.id === vehInfo);
+		if (a.dataset.vact === 'refresh') askVehicle();
+		else if (v) { closeVehicleInfo(); map.setView([v.z, v.x], Math.min(map.getMaxZoom(), Math.log2(map.getSize().x / ZOOM_IN_M))); openVehicle(v.id); }
+		return;
+	}
+	const it = e.target.closest('[data-vitem]');
+	if (it) { vehItemSel = +it.dataset.vitem; renderVehicleInfo(); return; }
+	if (e.target.closest('[data-vobj]')) { vehItemSel = null; renderVehicleInfo(); }
+});
 async function deleteVehicle(id) {
 	const v = vehicles.find(x => x.id === id), err = document.getElementById('vErr');
 	if (!v) return;
@@ -1429,14 +1563,75 @@ function renderOvBtn() {
 	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length; // not a layer's own filter (a heading is on while it shows something)
 	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
 }
+// fitMenu keeps an open menu (Overlays, Legend) inside the map: no wider
+// than it, moved left if it would run off its right edge, and no taller
+// than the room below its button (what is left scrolls inside it). The map
+// cuts off anything outside it, which on a phone was most of a menu.
+function fitMenu(m) {
+	// While a menu is open the bar it hangs from goes over the map's own
+	// controls (+ and −), which would otherwise cover it.
+	document.querySelector('.mapbar').classList.toggle('menuopen', !document.getElementById('ovMenu').hidden || !document.getElementById('lgMenu').hidden);
+	if (!m || m.hidden) return;
+	const box = document.querySelector('.mapwrap').getBoundingClientRect(), wrap = m.parentElement.getBoundingClientRect();
+	m.style.left = '0px';
+	m.style.maxWidth = Math.max(160, box.width - 16) + 'px';
+	const r = m.getBoundingClientRect();
+	if (r.right > box.right - 8) m.style.left = Math.max(box.left + 8 - wrap.left, box.right - 8 - r.width - wrap.left) + 'px';
+	m.style.maxHeight = Math.max(120, box.bottom - 8 - m.getBoundingClientRect().top) + 'px';
+}
+addEventListener('resize', () => { fitMenu(document.getElementById('ovMenu')); fitMenu(document.getElementById('lgMenu')); });
 function toggleOvMenu(open) {
 	const m = document.getElementById('ovMenu'), b = document.getElementById('ovBtn');
 	open = open === undefined ? m.hidden : open;
 	m.hidden = !open;
+	fitMenu(m);
 	b.classList.toggle('open', open);
 	b.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
-document.addEventListener('mousedown', e => { if (!e.target.closest('.ovwrap')) toggleOvMenu(false); });
+// (capture: the map stops its own mousedowns before they reach the page)
+document.addEventListener('mousedown', e => {
+	if (!e.target.closest('#ovMenu, #ovBtn')) toggleOvMenu(false);
+	if (!e.target.closest('#lgWrap')) toggleLegend(false);
+}, true);
+
+// The Legend: every mark the map draws and what it means, drawn by the
+// same functions as the map's, so it can't drift from them.
+function toggleLegend(open) {
+	const m = document.getElementById('lgMenu'), b = document.getElementById('lgBtn');
+	open = open === undefined ? m.hidden : open;
+	if (open && !m.innerHTML) m.innerHTML = legendHTML();
+	m.hidden = !open;
+	fitMenu(m);
+	b.classList.toggle('open', open);
+	b.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function legendHTML() {
+	const row = (icon, text, wide) => '<div class="lgrow' + (wide ? ' wide' : '') + '"><span class="lgi">' + icon + '</span><span class="lgt">' + text + '</span></div>';
+	const sec = (title, rows) => '<div class="lgsec"><h5>' + title + '</h5>' + rows.join('') + '</div>';
+	const pristine = CONDITION[0][1], worst = CONDITION[3][1];
+	const EVENT_NAMES = { heli: 'Heli crash', convoy: 'Convoy', police: 'Police', medical: 'Medical', other: 'Other' };
+	const col = html => '<div class="lgcol">' + html + '</div>';
+	return col(sec('Players', [
+			row(arrowSVG('#c58af9'), 'Player'),
+			row('<span class="lgdead">' + arrowSVG('#c58af9') + '</span>', 'Dead player'),
+			row(DEATH_SVG, 'Where a player died')]) +
+		sec('Vehicles', [
+			row(vehShape('#e8eaed'), 'Parked; Engine off'),
+			row(vehShape('#81c995'), 'Parked; Engine running'),
+			row(vehShape('#c58af9'), 'Occupied by driver'),
+			row(vehShape('#8ab4f8'), 'Occupied by passenger')]) +
+		sec('Predators', Object.values(PRED).map(([name, c]) => row(predShape(c, 0), name === 'Dog' ? 'Guard dog' : name)))) +
+		col(sec('Events', EVENT_CATS.filter(([k]) => k !== 'gas').map(([k, , c]) => row(spotSVG(c, true), EVENT_NAMES[k] || k)).concat([
+			row(spotSVG('#7a7a7a', false), 'Inactive')])) +
+		sec('Gas zones', [
+			row(bioSVG(GAS_STATIC), 'Static'),
+			row(bioSVG(eventCat('gas')[2]), 'Dynamic, active'),
+			row(bioSVG(GAS_OFF), 'Dynamic, inactive')]) +
+		sec('Placed objects', [
+			row(placedSVG(pristine), 'Placed object'),
+			row(groupSVG(worst) + '<span class="lgname" style="color:#fff">×5</span>', 'Several in one 50 m square', true),
+			'<div class="lgscale">' + CONDITION.map(([n, c]) => '<span><i style="background:' + c + '"></i>' + n + '</span>').join('') + '</div>']));
+}
 
 // Players: their arrows and names (on unless switched off); hiding them
 // hides their pane, so nothing else about them changes.
@@ -1541,7 +1736,7 @@ async function loadEvents() {
 			const w = await api('GET', '/api/mod/worldevents');
 			eventsSent = !!w.sent;
 			eventSpots = (w.events || []).map((e, i) => ({ id: i + 1, name: e.kind === 'crash' ? 'Heli crash' : e.kind === 'area' ? 'Hot zone' : 'Gas zone',
-				category: e.kind === 'crash' ? 'heli' : 'gas', x: e.x, z: e.z, on: true, checked: true, radius: e.kind === 'crash' ? 0 : e.radius, static: e.kind !== 'crash' }));
+				category: e.kind === 'crash' ? 'heli' : 'gas', x: e.x, z: e.z, on: true, checked: true, radius: e.kind === 'crash' ? 0 : e.radius, static: /static/i.test(e.type || '') }));
 		}
 	} catch (e) { return; }
 	drawEvents();
@@ -1553,6 +1748,13 @@ function bioSVG(c) {
 	return '<svg width="20" height="20" viewBox="-10 -10 20 20"><defs><mask id="bioM" maskUnits="userSpaceOnUse" x="-10" y="-10" width="20" height="20">' + lobes +
 		'</mask></defs><rect x="-10" y="-10" width="20" height="20" fill="' + c + '" mask="url(#bioM)" style="filter: drop-shadow(0 0 1px #000)"/></svg>';
 }
+// spotSVG is an event spot's diamond: bigger while the event is up.
+function spotSVG(c, on) {
+	const sz = on ? 14 : 10, h = sz / 2 - 1;
+	return '<svg width="' + sz + '" height="' + sz + '" viewBox="' + (-sz / 2) + ' ' + (-sz / 2) + ' ' + sz + ' ' + sz + '"' + (on ? '' : ' opacity="0.75"') + '>' +
+		'<path d="M0 ' + (-h) + ' L' + h + ' 0 L0 ' + h + ' L' + (-h) + ' 0 Z" fill="' + c + '" stroke="#111" stroke-width="1.2"/></svg>';
+}
+const GAS_STATIC = '#ea4335', GAS_OFF = '#9aa0a6';
 function eventCat(k) { return EVENT_CATS.find(c => c[0] === k) || EVENT_CATS[EVENT_CATS.length - 1]; }
 function drawEvents() {
 	const on = eventsWanted(), up = {}, all = {};
@@ -1573,13 +1775,15 @@ function drawEvents() {
 	eventLayer.addTo(map);
 	for (const e of eventSpots) {
 		if (!eventCatOn[e.category] || !(e.on ? eventStateOn.active : eventStateOn.inactive)) continue;
-		const [, , c0] = eventCat(e.category), c = e.on ? c0 : '#7a7a7a';
-		const tip = esc(e.name) + ' · ' + grid(e.x, e.z);
-		if (e.on && e.radius > 0)
-			L.circle([e.z, e.x], { radius: e.radius, color: c, weight: 1.5, dashArray: '5 4', fillColor: c, fillOpacity: 0.15, pane: 'events', interactive: false }).addTo(eventLayer);
-		const sz = e.on ? 14 : 10, h = sz / 2 - 1;
-		const html = e.category === 'gas' && e.on && !e.hot ? bioSVG(c) : '<svg width="' + sz + '" height="' + sz + '" viewBox="' + (-sz / 2) + ' ' + (-sz / 2) + ' ' + sz + ' ' + sz + '"' + (e.on ? '' : ' opacity="0.75"') + '>' +
-			'<path d="M0 ' + (-h) + ' L' + h + ' 0 L0 ' + h + ' L' + (-h) + ' 0 Z" fill="' + c + '" stroke="#111" stroke-width="1.2"/></svg>';
+		// Gas zones: a biohazard sign and the area, red when static (always
+		// there), in the category's colour while a dynamic one is up, grey
+		// where one can come (with the size it had when last up, if seen up).
+		const gas = e.category === 'gas' && !e.hot, [, , c0] = eventCat(e.category);
+		const c = gas ? (e.static ? GAS_STATIC : e.on ? c0 : GAS_OFF) : e.on ? c0 : '#7a7a7a';
+		const tip = esc(gas ? (e.static ? 'Static gas zone' : e.on ? 'Gas zone' : 'Gas zone (inactive)') : e.name) + ' · ' + grid(e.x, e.z);
+		if ((e.on || gas) && e.radius > 0)
+			L.circle([e.z, e.x], { radius: e.radius, color: c, weight: 1.5, dashArray: '5 4', fillColor: c, fillOpacity: e.on ? 0.15 : 0.06, pane: 'events', interactive: false }).addTo(eventLayer);
+		const html = gas ? bioSVG(c) : spotSVG(c, e.on);
 		L.marker([e.z, e.x], { pane: 'events', icon: L.divIcon({ className: 'emark', html, iconSize: [0, 0] }), keyboard: false })
 			.bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
 	}
@@ -1600,33 +1804,15 @@ async function loadPredators() {
 	} catch (e) { return; }
 	drawPredators();
 }
-// A predator's popup: its health and what its AI is doing (recon-mod 1.0.3
-// on), the nearest player while it hunts, and Remove.
+// A predator's popup: its health and whether it is attacking (recon-mod
+// 1.0.3 on), and Remove.
 const predPopup = L.popup({ autoPan: false, offset: [0, -6], autoPanPaddingTopLeft: [10, 60] });
 let predOpen = null, predErr = '';
-const BEHAVIOR = ['', 'Calm', 'Resting', 'Grazing', 'Travelling', 'Drinking', 'Threatened', 'Threatened', 'Alerted', 'Attracted', 'Scared',
-	'Hunting', 'Eating', 'Besieging', 'Keeping away from fire', 'Enraged', 'Enraged, lost target', 'Attracted', 'Intimidating'];
-const ACTIVITY = ['', 'Heading to safety', 'Grazing on the move', 'Grazing', 'Resting', 'Travelling', 'Eating', 'Drinking', 'Charging',
-	'Approaching', 'Closing in', 'Walking', 'Idle', 'Idle', 'Idle', 'Backing away from a threat', 'Stalking towards a threat', 'Watching a threat', 'Holding ground'];
-const HUNTING = [11, 15];
-// How far each can pick up a player, from the game's AI settings: a wolf
-// sees up to 200 m (ai.pbo visionRangeMax), a bear hears up to 110 m
-// (ai_bliss.pbo NoiseSystemParams rangeMax). Nobody that close: no line.
-const PRED_REACH = { wolf: 200, bear: 110, dog: 200 };
 function openPredator(id) {
 	if (!predators.some(x => x.id === id)) return;
 	predOpen = id; predErr = ''; confirming = null;
 	renderPredator();
 	predPopup.options.autoPan = true; predPopup.openOn(map); predPopup.options.autoPan = false;
-}
-function nearestPlayer(x, z, within) {
-	let best = null, bd = within || Infinity;
-	for (const p of players) {
-		if (!p.alive) continue;
-		const d = Math.hypot(p.x - x, p.z - z);
-		if (d < bd) { bd = d; best = p; }
-	}
-	return best ? [best, bd] : null;
 }
 function renderPredator() {
 	if (predOpen == null) return;
@@ -1638,16 +1824,8 @@ function renderPredator() {
 	if (a.health != null) {
 		const [, hc] = vehCondition(a.health);
 		h += row('Health', '<span style="color:' + hc + '">' + Math.round(a.health * 100) + '%</span>');
-		const b = BEHAVIOR[a.behaviour] || '', act = ACTIVITY[a.activity] || '';
-		const hunting = HUNTING.includes(a.behaviour);
-		if (b) h += row('Behavior', hunting ? '<b style="color:#f28b82">' + b + '</b>' : b);
-		if (act) h += row('Activity', act);
 		h += row('Attacking', a.attacking ? '<b style="color:#f28b82">Yes</b>' : 'No');
-		if (hunting || a.attacking) {
-			const n = nearestPlayer(a.x, a.z, PRED_REACH[a.kind] || 200);
-			if (n) h += row('Nearest player', esc(n[0].name) + ' · ' + Math.round(n[1]) + ' m');
-		}
-	} else h += '<div class="muted st">Health and what it\'s doing need recon-mod 1.0.3.</div>';
+	} else h += '<div class="muted st">Health and attacking need recon-mod 1.0.3.</div>';
 	h += '<div class="err">' + esc(predErr) + '</div><div class="acts" style="justify-content:flex-end">' +
 		confirmPair('pred:' + a.id, 'Remove', 'removePredator(' + a.id + ')', 'Remove this animal from the server') + '</div></div>';
 	predPopup.setLatLng([a.z, a.x]).setContent(h);
@@ -1659,10 +1837,15 @@ async function removePredator(id) {
 	map.closePopup(predPopup);
 	setTimeout(loadPredators, 1500);
 }
+// predShape is a predator's marker: a dot in its colour, the notch on
+// the side it faces.
+function predShape(c, heading) {
+	return '<svg width="12" height="12" viewBox="-6 -6 12 12"><g transform="rotate(' + Math.round(heading || 0) + ')"><path d="M0 -9 L3.5 -4.5 L-3.5 -4.5 Z" fill="' + c + '" stroke="#111" stroke-width="1"/></g>' +
+		'<circle r="4.5" fill="' + c + '" stroke="#111" stroke-width="1.2"/></svg>';
+}
 function predSVG(a) {
 	const [name, c] = PRED[a.kind] || [item(a.type), '#ccc'];
-	return '<svg width="12" height="12" viewBox="-6 -6 12 12"><g transform="rotate(' + Math.round(a.heading || 0) + ')"><path d="M0 -9 L3.5 -4.5 L-3.5 -4.5 Z" fill="' + c + '" stroke="#111" stroke-width="1"/></g>' +
-		'<circle r="4.5" fill="' + c + '" stroke="#111" stroke-width="1.2"/></svg><span style="color:' + c + '">' + esc(name) + '</span>';
+	return predShape(c, a.heading) + '<span style="color:' + c + '">' + esc(name) + '</span>';
 }
 function drawPredators() {
 	const n = {};
@@ -1804,7 +1987,7 @@ function drawPlaced() {
 		if (objs.length === 1 || !level) {
 			for (const o of objs) {
 				const [, c] = vehCondition(o.health);
-				const icon = L.divIcon({ className: 'omark', html: '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + c + '" stroke="#111" stroke-width="1"/></svg>', iconSize: [0, 0] });
+				const icon = L.divIcon({ className: 'omark', html: placedSVG(c), iconSize: [0, 0] });
 				let m = placedMarkers[o.id];
 				if (!m) {
 					m = placedMarkers[o.id] = L.marker([o.z, o.x], { pane: 'vehicles', icon, keyboard: false, title: placedName(o) }).addTo(map);
@@ -1827,7 +2010,7 @@ function drawPlaced() {
 			keep['r' + key] = true;
 		}
 		const [, c] = vehCondition(worstHealth(objs)), at = centreOf(objs);
-		const icon = L.divIcon({ className: 'gmark', iconSize: [0, 0], html: '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2" fill="' + c + '" stroke="#fff" stroke-width="2"/></svg><span class="n">×' + objs.length + '</span>' });
+		const icon = L.divIcon({ className: 'gmark', iconSize: [0, 0], html: groupSVG(c) + '<span class="n">×' + objs.length + '</span>' });
 		let m = placedMarkers['g' + key];
 		if (!m) {
 			m = placedMarkers['g' + key] = L.marker([at[1], at[0]], { pane: 'vehicles', icon, keyboard: false, title: objs.length + ' placed objects' }).addTo(map);
@@ -1841,6 +2024,10 @@ function drawPlaced() {
 	if (groupOpen != null) renderGroupPopup();
 	renderGroupInfo();
 }
+// placedSVG is one placed object's square; groupSVG a group's (white
+// edged, with ×N beside it); both in the colour of the worst condition.
+function placedSVG(c) { return '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + c + '" stroke="#111" stroke-width="1"/></svg>'; }
+function groupSVG(c) { return '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2" fill="' + c + '" stroke="#fff" stroke-width="2"/></svg>'; }
 function placedBy(o) { return o.placer ? esc(o.placer) : '<span class="muted">unknown</span>'; }
 function openPlacedPopup(id) {
 	placedOpen = id; groupOpen = null;
@@ -1875,6 +2062,13 @@ function keyParts(key) { const [m, ij] = key.split(':'), [i, j] = ij.split(',').
 function groupLevel() {
 	const bar = 100 / Math.pow(2, map.getZoom());
 	return bar >= 140 ? BLOCK_M : bar >= 70 ? GROUP_M : 0;
+}
+// nearbyOf is, for one object's dialog (key "id:<n>"), the other shown
+// objects in its 50 m square: those its group would list.
+function nearbyOf(key) {
+	if (!isOneKey(key)) return [];
+	const o = groupOf(key)[0];
+	return o ? groupOf(groupKey(o, GROUP_M)).filter(x => x.id !== o.id) : [];
 }
 function groupOf(key) {
 	if (isOneKey(key)) return placedList.filter(o => o.id === +key.slice(3));
@@ -1959,7 +2153,7 @@ function zoomToBlock(key) {
 	map.setView([z, x], Math.min(map.getMaxZoom(), zoomForBar(100)));
 }
 function openGroupInfo(key) {
-	const ids = groupOf(key).map(o => o.id), have = groupOpen === key;
+	const ids = groupOf(key).concat(nearbyOf(key)).map(o => o.id), have = groupOpen === key;
 	if (!have) stopGroup();
 	groupInfo = key; // before closing the popup, so its counts are kept
 	map.closePopup(plcPopup);
@@ -1998,17 +2192,20 @@ function renderGroupInfo() {
 	const pending = objs.some(o => !groupDetail[o.id]);
 	const total = objs.reduce((n, o) => n + (groupDetail[o.id] && !groupDetail[o.id].failed ? objCount(groupDetail[o.id]) : 0), 0);
 	document.getElementById('gSum').textContent = pending ? 'Loading…' : itemsText(total).replace('empty', 'nothing') + ' inside';
-	if (!objs.some(o => o.id === groupSel)) { groupSel = objs[0].id; groupItemSel = null; }
+	const near = nearbyOf(groupInfo), all = objs.concat(near);
+	if (!all.some(o => o.id === groupSel)) { groupSel = objs[0].id; groupItemSel = null; }
 	const top = list.scrollTop;
-	list.innerHTML = objs.map(o => {
+	const objRow = o => {
 		const [cn, cc] = vehCondition(o.health);
 		return '<button type="button" class="irow gobj' + (o.id === groupSel ? ' sel' : '') + '" data-obj="' + o.id + '">' +
 			'<span class="sl">' + esc((PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1]) + '</span><span class="nm">' + esc(placedName(o)) + '</span>' +
 			'<span class="ex">' + countText(o.id) + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
-	}).join('');
+	};
+	list.innerHTML = objs.map(objRow).join('') +
+		(near.length ? '<div class="gnear">Nearby items · ' + near.length + '</div>' + near.map(objRow).join('') : '');
 	list.scrollTop = top;
 
-	const o = objs.find(x => x.id === groupSel), d = groupDetail[o.id];
+	const o = all.find(x => x.id === groupSel), d = groupDetail[o.id];
 	const path = groupItemSel != null && d && !d.failed ? pathTo(d.items, groupItemSel) : null;
 	let h = '';
 	if (path) {
@@ -2033,8 +2230,8 @@ function renderGroupInfo() {
 		if (d && d.failed) h += '<div class="muted" style="margin-top:10px">recon-mod didn\'t send what is in it.</div>';
 		else if (d) {
 			const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
-			if (d.zones.length) h += '<h5>Damage</h5>' + d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('');
-			if (d.items.length) h += '<h5>In and on it · ' + d.items.length + '</h5><div class="sub-items">' + gItemRows(d.items, o.id) + '</div>';
+			h += damageBlock(d.zones);
+			if (d.items.length) h += itemsBlock('cargo', 'Inventory', d.items, '', its => gItemRows(its, o.id));
 		}
 	}
 	h += '<div class="gacts"><button type="button" data-act="show" data-of="' + o.id + '">Show on map</button>' +
@@ -2092,6 +2289,9 @@ function deathText(k) {
 	const d = new Date(k.at);
 	return (k.victimName || 'Someone') + ' ' + how + ' · ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
+// DEATH_SVG is the red X a death is drawn with.
+const DEATH_SVG = '<svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#111" stroke-width="4" stroke-linecap="round"/>' +
+	'<path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#ea4335" stroke-width="2.4" stroke-linecap="round"/></svg>';
 function drawDeaths() {
 	layerButton('deathBtn', deathsOn, 'Deaths' + (deathsOn ? ' ' + deathList.length : ''));
 	const sel = document.getElementById('deathHours');
@@ -2100,8 +2300,7 @@ function drawDeaths() {
 	deathLayer.clearLayers();
 	if (!deathsOn) { deathLayer.remove(); return; }
 	deathLayer.addTo(map);
-	const x = '<svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#111" stroke-width="4" stroke-linecap="round"/>' +
-		'<path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#ea4335" stroke-width="2.4" stroke-linecap="round"/></svg>';
+	const x = DEATH_SVG;
 	for (const k of deathList) {
 		if (!k.x && !k.z) continue;
 		const m = L.marker([k.z, k.x], { pane: 'events', icon: L.divIcon({ className: 'dmark', html: x, iconSize: [0, 0] }), keyboard: false })
@@ -2425,9 +2624,43 @@ function flagsOf(p) {
 	return f;
 }
 
+// The sidebar lists the players online (the mod's), or everyone else
+// ReCON has seen (offline: their last known inventory, kills and deaths).
+let plistMode = layerPref('plist', 'online') === 'offline' ? 'offline' : 'online', offline = null, offlineBy = {};
+async function loadOffline() {
+	try {
+		const d = await api('GET', '/api/players/all');
+		const live = new Set(players.map(p => p.guid.toLowerCase()));
+		offline = (d.players || []).filter(p => p.guid && !live.has(p.guid.toLowerCase()))
+			.map(p => ({ guid: p.guid.toLowerCase(), name: p.name || p.guid, lastSeen: p.lastSeenUnix, played: p.totalPlaytimeSeconds || 0 }))
+			.sort((a, b) => b.lastSeen - a.lastSeen || a.name.localeCompare(b.name));
+		offlineBy = Object.fromEntries(offline.map(p => [p.guid, p]));
+	} catch (e) { return; }
+	renderList();
+	if (selGuid && !byGuid[selGuid]) renderPlayer();
+}
+function setPlistMode(m) {
+	plistMode = m; setLayerPref('plist', m);
+	renderList();
+	if (m === 'offline') loadOffline();
+}
+setInterval(() => { if (plistMode === 'offline' || offline === null) loadOffline(); }, 30000);
+function playedText(s) { const h = s / 3600; return h >= 10 ? Math.round(h) + ' h played' : h >= 1 ? h.toFixed(1) + ' h played' : Math.max(1, Math.round(s / 60)) + ' min played'; }
 function renderList() {
 	const q = document.getElementById('find').value.trim().toLowerCase();
 	const list = document.getElementById('plist');
+	document.getElementById('nOnline').textContent = mod && mod.connected ? players.length : 0;
+	document.getElementById('nOffline').textContent = offline ? offline.length : '…';
+	document.querySelectorAll('.ptoggle [data-plist]').forEach(b => { const on = b.dataset.plist === plistMode; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+	if (plistMode === 'offline') {
+		if (!offline) { list.innerHTML = '<div class="empty">Loading…</div>'; return; }
+		const shown = offline.filter(p => !q || p.name.toLowerCase().includes(q) || p.guid.includes(q));
+		if (!shown.length) { list.innerHTML = '<div class="empty">' + (offline.length ? 'Nobody matches.' : 'Nobody offline yet.') + '</div>'; return; }
+		list.innerHTML = shown.slice(0, 300).map(p => '<button type="button" class="prow off' + (p.guid === selGuid ? ' sel' : '') + '" data-guid="' + p.guid + '">' +
+			'<span class="d"></span><span class="n"><b>' + esc(p.name) + '</b><small>' + (p.lastSeen ? 'seen ' + agoText(p.lastSeen * 1000) : 'never seen') + ' · ' + playedText(p.played) + '</small></span><span></span></button>').join('') +
+			(shown.length > 300 ? '<div class="empty">' + (shown.length - 300) + ' more: search to find them.</div>' : '');
+		return;
+	}
 	if (!mod || !mod.connected) {
 		list.innerHTML = '<div class="empty">The Live Map shows the players recon-mod, the DayZ server mod, reports. Once it is installed and sending to this ReCON, they appear here every second.</div>';
 		return;
@@ -2453,6 +2686,8 @@ document.getElementById('plist').addEventListener('click', e => {
 	if (b) openPlayer(b.getAttribute('data-guid'));
 });
 document.getElementById('find').addEventListener('input', renderList);
+document.querySelector('.ptoggle').addEventListener('click', e => { const b = e.target.closest('[data-plist]'); if (b) setPlistMode(b.dataset.plist); });
+loadOffline();
 
 // ---- A player's popup on the map ------------------------------------------
 // A click on a player opens their basic stats and what they wear and hold;
@@ -2546,9 +2781,10 @@ function closePlayer() {
 	render();
 }
 function stepPlayer(dir) {
-	if (!players.length) return;
-	const i = players.findIndex(p => p.guid === selGuid);
-	openPlayer(players[(i < 0 ? 0 : i + dir + players.length) % players.length].guid);
+	const list = !byGuid[selGuid] && offlineBy[selGuid] ? offline : players;
+	if (!list || !list.length) return;
+	const i = list.findIndex(p => p.guid === selGuid);
+	openPlayer(list[(i < 0 ? 0 : i + dir + list.length) % list.length].guid);
 }
 function openInPlayers() { location.href = '/players#details=' + selGuid; }
 
@@ -2674,13 +2910,21 @@ function clearPending() {
 
 function renderPlayer() {
 	clearPending();
-	const p = byGuid[selGuid];
-	document.getElementById('pName').textContent = p ? p.name : 'Player';
+	const p = byGuid[selGuid], o = offlineBy[selGuid];
+	document.getElementById('pName').textContent = p ? p.name : o ? o.name : 'Player';
 	const badge = document.getElementById('pBadge');
-	badge.textContent = p ? (p.alive ? 'Online' : 'Dead') : 'Not online';
+	badge.textContent = p ? (p.alive ? 'Online' : 'Dead') : 'Offline';
 	badge.className = 'badge ' + (p && p.alive ? 'online' : 'gone');
 	document.getElementById('pGuid').textContent = selGuid;
-	document.getElementById('pWhen').textContent = p && mod && mod.connected ? 'Live from recon-mod · updated ' + Math.max(0, Math.round((Date.now() - new Date(mod.lastSync)) / 1000)) + ' s ago' : 'Not on the server now';
+	document.getElementById('pWhen').textContent = p && mod && mod.connected ? 'Live from recon-mod · updated ' + Math.max(0, Math.round((Date.now() - new Date(mod.lastSync)) / 1000)) + ' s ago'
+		: 'Not on the server now' + (o && o.lastSeen ? ' · last seen ' + agoText(o.lastSeen * 1000) + ' · ' + playedText(o.played) : '') + ' · what ReCON has on file';
+	// Offline: what ReCON keeps (their last known inventory, kills and
+	// deaths); every tab stays where it is, but nothing that needs them on
+	// the server: no Kill, Restore or Set condition, and Spawn is off.
+	document.querySelector('#pModal .pbox').classList.toggle('offline', !p);
+	const spawnBtn = document.querySelector('#fSpawn .setfoot button.go');
+	spawnBtn.disabled = !p;
+	spawnBtn.title = p ? '' : 'They aren\'t on the server now';
 	document.getElementById('pPos').innerHTML = p ? 'Grid <b>' + grid(p.x, p.z) + '</b> · ' + Math.round(p.x) + ', ' + Math.round(p.z) + ' · facing <b>' + compass(p.heading) + '</b> ' + Math.round(p.heading) + '°' : '';
 	if (p) {
 		let h = '';
@@ -3309,6 +3553,7 @@ document.getElementById('spList').addEventListener('click', e => {
 });
 function doSpawn() {
 	const err = document.getElementById('pErr');
+	if (!byGuid[selGuid]) { err.textContent = 'They aren\'t on the server now.'; return; }
 	if (!spSel) { err.textContent = 'Pick an item to spawn.'; return; }
 	const n = parseInt(document.getElementById('spCount').value, 10);
 	if (!(n >= 1 && n <= 20)) { err.textContent = 'Spawn 1 to 20 at a time.'; return; }

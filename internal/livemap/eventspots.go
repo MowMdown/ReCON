@@ -57,7 +57,7 @@ type EventSpot struct {
 	On       bool    `json:"on"`
 	Checked  bool    `json:"checked"`          // the mod has looked at it (it may still be off)
 	Radius   float64 `json:"radius,omitempty"` // a gas zone's, while up
-	Static   bool    `json:"static,omitempty"` // a gas zone that is always there
+	Static   bool    `json:"static,omitempty"` // a gas zone that is always there (ContaminatedArea_Static)
 	Hot      bool    `json:"hot,omitempty"`    // a hot (not toxic) zone: Sakhal's geysers
 }
 
@@ -192,6 +192,7 @@ func EventSpots(now time.Time) (list []EventSpot, sent bool) {
 			list[i].Checked = spots.seen[list[i].ID]
 		}
 	}
+	world := spots.world
 	spots.Unlock()
 	if !built || !connected2(now) {
 		return []EventSpot{}, false
@@ -223,6 +224,19 @@ func EventSpots(now time.Time) (list []EventSpot, sent bool) {
 			}
 		}
 	}
+	// A gas spot's zone's size is kept while it is up; once it is down the
+	// spot shows that last size (none: never seen up, no circle).
+	for i := range list {
+		s := &list[i]
+		if s.Category != "gas" {
+			continue
+		}
+		if s.On {
+			keepGasRadius(world, s.X, s.Z, s.Radius)
+		} else if r, ok := lastGasRadius(world, s.X, s.Z); ok {
+			s.Radius = r
+		}
+	}
 	next := 100000
 	for j, e := range events {
 		if used[j] {
@@ -238,7 +252,8 @@ func EventSpots(now time.Time) (list []EventSpot, sent bool) {
 			if hot {
 				name = "Hot zone"
 			}
-			list = append(list, EventSpot{ID: next, Event: e.Type, Name: name, Category: "gas", X: e.X, Z: e.Z, On: true, Checked: true, Radius: e.Radius, Static: true, Hot: hot})
+			static := strings.Contains(strings.ToLower(e.Type), "static")
+			list = append(list, EventSpot{ID: next, Event: e.Type, Name: name, Category: "gas", X: e.X, Z: e.Z, On: true, Checked: true, Radius: e.Radius, Static: static, Hot: hot})
 		}
 	}
 	return list, true

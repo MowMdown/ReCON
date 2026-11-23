@@ -31,6 +31,10 @@ nav a#resetCols:hover { color: var(--color-accent) !important; }
 .st.connected { color: var(--rc-ok) !important; } .st.retrying { color: var(--rc-warn) !important; } .st.unavailable { color: var(--rc-err) !important; }
 .statusbar b.st::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 6px; box-shadow: 0 0 8px currentColor; vertical-align: 1px; }
 
+/* hidden means hidden: the button rule below (display: inline-flex), and any
+   other display, would otherwise show what a page hides with [hidden] */
+[hidden] { display: none !important; }
+
 /* buttons — outlined, never filled */
 button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: 500 13px/1.2 var(--font-body); color: var(--color-text); background: transparent; border: 1px solid var(--color-divider); border-radius: var(--radius-md); padding: 6px 11px; cursor: pointer; }
 button:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
