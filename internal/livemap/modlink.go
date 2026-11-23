@@ -507,7 +507,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		}
 	}
 	if req.PlacesSent {
-		state.places, state.placesFor = req.Places, strings.ToLower(req.World)
+		state.places, state.placesFor = latinPlaces(req.Places), strings.ToLower(req.World)
 		if state.places == nil {
 			state.places = []Place{}
 		}
