@@ -1571,7 +1571,7 @@ function legendHTML() {
 			row(vehShape('#8ab4f8'), 'Occupied by passenger')]) +
 		sec('Predators', Object.values(PRED).map(([name, c]) => row(predShape(c, 0), name === 'Dog' ? 'Guard dog' : name))) +
 		sec('Events', EVENT_CATS.filter(([k]) => k !== 'gas').map(([k, , c]) => row(spotSVG(c, true), EVENT_NAMES[k] || k)).concat([
-			row(spotSVG('#7a7a7a', false), 'Spawn spot')])) +
+			row(spotSVG('#7a7a7a', false), 'Inactive')])) +
 		sec('Gas zones', [
 			row(bioSVG(GAS_STATIC), 'Static'),
 			row(bioSVG(eventCat('gas')[2]), 'Dynamic, active'),
