@@ -71,6 +71,8 @@ html[data-theme]:not([data-theme="default"]) {
 .mapscale { position: absolute; left: 10px; bottom: 10px; z-index: 500; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--lm-text); background: color-mix(in srgb, var(--lm-ground) 80%, transparent); border-radius: 4px; padding: 3px 8px; pointer-events: none; }
 .mapscale .bar { height: 5px; border: 1.5px solid currentColor; border-top: 0; box-sizing: border-box; }
 .mapscale .muted { font-size: 11.5px; }
+.mapscale #scaleXY { font-variant-numeric: tabular-nums; }
+.mapscale #scaleXY:not(:empty)::before { content: '·'; margin-right: 8px; color: var(--lm-muted); }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .mapbar > * { pointer-events: auto; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
@@ -255,6 +257,7 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 /* The grid's lines: the theme's border colour lit with its accent, so they
    stand out on the map's picture; the map's edge a step stronger. */
 .leaflet-overlay-pane path.gridline { stroke: color-mix(in srgb, var(--lm-accent) 45%, var(--lm-line2)); stroke-opacity: .85; }
+.leaflet-overlay-pane path.gridfine { stroke: color-mix(in srgb, var(--lm-accent) 30%, var(--lm-line2)); stroke-opacity: .45; }
 .leaflet-overlay-pane path.gridedge { stroke: color-mix(in srgb, var(--lm-accent) 70%, var(--lm-line2)); stroke-width: 1.5; }
 /* The grid's numbers: a small bubble, like a button that isn't one. */
 .gridlbl span { display: inline-block; white-space: nowrap; font-size: 10.5px; line-height: 1.3; padding: 1px 5px; color: var(--lm-text);
@@ -521,7 +524,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 	<div class="mapwrap">
 		<div id="map"></div>
-		<div class="mapscale" aria-hidden="true"><span class="bar" id="scaleBar"></span><span id="scaleLen"></span><span class="muted" id="scaleSpan"></span></div>
+		<div class="mapscale" aria-hidden="true"><span class="bar" id="scaleBar"></span><span id="scaleLen"></span><span class="muted" id="scaleSpan"></span><span id="scaleXY"></span></div>
 		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
 		<div class="mapbar">
 			<div class="ovwrap">
@@ -803,9 +806,9 @@ let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, 
 // viewSpan is how many metres across the map's view shows.
 function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoom())); }
 // Zoom moves in steps of the scale bar: the bar is always SCALE_PX long,
-// and a wheel notch, + or - or a double-click moves it to the next of
-// SCALE_STEPS (metres). Pinching on a phone zooms freely.
-const SCALE_PX = 100, SCALE_STEPS = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+// and a wheel notch, + or - or a double-click moves it 100 m (down to
+// 100 m, then 50 m, the closest). Pinching on a phone zooms freely.
+const SCALE_PX = 100, SCALE_STEPS = [50].concat(Array.from({ length: 500 }, (_, i) => (i + 1) * 100));
 function zoomForBar(m) { return Math.log2(SCALE_PX / m); }
 // barMetres is what the bar is long, in metres, at zoom z (default: where
 // the map is going, if it is mid-zoom).
@@ -868,6 +871,13 @@ function initMap() {
 	gridLayer = L.layerGroup().addTo(map);
 	labelLayer = L.layerGroup().addTo(map);
 	map.on('moveend zoomend', drawLabels);
+	map.on('moveend zoomend', () => drawFineGrid());
+	// Where the cursor is: X (east) and Y (north) in metres, and its grid.
+	map.on('mousemove', e => {
+		const x = e.latlng.lng, z = e.latlng.lat, el = document.getElementById('scaleXY');
+		el.textContent = x >= 0 && z >= 0 && (!size || (x <= size && z <= size)) ? 'X ' + Math.round(x) + ' · Y ' + Math.round(z) + ' · ' + grid(x, z) : '';
+	});
+	map.on('mouseout', () => { document.getElementById('scaleXY').textContent = ''; });
 	map.on('zoomend', zoomBand);
 	map.on('contextmenu', showCtx);
 	map.on('dragstart zoomstart', closeCtx);
@@ -1438,7 +1448,20 @@ let gridOn = layerPref('grid', '1') === '1';
 function toggleGrid() { gridOn = !gridOn; setLayerPref('grid', gridOn ? '1' : '0'); drawGridToggle(); }
 function drawGridToggle() {
 	layerButton('gridBtn', gridOn, 'Grid');
-	for (const l of [gridLayer, labelLayer]) if (l) { if (gridOn) l.addTo(map); else l.remove(); }
+	for (const l of [gridLayer, labelLayer, fineGrid]) if (l) { if (gridOn) l.addTo(map); else l.remove(); }
+	drawFineGrid();
+}
+// drawFineGrid adds 100 m lines (in view) once the scale bar is 200 m or
+// less, fainter than the 1 km ones.
+const fineGrid = L.layerGroup();
+function drawFineGrid() {
+	fineGrid.clearLayers();
+	if (!gridOn || !size || 100 / Math.pow(2, map.getZoom()) > 200 * 1.01) return;
+	const b = map.getBounds().pad(0.2), line = { className: 'gridfine', weight: 1, interactive: false };
+	const x0 = Math.max(0, Math.floor(b.getWest() / 100) * 100), x1 = Math.min(size, b.getEast());
+	const z0 = Math.max(0, Math.floor(b.getSouth() / 100) * 100), z1 = Math.min(size, b.getNorth());
+	for (let g = x0; g <= x1; g += 100) if (g % 1000) L.polyline([[Math.max(0, b.getSouth()), g], [Math.min(size, b.getNorth()), g]], line).addTo(fineGrid);
+	for (let g = z0; g <= z1; g += 100) if (g % 1000) L.polyline([[g, Math.max(0, b.getWest())], [g, Math.min(size, b.getEast())]], line).addTo(fineGrid);
 }
 
 // Towns: the map's place names, sent by recon-mod once a connection.
@@ -3587,11 +3610,11 @@ drawPredators(); loadPredators();
 drawDeaths(); loadDeaths();
 poll();
 // How often players, predators and the vehicles with someone in them
-// refresh goes with the scale bar (100 px): 1 km or more, every 10 s;
-// 500 m, 5 s; 200 m, 2 s; closer, every second. Every vehicle (parked ones
+// refresh goes with the scale bar (100 px): 600 m or more, every 10 s;
+// 300-500 m, 5 s; 200 m, 2 s; 100 m and closer, every second. Every vehicle (parked ones
 // too) is read every 10 s at any zoom. A tick each second runs whichever is
 // due, so zooming in speeds things up within a second.
-const REFRESH_BANDS = [[1000, 10000], [500, 5000], [200, 2000], [0, 1000]];
+const REFRESH_BANDS = [[600, 10000], [300, 5000], [200, 2000], [0, 1000]];
 const lastRun = { poll: Date.now(), crew: Date.now(), veh: Date.now(), pred: Date.now() };
 function refreshEvery() {
 	const bar = 100 / Math.pow(2, map.getZoom());
