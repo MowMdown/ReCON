@@ -70,10 +70,10 @@ html[data-theme]:not([data-theme="default"]) {
 .twohint { position: absolute; inset: 0; z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center;
 	background: rgba(0, 0, 0, .45); color: #fff; font-size: 16px; font-weight: 600; pointer-events: none; opacity: 0; transition: opacity .25s; }
 .twohint.on { opacity: 1; }
-.twohint.minihint { inset: 0 auto auto 0; width: 100%; aspect-ratio: 1; font-size: 14px; border-radius: 6px; }
+.twohint.minihint { inset: 0 auto auto 0; width: 100%; aspect-ratio: 1; font-size: 14px; border-radius: 6px; z-index: 1002; }
 /* Touch screens: one finger on the mini-map scrolls the dialog (its own
    handlers take two fingers), as on the big map. */
-#mini.touch2 { touch-action: pan-x pan-y; }
+
 #map { position: absolute; inset: 0; background: var(--lm-ground); }
 /* Full screen: the map covers the browser's window (not the monitor);
    the dialogs still open over it. */
@@ -347,15 +347,17 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .chip { font-size: 12px; padding: 2px 9px; border-radius: 10px; border: 1px solid var(--lm-line); color: var(--lm-muted); }
 .chip.blue { border-color: #2f4f7a; color: var(--lm-accent); }
-#mini { display: block; width: 260px; height: 260px; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 6px; cursor: crosshair; touch-action: none; user-select: none; }
-#mini.panning { cursor: grabbing; }
+#mini { display: block; width: 260px; height: 260px; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 6px; cursor: crosshair; user-select: none; font: inherit; }
+#mini.leaflet-dragging { cursor: grabbing; }
+#mini .leaflet-control-zoom a { width: 26px; height: 26px; line-height: 26px; font-size: 16px; }
+.mmark svg { position: absolute; overflow: visible; }
+.mmark span { position: absolute; top: -8px; white-space: nowrap; font-size: 11px; color: #ddd; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
 /* The mini-map's overlays: the point under the cursor and Recenter at
    the top, the scale at the bottom. */
 .miniwrap { position: relative; align-self: start; }
 /* The map's picture, under the mini-map's SVG: only the part in view, at
    the mini-map's own size (a phone can't hold the whole picture scaled up). */
-.miniwrap #mini { position: relative; background: transparent; }
-.miniwrap #miniCv { position: absolute; left: 1px; top: 1px; border-radius: 5px; background: var(--lm-ground); pointer-events: none; }
+.minihud, .minical, .miniscale { z-index: 1001; }
 .minihud { position: absolute; top: 6px; left: 6px; right: 6px; display: flex; align-items: center; gap: 6px; pointer-events: none; font-size: 11.5px; color: var(--lm-text); }
 .minihud #miniXY { background: var(--lm-overlay); border-radius: 4px; padding: 1px 6px; }
 .minihud #miniXY:empty { display: none; }
@@ -615,7 +617,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 				<div class="ailrow"><div class="chips" id="pChips"></div><button type="button" class="go" onclick="act('heal')" title="Full health, blood, shock, food, water and stamina; stops bleeding, cures illnesses, mends broken legs and wakes them">Heal</button><button type="button" onclick="act('dry')" title="Make them and everything they carry dry">Dry</button></div>
 			</div>
 			<div class="miniwrap">
-				<canvas id="miniCv" aria-hidden="true"></canvas><svg id="mini" viewBox="0 0 260 260" role="img" aria-label="The map around the player: drag to move, scroll to zoom, click to pick a teleport spot, double-click to teleport there"><g id="miniG"></g></svg>
+				<div id="mini" role="img" aria-label="The map around the player: drag to move, scroll to zoom, click to pick a teleport spot, double-click to teleport there"></div>
 				<div class="minihud"><span id="miniXY"></span><span class="sp"></span><button type="button" id="miniFollow" hidden title="Zoom back to 500 m across on the player and follow them again">Recenter</button><button type="button" id="miniCal" hidden title="If the map's picture is off: stand somewhere you can tell on it, then click where you really are">Calibrate</button></div>
 				<div class="minical" id="miniCalBox" hidden><span id="miniCalMsg"></span><span class="sp"></span><button type="button" id="miniCalReset" hidden title="Forget this map's calibration">Reset</button></div>
 				<div class="miniscale" id="miniScale"></div>
@@ -1099,11 +1101,10 @@ function placePicture() {
 		imageLayer = new PictureLayer({ bounds: [[P.N - P.L, P.W], [P.N, P.W + P.L]] }).addTo(map);
 		imageLayer.bringToBack();
 	}
+	setMiniPicture();
 	redrawMini();
 	calUI();
 }
-let miniSoon = 0;
-function redrawMiniSoon() { if (!miniSoon) miniSoon = setTimeout(() => { miniSoon = 0; redrawMini(); }, 50); }
 
 // setWorld sizes the map and draws its 1 km grid, with the map's picture
 // under it if ReCON's data folder has one (maps/<world>.jpg).
@@ -2997,8 +2998,7 @@ function renderPlayer() {
 		const save = document.getElementById('pSave');
 		save.innerHTML = ''; save.setAttribute('data-n', '');
 		document.getElementById('pChips').innerHTML = '';
-		document.getElementById('miniG').innerHTML = '';
-		drawMiniPicture(0, 0, 0);
+		fitMini();
 		['tHands', 'tVehicle', 'tKD'].forEach(id => document.getElementById(id).textContent = '—');
 	}
 	document.getElementById('tKDall').textContent = detail && detail.kills != null ? detail.kills + ' / ' + detail.deaths + ' all time' : '';
@@ -3276,144 +3276,168 @@ document.getElementById('pKills').addEventListener('click', e => {
 	if (byGuid[g]) openPlayer(g); else location.href = '/players#details=' + g;
 });
 
-// The mini-map: the map around the player, a grid, the others in view.
-// It follows the player until it is dragged (pan) or zoomed with the
-// wheel away from them; Recenter zooms back to 500 m across (MINI_HOME)
-// on the player and follows them again. Each wheel notch zooms
-// 200 m in or out (no closer than 100 m across). A click that isn't a
-// drag picks a teleport spot.
-const MINI = 260;
-const MINI_HOME = 500; // metres across, when it opens and on Recenter
-let mini = { span: MINI_HOME, cx: 0, cz: 0, follow: true }, tpPick = null;
-function resetMini() { mini = { span: MINI_HOME, cx: 0, cz: 0, follow: true }; }
-function miniMax() { return Math.max(1000, size || 15360); }
-function drawMini(p) {
-	const s = document.getElementById('miniG');
-	if (mini.follow) { mini.cx = p.x; mini.cz = p.z; }
-	const span = mini.span, x0 = mini.cx - span / 2, z0 = mini.cz - span / 2;
-	const px = x => (x - x0) / span * MINI, pz = z => MINI - (z - z0) / span * MINI;
-	drawMiniPicture(x0, z0, span);
-	const inView = (x, z) => x >= x0 && x <= x0 + span && z >= z0 && z <= z0 + span;
-	// Grid: 10 m very close, 100 m close, 500 m or 1 km further out; every
-	// 100 m (10 m grid) or km brighter.
-	const step = span <= 300 ? 10 : span <= 1500 ? 100 : span <= 6000 ? 500 : 1000, major = step < 100 ? 100 : 1000;
-	let h = '';
-	for (let g = Math.ceil(x0 / step) * step; g <= x0 + span; g += step) h += '<line x1="' + px(g) + '" x2="' + px(g) + '" y1="0" y2="' + MINI + '" stroke="' + (g % major ? '#232a24' : '#3a463c') + '"/>';
-	for (let g = Math.ceil(z0 / step) * step; g <= z0 + span; g += step) h += '<line y1="' + pz(g) + '" y2="' + pz(g) + '" x1="0" x2="' + MINI + '" stroke="' + (g % major ? '#232a24' : '#3a463c') + '"/>';
-	// The map's edges, when in view.
+// The mini-map: a small Leaflet map of the player's surroundings, with
+// the big map's picture and a grid, the others in view (and how far), and
+// the spot picked to teleport to. It opens on the player at the 50 m step
+// and follows them until it is moved; it zooms in the big map's scale-bar
+// steps, out to 500 m at most (wheel, + and −, a pinch), and Recenter goes
+// back. A click (tap) picks a teleport spot, a double click teleports
+// there. On a touch screen one finger scrolls the dialog, two move and zoom
+// it (as on the big map).
+const MINI_STEPS = [25, 50, 100, 200, 500], MINI_HOME = 50;
+let miniMap = null, miniPic = null, miniGrid = null, miniMarks = null, miniW = 0, mini = { follow: true }, tpPick = null;
+function resetMini() {
+	mini = { follow: true };
+	if (miniMap) { miniMap.setMinZoom(zoomForBar(MINI_STEPS[MINI_STEPS.length - 1])); miniMap.setZoom(zoomForBar(MINI_HOME), { animate: false }); }
+}
+function miniBar() { return SCALE_PX / Math.pow(2, miniMap.getZoom()); }
+function miniSpan() { return miniMap.getSize().x / Math.pow(2, miniMap.getZoom()); }
+// ensureMini makes the map the first time the mini-map is on screen (a
+// Leaflet map made while hidden has no size), and keeps it sized.
+function ensureMini() {
+	const el = document.getElementById('mini');
+	if (!el.clientWidth) return null;
+	if (!miniMap) {
+		miniMap = L.map(el, { crs: L.CRS.Simple, minZoom: zoomForBar(MINI_STEPS[MINI_STEPS.length - 1]), maxZoom: zoomForBar(MINI_STEPS[0]), zoomSnap: 0,
+			center: [0, 0], zoom: zoomForBar(MINI_HOME), attributionControl: false, zoomControl: false, scrollWheelZoom: false, doubleClickZoom: false,
+			keyboard: false, boxZoom: false, dragging: !TOUCH, bounceAtZoomLimits: false, zoomAnimation: false });
+		L.control.zoom({ position: 'bottomleft' }).addTo(miniMap);
+		miniMap.zoomIn = function () { stepMini(1); return this; };
+		miniMap.zoomOut = function () { stepMini(-1); return this; };
+		miniGrid = L.layerGroup().addTo(miniMap);
+		miniMarks = L.layerGroup().addTo(miniMap);
+		miniMap.on('dragstart', () => { mini.follow = false; });
+		miniMap.on('moveend zoomend', drawMiniGrid);
+		// A pinch ends on the nearest step (not the whole map's view).
+		miniMap.on('zoomend', () => {
+			if (mini.fit) { miniHud(); return; }
+			const m = miniBar(), near = MINI_STEPS.reduce((x, y) => Math.abs(y - m) < Math.abs(x - m) ? y : x);
+			if (Math.abs(zoomForBar(near) - miniMap.getZoom()) > 1e-6) miniMap.setZoom(zoomForBar(near));
+			miniHud();
+		});
+		miniMap.on('click', e => miniPick(e.latlng.lng, e.latlng.lat));
+		miniMap.on('dblclick', e => miniTeleport(e.latlng.lng, e.latlng.lat));
+		miniMap.on('mousemove', e => {
+			const x = e.latlng.lng, z = e.latlng.lat;
+			document.getElementById('miniXY').textContent = x >= 0 && z >= 0 ? Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z) : '';
+		});
+		miniMap.on('mouseout', () => { document.getElementById('miniXY').textContent = ''; });
+		// The wheel: one step a notch (a trackpad's small steps add up to one).
+		let wheel = 0;
+		el.addEventListener('wheel', e => {
+			e.preventDefault();
+			wheel += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+			const n = Math.trunc(wheel / 100) || (Math.abs(e.deltaY) >= 50 && e.deltaMode === 0 ? Math.sign(e.deltaY) : 0);
+			if (!n) return;
+			wheel = 0;
+			stepMini(-Math.sign(n), miniMap.mouseEventToContainerPoint(e));
+		}, { passive: false });
+		// Two fingers on a touch screen: the map leaves the player.
+		el.addEventListener('touchstart', e => { if (e.touches.length > 1) mini.follow = false; }, { passive: true });
+		watchTouches(el, 'miniHint', () => true);
+		setMiniPicture();
+		miniW = el.clientWidth;
+	} else if (el.clientWidth !== miniW) {
+		miniW = el.clientWidth;
+		miniMap.invalidateSize({ pan: false });
+	}
+	return miniMap;
+}
+// stepMini zooms one step in (dir 1) or out (-1), about the point given
+// (while not following the player; following, about them).
+function stepMini(dir, around) {
+	if (!miniMap) return;
+	const cur = miniBar();
+	const next = dir > 0 ? [...MINI_STEPS].reverse().find(m => m < cur * 0.99) : MINI_STEPS.find(m => m > cur * 1.01);
+	if (!next) return;
+	if (around && !mini.follow) miniMap.setZoomAround(around, zoomForBar(next)); else miniMap.setZoom(zoomForBar(next));
+}
+// setMiniPicture puts the map's picture under the mini-map (again when
+// it, or its calibration, changes).
+function setMiniPicture() {
+	if (!miniMap) return;
+	if (miniPic) { miniPic.remove(); miniPic = null; }
+	if (!pic) return;
+	const P = placement();
+	miniPic = new PictureLayer({ bounds: [[P.N - P.L, P.W], [P.N, P.W + P.L]] }).addTo(miniMap);
+	miniPic.bringToBack();
+}
+// drawMiniGrid: 10 m lines close in, 100 m further out, 500 m at the
+// widest; every 100 m (10 m grid) or km brighter. And the map's edges.
+function drawMiniGrid() {
+	if (!miniMap) return;
+	miniGrid.clearLayers();
+	const span = miniSpan(), b = miniMap.getBounds(), step = miniStep(span), major = step < 100 ? 100 : 1000;
+	const line = (pts, g) => L.polyline(pts, { color: g % major ? '#232a24' : '#3a463c', weight: 1, interactive: false }).addTo(miniGrid);
+	for (let g = Math.ceil(b.getWest() / step) * step; g <= b.getEast(); g += step) line([[b.getSouth(), g], [b.getNorth(), g]], g);
+	for (let g = Math.ceil(b.getSouth() / step) * step; g <= b.getNorth(); g += step) line([[g, b.getWest()], [g, b.getEast()]], g);
 	const ms = size || 15360;
-	h += '<rect x="' + px(0) + '" y="' + pz(ms) + '" width="' + (px(ms) - px(0)) + '" height="' + (pz(0) - pz(ms)) + '" fill="none" stroke="#4a5a4d" stroke-width="1"/>';
-	players.forEach(o => {
-		if (o.guid === p.guid || !inView(o.x, o.z)) return;
-		const d = Math.round(Math.hypot(o.x - p.x, o.z - p.z)), right = px(o.x) > MINI - 110;
-		h += '<circle cx="' + px(o.x) + '" cy="' + pz(o.z) + '" r="4.5" fill="' + colorOf(o.guid) + '" stroke="#111"/>' +
-			'<text x="' + (px(o.x) + (right ? -8 : 8)) + '" y="' + (pz(o.z) + 4) + '" fill="#bbb" font-size="11"' + (right ? ' text-anchor="end"' : '') + '>' + esc(o.name) + ' · ' + (d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m') + '</text>';
-	});
-	if (tpPick && inView(tpPick[0], tpPick[1])) h += '<circle cx="' + px(tpPick[0]) + '" cy="' + pz(tpPick[1]) + '" r="6" fill="none" stroke="#8ab4f8" stroke-width="2"/>' +
-		'<line x1="' + (px(tpPick[0]) - 10) + '" x2="' + (px(tpPick[0]) + 10) + '" y1="' + pz(tpPick[1]) + '" y2="' + pz(tpPick[1]) + '" stroke="#8ab4f8"/>' +
-		'<line y1="' + (pz(tpPick[1]) - 10) + '" y2="' + (pz(tpPick[1]) + 10) + '" x1="' + px(tpPick[0]) + '" x2="' + px(tpPick[0]) + '" stroke="#8ab4f8"/>';
-	if (inView(p.x, p.z)) h += '<g transform="translate(' + px(p.x) + ',' + pz(p.z) + ') rotate(' + p.heading + ')"><path d="M0,-9 L6.3,7.2 L0,3.2 L-6.3,7.2 Z" fill="' + colorOf(p.guid) + '" stroke="#111" stroke-width="1.2"/></g>';
-	s.innerHTML = h;
+	L.rectangle([[0, 0], [ms, ms]], { color: '#4a5a4d', weight: 1, fill: false, interactive: false }).addTo(miniGrid);
+	miniHud();
+}
+// miniHud: the grid and how far across the mini-map shows; Recenter while
+// it isn't on the player at the 50 m step.
+function miniHud() {
+	if (!miniMap) return;
+	const span = Math.round(miniSpan()), step = miniStep(span);
 	document.getElementById('miniScale').textContent = (step >= 1000 ? step / 1000 + ' km' : step + ' m') + ' grid · ' + (span >= 1000 ? (span / 1000).toFixed(1).replace(/\.0$/, '') + ' km' : span + ' m') + ' across';
-	document.getElementById('miniFollow').hidden = mini.follow && mini.span === MINI_HOME;
+	document.getElementById('miniFollow').hidden = mini.fit || (mini.follow && Math.abs(miniBar() - MINI_HOME) < 0.5);
 }
-// drawMiniPicture draws the map's picture under the mini-map: the part from
-// (x0, z0), span metres across, at the mini-map's size. span 0 clears it.
-function drawMiniPicture(x0, z0, span) {
-	const cv = document.getElementById('miniCv'), svg = document.getElementById('mini');
-	const w = svg.clientWidth, h = svg.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, 3);
-	if (cv.style.width !== w + 'px') { cv.style.width = w + 'px'; cv.style.height = h + 'px'; }
-	if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
-	drawPicture(cv, x0, z0, w ? span : 0, redrawMiniSoon);
+function miniStep(span) { return span <= 300 ? 10 : span <= 1500 ? 100 : span <= 6000 ? 500 : 1000; }
+function drawMini(p) {
+	if (!ensureMini()) return;
+	if (mini.fit) { // back from the whole map: on them at the 50 m step
+		mini = { follow: true };
+		miniMap.setMinZoom(zoomForBar(MINI_STEPS[MINI_STEPS.length - 1]));
+		miniMap.setView([p.z, p.x], zoomForBar(MINI_HOME), { animate: false });
+	}
+	if (mini.follow) miniMap.setView([p.z, p.x], miniMap.getZoom(), { animate: false });
+	miniMarks.clearLayers();
+	const w = miniMap.getSize().x, b = miniMap.getBounds();
+	const mark = (x, z, html) => L.marker([z, x], { icon: L.divIcon({ className: 'mmark', html, iconSize: [0, 0] }), interactive: false, keyboard: false }).addTo(miniMarks);
+	players.forEach(o => {
+		if (o.guid === p.guid || !b.contains([o.z, o.x])) return;
+		const d = Math.round(Math.hypot(o.x - p.x, o.z - p.z)), right = miniMap.latLngToContainerPoint([o.z, o.x]).x > w - 110;
+		mark(o.x, o.z, '<svg width="10" height="10" viewBox="-5 -5 10 10" style="left:-5px;top:-5px"><circle r="4.5" fill="' + colorOf(o.guid) + '" stroke="#111"/></svg>' +
+			'<span style="' + (right ? 'right:8px' : 'left:8px') + '">' + esc(o.name) + ' · ' + (d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m') + '</span>');
+	});
+	if (tpPick) mark(tpPick[0], tpPick[1], '<svg width="24" height="24" viewBox="-12 -12 24 24" style="left:-12px;top:-12px"><circle r="6" fill="none" stroke="#8ab4f8" stroke-width="2"/>' +
+		'<path d="M-10 0 H10 M0 -10 V10" stroke="#8ab4f8"/></svg>');
+	mark(p.x, p.z, '<svg width="20" height="20" viewBox="-10 -10 20 20" style="left:-10px;top:-10px"><path transform="rotate(' + p.heading + ')" d="M0,-9 L6.3,7.2 L0,3.2 L-6.3,7.2 Z" fill="' + colorOf(p.guid) + '" stroke="#111" stroke-width="1.2"/></svg>');
+	miniHud();
 }
-// miniAt is the map point (x, z) under the pointer.
-function miniAt(e) {
-	const r = document.getElementById('mini').getBoundingClientRect();
-	const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
-	return { x: mini.cx + (fx - 0.5) * mini.span, z: mini.cz - (fy - 0.5) * mini.span, fx, fy };
+// fitMini shows the whole map (an offline player's dialog: nobody to
+// follow), the 500 m limit lifted for it.
+function fitMini() {
+	if (!ensureMini()) return;
+	miniMarks.clearLayers();
+	if (mini.fit && mini.fitW === miniW && mini.fitSize === size) return;
+	const ms = size || 15360;
+	mini = { follow: false, fit: true, fitW: miniW, fitSize: size };
+	miniMap.setMinZoom(-8);
+	miniMap.fitBounds([[0, 0], [ms, ms]], { animate: false, padding: [4, 4] });
+	miniHud();
 }
 function redrawMini() { const p = byGuid[selGuid]; if (p) drawMini(p); }
-let miniDrag = null, miniDragged = false; // miniDragged: the last press was a drag, not a click
-const miniEl = document.getElementById('mini');
-miniEl.addEventListener('pointerdown', e => {
-	if (e.button !== 0) return;
-	miniDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, cx: mini.cx, cz: mini.cz, moved: false };
-	miniEl.setPointerCapture(e.pointerId);
-});
-miniEl.addEventListener('pointermove', e => {
-	const at = miniAt(e);
-	document.getElementById('miniXY').textContent = at.x >= 0 && at.z >= 0 ? Math.round(at.x) + ', ' + Math.round(at.z) + ' · ' + grid(at.x, at.z) : '';
-	if (!miniDrag || e.pointerId !== miniDrag.id) return;
-	const r = miniEl.getBoundingClientRect(), dx = e.clientX - miniDrag.x, dy = e.clientY - miniDrag.y;
-	if (!miniDrag.moved && Math.hypot(dx, dy) < 4) return; // a click, not a drag (yet)
-	miniDrag.moved = true;
-	if (TOUCH && e.pointerType === 'touch') return; // one finger scrolls the dialog; two move the map (below)
-	miniEl.classList.add('panning');
-	mini.follow = false;
-	mini.cx = miniDrag.cx - dx / r.width * mini.span;
-	mini.cz = miniDrag.cz + dy / r.height * mini.span;
-	redrawMini();
-});
-miniEl.addEventListener('pointerleave', () => { if (!miniDrag) document.getElementById('miniXY').textContent = ''; });
-function endMiniDrag(e, pick) {
-	if (!miniDrag || e.pointerId !== miniDrag.id) return;
-	const moved = miniDrag.moved;
-	miniDragged = moved;
-	miniDrag = null;
-	miniEl.classList.remove('panning');
-	if (moved || !pick) return;
-	if (calMode) { calPick(miniAt(e)); return; }
-	// A click: pick that spot to teleport to.
-	const at = miniAt(e);
-	tpPick = [at.x, at.z];
-	document.getElementById('tpX').value = Math.round(at.x);
-	document.getElementById('tpZ').value = Math.round(at.z);
+// A click (tap) on the mini-map picks that spot to teleport to; while
+// calibrating it is where the player really is on the picture.
+function miniPick(x, z) {
+	if (calMode) { calPick({ x, z }); return; }
+	if (!byGuid[selGuid]) return; // offline: nobody to send there
+	tpPick = [x, z];
+	document.getElementById('tpX').value = Math.round(x);
+	document.getElementById('tpZ').value = Math.round(z);
 	setTpMode('spot');
 	renderPlayer();
 }
-miniEl.addEventListener('pointerup', e => endMiniDrag(e, true));
-// A double-click teleports them there at once: its two clicks have already
+// A double click teleports them there at once: its two clicks have already
 // picked the spot, so this is the Teleport button without the trip.
-miniEl.addEventListener('dblclick', e => {
-	e.preventDefault();
-	if (miniDragged) return; // two quick drags, not a double-click
+function miniTeleport(x, z) {
 	if (calMode || Date.now() - calPicked < 1000) return; // a calibration click, not a teleport
-	const at = miniAt(e);
-	if (!(at.x > 0) || !(at.z > 0) || (size && (at.x > size || at.z > size))) { document.getElementById('pErr').textContent = 'That spot is off the map.'; return; }
+	if (!(x > 0) || !(z > 0) || (size && (x > size || z > size))) { document.getElementById('pErr').textContent = 'That spot is off the map.'; return; }
 	document.getElementById('tpTo').value = '';
-	act('teleport', { x: at.x, z: at.z, y: 0 }, true).then(ok => { if (ok) clearTeleport(); });
-});
-miniEl.addEventListener('pointercancel', e => endMiniDrag(e, false));
-// Touch screens: two fingers move the mini-map and pinch-zoom it, the map
-// point first under them staying under them; a pinch is never a tap.
-let miniPinch = null;
-if (TOUCH) miniEl.classList.add('touch2');
-watchTouches(miniEl, 'miniHint', () => true);
-function touchMid(t) { return [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2]; }
-function touchGap(t) { return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1; }
-miniEl.addEventListener('touchstart', e => {
-	if (!TOUCH || e.touches.length !== 2) return;
-	const [mx, my] = touchMid(e.touches), r = miniEl.getBoundingClientRect();
-	const fx = (mx - r.left) / r.width, fy = (my - r.top) / r.height;
-	miniPinch = { d: touchGap(e.touches), span: mini.span, r, ax: mini.cx + (fx - 0.5) * mini.span, az: mini.cz - (fy - 0.5) * mini.span };
-	if (miniDrag) miniDrag.moved = true;
-	miniDragged = true;
-}, { passive: true });
-miniEl.addEventListener('touchmove', e => {
-	if (!miniPinch || e.touches.length < 2) return;
-	e.preventDefault();
-	const [mx, my] = touchMid(e.touches), r = miniPinch.r;
-	const span = Math.max(100, Math.min(miniMax(), miniPinch.span * miniPinch.d / touchGap(e.touches)));
-	const fx = (mx - r.left) / r.width, fy = (my - r.top) / r.height;
-	mini.follow = false;
-	mini.span = span;
-	mini.cx = miniPinch.ax - (fx - 0.5) * span;
-	mini.cz = miniPinch.az + (fy - 0.5) * span;
-	redrawMini();
-}, { passive: false });
-const endMiniPinch = e => { if (e.touches.length < 2) miniPinch = null; };
-miniEl.addEventListener('touchend', endMiniPinch, { passive: true });
-miniEl.addEventListener('touchcancel', endMiniPinch, { passive: true });
+	act('teleport', { x, z, y: 0 }, true).then(ok => { if (ok) clearTeleport(); });
+}
 
 // Calibrating: with Calibrate on, a click on the mini-map is where the
 // player really is on the map's picture, which then moves (and with two
@@ -3471,26 +3495,7 @@ function calPick(at) {
 document.getElementById('miniCalReset').addEventListener('click', e => {
 	inlineConfirm(e.currentTarget, 'Reset', () => saveCal([], 'Calibration reset.'));
 });
-// The wheel: 200 m per notch (a trackpad's small steps add up to notches).
-let miniWheel = 0;
-miniEl.addEventListener('wheel', e => {
-	e.preventDefault();
-	miniWheel += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-	const notches = Math.trunc(miniWheel / 100) || (Math.abs(e.deltaY) >= 50 && e.deltaMode === 0 ? Math.sign(e.deltaY) : 0);
-	if (!notches) return;
-	miniWheel = 0;
-	const span = Math.max(100, Math.min(miniMax(), mini.span + 200 * notches));
-	if (span === mini.span) return;
-	if (!mini.follow) {
-		// Zoom around the point under the pointer, so it stays put.
-		const at = miniAt(e);
-		mini.cx = at.x - (at.fx - 0.5) * span;
-		mini.cz = at.z + (at.fy - 0.5) * span;
-	}
-	mini.span = span;
-	redrawMini();
-}, { passive: false });
-document.getElementById('miniFollow').addEventListener('click', () => { mini.follow = true; mini.span = MINI_HOME; redrawMini(); });
+document.getElementById('miniFollow').addEventListener('click', () => { mini.follow = true; if (miniMap) miniMap.setZoom(zoomForBar(MINI_HOME), { animate: false }); redrawMini(); });
 
 // showForm('message') puts the cursor in the message box (always shown).
 function showForm(name) {
