@@ -62,6 +62,14 @@ html[data-theme]:not([data-theme="default"]) {
 .hb i { display: block; height: 100%; }
 .empty { color: var(--lm-muted); font-size: 13px; line-height: 1.5; }
 .mapwrap { position: relative; border: 1px solid var(--lm-line); border-radius: 6px; overflow: hidden; background: var(--lm-ground); min-height: 420px; }
+/* A long press on the map (a phone's right-click: the map's menu) doesn't
+   select its labels or bring up the phone's own copy menu; the menu's
+   position line can still be selected and copied. */
+.mapwrap { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.mapwrap .ctx .hd { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.twohint { position: absolute; inset: 0; z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center;
+	background: rgba(0, 0, 0, .45); color: #fff; font-size: 16px; font-weight: 600; pointer-events: none; opacity: 0; transition: opacity .25s; }
+.twohint.on { opacity: 1; }
 #map { position: absolute; inset: 0; background: var(--lm-ground); }
 /* Full screen: the map covers the browser's window (not the monitor);
    the dialogs still open over it. */
@@ -75,6 +83,7 @@ html[data-theme]:not([data-theme="default"]) {
 .mapscale #scaleXY:not(:empty)::before { content: '·'; margin-right: 8px; color: var(--lm-muted); }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .mapbar > * { pointer-events: auto; }
+.mapbar.menuopen { z-index: 1001; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 /* Vehicles on the map, and the popup a click on one opens. */
 .vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
@@ -212,7 +221,8 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 /* Overlays: one button, its menu of layers to switch on and off (a box,
    ticked when on), Deaths with how far back beside it. */
 .ovwrap { position: relative; }
-.ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: 300px; display: flex; flex-direction: column; gap: 2px; padding: 5px;
+.ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: min(300px, calc(100vw - 40px)); display: flex; flex-direction: column; gap: 2px; padding: 5px;
+	overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; box-sizing: border-box;
 	background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
 .ovmenu[hidden] { display: none; }
 .ovmenu .ovrow { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
@@ -233,8 +243,10 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .ovmenu .ovsub .ovpair button { flex: 1; }
 .ovmenu .ovsub .ovsep { height: 1px; background: var(--lm-line); margin: 3px 8px; }
 /* A layer's own filter (Placed objects' kinds), indented under it. */
-.ovmenu.legend { display: block; width: min(640px, calc(100vw - 40px)); max-height: min(70vh, 560px); overflow-y: auto; padding: 10px 12px; columns: 2 260px; column-gap: 22px; }
-.legend .lgsec { break-inside: avoid; margin-bottom: 10px; }
+.ovmenu.legend { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 0 22px; width: 640px; padding: 10px 12px; }
+/* two columns side by side; one under the other when the map is narrow */
+.legend .lgcol { flex: 1 1 260px; min-width: 0; }
+.legend .lgsec { margin-bottom: 10px; }
 .ovmenu.legend[hidden] { display: none; }
 .legend .lgsec h5 { margin: 0 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--lm-muted); font-weight: 600; }
 .legend .lgrow { display: flex; align-items: center; gap: 10px; padding: 2px 0; font-size: 13px; }
@@ -547,6 +559,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div id="map"></div>
 		<div class="mapscale" aria-hidden="true"><span class="bar" id="scaleBar"></span><span id="scaleLen"></span><span class="muted" id="scaleSpan"></span><span id="scaleXY"></span></div>
 		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
+		<div class="twohint" id="twoHint" aria-hidden="true">Use two fingers to move the map</div>
 		<div class="mapbar">
 			<div class="ovwrap">
 				<button type="button" id="ovBtn" onclick="toggleOvMenu()" aria-expanded="false" aria-controls="ovMenu" title="Show or hide what's drawn on the map">Overlays</button>
@@ -889,6 +902,8 @@ function drawScale() {
 function initMap() {
 	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
 	stepWheel();
+	setTouchDrag();
+	map.getContainer().addEventListener('touchmove', e => { if (TOUCH && !map.dragging.enabled() && e.touches.length === 1) twoFingerHint(); }, { passive: true });
 	L.control.zoom({ position: 'bottomright' }).addTo(map);
 	// What covers what, top first: players, vehicles and predators, town
 	// names, events and deaths, the grid's numbers; then the grid lines
@@ -1179,6 +1194,21 @@ function fitAll() {
 	map.fitBounds([[0, 0], [s, s]]);
 }
 // toggleFull makes the map fill the browser's window, or puts it back.
+// Touch screens: one finger scrolls the page, two move and zoom the map
+// (as with a map in any page); in full screen, with no page to scroll, one
+// finger moves it too. A one-finger drag on the map says how.
+const TOUCH = matchMedia('(pointer: coarse)').matches;
+function setTouchDrag() {
+	if (!TOUCH || !map) return;
+	if (document.querySelector('.mapwrap').classList.contains('full')) map.dragging.enable(); else map.dragging.disable();
+}
+let hintTimer = 0;
+function twoFingerHint() {
+	const h = document.getElementById('twoHint');
+	h.classList.add('on');
+	clearTimeout(hintTimer);
+	hintTimer = setTimeout(() => h.classList.remove('on'), 1200);
+}
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
@@ -1190,6 +1220,7 @@ function toggleFull(on) {
 	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
 	map.invalidateSize({ pan: false });
 	map.panTo(c, { animate: false });
+	setTouchDrag();
 }
 // ---- Vehicles: every car, motorbike and boat on the server (mod 0.0.1i) -
 // Shown while the Vehicles button is on (remembered in this browser), read
@@ -1532,10 +1563,28 @@ function renderOvBtn() {
 	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length; // not a layer's own filter (a heading is on while it shows something)
 	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
 }
+// fitMenu keeps an open menu (Overlays, Legend) inside the map: no wider
+// than it, moved left if it would run off its right edge, and no taller
+// than the room below its button (what is left scrolls inside it). The map
+// cuts off anything outside it, which on a phone was most of a menu.
+function fitMenu(m) {
+	// While a menu is open the bar it hangs from goes over the map's own
+	// controls (+ and −), which would otherwise cover it.
+	document.querySelector('.mapbar').classList.toggle('menuopen', !document.getElementById('ovMenu').hidden || !document.getElementById('lgMenu').hidden);
+	if (!m || m.hidden) return;
+	const box = document.querySelector('.mapwrap').getBoundingClientRect(), wrap = m.parentElement.getBoundingClientRect();
+	m.style.left = '0px';
+	m.style.maxWidth = Math.max(160, box.width - 16) + 'px';
+	const r = m.getBoundingClientRect();
+	if (r.right > box.right - 8) m.style.left = Math.max(box.left + 8 - wrap.left, box.right - 8 - r.width - wrap.left) + 'px';
+	m.style.maxHeight = Math.max(120, box.bottom - 8 - m.getBoundingClientRect().top) + 'px';
+}
+addEventListener('resize', () => { fitMenu(document.getElementById('ovMenu')); fitMenu(document.getElementById('lgMenu')); });
 function toggleOvMenu(open) {
 	const m = document.getElementById('ovMenu'), b = document.getElementById('ovBtn');
 	open = open === undefined ? m.hidden : open;
 	m.hidden = !open;
+	fitMenu(m);
 	b.classList.toggle('open', open);
 	b.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
@@ -1552,6 +1601,7 @@ function toggleLegend(open) {
 	open = open === undefined ? m.hidden : open;
 	if (open && !m.innerHTML) m.innerHTML = legendHTML();
 	m.hidden = !open;
+	fitMenu(m);
 	b.classList.toggle('open', open);
 	b.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
@@ -1560,7 +1610,8 @@ function legendHTML() {
 	const sec = (title, rows) => '<div class="lgsec"><h5>' + title + '</h5>' + rows.join('') + '</div>';
 	const pristine = CONDITION[0][1], worst = CONDITION[3][1];
 	const EVENT_NAMES = { heli: 'Heli crash', convoy: 'Convoy', police: 'Police', medical: 'Medical', other: 'Other' };
-	return sec('Players', [
+	const col = html => '<div class="lgcol">' + html + '</div>';
+	return col(sec('Players', [
 			row(arrowSVG('#c58af9'), 'Player'),
 			row('<span class="lgdead">' + arrowSVG('#c58af9') + '</span>', 'Dead player'),
 			row(DEATH_SVG, 'Where a player died')]) +
@@ -1569,8 +1620,8 @@ function legendHTML() {
 			row(vehShape('#81c995'), 'Parked; Engine running'),
 			row(vehShape('#c58af9'), 'Occupied by driver'),
 			row(vehShape('#8ab4f8'), 'Occupied by passenger')]) +
-		sec('Predators', Object.values(PRED).map(([name, c]) => row(predShape(c, 0), name === 'Dog' ? 'Guard dog' : name))) +
-		sec('Events', EVENT_CATS.filter(([k]) => k !== 'gas').map(([k, , c]) => row(spotSVG(c, true), EVENT_NAMES[k] || k)).concat([
+		sec('Predators', Object.values(PRED).map(([name, c]) => row(predShape(c, 0), name === 'Dog' ? 'Guard dog' : name)))) +
+		col(sec('Events', EVENT_CATS.filter(([k]) => k !== 'gas').map(([k, , c]) => row(spotSVG(c, true), EVENT_NAMES[k] || k)).concat([
 			row(spotSVG('#7a7a7a', false), 'Inactive')])) +
 		sec('Gas zones', [
 			row(bioSVG(GAS_STATIC), 'Static'),
@@ -1579,7 +1630,7 @@ function legendHTML() {
 		sec('Placed objects', [
 			row(placedSVG(pristine), 'Placed object'),
 			row(groupSVG(worst) + '<span class="lgname" style="color:#fff">×5</span>', 'Several in one 50 m square', true),
-			'<div class="lgscale">' + CONDITION.map(([n, c]) => '<span><i style="background:' + c + '"></i>' + n + '</span>').join('') + '</div>']);
+			'<div class="lgscale">' + CONDITION.map(([n, c]) => '<span><i style="background:' + c + '"></i>' + n + '</span>').join('') + '</div>']));
 }
 
 // Players: their arrows and names (on unless switched off); hiding them
