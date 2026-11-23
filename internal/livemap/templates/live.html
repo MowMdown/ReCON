@@ -136,7 +136,9 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--lm-line); }
 .vpop .gear .row span:last-child { text-align: right; overflow-wrap: anywhere; }
 /* At most 5 rows, then it scrolls, so the popup fits near the map's edge. */
-.vpop .gear { max-height: calc(5 * 1.45em + 6px); overflow-y: auto; padding-right: 4px; }
+.vpop .gear { max-height: calc(5 * 1.45em + 6px); overflow-y: auto; padding-right: 4px; scrollbar-width: none; }
+/* It still scrolls (wheel, swipe); its scrollbar flashed at every refresh. */
+.vpop .gear::-webkit-scrollbar { display: none; }
 .vpop .muted { color: var(--lm-muted); font-size: 12px; }
 /* Town names: bigger for bigger places; zoomed out only the cities
    (#map's data-zb is far, mid or near). */
@@ -412,7 +414,9 @@ button.on { color: var(--lm-accent); border-color: var(--lm-accent); }
 	#fSpawn .setfoot > .muted { flex-basis: 100%; }
 	#fSpawn .setfoot select { flex: 1 1 0; }
 }
-.splist { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; margin: 10px 0 8px; }
+.splist { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; margin: 10px 0 8px; scrollbar-width: none; }
+/* It still scrolls (wheel, swipe, A–Z); its scrollbar covered the rows. */
+.splist::-webkit-scrollbar { display: none; }
 .sprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 5px; padding: 5px 9px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
 .sprow:hover { border-color: var(--lm-line2); }
 /* A-Z: jump to the first item starting with that letter (# for the rest) */
@@ -2815,9 +2819,12 @@ function renderPlayerPopup() {
 		'<button type="button" onclick="event.stopPropagation(); playerPopupAct(' + g + ', \'spawn\')" title="Spawn an item for them">Spawn</button>' +
 		(following ? '<button type="button" class="on" onclick="event.stopPropagation(); playerFollow(' + g + ')" title="Stop keeping the map on them">Stop</button>'
 			: '<button type="button" onclick="event.stopPropagation(); playerFollow(' + g + ')" title="Keep the map on them as they move">Follow</button>') + '</div></div>';
+	plPopup.setLatLng([p.z, p.x]);
+	if (h === plPopup._html) return; // unchanged: not rebuilt (no flash)
+	plPopup._html = h;
 	// Keep where the gear list was scrolled to across the redraws.
 	const old = plPopup.getElement() && plPopup.getElement().querySelector('.gear'), top = old ? old.scrollTop : 0;
-	plPopup.setLatLng([p.z, p.x]).setContent(h);
+	plPopup.setContent(h);
 	const now = plPopup.getElement() && plPopup.getElement().querySelector('.gear');
 	if (now) now.scrollTop = top;
 }
