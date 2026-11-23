@@ -169,11 +169,11 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
 /* The vehicle dialog: its facts, then parts, damage and cargo side by
    side, each scrolling on its own; one under the other on a narrow screen. */
-:is(#vModal, #oModal) .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
-:is(#vModal, #oModal) .vfacts .k { color: var(--lm-muted); font-size: 12px; grid-row: 1; }
-:is(#vModal, #oModal) .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-:is(#vModal, #oModal) .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
-:is(#vModal, #oModal) .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
+#vModal .vfacts { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; justify-content: start; font-size: 13px; margin-bottom: 12px; }
+#vModal .vfacts .k { color: var(--lm-muted); font-size: 12px; grid-row: 1; }
+#vModal .vcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+#vModal .vcols > div { max-height: 55vh; overflow-y: auto; padding-right: 4px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 8px 10px; }
+#vModal .vcols h5 { margin: 0 0 6px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
 /* Placed objects close together: one 50 m square, one marker with ×N. */
 .gmark { position: relative; }
 .gmark svg { position: absolute; left: -6px; top: -6px; overflow: visible; cursor: pointer; }
@@ -195,14 +195,14 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 #gModal .gacts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 #gModal .gacts button { margin: 0; }
 #gModal .dlg-err:empty { display: none; }
-:is(#vModal, #oModal, #gModal) .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
-:is(#vModal, #oModal, #gModal) .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:is(#vModal, #oModal, #gModal) .part .lv { font-size: 12px; white-space: nowrap; }
-:is(#vModal, #oModal, #gModal) .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-:is(#vModal, #oModal) .acts { display: flex; align-items: center; gap: 8px; }
-:is(#vModal, #oModal) .acts button { margin: 0; }
-:is(#vModal, #oModal) .st { font-size: 12.5px; }
-@media (max-width: 760px) { :is(#vModal, #oModal) .vcols { grid-template-columns: minmax(0, 1fr); } :is(#vModal, #oModal) .vcols > div { max-height: none; } :is(#vModal, #oModal) .vfacts { grid-template-columns: auto auto; } :is(#vModal, #oModal) .vfacts .k { grid-row: auto; } }
+:is(#vModal, #gModal) .part { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
+:is(#vModal, #gModal) .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(#vModal, #gModal) .part .lv { font-size: 12px; white-space: nowrap; }
+:is(#vModal, #gModal) .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+#vModal .acts { display: flex; align-items: center; gap: 8px; }
+#vModal .acts button { margin: 0; }
+#vModal .st { font-size: 12.5px; }
+@media (max-width: 760px) { #vModal .vcols { grid-template-columns: minmax(0, 1fr); } #vModal .vcols > div { max-height: none; } #vModal .vfacts { grid-template-columns: auto auto; } #vModal .vfacts .k { grid-row: auto; } }
 /* The weather and in-game time, beside Time & Weather above the map. */
 .top { justify-content: flex-end; }
 .worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
@@ -659,16 +659,6 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 </div>
 
-<!-- A placed object's details and Remove (Info on its popup) -->
-<div id="oModal" class="modal">
-	<div class="box wide" role="dialog" aria-labelledby="oTitle" style="width:min(1000px, 95vw)">
-		<div class="dlg-head"><h2 id="oTitle">Placed object</h2><span class="sub" id="oType"></span></div>
-		<div id="oBody"></div>
-		<div class="dlg-err" id="oErr"></div>
-		<div class="dfoot"><div class="acts" id="oActs"></div><button type="button" onclick="closePlacedInfo()">Close</button></div>
-	</div>
-</div>
-
 <!-- Spawn an item at a spot on the map (the map's right-click menu) -->
 <div id="sModal" class="modal">
 	<div class="box wide" role="dialog" aria-labelledby="sTitle">
@@ -808,7 +798,7 @@ function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoo
 // Zoom moves in steps of the scale bar: the bar is always SCALE_PX long,
 // and a wheel notch, + or - or a double-click moves it to the next of
 // SCALE_STEPS; out from the last one is Fit (the whole map).
-const SCALE_PX = 100, SCALE_STEPS = [50, 100, 200, 500, 1000];
+const SCALE_PX = 100, SCALE_STEPS = [25, 50, 100, 200, 500, 1000];
 function zoomForBar(m) { return Math.log2(SCALE_PX / m); }
 // barMetres is what the bar is long, in metres, at zoom z (default: where
 // the map is going, if it is mid-zoom).
@@ -1421,7 +1411,7 @@ function askConfirm(key) { confirming = key; rerenderConfirms(); }
 function cancelConfirm() { confirming = null; rerenderConfirms(); }
 // rerenderConfirms redraws whatever may hold a confirmPair.
 function rerenderConfirms() {
-	for (const f of [renderPredator, renderVehicle, renderVehicleInfo, renderPlacedPopup, renderPlacedInfo, renderGroupInfo])
+	for (const f of [renderPredator, renderVehicle, renderVehicleInfo, renderPlacedPopup, renderGroupInfo])
 		try { f(); } catch (e) { }
 }
 function layerPref(k, dflt) { try { const v = localStorage.getItem('live.' + k); return v == null ? dflt : v; } catch (e) { return dflt; } }
@@ -1849,7 +1839,6 @@ function drawPlaced() {
 	for (const id in placedMarkers) if (!keep[id]) { placedMarkers[id].remove(); delete placedMarkers[id]; }
 	if (placedOpen != null) { if (placedList.some(o => o.id === placedOpen)) renderPlacedPopup(); else map.closePopup(plcPopup); }
 	if (groupOpen != null) renderGroupPopup();
-	renderPlacedInfo();
 	renderGroupInfo();
 }
 function placedBy(o) { return o.placer ? esc(o.placer) : '<span class="muted">unknown</span>'; }
@@ -1867,72 +1856,18 @@ function renderPlacedPopup() {
 		row('Condition', '<span style="color:' + cc + '">' + cn + '</span>') + row('Placed by', placedBy(o)) +
 		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openPlacedInfo(' + o.id + ')" title="What is in and on it, and Remove">Info</button></div></div>');
 }
-// The Info dialog: its facts, then attachments, damage and contents (asked
-// of the mod once, like a vehicle's), and Remove.
-let placedInfo = null, placedDetail = null, placedAsk = 0;
-function openPlacedInfo(id) {
-	map.closePopup(plcPopup);
-	placedInfo = id;
-	document.getElementById('oModal').style.display = 'flex';
-	askPlaced();
-}
-function closePlacedInfo() { document.getElementById('oModal').style.display = 'none'; placedInfo = null; placedDetail = null; placedAsk++; }
-async function askPlaced() {
-	if (placedInfo == null) return;
-	const id = placedInfo, ask = ++placedAsk;
-	placedDetail = null;
-	renderPlacedInfo();
-	for (let i = 0; i < 15 && id === placedInfo && ask === placedAsk; i++) {
-		try {
-			const d = await api('GET', '/api/mod/placed/' + id + (i === 0 ? '?ask=1' : ''));
-			if (id !== placedInfo || ask !== placedAsk) return;
-			if (d.detail) { placedDetail = d.detail; break; }
-		} catch (e) { break; }
-		await new Promise(r => setTimeout(r, 1000));
-	}
-	if (id === placedInfo && ask === placedAsk) {
-		if (!placedDetail) placedDetail = { failed: true };
-		renderPlacedInfo();
-	}
-}
-function renderPlacedInfo() {
-	if (placedInfo == null) return;
-	const o = placedList.find(x => x.id === placedInfo), body = document.getElementById('oBody');
-	if (!o) { body.innerHTML = '<div class="empty">That isn\'t on the server any more.</div>'; document.getElementById('oActs').innerHTML = ''; return; }
-	document.getElementById('oTitle').textContent = placedName(o);
-	document.getElementById('oType').textContent = o.type;
-	const tops = [...body.querySelectorAll('.vcols > div')].map(c => c.scrollTop);
-	const [cn, cc] = vehCondition(o.health), kind = (PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1];
-	const facts = [['Kind', kind], ['Where', grid(o.x, o.z) + ' <span class="muted">' + Math.round(o.x) + ', ' + Math.round(o.z) + '</span>'],
-		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'], ['Placed by', placedBy(o)],
-		['Placed', o.placedAt ? new Date(o.placedAt * 1000).toLocaleString() : '<span class="muted">unknown</span>']];
-	let h = '<div class="vfacts">' + facts.map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
-	const d = placedDetail;
-	if (!d) h += '<div class="muted">Loading…</div>';
-	else if (d.failed) h += '<div class="muted">recon-mod didn\'t send what is in it (it needs 1.0.1 or later).</div>';
-	else {
-		const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
-		const att = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
-		h += '<div class="vcols"><div><h5>Attachments · ' + att.length + '</h5>' +
-			(att.length ? att.map(it => partRow(itemName(it), it.healthLevel | 0)).join('') : '<div class="muted">None</div>') +
-			'</div><div><h5>Damage</h5>' +
-			(d.zones.length ? d.zones.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('') : '<div class="muted">No zones</div>') +
-			'</div><div><h5>Contents · ' + cargo.length + '</h5>' +
-			(cargo.length ? cargo.map(it => { const n = countIn(it); return partRow(itemName(it), it.healthLevel | 0, n ? n + (n === 1 ? ' item inside' : ' items inside') : qty(it)); }).join('') : '<div class="muted">Empty</div>') + '</div></div>';
-	}
-	body.innerHTML = h;
-	body.querySelectorAll('.vcols > div').forEach((c, i) => { c.scrollTop = tops[i] || 0; });
-	document.getElementById('oActs').innerHTML = '<button type="button" onclick="askPlaced()" title="Read what is in and on it again">Refresh</button>' +
-		confirmPair('plc:' + o.id, 'Remove', 'removePlaced(' + o.id + ')', 'Remove it, and everything in it');
-}
+// Info on one object opens the same dialog as a group's, with just it in it.
+function openPlacedInfo(id) { openGroupInfo('id:' + id); }
 // ---- Placed objects close together -------------------------------------
 // A group is the shown objects in one GROUP_M square of the map (metres,
 // lined up with 0,0). Its popup and Info ask the mod for what is in each.
 // Placed objects group by 50 m squares, and by 100 m (BLOCK_M) further out.
 const GROUP_M = 50, BLOCK_M = 100, ZOOM_IN_M = 300;
-let groupOpen = null, groupInfo = null, groupSel = null, groupItemSel = null, groupExpand = {}, groupDetail = {}, groupRun = 0;
+let groupOpen = null, groupInfo = null, groupSel = null, groupItemSel = null, groupDetail = {}, groupRun = 0;
 // groupKey names the square of size m (metres) an object is in: "50:12,40".
 function groupKey(o, m) { m = m || GROUP_M; return m + ':' + Math.floor(o.x / m) + ',' + Math.floor(o.z / m); }
+// isOneKey: a key "id:<n>" is the one object n (Info on a single object).
+function isOneKey(key) { return String(key).startsWith('id:'); }
 function keyParts(key) { const [m, ij] = key.split(':'), [i, j] = ij.split(',').map(Number); return [+m, i, j]; }
 // groupLevel is the square size placed objects group by at this zoom: by
 // the scale bar's length (100 px), 140 m or more: BLOCK_M; 70 m or more:
@@ -1942,6 +1877,7 @@ function groupLevel() {
 	return bar >= 140 ? BLOCK_M : bar >= 70 ? GROUP_M : 0;
 }
 function groupOf(key) {
+	if (isOneKey(key)) return placedList.filter(o => o.id === +key.slice(3));
 	const [m] = keyParts(key);
 	return placedList.filter(o => placedKindOn[placedKind(o)] && groupKey(o, m) === key)
 		.sort((a, b) => placedName(a).localeCompare(placedName(b)) || a.id - b.id);
@@ -1949,7 +1885,10 @@ function groupOf(key) {
 function worstHealth(objs) { return Math.min(...objs.map(o => o.health)); }
 function centreOf(objs) { return [objs.reduce((n, o) => n + o.x, 0) / objs.length, objs.reduce((n, o) => n + o.z, 0) / objs.length]; }
 function squareCentre(key) { const [m, i, j] = keyParts(key); return [(i + 0.5) * m, (j + 0.5) * m]; }
-function groupGrid(key) { const [x, z] = squareCentre(key); return grid(x, z); }
+function groupGrid(key) {
+	if (isOneKey(key)) { const o = groupOf(key)[0]; return o ? grid(o.x, o.z) : ''; }
+	const [x, z] = squareCentre(key); return grid(x, z);
+}
 // objCount is every item in and on an object, all levels.
 function objCount(d) { return (d.items || []).reduce((n, it) => n + 1 + countIn(it), 0); }
 function itemsText(n) { return n ? n + (n === 1 ? ' item' : ' items') : 'empty'; }
@@ -2024,8 +1963,7 @@ function openGroupInfo(key) {
 	if (!have) stopGroup();
 	groupInfo = key; // before closing the popup, so its counts are kept
 	map.closePopup(plcPopup);
-	groupSel = ids[0] ?? null; groupItemSel = null; groupExpand = {};
-	if (groupSel != null) groupExpand[groupSel] = true;
+	groupSel = ids[0] ?? null; groupItemSel = null;
 	document.getElementById('gErr').textContent = '';
 	document.getElementById('gModal').style.display = 'flex';
 	renderGroupInfo();
@@ -2051,24 +1989,22 @@ function renderGroupInfo() {
 	const objs = groupOf(groupInfo), list = document.getElementById('gList'), det = document.getElementById('gDet');
 	document.getElementById('gWhere').textContent = groupGrid(groupInfo);
 	if (!objs.length) {
-		document.getElementById('gTitle').textContent = 'Placed objects';
+		document.getElementById('gTitle').textContent = isOneKey(groupInfo) ? 'Placed object' : 'Placed objects';
 		document.getElementById('gSum').textContent = '';
 		list.innerHTML = '<div class="empty">That isn\'t on the server any more.</div>'; det.innerHTML = '';
 		return;
 	}
-	document.getElementById('gTitle').textContent = objs.length + ' placed objects';
+	document.getElementById('gTitle').textContent = objs.length === 1 ? placedName(objs[0]) : objs.length + ' placed objects';
 	const pending = objs.some(o => !groupDetail[o.id]);
 	const total = objs.reduce((n, o) => n + (groupDetail[o.id] && !groupDetail[o.id].failed ? objCount(groupDetail[o.id]) : 0), 0);
 	document.getElementById('gSum').textContent = pending ? 'Loading…' : itemsText(total).replace('empty', 'nothing') + ' inside';
 	if (!objs.some(o => o.id === groupSel)) { groupSel = objs[0].id; groupItemSel = null; }
 	const top = list.scrollTop;
 	list.innerHTML = objs.map(o => {
-		const [cn, cc] = vehCondition(o.health), d = groupDetail[o.id], open = groupExpand[o.id];
-		const caret = d && !d.failed && d.items.length ? (open ? '▾ ' : '▸ ') : '';
-		return '<button type="button" class="irow gobj' + (o.id === groupSel && groupItemSel == null ? ' sel' : '') + '" data-obj="' + o.id + '">' +
-			'<span class="sl">' + caret + esc((PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1]) + '</span><span class="nm">' + esc(placedName(o)) + '</span>' +
-			'<span class="ex">' + countText(o.id) + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>' +
-			(open && d && !d.failed && d.items.length ? '<div class="sub-items">' + gItemRows(d.items, o.id) + '</div>' : '');
+		const [cn, cc] = vehCondition(o.health);
+		return '<button type="button" class="irow gobj' + (o.id === groupSel ? ' sel' : '') + '" data-obj="' + o.id + '">' +
+			'<span class="sl">' + esc((PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1]) + '</span><span class="nm">' + esc(placedName(o)) + '</span>' +
+			'<span class="ex">' + countText(o.id) + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
 	}).join('');
 	list.scrollTop = top;
 
@@ -2118,21 +2054,18 @@ document.getElementById('gModal').addEventListener('click', e => {
 	if (it) { groupSel = +it.dataset.of; groupItemSel = +it.dataset.item; renderGroupInfo(); return; }
 	const ob = e.target.closest('[data-obj]');
 	if (ob) {
-		const id = +ob.dataset.obj;
-		if (id === groupSel && groupItemSel == null) groupExpand[id] = !groupExpand[id];
-		else groupExpand[id] = true;
-		groupSel = id; groupItemSel = null;
+		groupSel = +ob.dataset.obj; groupItemSel = null;
 		renderGroupInfo();
 	}
 });
 async function removePlaced(id) {
 	const o = placedList.find(x => x.id === id);
 	if (!o) return;
-	const err = document.getElementById(groupInfo != null ? 'gErr' : 'oErr');
+	const err = document.getElementById('gErr');
 	err.textContent = '';
 	try { await api('POST', '/api/mod/world/removeEntity', { text: o.pid, stat: o.type }); }
 	catch (e) { err.textContent = 'Not removed: ' + e.message; rerenderConfirms(); return; }
-	closePlacedInfo();
+	if (groupInfo != null && isOneKey(groupInfo)) closeGroupInfo();
 	poll();
 }
 // recon-mod sends the list every 30 s; reading it every 10 s means a new one
@@ -3597,14 +3530,13 @@ document.addEventListener('keydown', e => {
 	if (document.getElementById('sModal').style.display === 'flex') { closeSpawnAt(); return; }
 	if (document.getElementById('vModal').style.display === 'flex') { closeVehicleInfo(); return; }
 	if (document.getElementById('rModal').style.display === 'flex') { closeRestore(); return; }
-	if (document.getElementById('oModal').style.display === 'flex') { closePlacedInfo(); return; }
 	if (document.getElementById('gModal').style.display === 'flex') { closeGroupInfo(); return; }
 	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
 	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
-for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'oModal', 'gModal', 'rModal']) document.getElementById(id).addEventListener('mousedown', e => {
-	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'oModal') closePlacedInfo(); else if (id === 'gModal') closeGroupInfo(); else if (id === 'rModal') closeRestore(); else closeWorld(); }
+for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'gModal', 'rModal']) document.getElementById(id).addEventListener('mousedown', e => {
+	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'gModal') closeGroupInfo(); else if (id === 'rModal') closeRestore(); else closeWorld(); }
 });
 
 initMap();
