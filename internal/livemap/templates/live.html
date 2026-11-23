@@ -496,7 +496,7 @@ html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-
 .inv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; align-items: start; }
 @media (max-width: 700px) { .inv { grid-template-columns: minmax(0, 1fr); } }
 .ilist { display: flex; flex-direction: column; gap: 4px; }
-.irow { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
+.irow { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; box-sizing: border-box; } /* the same width for an empty slot (a div) as a full one (a button) */
 .irow:hover { border-color: var(--lm-line2); }
 .irow.sel { border-color: var(--lm-accent); background: var(--lm-sel); }
 /* A slot with nothing in it (every slot is always listed: no pop-in). */
@@ -3044,7 +3044,7 @@ function renderPlayer() {
 let invSel = null, invAsked = 0;
 // The player's slots, in the order DayZ's inventory shows them.
 const SLOTS = [['Hands', 'Hands'], ['Headgear', 'Head'], ['Mask', 'Face'], ['Eyewear', 'Eyes'], ['Gloves', 'Gloves'], ['Armband', 'Armband'],
-	['Body', 'Top'], ['Vest', 'Vest'], ['Back', 'Back'], ['Hips', 'Belt'], ['Legs', 'Pants'], ['Feet', 'Shoes'], ['Shoulder', 'Left Shoulder'], ['Melee', 'Right Shoulder']];
+	['Body', 'Top'], ['Vest', 'Vest'], ['Back', 'Back'], ['Hips', 'Belt'], ['Legs', 'Pants'], ['Feet', 'Shoes'], ['Shoulder', 'L Shoulder'], ['Melee', 'R Shoulder']];
 const SLOT_LABEL = Object.fromEntries(SLOTS);
 const SLOT_RANK = Object.fromEntries(SLOTS.map(([k], i) => [k, i]));
 const CONDITION = [['Pristine', '#81c995'], ['Worn', '#b5d07a'], ['Damaged', '#fdd663'], ['Badly damaged', '#f2a65a'], ['Ruined', '#f28b82']];
