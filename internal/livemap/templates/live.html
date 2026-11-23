@@ -611,8 +611,8 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div class="ptabs" id="pTabs" role="tablist">
 			<button type="button" role="tab" data-ptab="stats">Stats</button>
 			<button type="button" role="tab" data-ptab="inventory">Inventory</button>
-			<button type="button" role="tab" data-ptab="spawn">Spawn item</button>
-			<button type="button" role="tab" data-ptab="kills">Kills &amp; deaths</button>
+			<button type="button" role="tab" data-ptab="spawn">Spawn Item</button>
+			<button type="button" role="tab" data-ptab="kills">Kills &amp; Deaths</button>
 		</div>
 		<div class="ppane" data-ppane="stats">
 		<div class="statgrid">
@@ -1481,7 +1481,7 @@ function renderVehicleInfo() {
 	if (!v) {
 		document.getElementById('vTitle').textContent = 'Vehicle';
 		document.getElementById('vWhere').textContent = ''; document.getElementById('vSum').textContent = '';
-		list.innerHTML = '<div class="empty">That vehicle isn\'t on the server any more.</div>'; det.innerHTML = '';
+		setHTML(list, '<div class="empty">That vehicle isn\'t on the server any more.</div>'); setHTML(det, '');
 		return;
 	}
 	const d = vehDetail, has = d && !d.failed, count = !d ? 'Loading…' : d.failed ? '?' : itemsText(objCount(d));
@@ -1489,9 +1489,9 @@ function renderVehicleInfo() {
 	document.getElementById('vWhere').textContent = grid(v.x, v.z);
 	document.getElementById('vSum').textContent = !d ? 'Loading…' : d.failed ? '' : itemsText(objCount(d)).replace('empty', 'nothing') + ' inside';
 	const [cn, cc] = vehCondition(v.health);
-	list.innerHTML = '<button type="button" class="irow gobj' + (vehItemSel == null ? ' sel' : '') + '" data-vobj="1">' +
+	setHTML(list, '<button type="button" class="irow gobj' + (vehItemSel == null ? ' sel' : '') + '" data-vobj="1">' +
 		'<span class="sl">' + (v.fuel < 0 ? 'Boat' : 'Vehicle') + '</span><span class="nm">' + esc(catLabel(v)) + '</span>' +
-		'<span class="ex">' + count + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
+		'<span class="ex">' + count + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>');
 	const top = det.scrollTop, path = vehItemSel != null && has ? pathTo(d.items, vehItemSel) : null;
 	let h = '';
 	if (path) {
@@ -1520,7 +1520,7 @@ function renderVehicleInfo() {
 	}
 	h += '<div class="gacts">' + vehDeleteState(v) + '<button type="button" data-vact="show">Show on map</button>' +
 		'<button type="button" data-vact="refresh" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + '</div>';
-	det.innerHTML = h;
+	setHTML(det, h);
 	det.scrollTop = top;
 }
 document.getElementById('vModal').addEventListener('click', e => {
@@ -2218,7 +2218,7 @@ function renderGroupInfo() {
 	if (!objs.length) {
 		document.getElementById('gTitle').textContent = isOneKey(groupInfo) ? 'Placed object' : 'Placed objects';
 		document.getElementById('gSum').textContent = '';
-		list.innerHTML = '<div class="empty">That isn\'t on the server any more.</div>'; det.innerHTML = '';
+		setHTML(list, '<div class="empty">That isn\'t on the server any more.</div>'); setHTML(det, '');
 		return;
 	}
 	document.getElementById('gTitle').textContent = objs.length === 1 ? placedName(objs[0]) : objs.length + ' placed objects';
@@ -2234,8 +2234,8 @@ function renderGroupInfo() {
 			'<span class="sl">' + esc((PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1]) + '</span><span class="nm">' + esc(placedName(o)) + '</span>' +
 			'<span class="ex">' + countText(o.id) + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
 	};
-	list.innerHTML = objs.map(objRow).join('') +
-		(near.length ? '<div class="gnear">Nearby items · ' + near.length + '</div>' + near.map(objRow).join('') : '');
+	setHTML(list, objs.map(objRow).join('') +
+		(near.length ? '<div class="gnear">Nearby items · ' + near.length + '</div>' + near.map(objRow).join('') : ''));
 	list.scrollTop = top;
 
 	const o = all.find(x => x.id === groupSel), d = groupDetail[o.id];
@@ -2270,7 +2270,7 @@ function renderGroupInfo() {
 	h += '<div class="gacts"><button type="button" data-act="show" data-of="' + o.id + '">Show on map</button>' +
 		'<button type="button" data-act="refresh" data-of="' + o.id + '">Refresh</button>' +
 		confirmPair('plc:' + o.id, 'Remove', 'removePlaced(' + o.id + ')', 'Remove it, and everything in it') + '</div>';
-	det.innerHTML = h;
+	setHTML(det, h);
 }
 document.getElementById('gModal').addEventListener('click', e => {
 	const a = e.target.closest('[data-act]');
@@ -2442,21 +2442,17 @@ function showPlayerCtx(guid, e) {
 	const following = track && track.kind === 'player' && track.id === guid;
 	openCtx(e.containerPoint, { guid },
 		'<div class="hd">' + esc(p.name) + ' · ' + grid(p.x, p.z) + (p.alive ? '' : ' · dead') + '</div>' +
-		ctxItem('open', 'Open') + ctxItem('inv', 'Inventory') + ctxItem('spawn', 'Spawn an item for them…') +
+		ctxItem('tab:stats', 'Stats') + ctxItem('tab:inventory', 'Inventory') + ctxItem('tab:spawn', 'Spawn Item') + ctxItem('tab:kills', 'Kills & Deaths') +
 		'<div class="lbl">Map</div>' + ctxItem('follow', following ? 'Stop following' : 'Follow Player') + ctxItem('send', 'Teleport to…') +
-		'<div class="lbl">Actions</div>' + ctxItem('heal', 'Heal') + ctxItem('dry', 'Dry') + ctxItem('message', 'Message…') + ctxItem('kill', 'Kill', 'bad'),
+		'<div class="lbl">Actions</div>' + ctxItem('heal', 'Heal') + ctxItem('dry', 'Dry') + ctxItem('message', 'Message…'),
 		a => {
 			const tab = t => { closeCtx(); openPlayer(guid); showPTab(t); };
-			if (a === 'open') tab('stats');
-			else if (a === 'inv') tab('inventory');
-			else if (a === 'spawn') tab('spawn');
+			if (a.startsWith('tab:')) tab(a.slice(4));
 			else if (a === 'message') { tab('stats'); showForm('message'); }
 			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'player', id: guid }); }
 			else if (a === 'send') { closeCtx(); startPick(guid); }
 			else if (a === 'heal') ctxRun('Healing ' + p.name, '/api/mod/players/' + guid + '/heal');
 			else if (a === 'dry') ctxRun('Drying ' + p.name, '/api/mod/players/' + guid + '/dry');
-			else if (ctxConfirm(a, 'kill', 'Kill')) return;
-			else if (a === 'kill!') ctxRun('Killing ' + p.name, '/api/mod/players/' + guid + '/kill');
 		});
 }
 
@@ -2686,24 +2682,24 @@ function renderList() {
 	document.getElementById('nOffline').textContent = offline ? offline.length : '…';
 	document.querySelectorAll('.ptoggle [data-plist]').forEach(b => { const on = b.dataset.plist === plistMode; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
 	if (plistMode === 'offline') {
-		if (!offline) { list.innerHTML = '<div class="empty">Loading…</div>'; return; }
+		if (!offline) { setHTML(list, '<div class="empty">Loading…</div>'); return; }
 		const shown = offline.filter(p => !q || p.name.toLowerCase().includes(q) || p.guid.includes(q));
-		if (!shown.length) { list.innerHTML = '<div class="empty">' + (offline.length ? 'Nobody matches.' : 'Nobody offline yet.') + '</div>'; return; }
-		list.innerHTML = shown.slice(0, 300).map(p => '<button type="button" class="prow off' + (p.guid === selGuid ? ' sel' : '') + '" data-guid="' + p.guid + '">' +
+		if (!shown.length) { setHTML(list, '<div class="empty">' + (offline.length ? 'Nobody matches.' : 'Nobody offline yet.') + '</div>'); return; }
+		setHTML(list, shown.slice(0, 300).map(p => '<button type="button" class="prow off' + (p.guid === selGuid ? ' sel' : '') + '" data-guid="' + p.guid + '">' +
 			'<span class="d"></span><span class="n"><b>' + esc(p.name) + '</b><small>' + (p.lastSeen ? 'seen ' + agoText(p.lastSeen * 1000) : 'never seen') + ' · ' + playedText(p.played) + '</small></span><span></span></button>').join('') +
-			(shown.length > 300 ? '<div class="empty">' + (shown.length - 300) + ' more: search to find them.</div>' : '');
+			(shown.length > 300 ? '<div class="empty">' + (shown.length - 300) + ' more: search to find them.</div>' : ''));
 		return;
 	}
 	if (!mod || !mod.connected) {
-		list.innerHTML = '<div class="empty">The Live Map shows the players recon-mod, the DayZ server mod, reports. Once it is installed and sending to this ReCON, they appear here every second.</div>';
+		setHTML(list, '<div class="empty">The Live Map shows the players recon-mod, the DayZ server mod, reports. Once it is installed and sending to this ReCON, they appear here every second.</div>');
 		return;
 	}
 	const shown = players.filter(p => !q || p.name.toLowerCase().includes(q));
 	if (!shown.length) {
-		list.innerHTML = '<div class="empty">' + (players.length ? 'Nobody matches.' : 'Nobody is online.') + '</div>';
+		setHTML(list, '<div class="empty">' + (players.length ? 'Nobody matches.' : 'Nobody is online.') + '</div>');
 		return;
 	}
-	list.innerHTML = shown.map(p => {
+	setHTML(list, shown.map(p => {
 		const [hc] = hud('health', p.health);
 		const what = p.vehicle ? 'in ' + vehicleOf(p) : (p.hands ? handsOf(p) : 'unarmed');
 		const f = flagsOf(p).map(([k, t]) => '<span class="' + k + '">' + esc(t) + '</span>').join('');
@@ -2711,7 +2707,7 @@ function renderList() {
 			'<span class="d" style="background:' + colorOf(p.guid) + '"></span>' +
 			'<span class="n"><b>' + esc(p.name) + '</b><small>' + grid(p.x, p.z) + ' · ' + esc(what) + '</small>' + (f ? '<span class="flags">' + f + '</span>' : '') + '</span>' +
 			'<span class="hb"><i style="width:' + Math.max(0, Math.min(100, p.health)) + '%;background:' + hc + '"></i></span></button>';
-	}).join('');
+	}).join(''));
 }
 
 document.getElementById('plist').addEventListener('click', e => {
@@ -3092,18 +3088,31 @@ function agoText(at) {
 	const s = Math.max(0, Math.round((Date.now() - new Date(at)) / 1000));
 	return s < 90 ? s + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : new Date(at).toLocaleString();
 }
+// setHTML sets an element's content only when it differs from what it
+// was last set to: the dialogs and lists redraw every second, and
+// rebuilding unchanged rows made them flicker (the picked one's highlight,
+// a hover). The inventory list may be holding the details panel (a narrow
+// screen): it is put back first.
+function setHTML(el, h) {
+	if (el._html === h) return;
+	if (el.id === 'iList') { const det = document.getElementById('iDet'); if (det.parentElement === el) el.parentElement.appendChild(det); }
+	el.innerHTML = h;
+	el._html = h;
+}
 // On a narrow screen (one column) the item's details open right under the
 // slot picked, the slots below it moving down, instead of under them all.
 const NARROW_INV = matchMedia('(max-width: 700px)');
 let invRoot = null; // the slot item the details are for (null: none picked)
 function renderInv(p) {
 	const list = document.getElementById('iList'), det = document.getElementById('iDet'), box = list.parentElement;
-	if (det.parentElement !== box) box.appendChild(det); // out of the list before it is redrawn
 	renderInvBody(p);
 	const narrow = NARROW_INV.matches, row = narrow && invRoot != null ? list.querySelector(':scope > .irow[data-item="' + invRoot + '"]') : null;
 	det.classList.toggle('under', !!row);
-	if (row) row.after(det);
-	det.style.display = narrow && !row ? 'none' : '';
+	// Moved only when it isn't where it belongs (a move redraws it).
+	if (row) { if (row.nextElementSibling !== det) row.after(det); }
+	else if (det.parentElement !== box) box.appendChild(det);
+	const disp = narrow && !row ? 'none' : '';
+	if (det.style.display !== disp) det.style.display = disp;
 }
 NARROW_INV.addEventListener('change', () => { if (selGuid) renderInv(byGuid[selGuid]); });
 function renderInvBody(p) {
@@ -3115,8 +3124,8 @@ function renderInvBody(p) {
 	const inv = live || cached;
 	if (!p && !cached) {
 		when.textContent = '';
-		list.innerHTML = '<div class="empty">They aren\'t on the server now.</div>';
-		det.innerHTML = '';
+		setHTML(list, '<div class="empty">They aren\'t on the server now.</div>');
+		setHTML(det, '');
 		return;
 	}
 	// Every slot is always listed, empty or not (and while the inventory is
@@ -3125,14 +3134,14 @@ function renderInvBody(p) {
 	const bySlot = {};
 	for (const it of items) bySlot[it.slot] = it;
 	const row = it => { const n = countIn(it); return irow(it, slotLabel(it.slot), n ? n + (n === 1 ? ' item' : ' items') : qty(it)); };
-	list.innerHTML = SLOTS.map(([slot, label]) => bySlot[slot] ? row(bySlot[slot])
+	setHTML(list, SLOTS.map(([slot, label]) => bySlot[slot] ? row(bySlot[slot])
 		: '<div class="irow none"><span class="sl">' + label + '</span><span class="nm">' + (inv ? 'Empty' : '…') + '</span><span class="ex"></span></div>').join('') +
-		items.filter(it => SLOT_RANK[it.slot] == null).map(row).join('');
+		items.filter(it => SLOT_RANK[it.slot] == null).map(row).join(''));
 	if (!inv) {
 		when.textContent = Date.now() - invAsked > 10000
 			? '· recon-mod hasn\'t sent their inventory (the mod on the server may be a version without it)'
 			: '· loading…';
-		det.innerHTML = '';
+		setHTML(det, '');
 		return;
 	}
 	when.textContent = cached ? '· as of ' + agoText(inv.at) + (p ? ' · loading…' : ' (last known)')
@@ -3141,7 +3150,7 @@ function renderInvBody(p) {
 	const path = invSel != null ? pathTo(items, invSel) : null;
 	if (!path) {
 		invSel = null;
-		det.innerHTML = '<div class="empty">' + (items.length ? 'Pick an item to see its condition, attachments and contents.' : '') + '</div>';
+		setHTML(det, '<div class="empty">' + (items.length ? 'Pick an item to see its condition, attachments and contents.' : '') + '</div>');
 		return;
 	}
 	invRoot = path[0].id;
@@ -3169,7 +3178,7 @@ function renderInvBody(p) {
 			const n = countIn(c);
 			return irow(c, 'Row ' + (c.row + 1) + ', ' + (c.col + 1), n ? n + (n === 1 ? ' item' : ' items') : qty(c));
 		}).join('') + '</div>';
-	det.innerHTML = h;
+	setHTML(det, h);
 }
 document.getElementById('pModal').addEventListener('click', e => {
 	const c = e.target.closest('[data-cond]');
