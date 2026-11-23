@@ -236,7 +236,6 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .ovmenu.legend { display: block; width: min(640px, calc(100vw - 40px)); max-height: min(70vh, 560px); overflow-y: auto; padding: 10px 12px; columns: 2 260px; column-gap: 22px; }
 .legend .lgsec { break-inside: avoid; margin-bottom: 10px; }
 .ovmenu.legend[hidden] { display: none; }
-.legend .lgsec h5 .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .legend .lgsec h5 { margin: 0 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--lm-muted); font-weight: 600; }
 .legend .lgrow { display: flex; align-items: center; gap: 10px; padding: 2px 0; font-size: 13px; }
 .legend .lgi { flex: none; width: 34px; height: 20px; display: flex; align-items: center; justify-content: center; gap: 3px; }
@@ -1557,30 +1556,30 @@ function toggleLegend(open) {
 	b.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 function legendHTML() {
-	const row = (icon, text, note, wide) => '<div class="lgrow' + (wide ? ' wide' : '') + '"><span class="lgi">' + icon + '</span><span class="lgt">' + text + (note ? '<span class="muted"> · ' + note + '</span>' : '') + '</span></div>';
-	const sec = (title, rows, note) => '<div class="lgsec"><h5>' + title + (note ? ' <span class="muted">· ' + note + '</span>' : '') + '</h5>' + rows.join('') + '</div>';
+	const row = (icon, text, wide) => '<div class="lgrow' + (wide ? ' wide' : '') + '"><span class="lgi">' + icon + '</span><span class="lgt">' + text + '</span></div>';
+	const sec = (title, rows) => '<div class="lgsec"><h5>' + title + '</h5>' + rows.join('') + '</div>';
 	const pristine = CONDITION[0][1], worst = CONDITION[3][1];
 	const EVENT_NAMES = { heli: 'Heli crash', convoy: 'Convoy', police: 'Police', medical: 'Medical', other: 'Other event' };
 	return sec('Players', [
-			row(arrowSVG('#c58af9'), 'Player', 'points the way they face'),
-			row('<span class="lgdead">' + arrowSVG('#c58af9') + '</span>', 'Dead player')], 'each has their own colour') +
+			row(arrowSVG('#c58af9'), 'Player'),
+			row('<span class="lgdead">' + arrowSVG('#c58af9') + '</span>', 'Dead player'),
+			row(DEATH_SVG, 'Where a player died')]) +
 		sec('Vehicles', [
 			row(vehShape('#e8eaed'), 'Parked; Engine off'),
 			row(vehShape('#81c995'), 'Parked; Engine running'),
 			row(vehShape('#c58af9'), 'Occupied by driver'),
 			row(vehShape('#8ab4f8'), 'Occupied by passenger')]) +
-		sec('Predators', Object.values(PRED).map(([name, c]) => row(predShape(c, 0), name === 'Dog' ? 'Guard dog' : name)), 'the notch shows where it faces') +
+		sec('Predators', Object.values(PRED).map(([name, c]) => row(predShape(c, 0), name === 'Dog' ? 'Guard dog' : name))) +
 		sec('Events', EVENT_CATS.filter(([k]) => k !== 'gas').map(([k, , c]) => row(spotSVG(c, true), EVENT_NAMES[k] || k)).concat([
-			row(spotSVG('#7a7a7a', false), 'Spawn spot', 'nothing there now')]), 'in colour: up now') +
+			row(spotSVG('#7a7a7a', false), 'Spawn spot')])) +
 		sec('Gas zones', [
-			row(bioSVG(GAS_STATIC), 'Static', 'always there'),
+			row(bioSVG(GAS_STATIC), 'Static'),
 			row(bioSVG(eventCat('gas')[2]), 'Dynamic, active'),
-			row(bioSVG(GAS_OFF), 'Dynamic, inactive', 'its circle: the size it was when last active')], 'the circle is its area') +
+			row(bioSVG(GAS_OFF), 'Dynamic, inactive')]) +
 		sec('Placed objects', [
 			row(placedSVG(pristine), 'Placed object'),
-			row(groupSVG(worst) + '<span class="lgname" style="color:#fff">×5</span>', 'Several in one 50 m square', 'click for the list', true),
-			'<div class="lgscale">' + CONDITION.map(([n, c]) => '<span><i style="background:' + c + '"></i>' + n + '</span>').join('') + '</div>'], 'coloured by condition') +
-		sec('Deaths', [row(DEATH_SVG, 'Where a player died')]);
+			row(groupSVG(worst) + '<span class="lgname" style="color:#fff">×5</span>', 'Several in one 50 m square', true),
+			'<div class="lgscale">' + CONDITION.map(([n, c]) => '<span><i style="background:' + c + '"></i>' + n + '</span>').join('') + '</div>']);
 }
 
 // Players: their arrows and names (on unless switched off); hiding them
