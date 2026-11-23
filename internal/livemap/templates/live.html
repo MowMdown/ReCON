@@ -520,6 +520,7 @@ html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-
 .idet h5 { margin: 14px 0 5px; font-size: 12px; color: var(--lm-text); font-weight: 600; }
 .sub-items { display: flex; flex-direction: column; gap: 3px; }
 .sub-items .irow { background: var(--lm-ground); padding: 5px 9px; }
+.ilist > .idet.under { margin: 0 0 4px; min-height: 0; }
 html[data-theme]:not([data-theme="default"]) .irow, html[data-theme]:not([data-theme="default"]) .idet { border-color: var(--color-divider); }
 /* World */
 .wsec { border-top: 1px solid var(--lm-line); padding: 14px 0 4px; margin-top: 4px; }
@@ -3091,7 +3092,22 @@ function agoText(at) {
 	const s = Math.max(0, Math.round((Date.now() - new Date(at)) / 1000));
 	return s < 90 ? s + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : new Date(at).toLocaleString();
 }
+// On a narrow screen (one column) the item's details open right under the
+// slot picked, the slots below it moving down, instead of under them all.
+const NARROW_INV = matchMedia('(max-width: 700px)');
+let invRoot = null; // the slot item the details are for (null: none picked)
 function renderInv(p) {
+	const list = document.getElementById('iList'), det = document.getElementById('iDet'), box = list.parentElement;
+	if (det.parentElement !== box) box.appendChild(det); // out of the list before it is redrawn
+	renderInvBody(p);
+	const narrow = NARROW_INV.matches, row = narrow && invRoot != null ? list.querySelector(':scope > .irow[data-item="' + invRoot + '"]') : null;
+	det.classList.toggle('under', !!row);
+	if (row) row.after(det);
+	det.style.display = narrow && !row ? 'none' : '';
+}
+NARROW_INV.addEventListener('change', () => { if (selGuid) renderInv(byGuid[selGuid]); });
+function renderInvBody(p) {
+	invRoot = null;
 	const list = document.getElementById('iList'), det = document.getElementById('iDet'), when = document.getElementById('invWhen');
 	// Until the live inventory comes (or while they're offline): their last
 	// known one, at most about 5 min old while they're online.
@@ -3128,6 +3144,7 @@ function renderInv(p) {
 		det.innerHTML = '<div class="empty">' + (items.length ? 'Pick an item to see its condition, attachments and contents.' : '') + '</div>';
 		return;
 	}
+	invRoot = path[0].id;
 	const it = path[path.length - 1];
 	const [cn, cc] = condOf(it);
 	let h = '';
@@ -3162,7 +3179,9 @@ document.getElementById('pModal').addEventListener('click', e => {
 	}
 	const t = e.target.closest('[data-item]');
 	if (!t) return;
-	invSel = +t.getAttribute('data-item');
+	// The slot whose details are open, picked again: they close.
+	const id = +t.getAttribute('data-item');
+	invSel = t.parentElement && t.parentElement.id === 'iList' && id === invRoot ? null : id;
 	renderInv(byGuid[selGuid]);
 });
 
