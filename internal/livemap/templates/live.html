@@ -808,7 +808,7 @@ function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoo
 // Zoom moves in steps of the scale bar: the bar is always SCALE_PX long,
 // and a wheel notch, + or - or a double-click moves it to the next of
 // SCALE_STEPS; out from the last one is Fit (the whole map).
-const SCALE_PX = 100, SCALE_STEPS = [50, 100, 200, 500, 1000];
+const SCALE_PX = 100, SCALE_STEPS = [25, 50, 100, 200, 500, 1000];
 function zoomForBar(m) { return Math.log2(SCALE_PX / m); }
 // barMetres is what the bar is long, in metres, at zoom z (default: where
 // the map is going, if it is mid-zoom).
