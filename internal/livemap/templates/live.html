@@ -806,9 +806,9 @@ let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, 
 // viewSpan is how many metres across the map's view shows.
 function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoom())); }
 // Zoom moves in steps of the scale bar: the bar is always SCALE_PX long,
-// and a wheel notch, + or - or a double-click moves it 100 m (down to
-// 100 m, then 50 m, the closest). Pinching on a phone zooms freely.
-const SCALE_PX = 100, SCALE_STEPS = [50].concat(Array.from({ length: 500 }, (_, i) => (i + 1) * 100));
+// and a wheel notch, + or - or a double-click moves it to the next of
+// SCALE_STEPS; out from the last one is Fit (the whole map).
+const SCALE_PX = 100, SCALE_STEPS = [50, 100, 200, 500, 1000];
 function zoomForBar(m) { return Math.log2(SCALE_PX / m); }
 // barMetres is what the bar is long, in metres, at zoom z (default: where
 // the map is going, if it is mid-zoom).
@@ -841,15 +841,16 @@ function stepWheel() {
 		acc = 0;
 		stepZoom(dir, map.mouseEventToContainerPoint(e));
 	}, { passive: false });
-	// A pinch ends on the nearest 100 m mark (50 m below 75 m), not in
-	// between: the two-finger touch is noted, and its zoom snapped once it ends.
+	// A pinch ends on the nearest step (or Fit), not in between: the
+	// two-finger touch is noted, and its zoom snapped once it ends.
 	let pinched = false;
 	map.getContainer().addEventListener('touchstart', e => { if (e.touches.length > 1) pinched = true; }, { passive: true });
 	map.on('zoomend', () => {
 		if (!pinched) return;
 		pinched = false;
+		// The nearest step, or Fit (as a step past the last).
 		const m = barMetres(map.getZoom());
-		const near = SCALE_STEPS.reduce((a, b) => Math.abs(b - m) < Math.abs(a - m) ? b : a);
+		const near = SCALE_STEPS.concat([barMetres(map.getMinZoom())]).reduce((a, b) => Math.abs(b - m) < Math.abs(a - m) ? b : a);
 		const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zoomForBar(near)));
 		if (Math.abs(z - map.getZoom()) > 1e-6) map.setZoom(z);
 	});
