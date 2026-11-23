@@ -66,6 +66,9 @@ html[data-theme]:not([data-theme="default"]) {
    select its labels or bring up the phone's own copy menu; the menu's
    position line can still be selected and copied. */
 .mapwrap { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* A popup opened below its marker: its tip on top, pointing up. */
+.leaflet-popup.flipped { margin-bottom: 0; }
+.leaflet-popup.flipped .leaflet-popup-tip-container { top: -20px; margin-top: 0; transform: rotate(180deg); }
 .mapwrap .ctx .hd { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .twohint { position: absolute; inset: 0; z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center;
 	background: rgba(0, 0, 0, .45); color: #fff; font-size: 16px; font-weight: 600; pointer-events: none; opacity: 0; transition: opacity .25s; }
@@ -840,6 +843,29 @@ let dataMaps = [];
 api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).catch(() => { });
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
 
+// A popup near the top of the map (under the bar of buttons, or off it)
+// opens below its marker instead, its tip on top pointing up at it (when
+// it fits there, or there is more room below than above). Leaflet places every popup here, so this
+// covers them all (players, vehicles, animals, placed objects). It is
+// decided before Leaflet's auto-pan, so a popup that fits flipped doesn't
+// move the map.
+const POPUP_TOP = 50, POPUP_GAP = 8;
+(function () {
+	const place = L.Popup.prototype._updatePosition;
+	L.Popup.prototype._updatePosition = function () {
+		const el = this._container, m = this._map;
+		if (!m || !el || !this._latlng) return place.call(this);
+		const base = this._baseOffset || (this._baseOffset = L.point(this.options.offset));
+		const y = m.latLngToContainerPoint(this._latlng).y, h = el.offsetHeight, H = m.getSize().y;
+		const above = y + base.y - 20 - h, below = y + POPUP_GAP + 20 + h;
+		// No room above: below, if it fits there, or there is more room
+		// below than above (a phone's map can be too short for either).
+		const flip = above < POPUP_TOP && (below <= H - 6 || H - y > y - POPUP_TOP);
+		this.options.offset = flip ? [base.x, POPUP_GAP + 20 + h] : [base.x, base.y];
+		el.classList.toggle('flipped', flip);
+		return place.call(this);
+	};
+})();
 // viewSpan is how many metres across the map's view shows.
 function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoom())); }
 // Zoom moves in steps of the scale bar: the bar is always SCALE_PX long,
