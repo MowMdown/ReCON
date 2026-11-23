@@ -70,6 +70,10 @@ html[data-theme]:not([data-theme="default"]) {
 .twohint { position: absolute; inset: 0; z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center;
 	background: rgba(0, 0, 0, .45); color: #fff; font-size: 16px; font-weight: 600; pointer-events: none; opacity: 0; transition: opacity .25s; }
 .twohint.on { opacity: 1; }
+.twohint.minihint { inset: 0 auto auto 0; width: 100%; aspect-ratio: 1; font-size: 14px; border-radius: 6px; }
+/* Touch screens: one finger on the mini-map scrolls the dialog (its own
+   handlers take two fingers), as on the big map. */
+#mini.touch2 { touch-action: pan-x pan-y; }
 #map { position: absolute; inset: 0; background: var(--lm-ground); }
 /* Full screen: the map covers the browser's window (not the monitor);
    the dialogs still open over it. */
@@ -334,7 +338,6 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .track .tip { position: absolute; bottom: 16px; transform: translateX(-50%); background: var(--lm-ground); border: 1px solid var(--lm-accent); color: var(--lm-text); font-size: 12px; padding: 3px 8px; border-radius: 4px; white-space: nowrap; pointer-events: none; z-index: 2; }
 .bar .v .to { color: var(--lm-accent); font-weight: 600; }
 .bar .v .pend { color: #fdd663; }
-.draghint { color: var(--lm-muted); font-size: 12px; margin-top: 2px; }
 .bar.staged .handle { display: block; background: var(--lm-accent); }
 .bar.staged .track { border-color: var(--lm-accent); }
 .savebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--lm-accent); margin-top: 2px; }
@@ -476,7 +479,6 @@ table.dt a { color: var(--lm-accent); text-decoration: none; cursor: pointer; }
 .pbox .track .mark, .pbox .track .cap { top: -3px; height: 18px; }
 .pbox .track .handle { width: 18px; height: 18px; margin: -9px 0 0 -9px; }
 .pbox .track .tip { bottom: 20px; }
-.pbox .draghint { margin-top: 12px; }
 .pbox .ailrow { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; }
 .pbox .ailrow .chips { flex: 1; margin-top: 0; }
 .pbox .ailrow button { margin: 0; flex: none; }
@@ -617,6 +619,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 				<div class="minihud"><span id="miniXY"></span><span class="sp"></span><button type="button" id="miniFollow" hidden title="Zoom back to 500 m across on the player and follow them again">Recenter</button><button type="button" id="miniCal" hidden title="If the map's picture is off: stand somewhere you can tell on it, then click where you really are">Calibrate</button></div>
 				<div class="minical" id="miniCalBox" hidden><span id="miniCalMsg"></span><span class="sp"></span><button type="button" id="miniCalReset" hidden title="Forget this map's calibration">Reset</button></div>
 				<div class="miniscale" id="miniScale"></div>
+				<div class="twohint minihint" id="miniHint" aria-hidden="true">Use two fingers to move the map</div>
 			</div>
 		</div>
 		<div class="tiles">
@@ -903,7 +906,7 @@ function initMap() {
 	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
 	stepWheel();
 	setTouchDrag();
-	map.getContainer().addEventListener('touchmove', e => { if (TOUCH && !map.dragging.enabled() && e.touches.length === 1) twoFingerHint(); }, { passive: true });
+	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled());
 	L.control.zoom({ position: 'bottomright' }).addTo(map);
 	// What covers what, top first: players, vehicles and predators, town
 	// names, events and deaths, the grid's numbers; then the grid lines
@@ -1202,13 +1205,34 @@ function setTouchDrag() {
 	if (!TOUCH || !map) return;
 	if (document.querySelector('.mapwrap').classList.contains('full')) map.dragging.enable(); else map.dragging.disable();
 }
-let hintTimer = 0;
-function twoFingerHint() {
-	const h = document.getElementById('twoHint');
-	h.classList.add('on');
-	clearTimeout(hintTimer);
-	hintTimer = setTimeout(() => h.classList.remove('on'), 1200);
+// watchTouches shows the hint for a one-finger drag only: one touch from
+// first finger down to last finger up is one gesture, and a gesture that
+// ever has two fingers (a pinch, its start and its release, when one finger
+// lifts first) never shows it; nor does a finger that has barely moved yet.
+function watchTouches(el, hintId, applies) {
+	let g = null;
+	el.addEventListener('touchstart', e => {
+		if (!g) g = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), multi: false };
+		if (e.touches.length > 1) { g.multi = true; hideHint(hintId); }
+	}, { passive: true });
+	el.addEventListener('touchmove', e => {
+		if (!TOUCH || !applies() || !g || g.multi || e.touches.length !== 1) return;
+		const t = e.touches[0];
+		if (Date.now() - g.t < 150 || Math.hypot(t.clientX - g.x, t.clientY - g.y) < 12) return;
+		twoFingerHint(hintId);
+	}, { passive: true });
+	const end = e => { if (!e.touches.length) g = null; };
+	el.addEventListener('touchend', end, { passive: true });
+	el.addEventListener('touchcancel', end, { passive: true });
 }
+const hintTimers = {};
+function twoFingerHint(id) {
+	const h = document.getElementById(id);
+	h.classList.add('on');
+	clearTimeout(hintTimers[id]);
+	hintTimers[id] = setTimeout(() => h.classList.remove('on'), 1200);
+}
+function hideHint(id) { clearTimeout(hintTimers[id]); document.getElementById(id).classList.remove('on'); }
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
@@ -2950,7 +2974,7 @@ function renderPlayer() {
 		const foot = n
 			? '<div class="savebar"><span>' + n + (n === 1 ? ' change' : ' changes') + ' not saved</span><span class="sp"></span>' +
 				'<button type="button" class="go" onclick="saveStats()">Save</button><button type="button" onclick="resetStats()">Reset</button></div>'
-			: '<div class="draghint">Drag Health, Blood, Water, Food or Comfort to where you want it (or click a spot on the bar), then Save. Esc cancels a drag.</div>';
+			: '';
 		if (!drag) document.getElementById('pBars').innerHTML = h;
 		// Apart from the bars (redrawn every second), so a click on Save isn't lost.
 		const save = document.getElementById('pSave');
@@ -3323,6 +3347,7 @@ miniEl.addEventListener('pointermove', e => {
 	const r = miniEl.getBoundingClientRect(), dx = e.clientX - miniDrag.x, dy = e.clientY - miniDrag.y;
 	if (!miniDrag.moved && Math.hypot(dx, dy) < 4) return; // a click, not a drag (yet)
 	miniDrag.moved = true;
+	if (TOUCH && e.pointerType === 'touch') return; // one finger scrolls the dialog; two move the map (below)
 	miniEl.classList.add('panning');
 	mini.follow = false;
 	mini.cx = miniDrag.cx - dx / r.width * mini.span;
@@ -3359,6 +3384,36 @@ miniEl.addEventListener('dblclick', e => {
 	act('teleport', { x: at.x, z: at.z, y: 0 }, true).then(ok => { if (ok) clearTeleport(); });
 });
 miniEl.addEventListener('pointercancel', e => endMiniDrag(e, false));
+// Touch screens: two fingers move the mini-map and pinch-zoom it, the map
+// point first under them staying under them; a pinch is never a tap.
+let miniPinch = null;
+if (TOUCH) miniEl.classList.add('touch2');
+watchTouches(miniEl, 'miniHint', () => true);
+function touchMid(t) { return [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2]; }
+function touchGap(t) { return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1; }
+miniEl.addEventListener('touchstart', e => {
+	if (!TOUCH || e.touches.length !== 2) return;
+	const [mx, my] = touchMid(e.touches), r = miniEl.getBoundingClientRect();
+	const fx = (mx - r.left) / r.width, fy = (my - r.top) / r.height;
+	miniPinch = { d: touchGap(e.touches), span: mini.span, r, ax: mini.cx + (fx - 0.5) * mini.span, az: mini.cz - (fy - 0.5) * mini.span };
+	if (miniDrag) miniDrag.moved = true;
+	miniDragged = true;
+}, { passive: true });
+miniEl.addEventListener('touchmove', e => {
+	if (!miniPinch || e.touches.length < 2) return;
+	e.preventDefault();
+	const [mx, my] = touchMid(e.touches), r = miniPinch.r;
+	const span = Math.max(100, Math.min(miniMax(), miniPinch.span * miniPinch.d / touchGap(e.touches)));
+	const fx = (mx - r.left) / r.width, fy = (my - r.top) / r.height;
+	mini.follow = false;
+	mini.span = span;
+	mini.cx = miniPinch.ax - (fx - 0.5) * span;
+	mini.cz = miniPinch.az + (fy - 0.5) * span;
+	redrawMini();
+}, { passive: false });
+const endMiniPinch = e => { if (e.touches.length < 2) miniPinch = null; };
+miniEl.addEventListener('touchend', endMiniPinch, { passive: true });
+miniEl.addEventListener('touchcancel', endMiniPinch, { passive: true });
 
 // Calibrating: with Calibrate on, a click on the mini-map is where the
 // player really is on the map's picture, which then moves (and with two
