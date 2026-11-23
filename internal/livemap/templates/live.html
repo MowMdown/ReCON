@@ -841,6 +841,18 @@ function stepWheel() {
 		acc = 0;
 		stepZoom(dir, map.mouseEventToContainerPoint(e));
 	}, { passive: false });
+	// A pinch ends on the nearest 100 m mark (50 m below 75 m), not in
+	// between: the two-finger touch is noted, and its zoom snapped once it ends.
+	let pinched = false;
+	map.getContainer().addEventListener('touchstart', e => { if (e.touches.length > 1) pinched = true; }, { passive: true });
+	map.on('zoomend', () => {
+		if (!pinched) return;
+		pinched = false;
+		const m = barMetres(map.getZoom());
+		const near = SCALE_STEPS.reduce((a, b) => Math.abs(b - m) < Math.abs(a - m) ? b : a);
+		const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zoomForBar(near)));
+		if (Math.abs(z - map.getZoom()) > 1e-6) map.setZoom(z);
+	});
 	map.zoomIn = function () { stepZoom(1); return this; };
 	map.zoomOut = function () { stepZoom(-1); return this; };
 	map.on('dblclick', e => stepZoom(e.originalEvent.shiftKey ? -1 : 1, e.containerPoint));
