@@ -8,6 +8,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": false,
 			"length": false,
 			"warn": false,
+			"needsMod": false,
 			"help": "!help lists the commands. !help !\u003ccommand\u003e explains one.",
 			"fields": [
 				{
@@ -27,6 +28,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": false,
 			"length": false,
 			"warn": false,
+			"needsMod": false,
 			"help": "!shout \u003cmessage\u003e sends your message to everyone on the server.",
 			"fields": [
 				{
@@ -47,6 +49,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": false,
 			"length": false,
 			"warn": false,
+			"needsMod": false,
 			"help": "!whisper \u003cplayer number\u003e \u003cmessage\u003e sends a private message to that player.",
 			"fields": [
 				{
@@ -67,6 +70,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": false,
 			"length": false,
 			"warn": false,
+			"needsMod": false,
 			"help": "!players lists everyone online with their player number, for !whisper.",
 			"fields": [
 				{
@@ -87,6 +91,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": false,
 			"length": true,
 			"warn": false,
+			"needsMod": false,
 			"help": "!vote \u003cquestion\u003e starts a server-wide vote on the topic you choose. Everyone answers with !vote y or !vote n.",
 			"fields": [
 				{
@@ -118,6 +123,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": false,
 			"length": false,
 			"warn": false,
+			"needsMod": false,
 			"help": "!code sends your player code to the admins and mods online, so they can find you.",
 			"fields": [
 				{
@@ -139,6 +145,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": true,
 			"length": false,
 			"warn": false,
+			"needsMod": false,
 			"help": "!kick \u003ccode or player number\u003e \u003creason\u003e kicks that player. Their code comes from !code, their number from !players.",
 			"fields": [
 				{
@@ -169,6 +176,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": true,
 			"length": false,
 			"warn": false,
+			"needsMod": false,
 			"help": "!ban \u003ccode or player number\u003e \u003creason\u003e permanently bans that player. Their code (the last 6 characters of their GUID) comes from !code, their number from !players.",
 			"fields": [
 				{
@@ -199,6 +207,7 @@ window.RECON_PREVIEW_DATA = {
 			"announce": true,
 			"length": false,
 			"warn": true,
+			"needsMod": false,
 			"help": "!warning \u003ccode or player number\u003e \u003creason\u003e warns that player. Enough warnings in one visit and they are kicked or banned.",
 			"fields": [
 				{
@@ -259,6 +268,206 @@ window.RECON_PREVIEW_DATA = {
 					]
 				}
 			]
+		},
+		{
+			"cmd": "car",
+			"role": 3,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!car \u003cname\u003e [colour] spawns that car in front of you. !car alone lists the names.",
+			"fields": [
+				{
+					"key": "spawned",
+					"label": "Spawned (to the player)",
+					"def": "Spawning {vehicle} ({colour})",
+					"ph": [
+						"vehicle",
+						"colour"
+					]
+				},
+				{
+					"key": "list",
+					"label": "List (to the player, for !car alone or a name it doesn't have)",
+					"def": "{category}: {names}",
+					"ph": [
+						"category",
+						"names"
+					]
+				}
+			]
+		},
+		{
+			"cmd": "truck",
+			"role": 3,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!truck \u003cname\u003e [colour] spawns that truck in front of you. !truck alone lists the names.",
+			"fields": [
+				{
+					"key": "spawned",
+					"label": "Spawned (to the player)",
+					"def": "Spawning {vehicle} ({colour})",
+					"ph": [
+						"vehicle",
+						"colour"
+					]
+				},
+				{
+					"key": "list",
+					"label": "List (to the player, for !truck alone or a name it doesn't have)",
+					"def": "{category}: {names}",
+					"ph": [
+						"category",
+						"names"
+					]
+				}
+			]
+		},
+		{
+			"cmd": "boat",
+			"role": 3,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!boat \u003cname\u003e [colour] spawns that boat in front of you. !boat alone lists the names.",
+			"fields": [
+				{
+					"key": "spawned",
+					"label": "Spawned (to the player)",
+					"def": "Spawning {vehicle} ({colour})",
+					"ph": [
+						"vehicle",
+						"colour"
+					]
+				},
+				{
+					"key": "list",
+					"label": "List (to the player, for !boat alone or a name it doesn't have)",
+					"def": "{category}: {names}",
+					"ph": [
+						"category",
+						"names"
+					]
+				}
+			]
+		},
+		{
+			"cmd": "vehicle",
+			"role": 3,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!vehicle \u003cname\u003e [colour] spawns that vehicle (bikes, ATVs, helicopters and the rest) in front of you. !vehicle alone lists the names.",
+			"fields": [
+				{
+					"key": "spawned",
+					"label": "Spawned (to the player)",
+					"def": "Spawning {vehicle} ({colour})",
+					"ph": [
+						"vehicle",
+						"colour"
+					]
+				},
+				{
+					"key": "list",
+					"label": "List (to the player, for !vehicle alone or a name it doesn't have)",
+					"def": "{category}: {names}",
+					"ph": [
+						"category",
+						"names"
+					]
+				}
+			]
+		},
+		{
+			"cmd": "save",
+			"role": 1,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!save keeps everything you wear, carry and hold as your loadout, for !equip.",
+			"fields": [
+				{
+					"key": "saved",
+					"label": "Saved (to the player)",
+					"def": "Loadout saved: {count} items",
+					"ph": [
+						"count"
+					]
+				}
+			]
+		},
+		{
+			"cmd": "equip",
+			"role": 1,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!equip replaces your gear with your !save loadout, every item pristine, once you type confirm.",
+			"fields": [
+				{
+					"key": "confirm",
+					"label": "Asks to confirm (to the player)",
+					"def": "Replace your gear with your saved loadout ({count} items)? Type confirm within 30 s",
+					"ph": [
+						"count"
+					]
+				},
+				{
+					"key": "equipped",
+					"label": "Equipped (to the player)",
+					"def": "Loadout equipped: {count} items",
+					"ph": [
+						"count"
+					]
+				},
+				{
+					"key": "cancelled",
+					"label": "Not confirmed (to the player: another message, or 30 s passed)",
+					"def": "Loadout not equipped",
+					"ph": []
+				},
+				{
+					"key": "none",
+					"label": "No loadout (to the player)",
+					"def": "No loadout saved, use !save first",
+					"ph": []
+				}
+			]
+		},
+		{
+			"cmd": "remove",
+			"role": 3,
+			"cool": "0",
+			"announce": false,
+			"length": false,
+			"warn": false,
+			"needsMod": true,
+			"help": "!remove removes the vehicle your last !car, !truck, !boat or !vehicle spawned (anyone in it gets out first).",
+			"fields": [
+				{
+					"key": "removing",
+					"label": "Removing (to the player)",
+					"def": "Removing your {vehicle}",
+					"ph": [
+						"vehicle"
+					]
+				}
+			]
 		}
 	],
 	"crons": {
@@ -281,11 +490,37 @@ window.RECON_PREVIEW_DATA = {
 				"staff": "{target_name} has been banned by {player_name}: {reason}"
 			}
 		},
+		"boat": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"list": "{category}: {names}",
+				"spawned": "Spawning {vehicle} ({colour})"
+			}
+		},
+		"car": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"list": "{category}: {names}",
+				"spawned": "Spawning {vehicle} ({colour})"
+			}
+		},
 		"code": {
 			"on": true,
 			"cool": "0",
 			"msgs": {
 				"staff": "Code for {player_name} (#{player_id}): {code}"
+			}
+		},
+		"equip": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"cancelled": "Loadout not equipped",
+				"confirm": "Replace your gear with your saved loadout ({count} items)? Type confirm within 30 s",
+				"equipped": "Loadout equipped: {count} items",
+				"none": "No loadout saved, use !save first"
 			}
 		},
 		"help": {
@@ -311,11 +546,41 @@ window.RECON_PREVIEW_DATA = {
 				"entry": "{target_name}:{target_id}"
 			}
 		},
+		"remove": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"removing": "Removing your {vehicle}"
+			}
+		},
+		"save": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"saved": "Loadout saved: {count} items"
+			}
+		},
 		"shout": {
 			"on": true,
 			"cool": "10s",
 			"msgs": {
 				"msg": "({player_name}): {message}"
+			}
+		},
+		"truck": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"list": "{category}: {names}",
+				"spawned": "Spawning {vehicle} ({colour})"
+			}
+		},
+		"vehicle": {
+			"on": true,
+			"cool": "0",
+			"msgs": {
+				"list": "{category}: {names}",
+				"spawned": "Spawning {vehicle} ({colour})"
 			}
 		},
 		"vote": {

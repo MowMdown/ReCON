@@ -69,6 +69,14 @@ func handleModItems(w http.ResponseWriter, r *http.Request) {
 // server, as the mod last sent them (sent: false when it hasn't, as a mod
 // before 0.0.1i doesn't).
 func handleModVehicles(w http.ResponseWriter, r *http.Request) {
+	// ?occupied=1: only the ones with someone in them (mod 1.0.3 on), sent
+	// every second; sent false when the mod can't, and the page then reads
+	// the whole list.
+	if r.URL.Query().Get("occupied") == "1" {
+		vs, sent := OccupiedVehicles(time.Now())
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "vehicles": vs, "sent": sent})
+		return
+	}
 	vs, at, sent := Vehicles(time.Now())
 	out := map[string]any{"ok": true, "vehicles": vs, "sent": sent}
 	if sent {
@@ -153,6 +161,13 @@ func handleModPlayer(w http.ResponseWriter, r *http.Request) {
 		Watch(guid, now)
 		if inv, ok := InventoryOf(guid, now); ok {
 			out["inventory"] = inv
+		}
+	}
+	// Their last known inventory (at most about 5 min old while they're
+	// online), shown until the live one comes in, or while they're offline.
+	if _, have := out["inventory"]; !have {
+		if li, ok, err := LastInventory(guid); err == nil && ok {
+			out["lastInventory"] = li
 		}
 	}
 	if prev, ok := Previous(guid); ok {

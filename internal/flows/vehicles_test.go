@@ -137,7 +137,7 @@ func TestVehicleCommandRolesAndMod(t *testing.T) {
 
 	vt.connected = true
 	typ(roleMod, "!help")
-	eq(t, "help with mod", vt.said, "Commands: "+everyone+", !kick, !ban, !warning, !car, !truck, !boat, !vehicle, !remove. Type !help !<command> for details.")
+	eq(t, "help with mod", vt.said, "Commands: "+everyone+", !kick, !ban, !warning, !car, !truck, !boat, !vehicle, !save, !equip, !remove. Type !help !<command> for details.")
 }
 
 func TestRemoveCommand(t *testing.T) {

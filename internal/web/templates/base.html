@@ -60,6 +60,15 @@ html[data-theme]:not([data-theme="default"]) .verline { color: var(--color-neutr
 .importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
 .importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
 .importbox .buttons { margin-top: 12px; flex: none; }
+/* Asked again in place (inlineConfirm): Cancel and the red action where the
+   button was, never a browser pop-up. Messages: a line in the page or form. */
+button.danger { color: #f28b82; border-color: #5c3533; }
+button.danger.go { background: #5c3533; color: #fff; border-color: #f28b82; }
+.askpair { display: inline-flex; gap: 6px; }
+.pagemsg, .formerr { margin: 6px 0; font-size: 13px; white-space: pre-line; }
+.pagemsg:empty, .formerr:empty { display: none; }
+.pagemsg.bad, .formerr { color: #f28b82; }
+.pagemsg.warn { color: #fdd663; }
 </style>{{end}}
 
 {{define "navlinks"}}{{/* The page links in every page's nav; the dot is the page
@@ -82,11 +91,38 @@ html[data-theme]:not([data-theme="default"]) .verline { color: var(--color-neutr
 <script src="assets/recon-icons.js" defer></script>{{end}}
 
 {{define "statusbar"}}<div class="statusbar">
-	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
-	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
+	<span>RCON Status - <b id="rconStatus" class="st">Loading...</b><span id="rconRetry" class="retry"></span></span>
+	<span>WebGUI Status - <b id="webStatus" class="st">Loading...</b></span>
 </div>
 <div class="verline" id="verLine" aria-label="Versions"></div>
 <script>
+// inlineConfirm asks again in place: the button hides and Cancel and the
+// red action (label) take its spot; Cancel puts it back, the action runs go.
+function inlineConfirm(btn, label, go) {
+	if (!btn || btn.dataset.asking) return;
+	btn.dataset.asking = '1';
+	var wrap = document.createElement('span');
+	wrap.className = 'askpair';
+	var no = document.createElement('button'), yes = document.createElement('button');
+	no.type = yes.type = 'button';
+	no.textContent = 'Cancel';
+	yes.textContent = label;
+	yes.className = 'danger go';
+	wrap.append(no, yes);
+	function done() { wrap.remove(); btn.hidden = false; delete btn.dataset.asking; }
+	no.onclick = function(e) { e.stopPropagation(); done(); };
+	yes.onclick = function(e) { e.stopPropagation(); done(); go(); };
+	btn.hidden = true;
+	btn.after(wrap);
+}
+// pageMsg shows text in the line with that id (kind: "bad", "warn" or "").
+function pageMsg(id, text, kind) {
+	var el = document.getElementById(id);
+	if (!el) return;
+	el.textContent = text || '';
+	el.className = el.className.replace(/\s*\b(bad|warn)\b/g, '') + (kind ? ' ' + kind : '');
+}
+
 // Status bar shown on every page. RCON is the game server as ReCON's
 // 5-second player check last saw it (GET /api/status): Connected, or
 // "Unavailable - Retrying..." with a grey countdown to ReCON's next try

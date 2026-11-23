@@ -51,7 +51,6 @@ table.vars td.mono { font-family: ui-monospace, Menlo, Consolas, monospace; whit
 table.vars td.v { overflow-wrap: anywhere; white-space: normal; }
 table.vars .unk { color: #f28b82; }
 table.vars td.from { color: #9aa0a6; }
-.devnote { color: #888; font-size: 12px; margin: 0 0 12px; }
 html[data-theme]:not([data-theme="default"]) .devrow.sel { background: color-mix(in srgb, var(--color-accent) 14%, transparent); box-shadow: inset 3px 0 0 var(--color-accent); }
 html[data-theme]:not([data-theme="default"]) details.src .kind.flow { color: var(--color-success, #81c995); border-color: color-mix(in srgb, var(--color-success, #81c995) 45%, transparent); }
 html[data-theme]:not([data-theme="default"]) .devlist, html[data-theme]:not([data-theme="default"]) details.src, html[data-theme]:not([data-theme="default"]) details.src pre, html[data-theme]:not([data-theme="default"]) details.src .tw,
@@ -63,8 +62,6 @@ html[data-theme]:not([data-theme="default"]) table.vars th, html[data-theme]:not
 <body>
 <nav>{{template "navlinks" ""}}</nav>
 {{template "statusbar" .}}
-<div class="top"><h1>Developer</h1></div>
-<p class="devnote">Every player and everything ReCON holds about them, raw: <b>flow</b> is what each flow {variable} would be right now, <b>memory</b> is what ReCON keeps while it runs, <b>db</b> is every row in players.db, <b>ext</b> is the Steam cache and GeoIP. Nothing is trimmed. Read only; press Refresh to read it again.</p>
 <div class="dev">
 	<div class="devlist">
 		<div class="tools"><input id="devq" type="search" placeholder="Name, GUID, IP or SteamID" autocomplete="off"></div>
@@ -80,8 +77,8 @@ html[data-theme]:not([data-theme="default"]) table.vars th, html[data-theme]:not
 <script>
 (function () {
 	var players = [], filter = 'all', current = '', data = null, lastJSON = '';
-	// Which sections are open, by title; these start open.
-	var open = { 'Flow {variables}': true, 'Player tracker (game tracker)': true, 'players': true, 'active_sessions': true };
+	// Which sections are open, by title.
+	var open = {}; // every section starts collapsed
 	var listEl = document.getElementById('devrows'), qEl = document.getElementById('devq');
 
 	function el(tag, cls, text) {

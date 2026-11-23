@@ -1,6 +1,7 @@
 package livemap
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -60,5 +61,31 @@ func TestRemoveEntityValidated(t *testing.T) {
 	}
 	if _, err := QueueWorld(Command{Action: "removeEntity", Text: "1:2:3:4", Stat: "Barrel_Green"}, now); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestPlacedDetailsBatch(t *testing.T) {
+	setup(t)
+	now := time.Now()
+	r := syncReq()
+	r.PlacedSent = true
+	r.Placed = []Placed{{ID: 7, Type: "Barrel_Green"}, {ID: 8, Type: "WoodenCrate"}}
+	Sync(r, now)
+	if got := PlacedDetails([]int{7, 8}, true, now); len(got) != 0 {
+		t.Fatalf("details before the mod sent any: %v", got)
+	}
+	reply, _ := Sync(syncReq(), now)
+	if !reflect.DeepEqual(reply.WatchPlaced, []int{7, 8}) {
+		t.Fatalf("asked for %v, want [7 8]", reply.WatchPlaced)
+	}
+	r = syncReq()
+	r.PlacedDetails = []PlacedDetail{{ID: 7, Items: []Item{{Type: "Apple"}}}, {ID: 8}}
+	Sync(r, now)
+	got := PlacedDetails([]int{7, 8}, false, now)
+	if len(got) != 2 || len(got[7].Items) != 1 || got[8].Items == nil {
+		t.Fatalf("details %+v", got)
+	}
+	if got := PlacedDetails([]int{7, 8}, true, now); len(got) != 0 {
+		t.Fatalf("asking again kept the old details: %v", got)
 	}
 }

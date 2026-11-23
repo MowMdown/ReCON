@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,6 +83,16 @@ type SyncRequest struct {
 	// The map's place names, when the reply asked for them (WantPlaces).
 	PlacesSent Flag    `json:"placesSent"`
 	Places     []Place `json:"places"`
+	// The vehicles with someone in them, every sync (mod 1.0.3 on:
+	// CrewSent), plus each once more after its last player got out.
+	CrewSent     Flag      `json:"crewSent"`
+	CrewVehicles []Vehicle `json:"crewVehicles"`
+	// Mission files the reply's WantMission asked for (eventspots.go).
+	MissionFiles []MissionFile `json:"missionFiles"`
+	// How many event spots the mod holds to check (nil: a mod before
+	// 1.0.3), and the ones it checked this sync.
+	SpotsHeld *int        `json:"spotsHeld"`
+	Spots     []SpotState `json:"spots"`
 }
 
 // WorldEvent is one of the map's dynamic events (ReCON_WorldEvent).
@@ -102,6 +113,13 @@ type Predator struct {
 	X       float64 `json:"x"`
 	Z       float64 `json:"z"`
 	Heading float64 `json:"heading"` // degrees, 0 = north, clockwise
+	// Mod 1.0.3 on (nil before): health 0-1; Behaviour is the AI's
+	// DayZAnimalBehaviourSlot, Activity its DayZAnimalBehaviourAction
+	// (-1 unknown); Attacking while it bites.
+	Health    *float64 `json:"health,omitempty"`
+	Behaviour *int     `json:"behaviour,omitempty"`
+	Activity  *int     `json:"activity,omitempty"`
+	Attacking Flag     `json:"attacking"`
 }
 
 // Place is one of the map's place names (ReCON_Place).
@@ -181,8 +199,13 @@ type PlayerState struct {
 	Vehicle         string  `json:"vehicle"`
 	HandsName       string  `json:"handsName"` // as the game shows them ("Wood Axe")
 	VehicleName     string  `json:"vehicleName"`
-	Kills           int     `json:"kills"`
-	Deaths          int     `json:"deaths"`
+	// The vehicle they are in (Vehicle.ID) and their crew position in it
+	// (nil: a mod before 1.0.3; -1: not in one); Driver when driving.
+	VehicleID int  `json:"vehicleId"`
+	Seat      *int `json:"seat,omitempty"`
+	Driver    Flag `json:"driver"`
+	Kills     int  `json:"kills"`
+	Deaths    int  `json:"deaths"`
 	// Inv: Inventory was read (only for watched players). Kept apart from
 	// the live state (see InventoryOf), so the players list stays small.
 	Inv       Flag   `json:"inv"`
@@ -288,9 +311,13 @@ type Command struct {
 	ReplaceType string `json:"replaceType,omitempty"`
 	// restore: the items to give back, as a list (in the inventory's shape),
 	// not JSON in Text: the mod's JSON reader broke on nested JSON.
-	Items   []Item  `json:"items,omitempty"`
-	Title   string  `json:"title"`
-	Seconds float64 `json:"seconds"`
+	Items []Item `json:"items,omitempty"`
+	// restore (mod 1.0.3 on): worn, pristine or "" (as saved); Clear
+	// empties their inventory first. Left out when empty, for older mods.
+	Condition string  `json:"condition,omitempty"`
+	Clear     bool    `json:"clear,omitempty"`
+	Title     string  `json:"title"`
+	Seconds   float64 `json:"seconds"`
 	// World actions (QueueWorld).
 	Transition float64 `json:"transition"`
 	Hold       float64 `json:"hold"`
@@ -320,6 +347,12 @@ type SyncReply struct {
 	WantPlaces bool `json:"wantPlaces,omitempty"`
 	// CatalogNext is 1 + the first catalog entry wanted next (0: none).
 	CatalogNext int `json:"catalogNext"`
+	// Mod 1.0.3 on only (a key an older mod doesn't know breaks its JSON
+	// reader): mission files to send, and the event spots to check
+	// (SpotsSet: SpotChecks is the new list).
+	WantMission []string    `json:"wantMission,omitempty"`
+	SpotsSet    bool        `json:"spotsSet,omitempty"`
+	SpotChecks  []SpotCheck `json:"spotChecks,omitempty"`
 }
 
 // Player is a player's live state as the pages get it.
@@ -387,6 +420,9 @@ var state struct {
 	// The map the mod last reported, kept in the database (mapstate.go), so
 	// the Live Map can show it while the mod isn't connected.
 	lastWorld string
+	// The mod sends occupied vehicles every sync (1.0.3 on).
+	crewSent bool
+	crewLast []Vehicle // the occupied ones the last sync brought
 	// The predators as last sent (nil: never, so a mod before 0.0.1l).
 	predators []Predator
 	places    []Place
@@ -428,6 +464,8 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	untracked := false
 	var forgetCars []string // chat cars !remove got rid of, forgotten after the lock
 	saveWorld := ""
+	var gotInv []Inventory // inventories the mod sent, saved as last known after the lock
+	var gotInvGUID []string
 	state.Lock()
 	if w := strings.ToLower(req.World); w != "" && w != state.lastWorld {
 		state.lastWorld, saveWorld = w, w
@@ -438,6 +476,8 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		state.catalog, state.catalogTotal, state.catalogTypes = nil, 0, nil
 		state.places, state.placesFor = nil, ""
 		state.predators, state.vehFileFor = nil, ""
+		state.crewSent = false
+		resetSpots()
 	}
 	takeCatalog(req)
 	if req.VehiclesSent {
@@ -448,6 +488,16 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		state.worldEvents = req.WorldEvents
 		if state.worldEvents == nil {
 			state.worldEvents = []WorldEvent{}
+		}
+	}
+	if req.CrewSent {
+		state.crewSent = true
+		state.crewLast = req.CrewVehicles
+		if state.crewLast == nil {
+			state.crewLast = []Vehicle{}
+		}
+		if !bool(req.VehiclesSent) && len(req.CrewVehicles) > 0 && !state.vehiclesAt.IsZero() {
+			state.vehicles = mergeVehicles(state.vehicles, req.CrewVehicles)
 		}
 	}
 	if req.PredatorsSent {
@@ -500,6 +550,8 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 				items = []Item{}
 			}
 			state.inventory[guid] = Inventory{Items: items, At: now}
+			gotInv = append(gotInv, Inventory{Items: items, At: now})
+			gotInvGUID = append(gotInvGUID, guid)
 		}
 		p.Inv, p.Inventory = false, nil
 		players[guid] = Player{GUID: guid, PlayerState: p, Illnesses: Illnesses(p.Agents)}
@@ -572,6 +624,16 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 			reply.Watch = append(reply.Watch, p.SteamID)
 		}
 	}
+	// Keep everyone's last known inventory fresh (lastinv.go).
+	online := make(map[string]string, len(players))
+	for g, p := range players {
+		online[g] = p.SteamID
+	}
+	for _, steam := range pollInventories(online, now) {
+		if !slices.Contains(reply.Watch, steam) {
+			reply.Watch = append(reply.Watch, steam)
+		}
+	}
 	sort.Strings(reply.Watch)
 	for g := range state.inventory {
 		if _, ok := players[g]; !ok {
@@ -592,7 +654,14 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	trimCommands()
 	state.Unlock()
 
+	for i, g := range gotInvGUID {
+		if err := saveLastInventory(g, "watched", gotInv[i].Items, now); err != nil {
+			log.Printf("recon-mod: saving %s's last inventory: %v", g, err)
+		}
+	}
+
 	reply.WatchPlaced = takePlaced(req, now)
+	reply.WantMission, reply.SpotsSet, reply.SpotChecks = takeSpots(req, now)
 	keepChatCars(chatCars, untracked, now)
 	for _, g := range forgetCars {
 		forgetChatCar(g)
@@ -623,6 +692,9 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 			if k.VictimGUID != "" && len(e.Inventory) > 0 {
 				if err := saveDeath(k.VictimGUID, id, e.Inventory, now); err != nil {
 					log.Printf("recon-mod: saving %s's inventory at death: %v", k.VictimName, err)
+				}
+				if err := saveLastInventory(k.VictimGUID, "death", e.Inventory, now); err != nil {
+					log.Printf("recon-mod: saving %s's last inventory: %v", k.VictimName, err)
 				}
 			}
 		}
@@ -978,6 +1050,13 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 	}
 	c.SteamID = p.SteamID
 	back := false
+	if c.Action == "restore" && !modAtLeast(state.mod, "1.0.3") {
+		// An older mod doesn't know these keys (its JSON reader would fail).
+		if c.Clear {
+			return CommandStatus{}, errors.New("replacing their gear needs recon-mod 1.0.3")
+		}
+		c.Condition = ""
+	}
 	switch c.Action {
 	case "teleportTo":
 		t, ok := state.players[strings.ToLower(c.Target)]
@@ -1045,7 +1124,7 @@ func add(c Command, guid string, now time.Time) CommandStatus {
 }
 
 // WorldActions are the commands on the world rather than a player.
-var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true, "deleteVehicle": true, "spawnAt": true, "removeEntity": true}
+var WorldActions = map[string]bool{"weather": true, "weatherMode": true, "storm": true, "rainThresholds": true, "date": true, "freezeTime": true, "deleteVehicle": true, "deleteAnimal": true, "spawnAt": true, "removeEntity": true}
 
 // weatherMax is each weather part's largest value.
 var weatherMax = map[string]float64{"overcast": 1, "rain": 1, "fog": 1, "snow": 1, "windSpeed": 50, "windDir": 360}
@@ -1093,6 +1172,11 @@ func checkWorld(c *Command) error {
 		// Text is the vehicle's id (Vehicle.ID).
 		if _, err := strconv.Atoi(c.Text); err != nil {
 			return errors.New("pick a vehicle")
+		}
+	case "deleteAnimal":
+		// Text is the predator's id (Predator.ID); mod 1.0.3 on.
+		if _, err := strconv.Atoi(c.Text); err != nil {
+			return errors.New("pick an animal")
 		}
 	case "spawnAt":
 		// Text is the class, Value how many, X and Z where (mod 0.0.1j on).

@@ -9,6 +9,7 @@ import (
 	"github.com/MowMdown/ReCON/internal/flows"
 	"github.com/MowMdown/ReCON/internal/game"
 	"github.com/MowMdown/ReCON/internal/geoip"
+	"github.com/MowMdown/ReCON/internal/livemap"
 	"github.com/MowMdown/ReCON/internal/steam"
 )
 
@@ -109,6 +110,18 @@ func handleDevPlayer(w http.ResponseWriter, r *http.Request) {
 		}
 		sources = append(sources, devSource{"db", t.Table, note, data})
 	}
+	invNote, invData := "none kept: ReCON gets a player's inventory while their dialog is open (Live Map or Players) and when they die", any(nil)
+	if inv, ok, err := livemap.LastInventory(guid); err != nil {
+		invNote = "reading it: " + err.Error()
+	} else if ok {
+		why := "read while they were online"
+		if inv.Why == "death" {
+			why = "what they died with"
+		}
+		invNote = strconv.Itoa(inv.Count) + " items, " + inv.At.Local().Format("2006-01-02 15:04:05") + " (" + why + ")"
+		invData = inv
+	}
+	sources = append(sources, devSource{"db", "Last known inventory (last_inventory)", invNote, invData})
 	sources = append(sources, devSource{"ext", "Steam (cache)", "memory only: nothing is fetched from Steam here", steam.Dev(guid)})
 	ips := map[string]string{}
 	for _, t := range tables {

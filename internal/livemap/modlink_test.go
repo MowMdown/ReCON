@@ -317,6 +317,12 @@ func openTestDB(t *testing.T) {
 	if err := openInvSaves(d); err != nil {
 		t.Fatal(err)
 	}
+	if err := openLastInv(d); err != nil {
+		t.Fatal(err)
+	}
+	lastInvSent.Lock()
+	lastInvSent.m = map[string]lastInvMark{}
+	lastInvSent.Unlock()
 }
 
 // md5("BE" + the SteamID64 as 8 little-endian bytes), worked out apart

@@ -44,6 +44,9 @@ td.act button:last-child { margin-right: 0; }
 .top h1 { margin: 0; }
 .top button { margin-right: 0; }
 .statusbar b { font-weight: 600; }
+ 
+.verline { position: fixed; right: 10px; bottom: 6px; z-index: 900; font-size: 11px; color: #777; opacity: .75; pointer-events: none; white-space: nowrap; }
+html[data-theme]:not([data-theme="default"]) .verline { color: var(--color-neutral-500); }
 .st.connected { color: #81c995; }
 .st.retrying { color: #fdd663; }
 .st.unavailable { color: #f28b82; }
@@ -61,6 +64,14 @@ td.act button:last-child { margin-right: 0; }
 .importbox .pick .info { color: #aaa; font-size: 12px; white-space: nowrap; }
 .importbox .pick .taken { color: #fdd663; font-size: 12px; white-space: nowrap; }
 .importbox .buttons { margin-top: 12px; flex: none; }
+ 
+button.danger { color: #f28b82; border-color: #5c3533; }
+button.danger.go { background: #5c3533; color: #fff; border-color: #f28b82; }
+.askpair { display: inline-flex; gap: 6px; }
+.pagemsg, .formerr { margin: 6px 0; font-size: 13px; white-space: pre-line; }
+.pagemsg:empty, .formerr:empty { display: none; }
+.pagemsg.bad, .formerr { color: #f28b82; }
+.pagemsg.warn { color: #fdd663; }
 </style>
 <link rel="stylesheet" href="assets/leaflet/leaflet.css">
 <script src="assets/leaflet/leaflet.js"></script>
@@ -119,6 +130,7 @@ img.flag { display: inline-block; width: 16px; height: 12px; margin-right: 7px; 
  
 .badge.role-1 { color: #111; background: #fdd663; }
 .badge.role-2 { color: #111; background: #f28b82; }
+.badge.role-3 { color: #111; background: #8ab4f8; }
 td .badge { margin-left: 6px; vertical-align: 1px; }
 
  
@@ -253,10 +265,38 @@ html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { backgrou
 <body>
 <nav><a href="/server">Server Info</a><a class="active" href="/players">Players</a><a href="/bans">Server Bans</a><a href="/flows">Flows</a><a href="#" id="resetCols">Reset columns</a></nav>
 <div class="statusbar">
-	<span>RCON Status - <b id="rconStatus" class="st">Checking...</b><span id="rconRetry" class="retry"></span></span>
-	<span>WebGUI Status - <b id="webStatus" class="st">Checking...</b></span>
+	<span>RCON Status - <b id="rconStatus" class="st">Loading...</b><span id="rconRetry" class="retry"></span></span>
+	<span>WebGUI Status - <b id="webStatus" class="st">Loading...</b></span>
 </div>
+<div class="verline" id="verLine" aria-label="Versions"></div>
 <script>
+
+
+function inlineConfirm(btn, label, go) {
+	if (!btn || btn.dataset.asking) return;
+	btn.dataset.asking = '1';
+	var wrap = document.createElement('span');
+	wrap.className = 'askpair';
+	var no = document.createElement('button'), yes = document.createElement('button');
+	no.type = yes.type = 'button';
+	no.textContent = 'Cancel';
+	yes.textContent = label;
+	yes.className = 'danger go';
+	wrap.append(no, yes);
+	function done() { wrap.remove(); btn.hidden = false; delete btn.dataset.asking; }
+	no.onclick = function(e) { e.stopPropagation(); done(); };
+	yes.onclick = function(e) { e.stopPropagation(); done(); go(); };
+	btn.hidden = true;
+	btn.after(wrap);
+}
+
+function pageMsg(id, text, kind) {
+	var el = document.getElementById(id);
+	if (!el) return;
+	el.textContent = text || '';
+	el.className = el.className.replace(/\s*\b(bad|warn)\b/g, '') + (kind ? ' ' + kind : '');
+}
+
 
 
 
@@ -312,6 +352,7 @@ var setStatusCount;
 			waiting = !!d.waiting;
 			show('webStatus', 'connected');
 			show('rconStatus', d.rcon);
+			document.getElementById('verLine').textContent = 'ReCON ' + (d.version || '?') + ' · recon-mod ' + (d.mod || '—');
 		} catch (e) {
 			fails++;
 			retryAt = 0;
@@ -327,9 +368,6 @@ var setStatusCount;
 	setInterval(tickRetry, 1000);
 })();
 </script>
-<div class="top">
-	<h1>DayZ Players</h1>
-</div>
 <div class="toolbar">
 	<div>
 		<button type="button" class="icon-btn hdrbtn" onclick="openRconSettings()" title="RCON Settings">
@@ -344,6 +382,7 @@ var setStatusCount;
 		</button>
 	</div>
 </div>
+<div class="pagemsg" id="playersMsg" role="status"></div>
 <div class="tablewrap pin">
 <table id="onlineTable">
 	<colgroup>
@@ -471,6 +510,7 @@ var setStatusCount;
 		</div>
 		<label>Reason</label>
 		<input id="text" type="text" maxlength="200" placeholder="Short message shown to the player">
+		<div class="formerr" id="modalErr" role="alert"></div>
 		<div class="buttons">
 			<button onclick="closeModal()">Cancel</button>
 			<button id="submit"></button>
@@ -563,7 +603,12 @@ function esc(s) {
 }
 
 
-const ROLE_NAMES = ['Player', 'Mod', 'Admin'];
+
+
+const ROLE_NAMES = ['Player', 'Mod', 'Admin', 'Vehicles'];
+const ROLE_ORDER = [0, 3, 1, 2];
+
+const ROLE_SAVED = ['a Player', 'a Mod', 'an Admin', 'a Vehicles player'];
 
 
 
@@ -778,6 +823,7 @@ function openModal(id, a, name, guid) {
 	document.getElementById('durationWrap').style.display = a === 'ban' ? 'block' : 'none';
 	document.getElementById('text').value = '';
 	document.getElementById('minutes').value = '0';
+	pageMsg('modalErr', '');
 	document.getElementById('modal').style.display = 'flex';
 }
 
@@ -785,8 +831,9 @@ function closeModal() { document.getElementById('modal').style.display = 'none';
 
 document.getElementById('submit').onclick = async () => {
 	let body = { reason: document.getElementById('text').value, minutes: parseInt(document.getElementById('minutes').value, 10) };
+	pageMsg('modalErr', '');
 	if (action === 'ban' && (!Number.isInteger(body.minutes) || body.minutes < 0)) {
-		alert('Duration must be a whole number of minutes (0 = permanent).');
+		pageMsg('modalErr', 'Duration must be a whole number of minutes (0 = permanent).');
 		return;
 	}
 	
@@ -801,12 +848,13 @@ document.getElementById('submit').onclick = async () => {
 	});
 	let d = await r.json();
 	if (!d.ok) {
-		alert(d.error || d.guid_error || 'Action failed');
+		pageMsg('modalErr', d.error || d.guid_error || 'Action failed');
 		return;
 	}
 	closeModal();
 	if (action === 'ban' && d.online !== false && d.kicked === false) {
-		alert('Player was banned, but the kick was not confirmed.');
+		pageMsg('playersMsg', 'Player was banned, but the kick was not confirmed.', 'warn');
+		if (det) pageMsg('detErr', 'Banned, but the kick was not confirmed.');
 	}
 	if (action === 'ban') await bansChanged();
 	refresh();
@@ -1345,8 +1393,9 @@ function renderDetails(keepDraft) {
 
 const ROLE_INFO = [
 	{ tag: 'normal user (default)', can: ['Can use ', ['!help'], ', ', ['!shout'], ', ', ['!whisper'], ', ', ['!players'], ', ', ['!vote'], ' and ', ['!code'], '.'] },
-	{ tag: 'moderator', can: ['Everything a Player can, plus ', ['!kick'], ' and ', ['!ban'], ' on Players. Gets every ', ['!code'], ' and every kick and ban notice.'] },
-	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['!kick'], ' and ', ['!ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] }
+	{ tag: 'moderator', can: ['Everything a Vehicles player can, plus ', ['!kick'], ', ', ['!ban'], ' and ', ['!warning'], ' on Players and Vehicles players. Gets every ', ['!code'], ' and every kick and ban notice.'] },
+	{ tag: 'administrator', can: ['Everything a Mod can, plus ', ['!kick'], ' and ', ['!ban'], ' on Mods. Admins can\'t kick or ban other Admins from chat.'] },
+	{ tag: 'vehicle spawner', can: ['Everything a Player can, plus ', ['!car'], ', ', ['!truck'], ', ', ['!boat'], ' and ', ['!vehicle'], ' (with recon-mod on the server). One vehicle at a time: the next replaces it.'] }
 ];
 
 function renderRoleBadge() {
@@ -1362,7 +1411,8 @@ function renderRoles() {
 	box.textContent = '';
 	if (!det) return;
 	let cur = det.player.role || 0;
-	ROLE_INFO.forEach(function (info, v) {
+	ROLE_ORDER.forEach(function (v) {
+		let info = ROLE_INFO[v];
 		let input = document.createElement('input');
 		input.type = 'radio';
 		input.name = 'role';
@@ -1407,7 +1457,7 @@ async function setRole(v) {
 		if (!d.ok) throw new Error(d.error || 'not saved');
 		if (det && det.guid === guid) det.player.role = d.role;
 		st.className = 'saved';
-		st.textContent = 'Saved: ' + name + ' is now ' + (v === 0 ? 'a Player' : v === 1 ? 'a Mod' : 'an Admin');
+		st.textContent = 'Saved: ' + name + ' is now ' + ROLE_SAVED[v];
 		refresh();
 	} catch (e) {
 		st.className = 'bad';
@@ -1516,19 +1566,22 @@ document.getElementById('detBan').onclick = async function () {
 		openModal(p.online ? p.id : -1, 'ban', p.name, det.guid);
 		return;
 	}
-	if (!confirm('Unban ' + p.name + '?')) return;
 	let btn = this;
-	btn.disabled = true;
-	try {
-		let d = await (await fetch('/api/bans/' + encodeURIComponent(det.guid) + '/unban', { method: 'POST' })).json();
-		if (!d.ok) alert(d.error || 'Unban failed');
-	} catch (e) {
-		alert('ReCON could not be reached; the player was not unbanned.');
-	} finally {
-		btn.disabled = false;
-	}
-	await bansChanged();
-	refresh();
+	inlineConfirm(btn, 'Unban', async function () {
+		let err = document.getElementById('detErr');
+		err.textContent = '';
+		btn.disabled = true;
+		try {
+			let d = await (await fetch('/api/bans/' + encodeURIComponent(det.guid) + '/unban', { method: 'POST' })).json();
+			if (!d.ok) err.textContent = d.error || 'Unban failed';
+		} catch (e) {
+			err.textContent = 'ReCON could not be reached; the player was not unbanned.';
+		} finally {
+			btn.disabled = false;
+		}
+		await bansChanged();
+		refresh();
+	});
 };
 
 
@@ -1548,7 +1601,7 @@ async function loadDetSteam(refresh, quiet) {
 	let box = document.getElementById('detSteam');
 	let btn = document.getElementById('steamRefresh');
 	if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
-	else if (!quiet) { box.textContent = ''; box.append(steamHint('Loading the Steam profile...')); }
+	else if (!quiet) { box.textContent = ''; box.append(steamHint('Loading...')); }
 	let d = await steamCall('/api/players/' + encodeURIComponent(guid) + '/steam' + (refresh ? '?refresh=1' : ''), { cache: 'no-store' });
 	if (detOpenGuid !== guid) return; 
 	renderSteam(d);
