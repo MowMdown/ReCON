@@ -1087,9 +1087,10 @@ function setWorld(w, s) {
 	L.polyline([[0, 0], [0, size], [size, size], [size, 0], [0, 0]], { className: 'gridedge', weight: 1, interactive: false }).addTo(gridLayer);
 	map.setMaxBounds([[-size * 0.25, -size * 0.25], [size * 1.25, size * 1.25]]);
 	limitZoomOut();
-	// The whole map once, when it is first known; never again on its own
-	// (a player joining used to zoom the map back out).
-	if (!fitted) { map.fitBounds([[0, 0], [size, size]]); fitted = true; }
+	// The whole map (Fit) when the page first knows the map, and when the
+	// server's map changes; never on its own otherwise (a player joining
+	// used to zoom the map back out).
+	if (!fitted || newWorld) { map.invalidateSize({ pan: false }); map.fitBounds([[0, 0], [size, size]], { animate: false }); fitted = true; }
 	drawLabels();
 }
 
