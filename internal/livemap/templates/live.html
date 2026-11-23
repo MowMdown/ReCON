@@ -817,12 +817,13 @@ function barMetres(z) {
 	return SCALE_PX / Math.pow(2, z);
 }
 // stepZoom zooms one step in (dir 1) or out (dir -1), about the point on
-// screen given (default: the centre). Past the last step: as far as the
-// map goes (out: Fit).
+// screen given (default: the centre). Out past the last step: Fit.
 function stepZoom(dir, around) {
 	const cur = barMetres();
 	const next = dir > 0 ? [...SCALE_STEPS].reverse().find(m => m < cur * 0.99) : SCALE_STEPS.find(m => m > cur * 1.01);
-	const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), next ? zoomForBar(next) : dir > 0 ? map.getMaxZoom() : map.getMinZoom()));
+	// Out past the last step: Fit, the whole map in the middle.
+	if (dir < 0 && !next) { fitAll(); return; }
+	const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), next ? zoomForBar(next) : map.getMaxZoom()));
 	if (Math.abs(z - map.getZoom()) < 1e-6) return;
 	if (around) map.setZoomAround(around, z); else map.setZoom(z);
 }
