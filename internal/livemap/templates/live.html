@@ -809,9 +809,10 @@ api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).ca
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {};
 
 // Opening a popup never moves the map (every popup has autoPan off). One that
-// would open under the map's button bar opens below its marker instead (if it
-// fits, or there is more room below) and stays below, as its marker moves or
-// the map is panned, until it reaches the map's bottom edge; one past the map's left or right
+// would open under the map's button bar opens below its marker instead, if it
+// fits there, and stays below, as its marker moves or the map is panned,
+// until it reaches the map's bottom edge. One that fits neither way stays
+// above, so it never flips back and forth. One past the map's left or right
 // edge slides its body back inside, its tip still on the marker.
 const POPUP_TOP = 50, POPUP_GAP = 8;
 (function () {
@@ -832,7 +833,7 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 		const base = this._baseOffset || (this._baseOffset = L.point(this.options.offset));
 		const y = m.latLngToContainerPoint(this._latlng).y, h = el.offsetHeight, H = m.getSize().y;
 		const above = y + base.y - 20 - h, below = y + POPUP_GAP + 20 + h;
-		const flip = this._flipped && below <= H - 6 || above < POPUP_TOP && (below <= H - 6 || H - y > y - POPUP_TOP);
+		const flip = below <= H - 6 && (this._flipped || above < POPUP_TOP);
 		this._flipped = flip;
 		this.options.offset = flip ? [base.x, POPUP_GAP + 20 + h] : [base.x, base.y];
 		el.classList.toggle('flipped', flip);
