@@ -880,7 +880,7 @@ function drawScale() {
 	document.getElementById('scaleSpan').textContent = km(span) + ' across';
 }
 function initMap() {
-	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
+	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, maxBoundsViscosity: 1, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
 	stepWheel();
 	setTouchDrag();
 	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled());
@@ -1154,8 +1154,7 @@ function fitZoom() {
 }
 // fitMap shows the whole map, centred (Leaflet drops a fit made mid zoom
 // animation, so it waits for one to end). Unanimated, it also resets the
-// bounds the map can be dragged within: set before the fit, they would start
-// a pan back inside them that undoes it.
+// map's edges (see setEdges).
 function fitMap(animate) {
 	const v = map.getSize();
 	if (!(v.x > 0 && v.y > 0)) return;
@@ -1163,16 +1162,21 @@ function fitMap(animate) {
 	const b = mapBounds();
 	fitZoom();
 	if (animate) { map.fitBounds(b); return; }
-	map.setMaxBounds(L.latLngBounds([]));
+	setEdges(false);
 	map.fitBounds(b, { animate: false });
-	map.setMaxBounds(b.pad(0.25));
+	setEdges(true);
 }
+// setEdges makes the map picture's edges a hard stop: an edge can't be dragged
+// or zoomed inside the view, and a map smaller than the view stays centred.
+// Off while the view is set: Leaflet's pan back inside them is animated and
+// would undo it.
+function setEdges(on) { map.setMaxBounds(on ? mapBounds() : L.latLngBounds([])); }
 // mapChanged keeps the view right after the map's edges change: fitted again
 // when asked or already at Fit, otherwise only its limits are updated.
 function mapChanged(refit) {
 	if (refit || atFit()) { fitMap(); return; }
 	fitZoom();
-	map.setMaxBounds(mapBounds().pad(0.25));
+	setEdges(true);
 }
 // On a touch screen one finger scrolls the page and two move the map,
 // except in full screen, where one finger moves it too.
@@ -1211,15 +1215,22 @@ function hideHint(id) { clearTimeout(hintTimers[id]); document.getElementById(id
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
-	const c = map.getCenter(), wasFit = atFit();
+	const c = map.getCenter(), z = map.getZoom(), wasFit = atFit();
 	wrap.classList.toggle('full', on);
 	document.body.style.overflow = on ? 'hidden' : '';
 	const b = document.getElementById('fullBtn');
 	b.textContent = on ? 'Exit' : 'Full';
 	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
-	map.invalidateSize({ pan: false }); // at Fit, its resize fits again
-	if (on) fillWidth(); // full screen opens at Fill
-	else if (!wasFit) map.setView(c, map.getZoom(), { animate: false });
+	// Leaflet fires moveend before resize, so with the edges on its pan back
+	// inside them would start before the view is set. Full opens at Fill; Exit
+	// fits again, or goes back to where the map was.
+	setEdges(false);
+	map.invalidateSize({ pan: false });
+	if (on) fillWidth();
+	else if (wasFit) fitMap();
+	else map.setView(c, Math.max(z, map.getMinZoom()), { animate: false });
+	setEdges(true);
+	drawScale();
 	setTouchDrag();
 }
 // ---- Vehicles ---------------------------------------------------------------
