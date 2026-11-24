@@ -159,6 +159,12 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .mapbar .pick[hidden] { display: none; }
 .mapbar button[hidden] { display: none; }
 #map.picking, #map.picking .leaflet-interactive { cursor: crosshair; }
+/* Zoom to an area: the button above +, and the box being drawn. One finger
+   draws on a touch screen while it is on. */
+#map.boxing, #map.boxing .leaflet-interactive { cursor: crosshair; touch-action: none; }
+#map .zoombox a { display: flex; align-items: center; justify-content: center; color: #333; }
+#map .zoombox a.on { background: var(--lm-sel); color: var(--lm-text-hi); }
+.zoomrect { position: absolute; z-index: 800; box-sizing: border-box; border: 1.5px dashed var(--lm-accent); background: color-mix(in srgb, var(--lm-accent) 15%, transparent); pointer-events: none; }
 .ctx .muted { padding: 2px 8px; }
 #sModal .box { width: min(900px, 96vw); }
 #sModal .splist { max-height: min(640px, 62vh); }
@@ -803,10 +809,10 @@ api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).ca
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {};
 
 // Opening a popup never moves the map (every popup has autoPan off). One that
-// would open under the map's button bar opens below its marker instead (if it
+// would go past the map's top edge opens below its marker instead (if it
 // fits, or there is more room below), and one past the map's left or right
 // edge slides its body back inside, its tip still on the marker.
-const POPUP_TOP = 50, POPUP_GAP = 8;
+const POPUP_TOP = 6, POPUP_GAP = 8;
 (function () {
 	// The close button goes inside the popup's body (Leaflet puts it beside
 	// it), so it stays in the body's corner wherever the body is.
@@ -914,12 +920,20 @@ function drawScale() {
 }
 function initMap() {
 	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, maxBoundsViscosity: 0.5, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
-	// Springing back inside the edges takes 0.5 s (Leaflet's pan: 0.25 s).
-	map._panInsideMaxBounds = function () { if (!this._enforcingBounds) this.panInsideBounds(this.options.maxBounds, { duration: 0.5 }); };
+	// Springing back inside the edges waits 0.2 s, then takes 0.5 s (Leaflet:
+	// at once, 0.25 s); grabbing or zooming the map again in the wait cancels it.
+	map._panInsideMaxBounds = function () {
+		clearTimeout(this._bounceTimer);
+		if (this._enforcingBounds) return;
+		this._bounceTimer = setTimeout(() => { if (this.options.maxBounds) this.panInsideBounds(this.options.maxBounds, { duration: 0.5 }); }, 200);
+	};
+	map.on('dragstart zoomstart', () => clearTimeout(map._bounceTimer));
 	stepWheel();
 	setTouchDrag();
-	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled());
+	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled() && !boxMode);
 	L.control.zoom({ position: 'bottomright' }).addTo(map);
+	new BoxControl().addTo(map); // added after +/−, so it sits above them
+	initBoxZoom();
 	// Stacking, top first: players, vehicles/predators/placed, towns,
 	// events/deaths, grid numbers; then grid lines (overlay pane, 400) and
 	// the picture. Popups (700) stay above all.
@@ -1227,8 +1241,73 @@ function mapChanged(refit) {
 // except in full screen, where one finger moves it too.
 const TOUCH = matchMedia('(pointer: coarse)').matches;
 function setTouchDrag() {
-	if (!TOUCH || !map) return;
-	if (document.querySelector('.mapwrap').classList.contains('full')) map.dragging.enable(); else map.dragging.disable();
+	if (!map) return;
+	if (boxMode) map.dragging.disable(); // a drag draws a box instead
+	else if (!TOUCH || document.querySelector('.mapwrap').classList.contains('full')) map.dragging.enable();
+	else map.dragging.disable();
+}
+
+// ---- Zoom to an area ----------------------------------------------------------
+// The button above + switches the map between moving it (drag) and zooming to
+// an area (drag a box around it; letting go zooms to fit the box). It stays on
+// until clicked again or Esc. A click without a drag still opens a marker.
+let boxMode = false, boxEndedAt = 0;
+const BoxControl = L.Control.extend({
+	options: { position: 'bottomright' },
+	onAdd() {
+		const bar = L.DomUtil.create('div', 'leaflet-bar zoombox'), a = L.DomUtil.create('a', '', bar);
+		a.href = '#'; a.id = 'boxBtn'; a.setAttribute('role', 'button');
+		a.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
+			'<rect x="2" y="2" width="12" height="12" rx="1" stroke-dasharray="2.5 2"/><path d="M8 5.5v5M5.5 8h5"/></svg>';
+		L.DomEvent.disableClickPropagation(bar);
+		L.DomEvent.on(a, 'click', e => { L.DomEvent.preventDefault(e); setBoxMode(!boxMode); });
+		return bar;
+	},
+	onRemove() { },
+});
+function setBoxMode(on) {
+	boxMode = on;
+	const b = document.getElementById('boxBtn');
+	if (b) {
+		b.classList.toggle('on', on);
+		b.setAttribute('aria-pressed', on ? 'true' : 'false');
+		b.title = on ? 'Drag a box to zoom to it; click to move the map again (Esc)' : 'Zoom to an area: drag a box around it';
+	}
+	map.getContainer().classList.toggle('boxing', on);
+	setTouchDrag();
+}
+// initBoxZoom draws the box while boxMode is on and zooms to it on release.
+function initBoxZoom() {
+	const el = map.getContainer();
+	let start = null, rect = null;
+	const at = e => { const r = el.getBoundingClientRect(); return L.point(e.clientX - r.left, e.clientY - r.top); };
+	const stop = () => { if (rect) { rect.remove(); rect = null; } start = null; };
+	el.addEventListener('pointerdown', e => {
+		if (!boxMode || e.button !== 0) return;
+		if (start) { stop(); return; } // a second finger: a pinch, not a box
+		if (e.target.closest('.leaflet-control, .leaflet-popup')) return;
+		start = { from: at(e), to: null, id: e.pointerId };
+	});
+	el.addEventListener('pointermove', e => {
+		if (!start || e.pointerId !== start.id) return;
+		const p = at(e);
+		if (!rect && p.distanceTo(start.from) < 6) return; // not a drag yet: maybe a click on a marker
+		if (!rect) { rect = L.DomUtil.create('div', 'zoomrect', el); el.setPointerCapture(e.pointerId); }
+		start.to = p;
+		const min = L.point(Math.min(p.x, start.from.x), Math.min(p.y, start.from.y));
+		Object.assign(rect.style, { left: min.x + 'px', top: min.y + 'px', width: Math.abs(p.x - start.from.x) + 'px', height: Math.abs(p.y - start.from.y) + 'px' });
+	});
+	const end = e => {
+		if (!start || e.pointerId !== start.id) return;
+		const s = start, drew = !!rect;
+		stop();
+		if (!drew) return;
+		boxEndedAt = Date.now(); // the click that follows the drag isn't a click on the map
+		if (e.type === 'pointerup') map.fitBounds(L.latLngBounds(map.containerPointToLatLng(s.from), map.containerPointToLatLng(s.to)));
+	};
+	el.addEventListener('pointerup', end);
+	el.addEventListener('pointercancel', end);
+	el.addEventListener('click', e => { if (Date.now() - boxEndedAt < 400) { e.stopPropagation(); e.preventDefault(); } }, true);
 }
 // watchTouches shows the two-finger hint on a one-finger drag: never for a
 // gesture that ever had two fingers, nor for a finger that has barely moved.
@@ -1260,18 +1339,20 @@ function hideHint(id) { clearTimeout(hintTimers[id]); document.getElementById(id
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
-	const c = map.getCenter(), z = map.getZoom(), wasFit = atFit();
+	const c = map.getCenter(), z = map.getZoom(), wasFit = atFit(), pastFill = z > fillZoom() + 1e-6;
 	wrap.classList.toggle('full', on);
 	document.body.style.overflow = on ? 'hidden' : '';
 	const b = document.getElementById('fullBtn');
 	b.textContent = on ? 'Exit' : 'Full';
 	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
 	// Leaflet fires moveend before resize, so with the edges on its pan back
-	// inside them would start before the view is set. Full opens at Fill; Exit
-	// fits again, or goes back to where the map was.
+	// inside them would start before the view is set. Full opens at Fill, or
+	// zoomed in past Fill keeps the spot and zoom (at least Fill, so the wider
+	// window has no empty sides); Exit fits again, or goes back to where it was.
 	setEdges(false);
 	map.invalidateSize({ pan: false });
-	if (on) fillWidth();
+	if (on && pastFill) map.setView(c, Math.max(z, fillZoom()), { animate: false });
+	else if (on) fillWidth();
 	else if (wasFit) fitMap();
 	else map.setView(c, Math.max(z, map.getMinZoom()), { animate: false });
 	setEdges(true);
@@ -1419,9 +1500,17 @@ function vehFacts(v) {
 	return [['Where', grid(v.x, v.z) + ' <span class="muted">' + Math.round(v.x) + ', ' + Math.round(v.z) + '</span>'],
 		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'],
 		['Fuel', v.fuel >= 0 ? Math.round(v.fuel * 100) + '%' : '—'],
-		['Inside', crewOf(v).length ? crewOf(v).map(p => '<a href="#" onclick="event.preventDefault(); event.stopPropagation(); openPlayerPopup(\'' + p.guid + '\')">' + esc(p.name) + '</a>' + (p.driver ? ' <span class="muted">driving</span>' : '')).join(', ')
+		['Inside', crewOf(v).length ? crewOf(v).map(p => '<a href="#" onclick="event.preventDefault(); event.stopPropagation(); openCrew(\'' + p.guid + '\')" title="Their stats">' + esc(p.name) + '</a>' + (p.driver ? ' <span class="muted">driving</span>' : '')).join(', ')
 			: v.crew ? v.crew + (v.crew === 1 ? ' person' : ' people') : 'Nobody'],
 		['Engine', v.engine ? 'Running' : 'Off']];
+}
+// openCrew opens the dialog of someone in a vehicle on their Stats tab,
+// from the vehicle's popup or dialog.
+function openCrew(guid) {
+	map.closePopup(vehPopup);
+	if (vehInfo != null) closeVehicleInfo();
+	openPlayer(guid);
+	showPTab('stats');
 }
 function vehDeleteState(v) {
 	const cmd = vehPending[v.id] && commands.find(c => c.id === vehPending[v.id]);
@@ -1564,23 +1653,24 @@ function renderVehicleInfoBody() {
 	document.getElementById('vSum').textContent = !d ? 'Loading…' : d.failed ? '' : itemsText(objCount(d)).replace('empty', 'nothing') + ' inside';
 	setHTML(list, objRow('v', v.fuel < 0 ? 'Boat' : 'Vehicle', catLabel(v), count, vehCondition(v.health), vehItemSel == null));
 	const top = det.scrollTop, path = vehItemSel != null && has ? pathTo(d.items, vehItemSel) : null;
-	let h = '';
+	// Three parts, each redrawn only when it changes: its facts change as it
+	// is driven, and redrawing the parts and cargo with them made them flicker.
+	let head = '', body = '';
 	if (path) {
-		h += itemDetail(path, { root: '<a data-obj="v">' + esc(catLabel(v)) + '</a>', rows: vItemRows });
+		head = itemDetail(path, { root: '<a data-obj="v">' + esc(catLabel(v)) + '</a>', rows: vItemRows });
 	} else {
 		vehItemSel = null;
-		h += '<h3>' + esc(catLabel(v)) + '</h3><div class="ty">' + esc(v.type) + '</div>' + props(vehFacts(v).concat([['Contents', count]]));
-		if (!d) h += '<div class="muted" style="margin-top:10px">Loading…</div>';
-		else if (d.failed) h += '<div class="muted" style="margin-top:10px">recon-mod didn\'t send its parts, damage and cargo.</div>';
+		head = '<h3>' + esc(catLabel(v)) + '</h3><div class="ty">' + esc(v.type) + '</div>' + props(vehFacts(v).concat([['Contents', count]]));
+		if (!d) body = '<div class="muted" style="margin-top:10px">Loading…</div>';
+		else if (d.failed) body = '<div class="muted" style="margin-top:10px">recon-mod didn\'t send its parts, damage and cargo.</div>';
 		else {
 			const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
-			h += damageBlock(d.zones);
-			h += itemsBlock('parts', 'Parts', parts, 'None fitted', vItemRows) + itemsBlock('cargo', 'Inventory', cargo, 'Empty', vItemRows);
+			body = damageBlock(d.zones) +
+				itemsBlock('parts', 'Parts', parts, 'None fitted', vItemRows) + itemsBlock('cargo', 'Inventory', cargo, 'Empty', vItemRows);
 		}
 	}
-	h += '<div class="gacts">' + vehDeleteState(v) + '<button type="button" data-act="show">Show on map</button>' +
-		'<button type="button" data-act="refresh" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + '</div>';
-	setHTML(det, h);
+	setParts(det, [head, body, '<div class="gacts">' + vehDeleteState(v) + '<button type="button" data-act="show">Show on map</button>' +
+		'<button type="button" data-act="refresh" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + '</div>']);
 	det.scrollTop = top;
 }
 document.getElementById('vModal').addEventListener('click', e => {
@@ -2542,11 +2632,13 @@ async function doSpawnAt() {
 	} catch (e) { err.textContent = e.message; }
 }
 
+// fillZoom is the zoom at which the map's width just fills the view.
+function fillZoom() { const b = mapBounds(); return Math.log2(map.getSize().x / (b.getEast() - b.getWest())); }
 // fillWidth zooms so the map's width fills the view, keeping the centre's
 // north-south position (within the map).
 function fillWidth() {
 	const b = mapBounds(), view = map.getSize(), s = b.getNorth() - b.getSouth();
-	const z = Math.log2(view.x / (b.getEast() - b.getWest())), h = view.y / Math.pow(2, z); // metres the view is high
+	const z = fillZoom(), h = view.y / Math.pow(2, z); // metres the view is high
 	const lat = h >= s ? (b.getNorth() + b.getSouth()) / 2 : Math.min(b.getNorth() - h / 2, Math.max(b.getSouth() + h / 2, map.getCenter().lat));
 	map.setView([lat, (b.getWest() + b.getEast()) / 2], z, { animate: false });
 }
@@ -3026,6 +3118,16 @@ function setHTML(el, h) {
 	if (detId) { const det = document.getElementById(detId); if (det.parentElement === el) el.parentElement.appendChild(det); }
 	el.innerHTML = h;
 	el._html = h;
+	el._parts = null;
+}
+// setParts sets el's content as parts, each in its own box set by setHTML,
+// so a part that changes often (a moving vehicle's facts) is redrawn alone.
+function setParts(el, parts) {
+	if (!el._parts || el._parts.length !== parts.length) {
+		setHTML(el, parts.map(() => '<div></div>').join(''));
+		el._parts = Array.from(el.children);
+	}
+	parts.forEach((h, i) => setHTML(el._parts[i], h));
 }
 function invRows(items) {
 	return containerRows(items, (it, label, extra) => itemRow(it, label, extra, it.id === invSel));
@@ -3710,6 +3812,7 @@ document.addEventListener('keydown', e => {
 	if (pickSend) { endPick(); return; }
 	const open = DIALOGS.find(([id]) => isOpen(id));
 	if (open) open[1]();
+	else if (boxMode) setBoxMode(false);
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
 for (const [id, close] of DIALOGS) document.getElementById(id).addEventListener('mousedown', e => { if (e.target.id === id) close(); });
