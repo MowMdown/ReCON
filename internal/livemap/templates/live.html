@@ -860,31 +860,47 @@ function stepZoom(dir, around) {
 	if (Math.abs(z - map.getZoom()) < 1e-6) return;
 	if (around) map.setZoomAround(around, z); else map.setZoom(z);
 }
-// onWheel calls zoom(dir, point) once a wheel click (1 in, -1 out), with a
-// trackpad's small scrolls adding up to one.
-function onWheel(el, zoom) {
-	let acc = 0, last = 0;
+// smoothWheel zooms map m with the wheel the way a pinch does: gliding,
+// about the cursor (or its centre while centre() says so), WHEEL_ZOOM a mouse
+// wheel click, continuously on a trackpad. Like Leaflet's pinch, it moves the
+// map frame by frame (tiles and lines scaled) and redraws them sharp at the end.
+function smoothWheel(m, el, centre) {
+	let target = null, around = null, frame = 0, idle = 0;
+	const perPx = Math.log2(WHEEL_ZOOM) / 100; // a mouse click is about 100 px of wheel
+	const clamp = z => Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), z));
+	const step = () => {
+		frame = 0;
+		const z = m.getZoom(), next = Math.abs(target - z) < 0.002 ? target : z + (target - z) * 0.35;
+		let c = m.getCenter();
+		if (around) {
+			// The point under the cursor stays under it (as setZoomAround).
+			const half = m.getSize().divideBy(2), scale = m.getZoomScale(next, z);
+			c = m.containerPointToLatLng(half.add(around.subtract(half).multiplyBy(1 - 1 / scale)));
+		}
+		m._move(m._limitCenter(c, next, m.options.maxBounds), next, { pinch: true, round: false });
+		if (next !== target) frame = requestAnimationFrame(step);
+		else { clearTimeout(idle); idle = setTimeout(end, 150); }
+	};
+	const end = () => {
+		if (frame) return;
+		target = null; m._wheeling = false;
+		m._resetView(m.getCenter(), m.getZoom(), true); // tiles and lines redrawn for the new zoom
+		m.fire('zoomend');
+	};
 	el.addEventListener('wheel', e => {
 		e.preventDefault();
-		acc += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
-		const now = Date.now();
-		if (Math.abs(acc) < 50 || now - last < 60) return;
-		last = now;
-		const dir = acc < 0 ? 1 : -1;
-		acc = 0;
-		zoom(dir, e);
+		const px = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
+		if (target == null) { m._stop(); m._moveStart(true, false); target = m.getZoom(); m._wheeling = true; }
+		// A trackpad pinch comes as small wheel steps with Ctrl held: zoom faster.
+		target = clamp(target - px * perPx * (e.ctrlKey ? 4 : 1));
+		around = centre && centre() ? null : m.mouseEventToContainerPoint(e);
+		clearTimeout(idle);
+		if (!frame) frame = requestAnimationFrame(step);
 	}, { passive: false });
-}
-// wheelZoom zooms map m by WHEEL_ZOOM, in (1) or out (-1), within its limits,
-// about the point given (none: its centre).
-function wheelZoom(m, dir, point) {
-	const z = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), m.getZoom() + dir * Math.log2(WHEEL_ZOOM)));
-	if (Math.abs(z - m.getZoom()) < 1e-6) return;
-	if (point) m.setZoomAround(point, z, { animate: false }); else m.setZoom(z, { animate: false });
 }
 // stepWheel sets up the big map's zoom: the wheel, + and −, double-click and keys.
 function stepWheel() {
-	onWheel(map.getContainer(), (dir, e) => wheelZoom(map, dir, map.mouseEventToContainerPoint(e)));
+	smoothWheel(map, map.getContainer());
 	map.zoomIn = function () { stepZoom(1); return this; };
 	map.zoomOut = function () { stepZoom(-1); return this; };
 	map.on('dblclick', e => stepZoom(e.originalEvent.shiftKey ? -1 : 1, e.containerPoint));
@@ -3232,7 +3248,7 @@ function ensureMini() {
 		});
 		miniMap.on('mouseout', () => { document.getElementById('miniXY').textContent = ''; });
 		// The wheel as on the big map: about the cursor, or the player while following them.
-		onWheel(el, (dir, e) => wheelZoom(miniMap, dir, mini.follow ? null : miniMap.mouseEventToContainerPoint(e)));
+		smoothWheel(miniMap, el, () => mini.follow);
 		el.addEventListener('touchstart', e => { if (e.touches.length > 1) mini.follow = false; }, { passive: true });
 		watchTouches(el, 'miniHint', () => true);
 		setMiniPicture();
@@ -3283,7 +3299,7 @@ function miniHud() {
 function miniStep(span) { return span <= 1500 ? 100 : span <= 6000 ? 500 : 1000; }
 function drawMini(p) {
 	if (!ensureMini()) return;
-	if (mini.follow) miniMap.setView([p.z, p.x], miniMap.getZoom(), { animate: false });
+	if (mini.follow && !miniMap._wheeling) miniMap.setView([p.z, p.x], miniMap.getZoom(), { animate: false });
 	miniMarks.clearLayers();
 	const w = miniMap.getSize().x, b = miniMap.getBounds();
 	const markAs = (className, x, z, html) => L.marker([z, x], { icon: L.divIcon({ className, html, iconSize: [0, 0] }), interactive: false, keyboard: false }).addTo(miniMarks);
@@ -3726,7 +3742,7 @@ drawPlayersToggle();
 drawGridToggle();
 drawPlaced(); loadPlaced();
 map.on('moveend zoomend', drawPlaced);
-map.on('zoomend resize', drawScale); drawScale();
+map.on('zoom zoomend resize', drawScale); drawScale();
 // A new size (the window, Full, Exit): at Fit it fits again, otherwise Fit's
 // zoom stays the furthest out. Leaflet fires resize before anything moves.
 map.on('resize', () => mapChanged(false)); fitZoom();
