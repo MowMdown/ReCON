@@ -408,7 +408,11 @@ table.dt a { color: var(--lm-accent); text-decoration: none; cursor: pointer; }
 .ppane[hidden] { display: none; }
 /* The player dialog keeps one size across tabs; a tab scrolls inside it. */
 .box.pbox { width: min(1290px, 96vw); height: min(1025px, 92vh); display: flex; flex-direction: column; margin-bottom: 0; }
-.pbox .ppane { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+/* Nothing in a tab may make it wider than the dialog: grid cells can
+   shrink, long words break, and the tab never scrolls sideways. */
+.pbox .ppane { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+.pbox .statgrid > *, .pbox .inv > *, .pbox .tiles > * { min-width: 0; }
+.pbox table.dt td { overflow-wrap: anywhere; }
 .pbox .dfoot { margin-top: auto; padding-top: 10px; }
 .pbox .dlg-err:empty, .pbox .lastact:empty { min-height: 0; margin-top: 0; }
 .pbox .statgrid { grid-template-columns: minmax(0, 1fr) 390px; }
@@ -2854,14 +2858,14 @@ function renderPlayer() {
 	badge.textContent = p ? (p.alive ? 'Online' : 'Dead') : 'Offline';
 	badge.className = 'badge ' + (p && p.alive ? 'online' : 'gone');
 	document.getElementById('pGuid').textContent = selGuid;
-	document.getElementById('pWhen').textContent = p && mod && mod.connected ? 'Live from recon-mod · updated ' + Math.max(0, Math.round((Date.now() - new Date(mod.lastSync)) / 1000)) + ' s ago'
+	document.getElementById('pWhen').textContent = p && mod && mod.connected ? 'Online · Updated ' + shortSpan((Date.now() - new Date(mod.lastSync)) / 1000)
 		: 'Offline' + (o && o.lastSeen ? ' · Last seen: ' + shortSpan((Date.now() - o.lastSeen * 1000) / 1000) + ' ago' : '') + (o ? ' · ' + activeText(o.played) + ' active' : '');
 	// Offline: what ReCON keeps, without the actions that need them online.
 	document.querySelector('#pModal .pbox').classList.toggle('offline', !p);
 	const spawnBtn = document.querySelector('#fSpawn .setfoot button.go');
 	spawnBtn.disabled = !p;
 	spawnBtn.title = p ? '' : 'They aren\'t on the server now';
-	document.getElementById('pPos').innerHTML = p ? 'Grid <b>' + grid(p.x, p.z) + '</b> · ' + Math.round(p.x) + ', ' + Math.round(p.z) + ' · facing <b>' + compass(p.heading) + '</b> ' + Math.round(p.heading) + '°' : '';
+	document.getElementById('pPos').innerHTML = p ? 'Grid <b>' + grid(p.x, p.z) + '</b>' : '';
 	if (p) {
 		let h = '';
 		for (const [k, label, max] of [['health', 'Health', 100], ['blood', 'Blood', 5000], ['water', 'Water', 5000], ['energy', 'Food', 5000]]) {
