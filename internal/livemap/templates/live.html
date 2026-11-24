@@ -916,6 +916,8 @@ function drawScale() {
 }
 function initMap() {
 	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, maxBoundsViscosity: 0.5, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
+	// Springing back inside the edges takes 0.5 s (Leaflet's pan: 0.25 s).
+	map._panInsideMaxBounds = function () { if (!this._enforcingBounds) this.panInsideBounds(this.options.maxBounds, { duration: 0.5 }); };
 	stepWheel();
 	setTouchDrag();
 	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled());
