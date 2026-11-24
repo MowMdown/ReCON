@@ -247,7 +247,8 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
 **The map** shows each player as an arrow in their own colour, pointing the way they face (a skull when dead).
 
 - **Zoom:** **+** and **−**, double-click (Shift: out) and the keyboard move in steps of the scale bar (bottom left: 25 m, 50 m, 100 m, 200 m, 500 m, 1 km, 2 km, 5 km, 10 km, out until the whole map is in view); the wheel zooms smoothly about the pointer, like a pinch (about 20% a click), and a pinch stops wherever it lands. Nothing goes closer than 25 m or further out than the whole map. The button above **+** switches to zooming to an area: drag a box around it and the map zooms to fit it (on a touch screen, with one finger); click it again (or Esc) to move the map by dragging again. The scale also says how far the view shows across and, under the mouse, its X, Y and grid square. **Fit** shows the whole map, **Fill** makes its width fill the view, and **Full** fills the browser's window, at Fill, or where you are if you're zoomed in further (**Exit** or Esc puts it back). They stay on the right of the bar's one row. On a touch screen one finger scrolls the page and two move the map, except in full screen.
-- **Overlays** turns layers on and off, each remembered in this browser:
+- **<<** (left of Layers, not on a phone or in full screen) hides the player list and widens the map over its place; **>>** brings it back. Remembered in this browser.
+- **Layers** turns layers on and off, each remembered in this browser:
   - **Players** (on by default).
   - **Vehicles:** every car, motorbike and boat, in the driver's colour, blue with only passengers, green parked with the engine running, grey parked. The driver's name is beside it.
   - **Predators:** bears, wolves and guard dogs, named, pointing the way they face.

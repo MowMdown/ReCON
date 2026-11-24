@@ -28,6 +28,11 @@ html[data-theme]:not([data-theme="default"]) {
 :root { --hud-white: rgb(220,220,220); --hud-yellow: rgb(220,220,0); --hud-red: rgb(220,0,0); --hud-lblue: rgb(0,206,209); --hud-blue: rgb(30,144,220); }
 .live { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; height: calc(100vh - 210px); min-height: 420px; }
 @media (max-width: 760px) { .live { grid-template-columns: minmax(0, 1fr); height: auto; } .mapwrap { height: 70vh; } }
+/* << on a wide screen: the player list is taken out and the map takes its
+   place, so nothing is left under the map to click or to widen the page. */
+@media (min-width: 761px) { .live.wide { grid-template-columns: minmax(0, 1fr); } .live.wide > .side { display: none; } }
+@media (max-width: 760px) { #sideBtn { display: none; } }
+.mapwrap.full #sideBtn { display: none; }
 /* Portrait phone: a square map first, players two to a row under it. */
 @media (max-width: 760px) and (orientation: portrait) {
 	.live .mapwrap { order: -1; height: auto; min-height: 0; aspect-ratio: 1; max-height: 75svh; }
@@ -79,7 +84,7 @@ html[data-theme]:not([data-theme="default"]) {
 .mapscale #scaleXY:empty { display: none; }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; pointer-events: none; }
 /* One row that never overflows: Fit, Fill and Full keep their size; the
-   chips, then Overlays and Legend, shrink (with …) instead. */
+   chips, then Layers and Legend, shrink (with …) instead. */
 .mapbar > * { flex: none; }
 .mapbar #trackBtn, .mapbar .pick, .mapbar .ovwrap { flex: 0 1 auto; min-width: 0; }
 .mapbar #trackBtn, .mapbar .pick, .mapbar .ovwrap > button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -223,7 +228,7 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 	.mapbar .mapbtns { gap: 5px; }
 	.mapbar > button, .mapbar > .ovwrap > button, .mapbar .mapbtns > button, .mapbar .pick { padding: 4px 8px; font-size: 12px; }
 }
-/* Overlays and Legend menus. */
+/* Layers and Legend menus. */
 .ovwrap { position: relative; }
 .ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: min(300px, calc(100vw - 40px)); display: flex; flex-direction: column; gap: 2px; padding: 5px;
 	overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; box-sizing: border-box;
@@ -540,8 +545,9 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
 		<div class="twohint" id="twoHint" aria-hidden="true">Use two fingers to move the map</div>
 		<div class="mapbar">
+			<button type="button" id="sideBtn" onclick="toggleSide()" title="Hide the player list and widen the map" aria-label="Hide the player list">&lt;&lt;</button>
 			<div class="ovwrap">
-				<button type="button" id="ovBtn" onclick="toggleOvMenu()" aria-expanded="false" aria-controls="ovMenu" title="Show or hide what's drawn on the map">Overlays</button>
+				<button type="button" id="ovBtn" onclick="toggleOvMenu()" aria-expanded="false" aria-controls="ovMenu" title="Show or hide what's drawn on the map">Layers</button>
 				<div class="ovmenu" id="ovMenu" hidden data-noicon role="menu">
 					<button type="button" id="plyBtn" onclick="togglePlayers()" title="Show the players on the map">Players</button>
 					<button type="button" id="vehBtn" onclick="toggleVehicles()" title="Show every car, motorbike and boat on the server">Vehicles</button>
@@ -1335,6 +1341,29 @@ function twoFingerHint(id) {
 	hintTimers[id] = setTimeout(() => h.classList.remove('on'), 1200);
 }
 function hideHint(id) { clearTimeout(hintTimers[id]); document.getElementById(id).classList.remove('on'); }
+// toggleSide hides the player list (wide screen), the map widening to the
+// left over its place, or shows it again; remembered in this browser. What
+// is on the map stays where it is on screen (at Fit it fits again).
+function toggleSide(hide) {
+	const live = document.querySelector('.live'), wrap = document.querySelector('.mapwrap');
+	hide = hide === undefined ? !live.classList.contains('wide') : hide;
+	const b = document.getElementById('sideBtn');
+	b.innerHTML = hide ? '&gt;&gt;' : '&lt;&lt;';
+	b.title = hide ? 'Show the player list' : 'Hide the player list and widen the map';
+	b.setAttribute('aria-label', b.title);
+	setLayerPref('side', hide ? '0' : '1');
+	if (live.classList.contains('wide') === hide) return;
+	const left = wrap.getBoundingClientRect().left, wasFit = atFit();
+	live.classList.toggle('wide', hide);
+	const dx = wrap.getBoundingClientRect().left - left;
+	if (!map) return;
+	setEdges(false);
+	map.invalidateSize({ pan: false });
+	if (wasFit) fitMap();
+	else if (dx) map.panBy([dx, 0], { animate: false });
+	setEdges(true);
+	drawScale();
+}
 // toggleFull makes the map fill the window, at Fill, or puts it back.
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
@@ -1692,7 +1721,7 @@ async function deleteVehicle(id) {
 	renderVehicle();
 }
 
-// ---- Confirm in place, layer preferences, the Overlays and Legend menus ------
+// ---- Confirm in place, layer preferences, the Layers and Legend menus --------
 
 // confirmPair is a red button that, clicked, turns into Cancel and the red
 // action in place. key names what it is for (one at a time); go is the
@@ -1736,7 +1765,7 @@ function layerButton(id, on, text, title) {
 // renderOvBtn counts the layers on (not their filters).
 function renderOvBtn() {
 	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length;
-	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
+	document.getElementById('ovBtn').textContent = 'Layers' + (n ? ' · ' + n : '');
 }
 // fitMenu keeps an open menu inside the map (which clips it): moved left and
 // capped in width and height, scrolling inside. While one is open the bar
@@ -3840,6 +3869,7 @@ map.on('zoom zoomend resize', drawScale); drawScale();
 // A new size (the window, Full, Exit): at Fit it fits again, otherwise Fit's
 // zoom stays the furthest out. Leaflet fires resize before anything moves.
 map.on('resize', () => mapChanged(false)); fitZoom();
+if (layerPref('side', '1') === '0') toggleSide(true);
 drawTowns(); loadPlaces();
 drawEvents(); loadEvents();
 drawPredators(); loadPredators();
