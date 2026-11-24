@@ -58,7 +58,7 @@ html[data-theme]:not([data-theme="default"]) {
 .empty { color: var(--lm-muted); font-size: 13px; line-height: 1.5; }
 /* No text selection or callout: a long press opens the map's own menu. */
 .mapwrap { position: relative; border: 1px solid var(--lm-line); border-radius: 6px; overflow: hidden; background: var(--lm-ground); min-height: 420px;
-	-webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+	-webkit-user-select: none; user-select: none; -webkit-touch-callout: none; container: mapwrap / inline-size; }
 /* A popup flipped below its marker (see L.Popup patch). */
 .leaflet-popup.flipped { margin-bottom: 0; }
 .leaflet-popup.flipped .leaflet-popup-tip-container { top: -20px; margin-top: 0; transform: rotate(180deg); }
@@ -76,9 +76,11 @@ html[data-theme]:not([data-theme="default"]) {
 .mapscale #scaleXY { font-variant-numeric: tabular-nums; }
 .mapscale #scaleXY:not(:empty)::before { content: '·'; margin-right: 8px; color: var(--lm-muted); }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; pointer-events: none; }
-/* One row: the Following and pick chips shrink (with …) before anything wraps. */
+/* One row that never overflows: Fit, Fill and Full keep their size; the
+   chips, then Overlays and Legend, shrink (with …) instead. */
 .mapbar > * { flex: none; }
-.mapbar #trackBtn, .mapbar .pick { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mapbar #trackBtn, .mapbar .pick, .mapbar .ovwrap { flex: 0 1 auto; min-width: 0; }
+.mapbar #trackBtn, .mapbar .pick, .mapbar .ovwrap > button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mapbar > * { pointer-events: auto; }
 .mapbar.menuopen { z-index: 1001; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
@@ -204,6 +206,12 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .mapbar button { margin: 0; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); }
 .mapbar button:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .mapbar button:disabled { opacity: .45; }
+/* A narrow map: smaller bar buttons, so the row still fits. */
+@container mapwrap (max-width: 520px) {
+	.mapbar { gap: 5px; left: 6px; right: 6px; top: 6px; }
+	.mapbar .mapbtns { gap: 5px; }
+	.mapbar > button, .mapbar > .ovwrap > button, .mapbar .mapbtns > button, .mapbar .pick { padding: 4px 8px; font-size: 12px; }
+}
 /* Overlays and Legend menus. */
 .ovwrap { position: relative; }
 .ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: min(300px, calc(100vw - 40px)); display: flex; flex-direction: column; gap: 2px; padding: 5px;
