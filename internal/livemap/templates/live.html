@@ -62,7 +62,7 @@ html[data-theme]:not([data-theme="default"]) {
 /* A popup flipped below its marker (see L.Popup patch). */
 .leaflet-popup.flipped { margin-bottom: 0; }
 .leaflet-popup.flipped .leaflet-popup-tip-container { top: -20px; margin-top: 0; transform: rotate(180deg); }
-.twohint { position: absolute; inset: 0; z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center;
+.twohint { position: absolute; inset: 0; box-sizing: border-box; z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center;
 	background: rgba(0, 0, 0, .45); color: #fff; font-size: 16px; font-weight: 600; pointer-events: none; opacity: 0; transition: opacity .25s; }
 .twohint.on { opacity: 1; }
 .twohint.minihint { inset: 0 auto auto 0; width: 100%; aspect-ratio: 1; font-size: 14px; border-radius: 6px; z-index: 1002; }
@@ -326,7 +326,7 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .chip { font-size: 12px; padding: 2px 9px; border-radius: 10px; border: 1px solid var(--lm-line); color: var(--lm-muted); }
 .chip.blue { border-color: #2f4f7a; color: var(--lm-accent); }
-#mini { display: block; width: 260px; height: 260px; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 6px; cursor: crosshair; user-select: none; font: inherit; }
+#mini { display: block; box-sizing: border-box; width: 260px; height: 260px; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 6px; cursor: crosshair; user-select: none; font: inherit; }
 #mini.leaflet-dragging { cursor: grabbing; }
 #mini .leaflet-control-zoom a { width: 26px; height: 26px; line-height: 26px; font-size: 16px; }
 .mmark svg { position: absolute; overflow: visible; }
