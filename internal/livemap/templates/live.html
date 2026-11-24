@@ -552,7 +552,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 			<button type="button" id="trackBtn" class="on" hidden onclick="setTrack(null)" title="Stop following"></button>
 			<span class="badge pick" id="pickBanner" hidden></span>
 			<div class="mapbtns">
-				<button type="button" onclick="fitAll()" title="Show the whole map">Fit</button>
+				<button type="button" onclick="fitMap(true)" title="Show the whole map">Fit</button>
 				<button type="button" onclick="fillWidth()" title="Zoom so the map's width fills the view, edge to edge">Fill</button>
 				<button type="button" id="fullBtn" onclick="toggleFull()" title="Make the map fill the window (Esc to go back)">Full</button>
 			</div>
@@ -795,7 +795,7 @@ let dataMaps = [];
 // On a narrow screen the inventory dialogs are one column, details under the row picked.
 const NARROW_INV = matchMedia('(max-width: 700px)');
 api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).catch(() => { });
-let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
+let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {};
 
 // Every popup that would open under the map's button bar opens below its
 // marker instead (if it fits, or there is more room below). Patched into
@@ -833,7 +833,7 @@ function barMetres(z) {
 function stepZoom(dir, around) {
 	const cur = barMetres();
 	const next = dir > 0 ? [...SCALE_STEPS].reverse().find(m => m < cur * 0.99) : SCALE_STEPS.find(m => m > cur * 1.01);
-	if (dir < 0 && !next) { fitAll(); return; }
+	if (dir < 0 && !next) { fitMap(true); return; }
 	const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), next ? zoomForBar(next) : map.getMaxZoom()));
 	if (Math.abs(z - map.getZoom()) < 1e-6) return;
 	if (around) map.setZoomAround(around, z); else map.setZoom(z);
@@ -1064,6 +1064,7 @@ function placePicture() {
 	setMiniPicture();
 	redrawMini();
 	calUI();
+	mapChanged(false); // the picture's edges may have moved
 }
 
 // setWorld sizes the map, draws its 1 km grid and loads its picture.
@@ -1079,20 +1080,8 @@ function setWorld(w, s) {
 		L.polyline([[g, 0], [g, size]], line).addTo(gridLayer);
 	}
 	L.polyline([[0, 0], [0, size], [size, size], [size, 0], [0, 0]], { className: 'gridedge', weight: 1, interactive: false }).addTo(gridLayer);
-	const bounds = [[-size * 0.25, -size * 0.25], [size * 1.25, size * 1.25]];
-	// Fit only on the first map and on a change of map, never otherwise.
-	if (!fitted || newWorld) {
-		// Max bounds go on after the fit: set before it, they start an
-		// animated pan back inside them that undoes the fit.
-		map.setMaxBounds(L.latLngBounds([]));
-		map.invalidateSize({ pan: false });
-		limitZoomOut();
-		fitNow(() => map.setMaxBounds(bounds));
-		fitted = true;
-	} else {
-		map.setMaxBounds(bounds);
-		limitZoomOut();
-	}
+	if (newWorld) map.invalidateSize({ pan: false });
+	mapChanged(newWorld); // Fit on the first map and a new one, never otherwise
 	drawLabels();
 }
 
@@ -1146,30 +1135,44 @@ function drawMarkers() {
 	renderPlayerPopup();
 }
 
-// limitZoomOut makes Fit's zoom the furthest out the map goes.
-function limitZoomOut() {
+// ---- Fit: the whole map, edge to edge ----------------------------------------
+
+// mapBounds is the whole map as drawn: its picture's edges, else the map's square.
+function mapBounds() {
+	if (pic) { const P = placement(); return L.latLngBounds([P.N - P.L, P.W], [P.N, P.W + P.L]); }
+	const s = size || 15360;
+	return L.latLngBounds([0, 0], [s, s]);
+}
+function atFit() { return map.getZoom() <= map.getMinZoom() + 1e-6; }
+// fitZoom makes Fit's zoom the furthest out the map goes. Not setMinZoom: it
+// zooms in animated, and Leaflet drops a fit made while that runs.
+function fitZoom() {
+	map.options.minZoom = -20; // getBoundsZoom never answers below minZoom
+	map.options.minZoom = map.getBoundsZoom(mapBounds());
+	map.fire('zoomlevelschange');
+	if (map.getZoom() < map.options.minZoom) map.setZoom(map.options.minZoom, { animate: false });
+}
+// fitMap shows the whole map, centred (Leaflet drops a fit made mid zoom
+// animation, so it waits for one to end). Unanimated, it also resets the
+// bounds the map can be dragged within: set before the fit, they would start
+// a pan back inside them that undoes it.
+function fitMap(animate) {
 	const v = map.getSize();
 	if (!(v.x > 0 && v.y > 0)) return;
-	// getBoundsZoom never answers below the current minZoom: lift it first.
-	map.options.minZoom = -20;
-	const z = map.getBoundsZoom([[0, 0], [size || 15360, size || 15360]]);
-	// Not setMinZoom: it zooms in animated, and Leaflet drops a fit made
-	// while that runs.
-	map.options.minZoom = z;
-	map.fire('zoomlevelschange');
-	if (map.getZoom() < z) map.setZoom(z, { animate: false });
+	if (map._animatingZoom) { map.once('zoomend', () => fitMap(animate)); return; }
+	const b = mapBounds();
+	fitZoom();
+	if (animate) { map.fitBounds(b); return; }
+	map.setMaxBounds(L.latLngBounds([]));
+	map.fitBounds(b, { animate: false });
+	map.setMaxBounds(b.pad(0.25));
 }
-// fitNow fits without animating, then runs after. Leaflet ignores a fit made
-// mid zoom animation, so it waits for one to end.
-function fitNow(after) {
-	if (map._animatingZoom) { map.once('zoomend', () => fitNow(after)); return; }
-	const s = size || 15360;
-	map.fitBounds([[0, 0], [s, s]], { animate: false });
-	if (after) after();
-}
-function fitAll() {
-	const s = size || 15360;
-	map.fitBounds([[0, 0], [s, s]]);
+// mapChanged keeps the view right after the map's edges change: fitted again
+// when asked or already at Fit, otherwise only its limits are updated.
+function mapChanged(refit) {
+	if (refit || atFit()) { fitMap(); return; }
+	fitZoom();
+	map.setMaxBounds(mapBounds().pad(0.25));
 }
 // On a touch screen one finger scrolls the page and two move the map,
 // except in full screen, where one finger moves it too.
@@ -1208,19 +1211,14 @@ function hideHint(id) { clearTimeout(hintTimers[id]); document.getElementById(id
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
-	const c = map.getCenter(), z = map.getZoom(), atFit = z <= map.getMinZoom() + 1e-6;
+	const c = map.getCenter(), wasFit = atFit();
 	wrap.classList.toggle('full', on);
 	document.body.style.overflow = on ? 'hidden' : '';
 	const b = document.getElementById('fullBtn');
 	b.textContent = on ? 'Exit' : 'Full';
 	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
-	// Once the new layout has settled: the same centre and zoom, or Fit again
-	// if the map was at Fit (the whole map, centred in the new size).
-	requestAnimationFrame(() => {
-		map.invalidateSize({ pan: false });
-		if (atFit) fitNow();
-		else map.setView(c, Math.max(z, map.getMinZoom()), { animate: false });
-	});
+	map.invalidateSize({ pan: false }); // at Fit, its resize fits again
+	if (!wasFit) map.setView(c, map.getZoom(), { animate: false });
 	setTouchDrag();
 }
 // ---- Vehicles ---------------------------------------------------------------
@@ -2497,10 +2495,10 @@ async function doSpawnAt() {
 // fillWidth zooms so the map's width fills the view, keeping the centre's
 // north-south position (within the map).
 function fillWidth() {
-	const s = size || 15360, view = map.getSize();
-	const z = Math.log2(view.x / s), h = view.y / Math.pow(2, z); // metres the view is high
-	const north = h >= s ? s / 2 : Math.min(s - h / 2, Math.max(h / 2, map.getCenter().lat));
-	map.setView([north, s / 2], z, { animate: false });
+	const b = mapBounds(), view = map.getSize(), s = b.getNorth() - b.getSouth();
+	const z = Math.log2(view.x / (b.getEast() - b.getWest())), h = view.y / Math.pow(2, z); // metres the view is high
+	const lat = h >= s ? (b.getNorth() + b.getSouth()) / 2 : Math.min(b.getNorth() - h / 2, Math.max(b.getSouth() + h / 2, map.getCenter().lat));
+	map.setView([lat, (b.getWest() + b.getEast()) / 2], z, { animate: false });
 }
 
 // ---- The page -----------------------------------------------------------
@@ -3697,7 +3695,9 @@ drawGridToggle();
 drawPlaced(); loadPlaced();
 map.on('moveend zoomend', drawPlaced);
 map.on('zoomend resize', drawScale); drawScale();
-map.on('resize', limitZoomOut); limitZoomOut();
+// A new size (the window, Full, Exit): at Fit it fits again, otherwise Fit's
+// zoom stays the furthest out. Leaflet fires resize before anything moves.
+map.on('resize', () => mapChanged(false)); fitZoom();
 drawTowns(); loadPlaces();
 drawEvents(); loadEvents();
 drawPredators(); loadPredators();
