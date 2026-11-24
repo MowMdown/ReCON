@@ -207,8 +207,8 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 :is(#gModal, #vModal) .idet { max-height: 62vh; overflow-y: auto; }
 /* Narrow: the details open inside the list, under their object; the
    dialog scrolls, not the list and the details each. */
-@media (max-width: 700px) { #gModal .ilist, #gModal .ilist > .idet.under { max-height: none; overflow: visible; } }
-#gModal .ilist > .idet .sub-items { margin-left: 0; }
+@media (max-width: 700px) { :is(#gModal, #vModal) .ilist, :is(#gModal, #vModal) .ilist > .idet.under { max-height: none; overflow: visible; } }
+:is(#gModal, #vModal) .ilist > .idet .sub-items { margin-left: 0; }
 :is(#gModal, #vModal) .irow.gobj { font-weight: 600; }
 :is(#gModal, #vModal) .irow.gobj .sl { color: var(--lm-muted); font-weight: 400; }
 :is(#gModal, #vModal) .sub-items { display: flex; flex-direction: column; gap: 4px; }
@@ -1418,7 +1418,7 @@ function openVehicle(id) {
 let vehInfo = null, vehAsk = 0, vehItemSel = null;
 function openVehicleInfo(id) {
 	map.closePopup(vehPopup);
-	vehInfo = id; vehItemSel = null;
+	vehInfo = id; vehItemSel = null; vehShut = false;
 	document.getElementById('vErr').textContent = '';
 	document.getElementById('vModal').style.display = 'flex';
 	askVehicle();
@@ -1524,10 +1524,23 @@ function vItemRows(items) {
 		return vIrow(it, it.slot ? slotLabel(it.slot) : 'Cargo', n ? itemsText(n) : qty(it));
 	}).join('');
 }
-// renderVehicleInfo draws the dialog (each side keeps where it was
-// scrolled to: it is redrawn with every vehicle update).
+// On a narrow screen (one column) the vehicle's details open right under
+// it, like a player's inventory; picking it again closes them.
+let vehShut = false; // narrow screen: the vehicle's details closed
 function renderVehicleInfo() {
 	if (vehInfo == null) return;
+	const list = document.getElementById('vList'), det = document.getElementById('vDet');
+	if (det.parentElement !== list.parentElement) list.parentElement.appendChild(det); // out of the list before it is redrawn
+	renderVehicleInfoBody();
+	const narrow = NARROW_INV.matches, row = narrow && !vehShut ? list.querySelector(':scope > .irow[data-vobj]') : null;
+	det.classList.toggle('under', !!row);
+	if (row) row.after(det);
+	det.style.display = narrow && !row ? 'none' : '';
+}
+NARROW_INV.addEventListener('change', renderVehicleInfo);
+// renderVehicleInfoBody draws the dialog (each side keeps where it was
+// scrolled to: it is redrawn with every vehicle update).
+function renderVehicleInfoBody() {
 	const v = vehicles.find(x => x.id === vehInfo), list = document.getElementById('vList'), det = document.getElementById('vDet');
 	if (!v) {
 		document.getElementById('vTitle').textContent = 'Vehicle';
@@ -1584,7 +1597,12 @@ document.getElementById('vModal').addEventListener('click', e => {
 	}
 	const it = e.target.closest('[data-vitem]');
 	if (it) { vehItemSel = +it.dataset.vitem; renderVehicleInfo(); return; }
-	if (e.target.closest('[data-vobj]')) { vehItemSel = null; renderVehicleInfo(); }
+	const ob = e.target.closest('[data-vobj]');
+	if (ob) {
+		// The vehicle's row in the list, picked again: its details close (or open).
+		if (ob.parentElement && ob.parentElement.id === 'vList' && NARROW_INV.matches) vehShut = !vehShut; else vehShut = false;
+		vehItemSel = null; renderVehicleInfo();
+	}
 });
 async function deleteVehicle(id) {
 	const v = vehicles.find(x => x.id === id), err = document.getElementById('vErr');
@@ -3153,7 +3171,7 @@ function agoText(at) {
 // screen): it is put back first.
 function setHTML(el, h) {
 	if (el._html === h) return;
-	const detId = { iList: 'iDet', gList: 'gDet' }[el.id];
+	const detId = { iList: 'iDet', gList: 'gDet', vList: 'vDet' }[el.id];
 	if (detId) { const det = document.getElementById(detId); if (det.parentElement === el) el.parentElement.appendChild(det); }
 	el.innerHTML = h;
 	el._html = h;
