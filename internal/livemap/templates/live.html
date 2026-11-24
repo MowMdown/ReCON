@@ -834,9 +834,9 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 // viewSpan is the metres across the map's view.
 function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoom())); }
 // The scale bar is always SCALE_PX long. + and −, a double-click and the
-// keyboard zoom in its SCALE_STEPS (out past the last one is Fit); the wheel
-// zooms WHEEL_ZOOM a click, and a pinch stops wherever it lands.
-const SCALE_PX = 100, SCALE_STEPS = [25, 50, 100, 200, 500, 1000], WHEEL_ZOOM = 1.2;
+// keyboard zoom in its SCALE_STEPS, out until the whole map is in view; the
+// wheel zooms WHEEL_ZOOM a click, and a pinch stops wherever it lands.
+const SCALE_PX = 100, SCALE_STEPS = [25, 50, 100, 200, 500, 1000, 2000, 5000, 10000], WHEEL_ZOOM = 1.2;
 function zoomForBar(m) { return Math.log2(SCALE_PX / m); }
 // barMetres is the scale bar's length in metres at zoom z (default: the
 // zoom the map is at or animating to).
@@ -849,8 +849,8 @@ function barMetres(z) {
 function stepZoom(dir, around) {
 	const cur = barMetres();
 	const next = dir > 0 ? [...SCALE_STEPS].reverse().find(m => m < cur * 0.99) : SCALE_STEPS.find(m => m > cur * 1.01);
-	if (dir < 0 && !next) { fitMap(true); return; }
-	const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), next ? zoomForBar(next) : map.getMaxZoom()));
+	// Out past the last step, or a step past the whole map: all the way out.
+	const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), next ? zoomForBar(next) : dir > 0 ? map.getMaxZoom() : map.getMinZoom()));
 	if (Math.abs(z - map.getZoom()) < 1e-6) return;
 	if (around) map.setZoomAround(around, z); else map.setZoom(z);
 }
