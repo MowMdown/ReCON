@@ -981,15 +981,16 @@ function initMap() {
 	map.setView([7680, 7680], -5);
 }
 // edgeBar hides the bar over the map (<<, Layers … Full) while zoomed in to
-// EDGE_HIDE_M or closer with the map's top edge under it, so marks along the
-// edge can be clicked. It comes back once the edge moves out from under it,
+// EDGE_HIDE_M or closer with the map's top edge less than EDGE_HIDE_PX above
+// the view's top (the bar is about 40 px tall: the rest is margin), so marks
+// along the edge can be clicked. It comes back once the edge is further up,
 // or zoomed out. Not while one of its menus is open.
-const EDGE_HIDE_M = 501;
+const EDGE_HIDE_M = 501, EDGE_HIDE_PX = 100;
 function edgeBar() {
 	const bar = document.querySelector('.mapbar');
 	if (!bar) return;
 	const edge = map.latLngToContainerPoint([mapBounds().getNorth(), 0]).y;
-	bar.classList.toggle('edgehide', barMetres() <= EDGE_HIDE_M && edge > -(bar.offsetTop + bar.offsetHeight) && !bar.classList.contains('menuopen'));
+	bar.classList.toggle('edgehide', barMetres() <= EDGE_HIDE_M && edge > -EDGE_HIDE_PX && !bar.classList.contains('menuopen'));
 }
 
 // The map's picture: satmap tiles (maps/<world>/<level>/<col>_<row>.jpg,
