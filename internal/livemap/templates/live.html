@@ -1163,12 +1163,24 @@ function setWorld(w, s) {
 		L.polyline([[g, 0], [g, size]], line).addTo(gridLayer);
 	}
 	L.polyline([[0, 0], [0, size], [size, size], [size, 0], [0, 0]], { className: 'gridedge', weight: 1, interactive: false }).addTo(gridLayer);
-	map.setMaxBounds([[-size * 0.25, -size * 0.25], [size * 1.25, size * 1.25]]);
-	limitZoomOut();
+	const bounds = [[-size * 0.25, -size * 0.25], [size * 1.25, size * 1.25]];
 	// The whole map (Fit) when the page first knows the map, and when the
 	// server's map changes; never on its own otherwise (a player joining
 	// used to zoom the map back out).
-	if (!fitted || newWorld) { map.invalidateSize({ pan: false }); fitNow(); fitted = true; }
+	if (!fitted || newWorld) {
+		// The map's bounds only once it is fitted (and so inside them): set
+		// first, on a wide screen they start an animated pan, which Leaflet
+		// restarts whenever it is stopped and which then undid the fit (the
+		// map a grid square too far south).
+		map.setMaxBounds(L.latLngBounds([])); // none for now (and its pan-back off)
+		map.invalidateSize({ pan: false });
+		limitZoomOut();
+		fitNow(() => map.setMaxBounds(bounds));
+		fitted = true;
+	} else {
+		map.setMaxBounds(bounds);
+		limitZoomOut();
+	}
 	drawLabels();
 }
 
@@ -1242,12 +1254,13 @@ function limitZoomOut() {
 	if (map.getZoom() < z) map.setZoom(z, { animate: false });
 }
 // fitNow is Fit without animating, for the page itself (first load, a new
-// map). If a zoom is still animating it waits for it to end: Leaflet
-// ignores a fit made mid-animation.
-function fitNow() {
-	if (map._animatingZoom) { map.once('zoomend', fitNow); return; }
+// map), then runs after (if given). If a zoom is still animating it waits
+// for it to end: Leaflet ignores a fit made mid-animation.
+function fitNow(after) {
+	if (map._animatingZoom) { map.once('zoomend', () => fitNow(after)); return; }
 	const s = size || 15360;
 	map.fitBounds([[0, 0], [s, s]], { animate: false });
+	if (after) after();
 }
 function fitAll() {
 	const s = size || 15360;
