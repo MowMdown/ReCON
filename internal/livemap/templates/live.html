@@ -1500,9 +1500,17 @@ function vehFacts(v) {
 	return [['Where', grid(v.x, v.z) + ' <span class="muted">' + Math.round(v.x) + ', ' + Math.round(v.z) + '</span>'],
 		['Condition', '<span style="color:' + cc + '">' + cn + '</span>'],
 		['Fuel', v.fuel >= 0 ? Math.round(v.fuel * 100) + '%' : '—'],
-		['Inside', crewOf(v).length ? crewOf(v).map(p => '<a href="#" onclick="event.preventDefault(); event.stopPropagation(); openPlayerPopup(\'' + p.guid + '\')">' + esc(p.name) + '</a>' + (p.driver ? ' <span class="muted">driving</span>' : '')).join(', ')
+		['Inside', crewOf(v).length ? crewOf(v).map(p => '<a href="#" onclick="event.preventDefault(); event.stopPropagation(); openCrew(\'' + p.guid + '\')" title="Their stats">' + esc(p.name) + '</a>' + (p.driver ? ' <span class="muted">driving</span>' : '')).join(', ')
 			: v.crew ? v.crew + (v.crew === 1 ? ' person' : ' people') : 'Nobody'],
 		['Engine', v.engine ? 'Running' : 'Off']];
+}
+// openCrew opens the dialog of someone in a vehicle on their Stats tab,
+// from the vehicle's popup or dialog.
+function openCrew(guid) {
+	map.closePopup(vehPopup);
+	if (vehInfo != null) closeVehicleInfo();
+	openPlayer(guid);
+	showPTab('stats');
 }
 function vehDeleteState(v) {
 	const cmd = vehPending[v.id] && commands.find(c => c.id === vehPending[v.id]);
@@ -1645,23 +1653,24 @@ function renderVehicleInfoBody() {
 	document.getElementById('vSum').textContent = !d ? 'Loading…' : d.failed ? '' : itemsText(objCount(d)).replace('empty', 'nothing') + ' inside';
 	setHTML(list, objRow('v', v.fuel < 0 ? 'Boat' : 'Vehicle', catLabel(v), count, vehCondition(v.health), vehItemSel == null));
 	const top = det.scrollTop, path = vehItemSel != null && has ? pathTo(d.items, vehItemSel) : null;
-	let h = '';
+	// Three parts, each redrawn only when it changes: its facts change as it
+	// is driven, and redrawing the parts and cargo with them made them flicker.
+	let head = '', body = '';
 	if (path) {
-		h += itemDetail(path, { root: '<a data-obj="v">' + esc(catLabel(v)) + '</a>', rows: vItemRows });
+		head = itemDetail(path, { root: '<a data-obj="v">' + esc(catLabel(v)) + '</a>', rows: vItemRows });
 	} else {
 		vehItemSel = null;
-		h += '<h3>' + esc(catLabel(v)) + '</h3><div class="ty">' + esc(v.type) + '</div>' + props(vehFacts(v).concat([['Contents', count]]));
-		if (!d) h += '<div class="muted" style="margin-top:10px">Loading…</div>';
-		else if (d.failed) h += '<div class="muted" style="margin-top:10px">recon-mod didn\'t send its parts, damage and cargo.</div>';
+		head = '<h3>' + esc(catLabel(v)) + '</h3><div class="ty">' + esc(v.type) + '</div>' + props(vehFacts(v).concat([['Contents', count]]));
+		if (!d) body = '<div class="muted" style="margin-top:10px">Loading…</div>';
+		else if (d.failed) body = '<div class="muted" style="margin-top:10px">recon-mod didn\'t send its parts, damage and cargo.</div>';
 		else {
 			const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
-			h += damageBlock(d.zones);
-			h += itemsBlock('parts', 'Parts', parts, 'None fitted', vItemRows) + itemsBlock('cargo', 'Inventory', cargo, 'Empty', vItemRows);
+			body = damageBlock(d.zones) +
+				itemsBlock('parts', 'Parts', parts, 'None fitted', vItemRows) + itemsBlock('cargo', 'Inventory', cargo, 'Empty', vItemRows);
 		}
 	}
-	h += '<div class="gacts">' + vehDeleteState(v) + '<button type="button" data-act="show">Show on map</button>' +
-		'<button type="button" data-act="refresh" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + '</div>';
-	setHTML(det, h);
+	setParts(det, [head, body, '<div class="gacts">' + vehDeleteState(v) + '<button type="button" data-act="show">Show on map</button>' +
+		'<button type="button" data-act="refresh" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + '</div>']);
 	det.scrollTop = top;
 }
 document.getElementById('vModal').addEventListener('click', e => {
@@ -3109,6 +3118,16 @@ function setHTML(el, h) {
 	if (detId) { const det = document.getElementById(detId); if (det.parentElement === el) el.parentElement.appendChild(det); }
 	el.innerHTML = h;
 	el._html = h;
+	el._parts = null;
+}
+// setParts sets el's content as parts, each in its own box set by setHTML,
+// so a part that changes often (a moving vehicle's facts) is redrawn alone.
+function setParts(el, parts) {
+	if (!el._parts || el._parts.length !== parts.length) {
+		setHTML(el, parts.map(() => '<div></div>').join(''));
+		el._parts = Array.from(el.children);
+	}
+	parts.forEach((h, i) => setHTML(el._parts[i], h));
 }
 function invRows(items) {
 	return containerRows(items, (it, label, extra) => itemRow(it, label, extra, it.id === invSel));
