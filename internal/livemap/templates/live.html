@@ -1030,8 +1030,16 @@ function drawPicture(cv, x0, z0, span, again) {
 }
 
 // PictureLayer draws the picture as Leaflet canvas tiles, only around the view.
+// A zoom without animation (the wheel, the mini-map) makes Leaflet drop every
+// tile before drawing the new ones, so the map flashes black: it keeps them
+// instead, as at the end of an animated zoom, until the new ones are drawn.
 const PictureLayer = L.GridLayer.extend({
 	options: { tileSize: 256, noWrap: true, updateWhenZooming: false, minZoom: -6, maxZoom: 3, className: 'piclayer' },
+	getEvents() {
+		const events = L.GridLayer.prototype.getEvents.call(this);
+		delete events.viewprereset;
+		return events;
+	},
 	createTile(c) {
 		const t = document.createElement('canvas'), ts = this.getTileSize().x;
 		const dpr = Math.min(window.devicePixelRatio || 1, 2);
