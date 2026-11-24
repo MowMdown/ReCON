@@ -817,6 +817,16 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 		layout.call(this);
 		if (this._closeButton) this._wrapper.appendChild(this._closeButton);
 	};
+	// Auto-pan only moves the map up or down: sideways a popup slides inside
+	// the map itself (below), so it opens in place instead of sliding there.
+	const adjust = L.Popup.prototype._adjustPan;
+	L.Popup.prototype._adjustPan = function () {
+		const m = this._map;
+		if (!m) return;
+		const panBy = m.panBy;
+		m.panBy = function (offset, options) { const o = L.point(offset); return o.y ? panBy.call(this, [0, o.y], options) : this; };
+		try { adjust.call(this); } finally { m.panBy = panBy; }
+	};
 	const place = L.Popup.prototype._updatePosition;
 	L.Popup.prototype._updatePosition = function () {
 		const el = this._container, m = this._map;
