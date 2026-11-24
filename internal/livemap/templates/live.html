@@ -73,7 +73,11 @@ html[data-theme]:not([data-theme="default"]) {
 .mapscale { position: absolute; left: 10px; bottom: 10px; z-index: 500; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--lm-text); background: color-mix(in srgb, var(--lm-ground) 80%, transparent); border-radius: 4px; padding: 3px 8px; pointer-events: none; }
 .mapscale .bar { height: 5px; border: 1.5px solid currentColor; border-top: 0; box-sizing: border-box; }
 .mapscale .muted { font-size: 11.5px; }
-.mapscale #scaleXY { font-variant-numeric: tabular-nums; }
+/* Fixed widths and even digits: the box doesn't change size as the numbers do. */
+.mapscale span { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mapscale #scaleLen { min-width: 6ch; }
+.mapscale #scaleSpan { min-width: 14ch; }
+.mapscale #scaleXY:not(:empty) { min-width: 30ch; }
 .mapscale #scaleXY:not(:empty)::before { content: '·'; margin-right: 8px; color: var(--lm-muted); }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; pointer-events: none; }
 /* One row that never overflows: Fit, Fill and Full keep their size; the
