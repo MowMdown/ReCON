@@ -267,7 +267,7 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
 - **A predator:** its health and whether it's attacking, and **Remove**.
 - **A placed object:** its condition and who placed it, and **Info**.
 
-Marks drawn on top of one another (touching on screen, or within a few pixels on a touch screen) open one list of them all instead, and a vehicle lists the people in it under it. Pick one for its own popup in the same place; **‹ Back** returns to the list.
+Marks drawn on top of one another (up to 4 pixels apart on screen; names don't count) open one list of them all instead, and a vehicle lists the people in it under it. Pick one for its own popup in the same place; **‹ Back** returns to the list.
 
 **Right-click** (a long press on a phone) the map for that spot's position (select it to copy), to teleport any online player there, or **Spawn an item here…**; a player for their dialog's tabs, Follow, Teleport to…, Heal, Dry and Message; a vehicle for Info, Follow (its driver), teleporting a player beside it, and Delete. Anything that removes or kills asks again in place (Cancel, or the red button once more).
 
