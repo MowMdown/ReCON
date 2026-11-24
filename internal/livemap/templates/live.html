@@ -186,6 +186,16 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .gpop .glist button:hover { background: var(--lm-sel); }
 .gpop .glist .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gpop .glist .ct { color: var(--lm-muted); font-size: 12px; white-space: nowrap; }
+/* The stack popup: bigger rows than a placed group's, crew indented under their vehicle. */
+.spop .glist { gap: 2px; }
+.spop .glist button { grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; padding: 6px; font-size: 14px; }
+.spop .glist .ct { font-size: 12.5px; }
+.spop .glist svg { width: 18px; height: 18px; overflow: visible; }
+.spop .glist button.crew { position: relative; padding-left: 26px; }
+.spop .glist button.crew::before { content: ""; position: absolute; left: 14px; top: 0; bottom: 50%; width: 8px; border-left: 1px solid var(--lm-line); border-bottom: 1px solid var(--lm-line); }
+.vpop .stback { display: inline-block; margin-bottom: 2px; font-size: 12px; color: var(--lm-muted); text-decoration: none; }
+.vpop .stback:hover { color: var(--lm-text-hi); }
+.vpop hr { border: 0; border-top: 1px solid var(--lm-line); margin: 6px 0; }
 :is(#gModal, #vModal) .box { width: min(1000px, 95vw); }
 :is(#gModal, #vModal) .ilist { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
 :is(#gModal, #vModal) .idet { max-height: 62vh; overflow-y: auto; }
@@ -1178,7 +1188,8 @@ function drawMarkers() {
 		if (!m) {
 			const guid = p.guid;
 			m = L.marker([p.z, p.x], { pane: 'players', icon: L.divIcon({ className: 'pmark', html: arrowSVG(colorOf(guid)) + '<span></span>', iconSize: [0, 0] }), keyboard: false });
-			m.on('click', () => openPlayerPopup(guid));
+			m._st = { k: 'ply', id: guid };
+			m.on('click', () => stackOr(m, () => openPlayerPopup(guid)));
 			m.on('contextmenu', e => showPlayerCtx(guid, e));
 			m.addTo(map);
 			markers[guid] = m;
@@ -1197,6 +1208,7 @@ function drawMarkers() {
 	for (const g in markers) if (!seen[g]) { markers[g].remove(); delete markers[g]; }
 	if (track && track.kind === 'player') followTrack();
 	renderPlayerPopup();
+	renderStack();
 }
 
 // ---- Fit: the whole map, edge to edge ----------------------------------------
@@ -1458,8 +1470,9 @@ function drawVehicles() {
 		let m = vehMarkers[v.id];
 		if (!m) {
 			m = vehMarkers[v.id] = L.marker([v.z, v.x], { pane: 'vehicles', icon, keyboard: false, title: catLabel(v) }).addTo(vehLayer);
-			m.on('click', () => openVehicle(v.id));
 			const vid = v.id;
+			m._st = { k: 'veh', id: vid };
+			m.on('click', () => stackOr(m, () => openVehicle(vid)));
 			m.on('contextmenu', e => showVehicleCtx(vid, e));
 		} else {
 			m.setLatLng([v.z, v.x]);
@@ -1471,6 +1484,7 @@ function drawVehicles() {
 		if (seen[vehOpen]) renderVehicle(); else map.closePopup(vehPopup);
 	}
 	renderVehicleInfo();
+	renderStack();
 	if (track && track.kind === 'vehicle') followTrack();
 }
 function catLabel(v) { return v.name && v.name[0] !== '$' ? v.name : item(v.type); }
@@ -1552,10 +1566,26 @@ function deleteButton(v) {
 	return confirmPair('veh:' + v.id, 'Delete', 'deleteVehicle(' + v.id + ')',
 		v.crew ? v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they get out first' : 'Delete it and everything in it');
 }
+// vehPopRows is the vehicle popup's facts: condition, engine and fuel, then
+// a line and who is in it (each name opens their popup in its place).
+function vehPopRows(v) {
+	const row = (k, x) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>', [cn, cc] = vehCondition(v.health), crew = crewOf(v);
+	return row('Condition', '<span style="color:' + cc + '">' + cn + '</span>') + row('Engine', v.engine ? 'Running' : 'Off') + row('Fuel', v.fuel >= 0 ? Math.round(v.fuel * 100) + '%' : '—') +
+		(crew.length ? '<hr>' + crew.map(p => row(p.driver ? 'Driver' : 'Passenger',
+			'<a href="#" onclick="event.preventDefault(); event.stopPropagation(); crewPopup(\'' + p.guid + '\')" title="Their popup">' + esc(p.name) + '</a>')).join('')
+			: v.crew ? '<hr>' + row('Inside', v.crew + (v.crew === 1 ? ' person' : ' people')) : '');
+}
+// crewPopup opens the popup of someone in the open vehicle, keeping the
+// stack's Back if the vehicle came from one.
+function crewPopup(guid) {
+	const back = stackBack && stackHas('veh', vehOpen);
+	openPlayerPopup(guid);
+	if (back) { stackBack = true; plPopup._html = null; renderPlayerPopup(); }
+}
 function renderVehicle() {
 	const v = vehicles.find(x => x.id === vehOpen);
-	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop" data-noicon><h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
-		vehFacts(v).map(([k, x]) => '<div class="row"><span>' + k + '</span><span>' + x + '</span></div>').join('') +
+	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop" data-noicon>' + backLink('veh', v.id) + '<h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
+		vehPopRows(v) +
 		'<div class="acts pairs"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage, cargo and Delete">Info…</button>' +
 		(track && track.kind === 'vehicle' && track.id === v.id
 			? '<button type="button" class="on" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Stop keeping the map on it">Stop</button>'
@@ -2005,7 +2035,7 @@ function renderPredator() {
 	if (!a) { map.closePopup(predPopup); return; }
 	const [name, c] = PRED[a.kind] || [item(a.type), '#ccc'];
 	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
-	let h = '<div class="vpop" data-noicon><h4>' + esc(name) + '</h4><div class="ty">' + esc(a.type) + '</div>';
+	let h = '<div class="vpop" data-noicon>' + backLink('pred', a.id) + '<h4>' + esc(name) + '</h4><div class="ty">' + esc(a.type) + '</div>';
 	const [, hc] = vehCondition(a.health);
 	h += row('Health', '<span style="color:' + hc + '">' + Math.round(a.health * 100) + '%</span>');
 	h += row('Attacking', a.attacking ? '<b style="color:#f28b82">Yes</b>' : 'No');
@@ -2044,7 +2074,8 @@ function drawPredators() {
 		if (!m) {
 			m = predMarkers[a.id] = L.marker([a.z, a.x], { pane: 'vehicles', icon, keyboard: false }).bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(predLayer);
 			const pid = a.id;
-			m.on('click', () => openPredator(pid));
+			m._st = { k: 'pred', id: pid };
+			m.on('click', () => stackOr(m, () => openPredator(pid)));
 		} else { m.setLatLng([a.z, a.x]); m.setIcon(icon); m.setTooltipContent(tip); }
 	}
 	for (const id in predMarkers) if (!seen[id]) { predMarkers[id].remove(); delete predMarkers[id]; }
@@ -2164,7 +2195,9 @@ function drawPlaced() {
 				let m = placedMarkers[o.id];
 				if (!m) {
 					m = placedMarkers[o.id] = L.marker([o.z, o.x], { pane: 'vehicles', icon, keyboard: false, title: placedName(o) }).addTo(map);
-					m.on('click', () => openPlacedPopup(o.id));
+					const oid = o.id;
+					m._st = { k: 'obj', id: oid };
+					m.on('click', () => stackOr(m, () => openPlacedPopup(oid)));
 				} else { m.setLatLng([o.z, o.x]); m.setIcon(icon); }
 				keep[o.id] = true;
 			}
@@ -2175,7 +2208,8 @@ function drawPlaced() {
 		let m = placedMarkers['g' + key];
 		if (!m) {
 			m = placedMarkers['g' + key] = L.marker([at[1], at[0]], { pane: 'vehicles', icon, keyboard: false, title: objs.length + ' placed objects' }).addTo(map);
-			m.on('click', () => level === GROUP_M ? openGroupPopup(key) : zoomToBlock(key));
+			m._st = { k: 'grp', id: key };
+			m.on('click', () => stackOr(m, () => level === GROUP_M ? openGroupPopup(key) : zoomToBlock(key)));
 		} else { m.setLatLng([at[1], at[0]]); m.setIcon(icon); m.options.title = objs.length + ' placed objects'; }
 		if (m.getElement()) m.getElement().title = objs.length + ' placed objects' + (level === GROUP_M ? '' : ' · click to zoom in');
 		keep['g' + key] = true;
@@ -2199,7 +2233,7 @@ function renderPlacedPopup() {
 	if (!o) return;
 	const [cn, cc] = vehCondition(o.health);
 	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
-	plcPopup.setLatLng([o.z, o.x]).setContent('<div class="vpop" data-noicon><h4>' + esc(placedName(o)) + '</h4><div class="ty">' + grid(o.x, o.z) + '</div>' +
+	plcPopup.setLatLng([o.z, o.x]).setContent('<div class="vpop" data-noicon>' + backLink('obj', o.id) + '<h4>' + esc(placedName(o)) + '</h4><div class="ty">' + grid(o.x, o.z) + '</div>' +
 		row('Condition', '<span style="color:' + cc + '">' + cn + '</span>') + row('Placed by', placedBy(o)) +
 		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openPlacedInfo(' + o.id + ')" title="What is in and on it, and Remove">Info</button></div></div>');
 }
@@ -2279,7 +2313,7 @@ function renderGroupPopup() {
 	if (objs.length === 1) { openPlacedPopup(objs[0].id); return; }
 	const el = plcPopup.getElement(), list = el && el.querySelector('.glist'), top = list ? list.scrollTop : 0;
 	const [x, z] = squareCentre(groupOpen), q = '\'' + groupOpen + '\'';
-	plcPopup.setLatLng([z, x]).setContent('<div class="vpop gpop" data-noicon><h4>' + objs.length + ' placed objects</h4><div class="ty">' + groupGrid(groupOpen) + '</div>' +
+	plcPopup.setLatLng([z, x]).setContent('<div class="vpop gpop" data-noicon>' + backLink('grp', groupOpen) + '<h4>' + objs.length + ' placed objects</h4><div class="ty">' + groupGrid(groupOpen) + '</div>' +
 		'<div class="glist">' + objs.map(o => '<button type="button" onclick="event.stopPropagation(); openPlacedPopup(' + o.id + ')" title="' + esc(o.type) + '">' +
 			placedSVG(vehCondition(o.health)[1]) +
 			'<span class="nm">' + esc(placedName(o)) + '</span><span class="ct">' + countText(o.id) + '</span></button>').join('') + '</div>' +
@@ -2802,6 +2836,123 @@ document.getElementById('find').addEventListener('input', renderList);
 document.querySelector('.ptoggle').addEventListener('click', e => { const b = e.target.closest('[data-plist]'); if (b) setPlistMode(b.dataset.plist); });
 loadOffline();
 
+// ---- Stacks: markers drawn on top of one another --------------------------
+// Clicking a marker whose drawn shape touches others' on screen (and those
+// touching them) opens a list of them all; picking one opens its own popup in
+// its place, with ‹ Back to the list. A vehicle brings who is in it, listed
+// under it. A marker touching nothing opens its own popup as before.
+
+// var: drawMarkers and drawVehicles call renderStack, maybe before this line runs.
+var stackPopup = L.popup({ autoPan: false, offset: [0, -6] });
+var stack = null, stackBack = false; // stack: { at: latlng, items: [{ k, id, crew }] }
+// shapeBox is the screen box of what a marker draws: not its label, nor a
+// hidden part (a dead player's arrow, the selected ring).
+function shapeBox(m) {
+	const el = m.getElement(), svg = el && el.querySelector('svg');
+	if (!svg) return null;
+	let r = null;
+	for (const s of svg.querySelectorAll('path, rect, circle')) {
+		if (s.getAttribute('fill') === 'none') continue;
+		const b = s.getBoundingClientRect();
+		if (!b.width || !b.height) continue;
+		r = r ? [Math.min(r[0], b.left), Math.min(r[1], b.top), Math.max(r[2], b.right), Math.max(r[3], b.bottom)] : [b.left, b.top, b.right, b.bottom];
+	}
+	return r;
+}
+// On a touch screen a finger can't pick between near-touching markers, so
+// those STACK_TOUCH_PX apart stack too.
+const STACK_TOUCH_PX = 6;
+function boxesTouch(a, b, pad) { return a[0] <= b[2] + pad && b[0] <= a[2] + pad && a[1] <= b[3] + pad && b[1] <= a[3] + pad; }
+// stackOf is what marker m's stack lists: vehicles (each with its crew),
+// players, predators, placed objects, placed groups.
+function stackOf(m) {
+	const first = shapeBox(m);
+	if (!first) return [m._st];
+	const left = [];
+	for (const set of [markers, vehMarkers, predMarkers, placedMarkers])
+		for (const id in set) { const x = set[id]; if (x !== m && x._st && map.hasLayer(x)) { const b = shapeBox(x); if (b) left.push([x, b]); } }
+	const got = [m], boxes = [first], pad = matchMedia('(pointer: coarse)').matches ? STACK_TOUCH_PX : 1;
+	for (let i = 0; i < boxes.length; i++)
+		for (let j = left.length - 1; j >= 0; j--)
+			if (boxesTouch(boxes[i], left[j][1], pad)) { got.push(left[j][0]); boxes.push(left[j][1]); left.splice(j, 1); }
+	const rank = { veh: 0, ply: 1, pred: 2, obj: 3, grp: 4 }, items = [], seen = new Set();
+	const add = it => { const k = it.k + ':' + it.id; if (!seen.has(k)) { seen.add(k); items.push(it); } };
+	for (const st of got.map(x => x._st).sort((a, b) => rank[a.k] - rank[b.k])) {
+		add({ k: st.k, id: st.id });
+		const v = st.k === 'veh' && vehicles.find(x => x.id === st.id);
+		if (v) for (const p of crewOf(v)) add({ k: 'ply', id: p.guid, crew: true });
+	}
+	return items;
+}
+// stackOr opens marker m's stack, or (alone) its own popup with open().
+function stackOr(m, open) {
+	stackBack = false;
+	const items = stackOf(m);
+	if (items.length < 2) { open(); return; }
+	stack = { at: m.getLatLng(), items };
+	if (renderStack(true)) stackPopup.openOn(map);
+}
+// stackThing is a stack item's player, vehicle, animal, object or group (null: gone).
+function stackThing(it) {
+	if (it.k === 'ply') return byGuid[it.id] || null;
+	if (it.k === 'veh') return vehicles.find(v => v.id === it.id) || null;
+	if (it.k === 'pred') return predators.find(a => a.id === it.id) || null;
+	if (it.k === 'obj') return placedList.find(o => o.id === it.id) || null;
+	const objs = groupOf(it.id);
+	return objs.length ? objs : null;
+}
+function stackHas(k, id) { return !!stack && stack.items.some(it => it.k === k && it.id === id); }
+// plyIcon is a player's arrow, pointing up; faded if dead.
+function plyIcon(p) {
+	return '<svg viewBox="-9 -9 18 18"' + (p.alive ? '' : ' opacity=".45"') + '><path d="M0,-8 L5.6,6.4 L0,2.8 L-5.6,6.4 Z" fill="' + colorOf(p.guid) + '" stroke="#111" stroke-width="1.2"/></svg>';
+}
+function stackRow(it, i) {
+	const t = stackThing(it);
+	if (!t) return '';
+	let ico, nm, ct = '', title = '';
+	if (it.k === 'veh') { ico = vehShape(vehColor(t), 0); nm = catLabel(t); ct = vehCondition(t.health)[0]; title = t.type; }
+	else if (it.k === 'ply') { ico = plyIcon(t); nm = t.name; ct = it.crew ? (t.driver ? 'driving' : 'passenger') : !t.alive ? 'dead' : t.unconscious ? 'unconscious' : ''; }
+	else if (it.k === 'pred') { const [n, c] = PRED[t.kind] || [item(t.type), '#ccc']; ico = predShape(c, 0); nm = n; ct = Math.round(t.health * 100) + '%'; title = t.type; }
+	else if (it.k === 'obj') { ico = placedSVG(vehCondition(t.health)[1]); nm = placedName(t); ct = vehCondition(t.health)[0]; title = t.type; }
+	else { ico = groupSVG(vehCondition(worstHealth(t))[1]); nm = t.length + ' placed objects'; ct = 'group'; }
+	return '<button type="button"' + (it.crew ? ' class="crew"' : '') + ' onclick="event.stopPropagation(); stackPick(' + i + ')"' + (title ? ' title="' + esc(title) + '"' : '') + '>' +
+		ico + '<span class="nm">' + esc(nm) + '</span><span class="ct">' + esc(ct) + '</span></button>';
+}
+// renderStack redraws the open stack popup (or, with force, the closed one
+// about to open); false when nothing in it is left.
+function renderStack(force) {
+	if (!stack || (!force && !stackPopup.isOpen())) return false;
+	const n = stack.items.filter(stackThing).length;
+	if (!n) { map.closePopup(stackPopup); return false; }
+	const h = '<div class="vpop gpop spop" data-noicon><h4>' + n + ' Objects</h4><div class="ty">' + grid(stack.at.lng, stack.at.lat) + '</div>' +
+		'<div class="glist">' + stack.items.map(stackRow).join('') + '</div></div>';
+	stackPopup.setLatLng(stack.at);
+	if (h === stackPopup._html) return true;
+	stackPopup._html = h;
+	const el = stackPopup.getElement(), list = el && el.querySelector('.glist'), top = list ? list.scrollTop : 0;
+	stackPopup.setContent(h);
+	const nl = stackPopup.getElement() && stackPopup.getElement().querySelector('.glist');
+	if (nl) nl.scrollTop = top;
+	return true;
+}
+function stackPick(i) {
+	const it = stack && stack.items[i];
+	if (!it || !stackThing(it)) return;
+	stackBack = true;
+	if (it.k === 'ply') openPlayerPopup(it.id);
+	else if (it.k === 'veh') openVehicle(it.id);
+	else if (it.k === 'pred') openPredator(it.id);
+	else if (it.k === 'obj') openPlacedPopup(it.id);
+	else if (keyParts(it.id)[0] === GROUP_M) openGroupPopup(it.id);
+	else { stackBack = false; map.closePopup(stackPopup); zoomToBlock(it.id); }
+}
+// backLink is ‹ Back to the stack, atop the popup of something picked from it.
+function backLink(k, id) {
+	if (!stackBack || !stackHas(k, id)) return '';
+	return '<a href="#" class="stback" onclick="event.preventDefault(); event.stopPropagation(); stackReturn()">‹ Back</a>';
+}
+function stackReturn() { stackBack = false; if (renderStack(true)) stackPopup.openOn(map); }
+
 // ---- A player's popup -------------------------------------------------------
 // Their gear is read every 2 s while it is open (which keeps ReCON asking
 // the mod for it).
@@ -2848,7 +2999,7 @@ function renderPlayerPopup() {
 	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
 	const pc = (v, max) => Math.round(Math.max(0, Math.min(100, 100 * v / max))) + '%';
 	const state = !p.alive ? 'Dead' : p.unconscious ? 'Unconscious' : p.restrained ? 'Restrained' : '';
-	let h = '<div class="vpop" data-noicon><h4>' + esc(p.name) + '</h4><div class="ty">' + grid(p.x, p.z) + ' · ' + Math.round(p.x) + ', ' + Math.round(p.z) + '</div>' +
+	let h = '<div class="vpop" data-noicon>' + backLink('ply', p.guid) + '<h4>' + esc(p.name) + '</h4><div class="ty">' + grid(p.x, p.z) + ' · ' + Math.round(p.x) + ', ' + Math.round(p.z) + '</div>' +
 		(state ? row('State', state) : '') +
 		'<div class="stats2">' + [[['Health', pc(p.health, 100)], ['Food', pc(p.energy, 5000)]], [['Blood', pc(p.blood, 5000)], ['Water', pc(p.water, 5000)]]]
 			.map(([[k1, v1], [k2, v2]]) => '<span class="k">' + k1 + '</span><span class="v">' + v1 + '</span><span class="sep">|</span><span class="k">' + k2 + '</span><span class="v">' + v2 + '</span>').join('') + '</div>' +
@@ -3856,6 +4007,7 @@ map.on('popupclose', e => {
 	if (e.popup === vehPopup) vehOpen = null;
 	if (e.popup === predPopup) predOpen = null;
 	if (e.popup === plPopup) { plOpen = null; plInv = null; }
+	if (e.popup !== stackPopup) setTimeout(() => { if (![plPopup, vehPopup, predPopup, plcPopup].some(x => x.isOpen())) stackBack = false; });
 });
 buildWorld();
 drawVehicles();

@@ -263,9 +263,11 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
 **Clicking** a mark opens its popup:
 
 - **A player:** their state, health, food, blood and water, bleeding, vehicle, and what they wear and hold. **Info** opens their dialog, **Teleport** sends them to the next spot you click on the map (Esc cancels), **Spawn** opens their Spawn item tab, and **Follow** keeps the map on them until you drag it or click the **Following** button.
-- **A vehicle:** where it is, its condition, fuel, who is inside and its engine. **Info…** opens its dialog; **Follow** as for a player.
+- **A vehicle:** its condition, engine and fuel, then its driver and passengers (a name opens their popup). **Info…** opens its dialog; **Follow** as for a player.
 - **A predator:** its health and whether it's attacking, and **Remove**.
 - **A placed object:** its condition and who placed it, and **Info**.
+
+Marks drawn on top of one another (touching on screen, or within a few pixels on a touch screen) open one list of them all instead, and a vehicle lists the people in it under it. Pick one for its own popup in the same place; **‹ Back** returns to the list.
 
 **Right-click** (a long press on a phone) the map for that spot's position (select it to copy), to teleport any online player there, or **Spawn an item here…**; a player for their dialog's tabs, Follow, Teleport to…, Heal, Dry and Message; a vehicle for Info, Follow, teleporting a player beside it, and Delete. Anything that removes or kills asks again in place (Cancel, or the red button once more).
 
