@@ -1,7 +1,7 @@
 package livemap
 
 // placed.go is the objects players placed (bases, tents, barrels...), as
-// recon-mod 1.0.1 sends them every 30 s, and what is in one when the Live
+// recon-mod sends them every 30 s, and what is in one when the Live
 // Map asks (like a vehicle's Info).
 
 import (
@@ -23,7 +23,7 @@ type Placed struct {
 	X        float64 `json:"x"`
 	Z        float64 `json:"z"`
 	Health   float64 `json:"health"`   // 0..1
-	Placer   string  `json:"placer"`   // "" unknown (placed before mod 1.0.1)
+	Placer   string  `json:"placer"`   // "" unknown
 	PlacerID string  `json:"placerId"` // SteamID64
 	PlacedAt int64   `json:"placedAt"` // unix; 0 unknown
 }
@@ -38,7 +38,7 @@ type PlacedDetail struct {
 
 var placedState struct {
 	sync.Mutex
-	list   []Placed // nil: never sent (a mod before 1.0.1)
+	list   []Placed // nil: not sent yet
 	watch  map[int]time.Time
 	detail map[int]PlacedDetail
 }
@@ -88,7 +88,7 @@ func resetPlaced() {
 // PlacedObjects is every placed object as last sent (sent false: none yet,
 // or the mod isn't connected).
 func PlacedObjects(now time.Time) ([]Placed, bool) {
-	if st, _ := Current(now); !st.Connected {
+	if !isConnected(now) {
 		return []Placed{}, false
 	}
 	placedState.Lock()

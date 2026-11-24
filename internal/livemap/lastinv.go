@@ -7,12 +7,9 @@ package livemap
 // and with a kill, so "last known" is the newest of those.
 
 import (
-	"bytes"
-	"compress/gzip"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
-	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -69,15 +66,13 @@ func saveLastInventory(guid, why string, items []Item, at time.Time) error {
 	lastInvSent.m[guid] = lastInvMark{sum, at}
 	lastInvSent.Unlock()
 
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	zw.Write(raw)
-	if err := zw.Close(); err != nil {
+	blob, err := gzipBytes(raw)
+	if err != nil {
 		return err
 	}
 	_, err = db.Exec(`INSERT INTO last_inventory (guid, at, why, items, count) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (guid) DO UPDATE SET at = excluded.at, why = excluded.why, items = excluded.items, count = excluded.count`,
-		guid, at.Unix(), why, buf.Bytes(), countItems(items))
+		guid, at.Unix(), why, blob, countItems(items))
 	if err != nil {
 		lastInvSent.Lock()
 		delete(lastInvSent.m, guid) // try again next time
@@ -86,10 +81,9 @@ func saveLastInventory(guid, why string, items []Item, at time.Time) error {
 	return err
 }
 
-// LastInv is a player's last known inventory: when, why ("watched": sent
-// read while they were online: every 5 min, or while their dialog was
-// open; "death": what they died with), how many
-// items (all levels) and the items.
+// LastInv is a player's last known inventory: when, why ("watched": read
+// while they were online; "death": what they died with), how many items
+// (all levels) and the items.
 type LastInv struct {
 	At    time.Time `json:"at"`
 	Why   string    `json:"why"`
@@ -112,15 +106,7 @@ func LastInventory(guid string) (inv LastInv, ok bool, err error) {
 	if err != nil {
 		return inv, false, err
 	}
-	zr, err := gzip.NewReader(bytes.NewReader(blob))
-	if err != nil {
-		return inv, false, err
-	}
-	raw, err := io.ReadAll(zr)
-	if err != nil {
-		return inv, false, err
-	}
-	if err := json.Unmarshal(raw, &inv.Items); err != nil {
+	if inv.Items, err = unpackItems(blob); err != nil {
 		return inv, false, err
 	}
 	inv.At = time.Unix(at, 0)

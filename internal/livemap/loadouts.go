@@ -5,12 +5,8 @@ package livemap
 // gear replaced, every item pristine).
 
 import (
-	"bytes"
-	"compress/gzip"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"io"
 	"strings"
 	"time"
 )
@@ -55,20 +51,14 @@ func SaveLoadout(guid string) (int, error) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	raw, err := json.Marshal(inv.Items)
+	blob, err := gzipJSON(inv.Items)
 	if err != nil {
-		return 0, err
-	}
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	zw.Write(raw)
-	if err := zw.Close(); err != nil {
 		return 0, err
 	}
 	n := countItems(inv.Items)
 	_, err = db.Exec(`INSERT INTO loadouts (guid, at, items, count) VALUES (?, ?, ?, ?)
 		ON CONFLICT (guid) DO UPDATE SET at = excluded.at, items = excluded.items, count = excluded.count`,
-		guid, inv.At.Unix(), buf.Bytes(), n)
+		guid, inv.At.Unix(), blob, n)
 	return n, err
 }
 
@@ -86,23 +76,12 @@ func Loadout(guid string) ([]Item, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	zr, err := gzip.NewReader(bytes.NewReader(blob))
-	if err != nil {
-		return nil, 0, err
-	}
-	raw, err := io.ReadAll(zr)
-	if err != nil {
-		return nil, 0, err
-	}
-	var items []Item
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, 0, err
-	}
-	return items, n, nil
+	items, err := unpackItems(blob)
+	return items, n, err
 }
 
 // EquipLoadout replaces the player's gear with their loadout, every item
-// pristine (recon-mod 1.0.3 on); it returns how many items.
+// pristine; it returns how many items.
 func EquipLoadout(guid string, now time.Time) (int, error) {
 	items, n, err := Loadout(guid)
 	if err != nil {

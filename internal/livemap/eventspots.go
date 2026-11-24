@@ -3,7 +3,7 @@ package livemap
 // Event spots: every place the mission lets an event spawn (helicopter
 // crashes, convoys, police, gas zones...), and which of them are up now.
 //
-// The mod (1.0.3 on) sends the mission's cfgeventspawns.xml, db/events.xml
+// The mod sends the mission's cfgeventspawns.xml, db/events.xml
 // and cfgeventgroups.xml when asked (one a sync). ReCON works out the spots
 // from them and sends the mod the ones to check (spotChecks); the mod
 // checks a slice of them each sync and says which have the event's objects
@@ -84,43 +84,6 @@ var spots struct {
 	seen   map[int]bool
 }
 
-// modAtLeast says whether the mod's version v is at least want (both
-// "1.0.3"; a version with a suffix, "1.0.3-dev", counts as its numbers).
-func modAtLeast(v, want string) bool {
-	num := func(s string) []int {
-		s = strings.TrimPrefix(strings.TrimSpace(s), "v")
-		if i := strings.IndexAny(s, "-+ "); i >= 0 {
-			s = s[:i]
-		}
-		var out []int
-		for _, p := range strings.Split(s, ".") {
-			n := 0
-			for _, r := range p {
-				if r < '0' || r > '9' {
-					break
-				}
-				n = n*10 + int(r-'0')
-			}
-			out = append(out, n)
-		}
-		return out
-	}
-	a, b := num(v), num(want)
-	for i := 0; i < len(a) || i < len(b); i++ {
-		x, y := 0, 0
-		if i < len(a) {
-			x = a[i]
-		}
-		if i < len(b) {
-			y = b[i]
-		}
-		if x != y {
-			return x > y
-		}
-	}
-	return true
-}
-
 // resetSpots forgets everything (a new connection: the mission may differ).
 func resetSpots() {
 	spots.Lock()
@@ -133,7 +96,7 @@ func resetSpots() {
 // to ask the mod next: the files still missing (one at a time) and the
 // spots to check, when the mod holds another number of them.
 func takeSpots(req SyncRequest, now time.Time) (want []string, set bool, checks []SpotCheck) {
-	if !modAtLeast(req.Mod, "1.0.3") || req.SpotsHeld == nil {
+	if req.SpotsHeld == nil {
 		return nil, false, nil
 	}
 	world := strings.ToLower(req.World)
@@ -178,8 +141,7 @@ func takeSpots(req SyncRequest, now time.Time) (want []string, set bool, checks 
 }
 
 // EventSpots is every spot with whether it is up, the gas zones on no spot,
-// and crashes on no spot (sent false: the mod can't say: before 1.0.3, or
-// the files haven't come in yet).
+// and crashes on no spot (sent false: the files haven't come in yet).
 func EventSpots(now time.Time) (list []EventSpot, sent bool) {
 	events, evSent := WorldEvents(now)
 	spots.Lock()
@@ -194,7 +156,7 @@ func EventSpots(now time.Time) (list []EventSpot, sent bool) {
 	}
 	world := spots.world
 	spots.Unlock()
-	if !built || !connected2(now) {
+	if !built || !isConnected(now) {
 		return []EventSpot{}, false
 	}
 	if !evSent {
@@ -257,13 +219,6 @@ func EventSpots(now time.Time) (list []EventSpot, sent bool) {
 		}
 	}
 	return list, true
-}
-
-// connected2 is connected with state locked for it.
-func connected2(now time.Time) bool {
-	state.Lock()
-	defer state.Unlock()
-	return connected(now)
 }
 
 // handleModEventSpots serves GET /api/mod/eventspots.

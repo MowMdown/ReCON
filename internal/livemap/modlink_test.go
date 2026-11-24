@@ -3,6 +3,7 @@ package livemap
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func setup(t *testing.T) {
 }
 
 func syncReq(players ...PlayerState) SyncRequest {
-	return SyncRequest{V: Protocol, Mod: "0.1.0", Key: "secret", World: "chernarusplus",
+	return SyncRequest{V: Protocol, Mod: MinMod, Key: "secret", World: "chernarusplus",
 		Year: 2026, Month: 11, Day: 20, Hour: 14, Minute: 5, Players: players}
 }
 
@@ -56,6 +57,18 @@ func TestSyncRefusesOtherProtocol(t *testing.T) {
 	req.V = 99
 	if _, err := Sync(req, time.Now()); err == nil {
 		t.Fatal("protocol 99 accepted")
+	}
+}
+
+func TestSyncRefusesOldMod(t *testing.T) {
+	setup(t)
+	req := syncReq()
+	req.Mod = "1.0.2"
+	if reply, err := Sync(req, time.Now()); err == nil || reply.OK || !strings.Contains(reply.Error, MinMod) {
+		t.Fatalf("reply %+v, err %v", reply, err)
+	}
+	if st, _ := Current(time.Now()); st.Connected {
+		t.Fatal("an old mod connected")
 	}
 }
 
@@ -410,7 +423,7 @@ func TestTeleportBack(t *testing.T) {
 		t.Fatal("previous spot before the mod ran the teleport")
 	}
 	a.X, a.Y, a.Z = 5000, 90, 6000
-	Sync(SyncRequest{V: Protocol, Key: "secret", Players: []PlayerState{a}, Results: []Result{{ID: cs.ID, OK: true}}}, now)
+	Sync(SyncRequest{V: Protocol, Mod: MinMod, Key: "secret", Players: []PlayerState{a}, Results: []Result{{ID: cs.ID, OK: true}}}, now)
 	prev, ok := Previous(g)
 	if !ok || prev.X != 1000 || prev.Y != 212.5 || prev.Z != 2000 {
 		t.Fatalf("previous %+v, %v", prev, ok)
@@ -426,7 +439,7 @@ func TestTeleportBack(t *testing.T) {
 		t.Fatalf("sent %+v", reply.Commands)
 	}
 	// Once there, back again returns them to where they were.
-	Sync(SyncRequest{V: Protocol, Key: "secret", Players: []PlayerState{a}, Results: []Result{{ID: back.ID, OK: true}}}, now)
+	Sync(SyncRequest{V: Protocol, Mod: MinMod, Key: "secret", Players: []PlayerState{a}, Results: []Result{{ID: back.ID, OK: true}}}, now)
 	if prev, _ := Previous(g); prev.X != 5000 || prev.Z != 6000 {
 		t.Fatalf("previous after back %+v", prev)
 	}
@@ -434,7 +447,7 @@ func TestTeleportBack(t *testing.T) {
 	// A failed teleport changes nothing.
 	failed, _ := Queue(g, Command{Action: "teleport", X: 7000, Z: 7000}, now)
 	Sync(syncReq(a), now)
-	Sync(SyncRequest{V: Protocol, Key: "secret", Players: []PlayerState{a}, Results: []Result{{ID: failed.ID, OK: false, Error: "the player is dead"}}}, now)
+	Sync(SyncRequest{V: Protocol, Mod: MinMod, Key: "secret", Players: []PlayerState{a}, Results: []Result{{ID: failed.ID, OK: false, Error: "the player is dead"}}}, now)
 	if prev, _ := Previous(g); prev.X != 5000 {
 		t.Fatalf("a failed teleport moved the previous spot: %+v", prev)
 	}

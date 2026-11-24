@@ -9,9 +9,7 @@
 <link rel="stylesheet" href="assets/leaflet/leaflet.css">
 <script src="assets/leaflet/leaflet.js"></script>
 <style>
-/* The page's colours, as variables: these are the Default theme's, black
-   and white (its accent is a light grey, not a colour); the other themes
-   (data-theme) map them onto their own palette below. */
+/* Default theme's palette; other themes map these onto their own below. */
 :root {
 	--lm-accent: #e0e0e0; --lm-surface: #1a1a1a; --lm-raised: #222; --lm-ground: #111; --lm-sel: #383838;
 	--lm-line: #333; --lm-line2: #555; --lm-text: #ddd; --lm-text-hi: #fff; --lm-muted: #999; --lm-faint: #666;
@@ -25,15 +23,12 @@ html[data-theme]:not([data-theme="default"]) {
 	--lm-muted: var(--color-neutral-400); --lm-faint: var(--color-neutral-500);
 	--lm-overlay: color-mix(in srgb, var(--color-surface) 92%, transparent);
 }
-/* Live Map (recon-mod): the online players on the left, the map on the
-   right; a player's stats and actions in a dialog, the weather and time in
-   another. The stats use DayZ's own HUD colours and thresholds, from
-   DayZ's scripts (Bohemia Interactive, DayZ Public License; see NOTICE). */
+/* HUD colours and thresholds come from DayZ's scripts (Bohemia Interactive,
+   DayZ Public License; see NOTICE). */
 :root { --hud-white: rgb(220,220,220); --hud-yellow: rgb(220,220,0); --hud-red: rgb(220,0,0); --hud-lblue: rgb(0,206,209); --hud-blue: rgb(30,144,220); }
 .live { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; height: calc(100vh - 210px); min-height: 420px; }
 @media (max-width: 760px) { .live { grid-template-columns: minmax(0, 1fr); height: auto; } .mapwrap { height: 70vh; } }
-/* A phone held upright: the map first, square (the whole map fits the
-   screen's width), the players under it two to a row. */
+/* Portrait phone: a square map first, players two to a row under it. */
 @media (max-width: 760px) and (orientation: portrait) {
 	.live .mapwrap { order: -1; height: auto; min-height: 0; aspect-ratio: 1; max-height: 75svh; }
 	.live .plist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -61,28 +56,20 @@ html[data-theme]:not([data-theme="default"]) {
 .hb { height: 6px; background: var(--lm-ground); border-radius: 3px; overflow: hidden; }
 .hb i { display: block; height: 100%; }
 .empty { color: var(--lm-muted); font-size: 13px; line-height: 1.5; }
-.mapwrap { position: relative; border: 1px solid var(--lm-line); border-radius: 6px; overflow: hidden; background: var(--lm-ground); min-height: 420px; }
-/* A long press on the map (a phone's right-click: the map's menu) doesn't
-   select its labels or bring up the phone's own copy menu; the menu's
-   position line can still be selected and copied. */
-.mapwrap { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-/* A popup opened below its marker: its tip on top, pointing up. */
+/* No text selection or callout: a long press opens the map's own menu. */
+.mapwrap { position: relative; border: 1px solid var(--lm-line); border-radius: 6px; overflow: hidden; background: var(--lm-ground); min-height: 420px;
+	-webkit-user-select: none; user-select: none; -webkit-touch-callout: none; container: mapwrap / inline-size; }
+/* A popup flipped below its marker (see L.Popup patch). */
 .leaflet-popup.flipped { margin-bottom: 0; }
 .leaflet-popup.flipped .leaflet-popup-tip-container { top: -20px; margin-top: 0; transform: rotate(180deg); }
-.mapwrap .ctx .hd { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .twohint { position: absolute; inset: 0; z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center;
 	background: rgba(0, 0, 0, .45); color: #fff; font-size: 16px; font-weight: 600; pointer-events: none; opacity: 0; transition: opacity .25s; }
 .twohint.on { opacity: 1; }
 .twohint.minihint { inset: 0 auto auto 0; width: 100%; aspect-ratio: 1; font-size: 14px; border-radius: 6px; z-index: 1002; }
-/* Touch screens: one finger on the mini-map scrolls the dialog (its own
-   handlers take two fingers), as on the big map. */
-
 #map { position: absolute; inset: 0; background: var(--lm-ground); }
-/* Full screen: the map covers the browser's window (not the monitor);
-   the dialogs still open over it. */
+/* Full screen covers the window, under the dialogs. */
 .live .mapwrap.full { position: fixed; inset: 0; z-index: 900; border: none; border-radius: 0; height: auto; min-height: 0; max-height: none; aspect-ratio: auto; order: 0; }
 .leaflet-container { font: inherit; }
-/* The scale, bottom left of the map. */
 .mapscale { position: absolute; left: 10px; bottom: 10px; z-index: 500; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--lm-text); background: color-mix(in srgb, var(--lm-ground) 80%, transparent); border-radius: 4px; padding: 3px 8px; pointer-events: none; }
 .mapscale .bar { height: 5px; border: 1.5px solid currentColor; border-top: 0; box-sizing: border-box; }
 .mapscale .muted { font-size: 11.5px; }
@@ -92,13 +79,10 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar > * { pointer-events: auto; }
 .mapbar.menuopen { z-index: 1001; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
-/* Vehicles on the map, and the popup a click on one opens. */
 .vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
 .amark svg { position: absolute; left: -6px; top: -6px; overflow: visible; }
-/* Who is in a vehicle (its driver), beside it, as a player's name. */
 .vpop a, .idet .props a { color: #8ab4f8; }
 .vmark .vname { position: absolute; left: 11px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
-/* The animal's name, beside its dot. */
 .amark span { position: absolute; left: 9px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--lm-surface); color: var(--lm-text); border: 1px solid var(--lm-line); box-shadow: 0 2px 10px rgba(0,0,0,.5); }
 .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; min-width: 210px; }
@@ -108,40 +92,31 @@ html[data-theme]:not([data-theme="default"]) {
 .vpop .row { display: flex; justify-content: space-between; gap: 12px; }
 .vpop .row span:first-child { color: var(--lm-muted); }
 .vpop .acts { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* Two buttons a row (a player's popup, a vehicle's). */
 .vpop .acts.pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .vpop .acts.pairs button { width: 100%; }
 .vpop .acts button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vpop .acts.split { justify-content: space-between; }
-/* The popup's Info button: the popup's own look, not the page theme's. */
+/* Popup buttons keep the popup's look, not the page theme's. */
 .vpop .acts button { margin: 0; padding: 4px 10px; font: inherit; font-size: 12.5px; color: var(--lm-text); background: var(--lm-raised); border: 1px solid var(--lm-line); border-radius: 4px; cursor: pointer; }
 .vpop .acts button:hover { background: var(--lm-sel); border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vpop .st { font-size: 12px; }
-/* A button that removes or kills: red; asked again in place (Cancel and the
-   red action, where the button was), never in a browser pop-up. */
 button.danger { color: #f28b82 !important; border-color: #5c3533 !important; }
 button.danger.go { background: #5c3533 !important; color: #fff !important; border-color: #f28b82 !important; }
 .vpop .err, .lm-err { color: #f28b82; font-size: 12px; margin-top: 4px; }
+.vpop .err:empty, .lm-err:empty { display: none; }
 .askpair { display: inline-flex; gap: 6px; }
 .ctxpair { display: flex; gap: 4px; }
 .ctxpair button { flex: 1; }
-.vpop .err:empty, .lm-err:empty { display: none; }
-/* A player's popup: their stats two to a line (label, value, label, value). */
 .vpop .stats2 { display: grid; grid-template-columns: auto 1fr auto auto 1fr; gap: 1px 8px; align-items: baseline; }
 .vpop .stats2 .k { color: var(--lm-muted); }
-/* Room for "100%" always, digits all one width: 99% doesn't shift the row. */
 .vpop .stats2 .v { text-align: right; min-width: 4.5ch; font-variant-numeric: tabular-nums; }
 .vpop .stats2 .sep { color: var(--lm-faint); }
-/* A player's popup: their stats, then what they wear and hold. */
-.vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--lm-line); }
+/* At most 5 rows; scrolls without a scrollbar (it flashed on every refresh). */
+.vpop .gear { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--lm-line); max-height: calc(5 * 1.45em + 6px); overflow-y: auto; padding-right: 4px; scrollbar-width: none; }
 .vpop .gear .row span:last-child { text-align: right; overflow-wrap: anywhere; }
-/* At most 5 rows, then it scrolls, so the popup fits near the map's edge. */
-.vpop .gear { max-height: calc(5 * 1.45em + 6px); overflow-y: auto; padding-right: 4px; scrollbar-width: none; }
-/* It still scrolls (wheel, swipe); its scrollbar flashed at every refresh. */
 .vpop .gear::-webkit-scrollbar { display: none; }
 .vpop .muted { color: var(--lm-muted); font-size: 12px; }
-/* Town names: bigger for bigger places; zoomed out only the cities
-   (#map's data-zb is far, mid or near). */
+/* Town names; #map[data-zb] (far, mid, near) hides the smaller ones zoomed out. */
 .town { pointer-events: none; }
 .town span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; color: var(--lm-text); font-size: 11px; font-weight: 600; letter-spacing: .2px;
 	text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
@@ -152,18 +127,15 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .town.t-marine span { font-size: 10.5px; font-style: italic; font-weight: 500; color: var(--lm-accent); }
 #map[data-zb="far"] .town:not(.t-capital):not(.t-city) { display: none; }
 #map[data-zb="mid"] .town:not(.t-capital):not(.t-city):not(.t-village) { display: none; }
-/* Events and deaths. */
 .emark svg, .dmark svg { position: absolute; overflow: visible; cursor: pointer; }
 .emark svg { left: -9px; top: -9px; }
 .dmark svg { left: -6px; top: -6px; }
 .leaflet-tooltip { background: var(--lm-surface); color: var(--lm-text); border: 1px solid var(--lm-line); box-shadow: 0 2px 8px rgba(0,0,0,.5); font-size: 12px; }
 .leaflet-tooltip-top:before { border-top-color: var(--lm-line); }
-/* The map's right-click menu. */
-/* Wide enough from the start for a player's name with Confirm and Cancel
-   (a teleport asked), so it doesn't grow when they appear. */
+/* Right-click menu: wide enough for a name plus Confirm/Cancel, so it doesn't grow. */
 .ctx { position: absolute; z-index: 800; width: 300px; max-width: calc(100% - 8px); box-sizing: border-box; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.6); padding: 6px; font-size: 13px; }
 .ctx[hidden] { display: none; }
-.ctx .hd { user-select: text; cursor: text; color: var(--lm-muted); font-size: 12px; padding: 2px 6px 6px; border-bottom: 1px solid var(--lm-line); margin-bottom: 4px; }
+.ctx .hd { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; cursor: text; color: var(--lm-muted); font-size: 12px; padding: 2px 6px 6px; border-bottom: 1px solid var(--lm-line); margin-bottom: 4px; }
 .ctx .lbl { color: var(--lm-muted); font-size: 11.5px; padding: 6px 6px 2px; }
 .ctx button { display: block; width: 100%; text-align: left; margin: 0; padding: 5px 8px; background: transparent; border: 0; border-radius: 4px; color: var(--lm-text); font: inherit; cursor: pointer; }
 .ctx button:hover { background: var(--lm-sel); color: var(--lm-text-hi); }
@@ -171,7 +143,6 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .ctx .msg { padding: 4px 8px; font-size: 12px; }
 .ctx .msg:empty { display: none; }
 .ctx button.bad { color: #f28b82; }
-/* A player in a teleport list, asked: their name, then Confirm and Cancel. */
 .ctx .ask { display: flex; align-items: center; gap: 4px; padding: 2px 0 2px 8px; }
 .ctx .ask span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--lm-text-hi); }
 .ctx .ask button { display: inline-block; width: auto; padding: 3px 8px; border: 1px solid var(--lm-line); }
@@ -183,20 +154,14 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .ctx .muted { padding: 2px 8px; }
 #sModal .box { width: min(900px, 96vw); }
 #sModal .splist { max-height: min(640px, 62vh); }
-/* Close sits top right; the error and Sent lines take no room until they
-   have something to say, so the space under the item box matches the sides. */
 .dlg-head .dlg-x { margin: 0 0 0 auto; }
 #sModal .dlg-err:empty, #sModal #sLast:empty { display: none; }
 #sModal #sLast { margin-top: 8px; }
 .mapbar select { margin: 0; padding: 3px 6px; font-size: 12px; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); border-radius: 4px; }
-/* The vehicle dialog: its facts, then parts, damage and cargo side by
-   side, each scrolling on its own; one under the other on a narrow screen. */
-/* Placed objects close together: one 50 m square, one marker with ×N. */
 .gmark { position: relative; }
 .gmark svg { position: absolute; left: -6px; top: -6px; overflow: visible; cursor: pointer; }
 .gmark .n { position: absolute; left: 9px; top: -8px; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000; white-space: nowrap; cursor: pointer; }
 .gpop .glist { display: flex; flex-direction: column; gap: 1px; margin: 4px 0 6px; max-height: calc(8 * 26px); overflow-y: auto; scrollbar-width: none; }
-/* It still scrolls (wheel, swipe), like the gear list; no scrollbar. */
 .gpop .glist::-webkit-scrollbar { display: none; }
 .gpop .glist button { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 0; padding: 3px 4px; background: transparent; border: 0; border-radius: 4px; color: var(--lm-text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 .gpop .glist button:hover { background: var(--lm-sel); }
@@ -205,8 +170,7 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 :is(#gModal, #vModal) .box { width: min(1000px, 95vw); }
 :is(#gModal, #vModal) .ilist { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
 :is(#gModal, #vModal) .idet { max-height: 62vh; overflow-y: auto; }
-/* Narrow: the details open inside the list, under their object; the
-   dialog scrolls, not the list and the details each. */
+/* Narrow: details open inside the list and the whole dialog scrolls. */
 @media (max-width: 700px) { :is(#gModal, #vModal) .ilist, :is(#gModal, #vModal) .ilist > .idet.under { max-height: none; overflow: visible; } }
 :is(#gModal, #vModal) .ilist > .idet .sub-items { margin-left: 0; }
 :is(#gModal, #vModal) .irow.gobj { font-weight: 600; }
@@ -227,17 +191,23 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 :is(#vModal, #gModal) .part .lv { font-size: 12px; white-space: nowrap; }
 :is(#vModal, #gModal) .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 #vModal .gacts .st { font-size: 12.5px; margin-right: auto; align-self: center; }
-/* The weather and in-game time, beside Time & Weather above the map. */
 .top { justify-content: flex-end; }
 .worldbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.worldbar .badge { font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; padding: 3px 8px; color: var(--lm-text); }
+.worldbar .badge { margin: 0; font: inherit; font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; padding: 3px 8px; color: var(--lm-text); cursor: pointer; }
+.worldbar .badge:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .worldbar .badge[hidden] { display: none; }
-.mapbar .sp { flex: 1; }
+/* Fit, Fill and Full screen stay on the right; on a narrow map Full screen
+   goes under Fit and Fill rather than the group wrapping below Overlays. */
+.mapbar .mapbtns { margin-left: auto; display: flex; gap: 8px; pointer-events: none; }
+.mapbar .mapbtns > * { pointer-events: auto; }
+@container mapwrap (max-width: 520px) {
+	.mapbar .mapbtns { display: grid; grid-template-columns: auto auto; }
+	.mapbar #fullBtn { grid-column: 1 / -1; justify-self: end; }
+}
 .mapbar button { margin: 0; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); }
 .mapbar button:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .mapbar button:disabled { opacity: .45; }
-/* Overlays: one button, its menu of layers to switch on and off (a box,
-   ticked when on), Deaths with how far back beside it. */
+/* Overlays and Legend menus. */
 .ovwrap { position: relative; }
 .ovmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: min(300px, calc(100vw - 40px)); display: flex; flex-direction: column; gap: 2px; padding: 5px;
 	overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; box-sizing: border-box;
@@ -245,24 +215,20 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .ovmenu[hidden] { display: none; }
 .ovmenu .ovrow { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
 .ovmenu .ovrow select { flex: none; }
-.mapbar .ovmenu button { white-space: nowrap; }
 .ovmenu .ovrow button { flex: 1; }
-.mapbar .ovmenu button { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; text-align: left; border-color: transparent; background: transparent; padding: 5px 8px; }
+.mapbar .ovmenu button { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; text-align: left; white-space: nowrap; border-color: transparent; background: transparent; padding: 5px 8px; }
 .mapbar .ovmenu button::before { content: ''; flex: none; width: 11px; height: 11px; border: 1px solid var(--lm-line2); border-radius: 3px; }
 .mapbar .ovmenu button.on::before { background: var(--lm-accent); border-color: var(--lm-accent);
 	box-shadow: inset 0 0 0 2px var(--lm-surface); }
 .mapbar .ovmenu button:hover { background: var(--lm-sel); }
-/* A heading (Events, Placed objects) opens and closes its filters; what
-   shows is only what is ticked under it. */
+/* A heading (Events, Placed objects) folds its filters: an arrow, not a tick box. */
 .mapbar .ovmenu button.ovhead::before { content: '\25B8'; width: 11px; height: auto; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--lm-muted); font-size: 11px; line-height: 1; text-align: center; }
 .mapbar .ovmenu button.ovhead.open::before { content: '\25BE'; }
 .mapbar .ovmenu button.ovhead.on { color: var(--lm-text); font-weight: 600; }
 .ovmenu .ovsub .ovpair { display: flex; gap: 2px; }
 .ovmenu .ovsub .ovpair button { flex: 1; }
 .ovmenu .ovsub .ovsep { height: 1px; background: var(--lm-line); margin: 3px 8px; }
-/* A layer's own filter (Placed objects' kinds), indented under it. */
 .ovmenu.legend { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 0 22px; width: 640px; padding: 10px 12px; }
-/* two columns side by side; one under the other when the map is narrow */
 .legend .lgcol { flex: 1 1 260px; min-width: 0; }
 .legend .lgsec { margin-bottom: 10px; }
 .ovmenu.legend[hidden] { display: none; }
@@ -278,10 +244,10 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .legend .lgdead .arr { display: none; }
 .legend .lgscale { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 3px 0 0 44px; font-size: 11.5px; color: var(--lm-muted); }
 .legend .lgscale i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+/* A heading's filters, indented under it. */
 .ovmenu .ovsub { display: flex; flex-direction: column; gap: 1px; padding-left: 18px; }
 .ovmenu .ovsub[hidden] { display: none; }
 .mapbar .ovmenu .ovsub button { padding: 3px 8px; font-size: 12px; }
-/* Restore: a saved inventory as a tree of tick boxes. */
 #rModal .rbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 #rModal .rbar .sp { flex: 1; }
 #rModal .rtree { max-height: 60vh; overflow-y: auto; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; }
@@ -294,14 +260,11 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 #pKills button.rs { margin: 0; padding: 2px 8px; font-size: 12px; }
 #rModal .rfoot { justify-content: flex-end; gap: 8px; }
 #rModal .rfoot button { margin: 0; }
-/* A placed object: a small square in the colour of its condition. */
 .omark svg { position: absolute; left: -5px; top: -5px; overflow: visible; cursor: pointer; }
-/* The grid's lines: the theme's border colour lit with its accent, so they
-   stand out on the map's picture; the map's edge a step stronger. */
+/* Grid lines tinted with the accent so they read on the map picture. */
 .leaflet-overlay-pane path.gridline { stroke: color-mix(in srgb, var(--lm-accent) 45%, var(--lm-line2)); stroke-opacity: .85; }
 .leaflet-overlay-pane path.gridfine { stroke: color-mix(in srgb, var(--lm-accent) 30%, var(--lm-line2)); stroke-opacity: .45; }
 .leaflet-overlay-pane path.gridedge { stroke: color-mix(in srgb, var(--lm-accent) 70%, var(--lm-line2)); stroke-width: 1.5; }
-/* The grid's numbers: a small bubble, like a button that isn't one. */
 .gridlbl span { display: inline-block; white-space: nowrap; font-size: 10.5px; line-height: 1.3; padding: 1px 5px; color: var(--lm-text);
 	background: var(--lm-overlay); border: 1px solid var(--lm-line2); border-radius: 4px; }
 html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(--color-divider); border-radius: var(--radius-md, 4px); font-family: var(--font-body, inherit); }
@@ -311,7 +274,6 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .pmark .dx { display: none; }
 .pmark.dead .dx { display: inline; }
 .pmark.dead .arr { display: none; }
-/* Dialogs */
 .modal { z-index: 1000; align-items: flex-start; padding-top: 4vh; overflow-y: auto; }
 .box.wide { width: min(860px, 95vw); box-sizing: border-box; margin-bottom: 4vh; }
 .dlg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -335,12 +297,10 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .track .fill { height: 100%; border-radius: 4px; }
 .track.temp { background: linear-gradient(90deg, #1e4f7a, var(--lm-surface) 35%, var(--lm-surface) 65%, #7a2b1e); }
 .track .mark { position: absolute; top: -2px; width: 3px; height: 13px; border-radius: 2px; }
-/* A limit on the bar (stamina's load cap, comfort's clothing cap): a light
-   tick the size of Temp's. */
+/* A cap on the bar: stamina's load limit, comfort's clothing limit. */
 .track .cap { position: absolute; top: -2px; width: 3px; height: 13px; margin-left: -1.5px; background: var(--lm-text); border-radius: 2px; z-index: 1; }
 .blink .fill, .blink .v, .blink .mark { animation: hudblink 1s steps(2, start) infinite; }
-/* Draggable bars (health, blood, water, food, comfort): a handle on hover;
-   while dragging, the new level striped with its value above the handle. */
+/* Draggable stat bars: a handle on hover; the new level striped while dragging. */
 .bar.can .track { cursor: ew-resize; touch-action: none; overflow: visible; }
 .bar.can .fill { border-radius: 4px; }
 .track .handle { display: none; position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--lm-text); box-shadow: 0 0 0 2px var(--lm-ground), 0 1px 4px #000a; pointer-events: none; }
@@ -366,11 +326,7 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 #mini .leaflet-control-zoom a { width: 26px; height: 26px; line-height: 26px; font-size: 16px; }
 .mmark svg { position: absolute; overflow: visible; }
 .mmark span { position: absolute; top: -8px; white-space: nowrap; font-size: 11px; color: #ddd; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
-/* The mini-map's overlays: the point under the cursor and Recenter at
-   the top, the scale at the bottom. */
 .miniwrap { position: relative; align-self: start; }
-/* The map's picture, under the mini-map's SVG: only the part in view, at
-   the mini-map's own size (a phone can't hold the whole picture scaled up). */
 .minihud, .minical, .miniscale { z-index: 1001; }
 .minihud { position: absolute; top: 6px; left: 6px; right: 6px; display: flex; align-items: center; gap: 6px; pointer-events: none; font-size: 11.5px; color: var(--lm-text); }
 .minihud #miniXY { background: var(--lm-overlay); border-radius: 4px; padding: 1px 6px; }
@@ -392,7 +348,6 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .acts button { margin: 0; }
 .acts .sp { flex: 1; }
-/* The main button of a row: plain in Default, the theme's accent in the others. */
 html[data-theme]:not([data-theme="default"]) button.go { color: var(--color-accent); border-color: var(--color-accent); }
 button.bad { color: #f28b82; border-color: #8c3b36; }
 button.on { color: var(--lm-accent); border-color: var(--lm-accent); }
@@ -405,14 +360,10 @@ button.on { color: var(--lm-accent); border-color: var(--lm-accent); }
 .form.stats { display: block; }
 .form.stats[hidden] { display: none; }
 .form.stats .wrow input[type=range] { width: 100%; }
-/* The spawn footer stays on one line: the item text shrinks (with ...) so
-   Count and Spawn never wrap below it. */
+/* The spawn footer stays on one line: only the item text shrinks. */
 .setfoot { display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; margin-top: 4px; }
-.setfoot > .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setfoot > * { flex-shrink: 0; }
-.setfoot > .muted { flex-shrink: 1; }
-/* Spawn item (a player's) also has Where: on a narrow screen the item text
-   gets its own line and Where shrinks, so Count and Spawn still fit. */
+.setfoot > .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setfoot select { flex: 0 1 auto; min-width: 0; }
 @media (max-width: 560px) {
 	#fSpawn .setfoot { flex-wrap: wrap; }
@@ -420,11 +371,9 @@ button.on { color: var(--lm-accent); border-color: var(--lm-accent); }
 	#fSpawn .setfoot select { flex: 1 1 0; }
 }
 .splist { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; margin: 10px 0 8px; scrollbar-width: none; }
-/* It still scrolls (wheel, swipe, A–Z); its scrollbar covered the rows. */
 .splist::-webkit-scrollbar { display: none; }
 .sprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-ground); border: 1px solid var(--lm-line); border-radius: 5px; padding: 5px 9px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; }
 .sprow:hover { border-color: var(--lm-line2); }
-/* A-Z: jump to the first item starting with that letter (# for the rest) */
 .spaz { display: flex; flex-wrap: wrap; gap: 2px; margin: 8px 0 0; }
 .spaz button { margin: 0; padding: 2px 0; width: 24px; font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; color: var(--lm-text); cursor: pointer; }
 .spaz button:hover:not(:disabled) { border-color: var(--lm-accent); color: var(--lm-text-hi); }
@@ -443,30 +392,24 @@ table.dt a { color: var(--lm-accent); text-decoration: none; cursor: pointer; }
 .dfoot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; gap: 10px; }
 .dfoot button { margin: 0; }
 .dlg-err { color: #f28b82; font-size: 13px; min-height: 1.2em; margin-top: 8px; }
-/* The player dialog's tabs: Stats, Inventory, and Spawn item */
 .ptabs { display: flex; gap: 2px; border-bottom: 1px solid var(--lm-line); margin: 4px 0 14px; }
 .ptabs button { margin: 0 0 -1px; padding: 7px 14px; font-size: 13px; color: var(--lm-muted); background: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; }
 .ptabs button:hover { color: var(--lm-text); }
 .ptabs button.on { color: var(--lm-text); background: var(--lm-raised); border-color: var(--lm-line); border-bottom: 1px solid var(--lm-raised); }
 .ppane[hidden] { display: none; }
-/* The player dialog: 1290 x 1025 (smaller on small screens), the same size
-   on both tabs; a tab scrolls inside it when it needs more room. */
+/* The player dialog keeps one size across tabs; a tab scrolls inside it. */
 .box.pbox { width: min(1290px, 96vw); height: min(1025px, 92vh); display: flex; flex-direction: column; margin-bottom: 0; }
 .pbox .ppane { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
 .pbox .dfoot { margin-top: auto; padding-top: 10px; }
-/* The error and last-action lines take no room until they have something to say. */
 .pbox .dlg-err:empty, .pbox .lastact:empty { min-height: 0; margin-top: 0; }
 .pbox .statgrid { grid-template-columns: minmax(0, 1fr) 390px; }
 .pbox #mini { width: 390px; height: 390px; }
-/* Spawn item: the list takes the height the dialog has left, and grows
-   and shrinks with it; below 120 px the tab scrolls instead. */
+/* Spawn item: the list takes the height left in the dialog. */
 .pbox .ppane[data-ppane="spawn"]:not([hidden]) { display: flex; flex-direction: column; }
 .pbox #fSpawn { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; flex: 1; min-height: 0; }
 .pbox #fSpawn .splist { flex: 1; min-height: 120px; max-height: none; }
 .pbox .killhead { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
 .pbox .killhead button { margin: 0 0 0 auto; font-size: 13px; }
-/* Teleport: three ways in a line (stacked when narrow), Teleport and
-   Previous on the right (below, side by side, when narrow). */
 #fTeleport { align-items: center; }
 #fTeleport .tpopts { flex: 1; display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; min-width: 0; }
 #fTeleport .tpopt { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
@@ -479,17 +422,14 @@ table.dt a { color: var(--lm-accent); text-decoration: none; cursor: pointer; }
 .killkinds { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; }
 .killkinds button { margin: 0; padding: 2px 10px; font-size: 12px; border-radius: 10px; background: transparent; border: 1px solid var(--lm-line); color: var(--lm-muted); }
 .killkinds button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
-/* An offline player's dialog shows what is on file only: none of the
-   actions that need them on the server. */
+/* Offline: hide the actions that need them on the server. */
 .pbox.offline .setcond, .pbox.offline .killhead button, .pbox.offline button.rs { display: none; }
-/* Online / Offline above the player list. */
 .ptoggle { display: flex; gap: 6px; }
 .ptoggle button { flex: 1; margin: 0; padding: 5px 8px; font-size: 12.5px; background: transparent; border: 1px solid var(--lm-line); color: var(--lm-muted); border-radius: 6px; }
 .ptoggle button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
-.prow.off .d { background: var(--lm-faint, #5f6368); }
+.prow.off .d { background: var(--lm-faint); }
 .killkinds button:disabled { opacity: .35; }
 .chip.violet { border-color: #5b3f7a; color: #c58af9; }
-/* The stats fill the height beside the mini-map: taller bars, more room. */
 .pbox .bars { gap: 12.5px; padding-top: 4px; }
 .pbox .bar { grid-template-columns: 84px minmax(0, 1fr) 150px; font-size: 14.5px; }
 .pbox .track { height: 14px; border-radius: 7px; overflow: visible; }
@@ -504,14 +444,12 @@ table.dt a { color: var(--lm-accent); text-decoration: none; cursor: pointer; }
 @media (max-width: 900px) { .pbox .statgrid { grid-template-columns: minmax(0, 1fr); } .pbox #mini { width: 100%; height: auto; aspect-ratio: 1; } }
 .ppane > h4:first-child { margin-top: 0; }
 html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-divider); }
-/* Inventory: the slots on the left, the item picked on the right */
 .inv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; align-items: start; }
 @media (max-width: 700px) { .inv { grid-template-columns: minmax(0, 1fr); } }
 .ilist { display: flex; flex-direction: column; gap: 4px; }
-.irow { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; box-sizing: border-box; } /* the same width for an empty slot (a div) as a full one (a button) */
+.irow { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 13px; margin: 0; width: 100%; box-sizing: border-box; }
 .irow:hover { border-color: var(--lm-line2); }
 .irow.sel { border-color: var(--lm-accent); background: var(--lm-sel); }
-/* A slot with nothing in it (every slot is always listed: no pop-in). */
 .irow.none { cursor: default; } .irow.none:hover { border-color: var(--lm-line); } .irow.none .nm { color: var(--lm-faint); }
 .irow .sl { color: var(--lm-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .irow .nm { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -534,7 +472,6 @@ html[data-theme]:not([data-theme="default"]) .ptabs { border-color: var(--color-
 .sub-items .irow { background: var(--lm-ground); padding: 5px 9px; }
 .ilist > .idet.under { margin: 0 0 4px; min-height: 0; }
 html[data-theme]:not([data-theme="default"]) .irow, html[data-theme]:not([data-theme="default"]) .idet { border-color: var(--color-divider); }
-/* World */
 .wsec { border-top: 1px solid var(--lm-line); padding: 14px 0 4px; margin-top: 4px; }
 .wsec.first { border-top: none; padding-top: 0; }
 .wsec h3 { margin: 0 0 10px; font-size: 14px; color: var(--lm-text); }
@@ -557,8 +494,7 @@ html[data-theme]:not([data-theme="default"]) .prow, html[data-theme]:not([data-t
 html[data-theme]:not([data-theme="default"]) .form, html[data-theme]:not([data-theme="default"]) .mapwrap,
 html[data-theme]:not([data-theme="default"]) #mini, html[data-theme]:not([data-theme="default"]) .chip,
 html[data-theme]:not([data-theme="default"]) .worldbar .badge { border-color: var(--color-divider); }
-/* A toggled button (Vehicles, Towns... on) looks like the theme's hovered
-   one: its accent for the text and border, over a tint of it. */
+/* Toggled buttons in a theme: accent text and border over a tint of it. */
 html[data-theme]:not([data-theme="default"]) .mapbar button.on, html[data-theme]:not([data-theme="default"]) .minihud button.on,
 html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-theme]:not([data-theme="default"]) button.on:not(.ptabs button):not(.setcond button) {
 	color: var(--color-accent) !important; border-color: var(--color-accent) !important; background: color-mix(in srgb, var(--color-accent) 12%, transparent) !important; }
@@ -568,7 +504,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 <body>
 <nav>{{template "navlinks" "live"}}</nav>
 {{template "statusbar" .}}
-<div class="top"><div class="worldbar"><span class="badge" id="wxBadge" hidden></span><span class="badge" id="timeBadge" hidden></span><button type="button" id="worldBtn" onclick="openWorld()" disabled title="Change the in-game time and weather">Time &amp; Weather</button></div></div>
+<div class="top"><div class="worldbar"><button type="button" class="badge" id="wxBadge" hidden onclick="openWorld()" title="Change the weather and in-game time"></button><button type="button" class="badge" id="timeBadge" hidden onclick="openWorld()" title="Change the in-game time and weather"></button></div></div>
 <div class="live">
 	<div class="side">
 		<div class="modline"><span class="dot off" id="modDot"></span><span id="modLine">No Connection to DayZ Server</span></div>
@@ -604,10 +540,11 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 			</div>
 			<button type="button" id="trackBtn" class="on" hidden onclick="setTrack(null)" title="Stop following"></button>
 			<span class="badge pick" id="pickBanner" hidden></span>
-			<span class="sp"></span>
-			<button type="button" onclick="fitAll()" title="Show the whole map">Fit</button>
-			<button type="button" onclick="fillWidth()" title="Zoom so the map's width fills the view, edge to edge">Fill</button>
-			<button type="button" id="fullBtn" onclick="toggleFull()" title="Make the map fill the window (Esc to go back)">Full screen</button>
+			<div class="mapbtns">
+				<button type="button" onclick="fitAll()" title="Show the whole map">Fit</button>
+				<button type="button" onclick="fillWidth()" title="Zoom so the map's width fills the view, edge to edge">Fill</button>
+				<button type="button" id="fullBtn" onclick="toggleFull()" title="Make the map fill the window (Esc to go back)">Full screen</button>
+			</div>
 		</div>
 	</div>
 </div>
@@ -688,8 +625,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 </div>
 
-<!-- The weather and the in-game time -->
-<!-- A vehicle's parts, damage and cargo (Info… on its popup) -->
+<!-- A vehicle's parts, damage and cargo -->
 <div id="vModal" class="modal">
 	<div class="box wide" role="dialog" aria-labelledby="vTitle">
 		<div class="dlg-head"><h2 id="vTitle">Vehicle</h2><span class="badge" id="vWhere"></span><span class="muted" id="vSum"></span><button type="button" class="dlg-x" onclick="closeVehicleInfo()">Close</button></div>
@@ -698,7 +634,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 </div>
 
-<!-- Give back chosen items from an inventory saved at death (Restore… on a death) -->
+<!-- Give back chosen items from an inventory saved at death -->
 <div id="rModal" class="modal">
 	<div class="box wide" role="dialog" aria-labelledby="rTitle" style="width:min(820px, 95vw)">
 		<div class="dlg-head"><h2 id="rTitle">Restore items</h2><span class="sub" id="rSub"></span></div>
@@ -709,7 +645,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 </div>
 
-<!-- Placed objects close together (one grid square): each one, what is in it (Info on the group's popup) -->
+<!-- Placed objects (one, or a group close together) and what is in them -->
 <div id="gModal" class="modal">
 	<div class="box wide" role="dialog" aria-labelledby="gTitle">
 		<div class="dlg-head"><h2 id="gTitle">Placed objects</h2><span class="badge" id="gWhere"></span><span class="muted" id="gSum"></span><button type="button" class="dlg-x" onclick="closeGroupInfo()">Close</button></div>
@@ -718,7 +654,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 </div>
 
-<!-- Spawn an item at a spot on the map (the map's right-click menu) -->
+<!-- Spawn an item at a spot on the map -->
 <div id="sModal" class="modal">
 	<div class="box wide" role="dialog" aria-labelledby="sTitle">
 		<div class="dlg-head"><h2 id="sTitle">Spawn here</h2><span class="badge" id="sWhere"></span><button type="button" class="dlg-x" onclick="closeSpawnAt()">Close</button></div>
@@ -737,6 +673,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 </div>
 
+<!-- The weather and the in-game time -->
 <div id="wModal" class="modal">
 	<div class="box wide" role="dialog" aria-labelledby="wTitle">
 		<div class="dlg-head"><h2 id="wTitle">Time &amp; Weather</h2><span class="badge" id="wWorld"></span></div>
@@ -770,30 +707,26 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 // ---- Data ---------------------------------------------------------------
 
 let mod = null, players = [], commands = [], byGuid = {};
-let selGuid = null, detail = null; // the player in the dialog, and their kills and inventory (every 2 s)
+let selGuid = null, detail = null; // the player in the dialog, and their /api/mod/players/{guid} reply
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 function pad(n, w) { return String(Math.max(0, Math.floor(n))).padStart(w || 2, '0'); }
-// grid is DayZ's map grid: the 100 m square, "067 112".
+// grid is DayZ's 100 m map grid reference: "067 112".
 function grid(x, z) { return pad(x / 100, 3) + ' ' + pad(z / 100, 3); }
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 function compass(deg) { return COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8]; }
-// A steady colour per player, from their GUID.
 function colorOf(guid) {
 	let h = 0;
 	for (const c of guid) h = (h * 31 + c.charCodeAt(0)) >>> 0;
 	return 'hsl(' + (h % 360) + ', 70%, 65%)';
 }
-// Class names read better without underscores: "MountainBag_Blue" -> "MountainBag Blue".
+// item makes a class name readable: "MountainBag_Blue" -> "MountainBag Blue".
 function item(s) { return s ? s.replace(/_/g, ' ') : ''; }
-// What's in their hands and the vehicle they're in, by the names the game
-// shows ("Wood Axe"); the class name when the mod didn't send one.
 function handsOf(p) { return p.handsName || item(p.hands); }
 function vehicleOf(p) { return p.vehicleName || item(p.vehicle); }
 
-// hud is DayZ's HUD colour for health, blood, food and water: white,
-// yellow, red, or red blinking (PlayerBase.GetStatLevel with
-// PlayerConstants.SL_*: critical, low, normal).
+// hud is DayZ's HUD colour (and blink) for a stat, per PlayerBase.GetStatLevel
+// and PlayerConstants.SL_* (critical, low, normal).
 const LEVELS = { health: [15, 30, 50], blood: [3000, 3500, 4000], energy: [0, 300, 800], water: [0, 300, 1000] };
 function hud(stat, v) {
 	const l = LEVELS[stat];
@@ -803,8 +736,7 @@ function hud(stat, v) {
 	if (v <= l[2]) return ['var(--hud-yellow)', false];
 	return ['var(--hud-white)', false];
 }
-// temp is the HUD's temperature: heat comfort from -1 to 1, with
-// PlayerConstants.THRESHOLD_HEAT_COMFORT_* and the HUD's colours.
+// temp is the HUD's heat comfort (-1 to 1), per PlayerConstants.THRESHOLD_HEAT_COMFORT_*.
 function temp(h) {
 	if (h >= 0.75) return ['var(--hud-red)', true, 'overheating'];
 	if (h > 0.45) return ['var(--hud-red)', false, 'very hot'];
@@ -842,25 +774,21 @@ async function poll() {
 
 // ---- The map ------------------------------------------------------------
 
-// Each map's size in metres; one the list doesn't know is sized to fit
-// the players on it.
+// Map sizes in metres; an unknown map is sized to fit its players.
 const SIZES = { chernarusplus: 15360, enoch: 12800, namalsk: 12800, deerisle: 16384, sakhal: 15360, esseker: 12800, takistanplus: 12800, banov: 15360, chiemsee: 10240, pripyat: 20480, rostow: 14336, iztek: 8192, alteria: 8192, nasdara: 16384 };
 const NAMES = { chernarusplus: 'Chernarus', enoch: 'Livonia', namalsk: 'Namalsk', deerisle: 'Deer Isle', sakhal: 'Sakhal', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', pripyat: 'Pripyat', rostow: 'Rostow', iztek: 'Iztek', alteria: 'Alteria', nasdara: 'Nasdara' };
-// dataMaps: the maps with a picture in ReCON's data folder (for a map to
-// show before the mod has ever said which it is).
+// dataMaps are the maps with a picture in ReCON's data folder, so one can
+// show before the mod has said which map it is.
 let dataMaps = [];
-// A narrow screen: the inventories (a player's, placed objects') are one
-// column, and an item's details open under the row picked.
+// On a narrow screen the inventory dialogs are one column, details under the row picked.
 const NARROW_INV = matchMedia('(max-width: 700px)');
 api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).catch(() => { });
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
 
-// A popup near the top of the map (under the bar of buttons, or off it)
-// opens below its marker instead, its tip on top pointing up at it (when
-// it fits there, or there is more room below than above). Leaflet places every popup here, so this
-// covers them all (players, vehicles, animals, placed objects). It is
-// decided before Leaflet's auto-pan, so a popup that fits flipped doesn't
-// move the map.
+// Every popup that would open under the map's button bar opens below its
+// marker instead (if it fits, or there is more room below). Patched into
+// Leaflet's placement, so it runs before auto-pan and a flipped popup that
+// fits doesn't move the map.
 const POPUP_TOP = 50, POPUP_GAP = 8;
 (function () {
 	const place = L.Popup.prototype._updatePosition;
@@ -870,40 +798,36 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 		const base = this._baseOffset || (this._baseOffset = L.point(this.options.offset));
 		const y = m.latLngToContainerPoint(this._latlng).y, h = el.offsetHeight, H = m.getSize().y;
 		const above = y + base.y - 20 - h, below = y + POPUP_GAP + 20 + h;
-		// No room above: below, if it fits there, or there is more room
-		// below than above (a phone's map can be too short for either).
 		const flip = above < POPUP_TOP && (below <= H - 6 || H - y > y - POPUP_TOP);
 		this.options.offset = flip ? [base.x, POPUP_GAP + 20 + h] : [base.x, base.y];
 		el.classList.toggle('flipped', flip);
 		return place.call(this);
 	};
 })();
-// viewSpan is how many metres across the map's view shows.
+// viewSpan is the metres across the map's view.
 function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoom())); }
-// Zoom moves in steps of the scale bar: the bar is always SCALE_PX long,
-// and a wheel notch, + or - or a double-click moves it to the next of
-// SCALE_STEPS; out from the last one is Fit (the whole map).
+// Zoom moves in scale-bar steps: the bar is always SCALE_PX long and reads
+// one of SCALE_STEPS metres; out past the last step is Fit.
 const SCALE_PX = 100, SCALE_STEPS = [25, 50, 100, 200, 500, 1000];
 function zoomForBar(m) { return Math.log2(SCALE_PX / m); }
-// barMetres is what the bar is long, in metres, at zoom z (default: where
-// the map is going, if it is mid-zoom).
+// barMetres is the scale bar's length in metres at zoom z (default: the
+// zoom the map is at or animating to).
 function barMetres(z) {
 	if (z === undefined) z = map._animatingZoom ? map._animateToZoom : map.getZoom();
 	return SCALE_PX / Math.pow(2, z);
 }
-// stepZoom zooms one step in (dir 1) or out (dir -1), about the point on
-// screen given (default: the centre). Out past the last step: Fit.
+// stepZoom zooms one step in (dir 1) or out (dir -1) about a container
+// point (default: the centre).
 function stepZoom(dir, around) {
 	const cur = barMetres();
 	const next = dir > 0 ? [...SCALE_STEPS].reverse().find(m => m < cur * 0.99) : SCALE_STEPS.find(m => m > cur * 1.01);
-	// Out past the last step: Fit, the whole map in the middle.
 	if (dir < 0 && !next) { fitAll(); return; }
 	const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), next ? zoomForBar(next) : map.getMaxZoom()));
 	if (Math.abs(z - map.getZoom()) < 1e-6) return;
 	if (around) map.setZoomAround(around, z); else map.setZoom(z);
 }
-// stepWheel turns the mouse wheel into steps: one per notch, and a
-// trackpad's small scrolls add up to one.
+// stepWheel makes the wheel, pinch, +/- and double-click zoom in steps
+// (a trackpad's small scrolls add up to one).
 function stepWheel() {
 	let acc = 0, last = 0;
 	map.getContainer().addEventListener('wheel', e => {
@@ -917,14 +841,12 @@ function stepWheel() {
 		acc = 0;
 		stepZoom(dir, map.mouseEventToContainerPoint(e));
 	}, { passive: false });
-	// A pinch ends on the nearest step (or Fit), not in between: the
-	// two-finger touch is noted, and its zoom snapped once it ends.
+	// A pinch snaps to the nearest step (or Fit) once it ends.
 	let pinched = false;
 	map.getContainer().addEventListener('touchstart', e => { if (e.touches.length > 1) pinched = true; }, { passive: true });
 	map.on('zoomend', () => {
 		if (!pinched) return;
 		pinched = false;
-		// The nearest step, or Fit (as a step past the last).
 		const m = barMetres(map.getZoom());
 		const near = SCALE_STEPS.concat([barMetres(map.getMinZoom())]).reduce((a, b) => Math.abs(b - m) < Math.abs(a - m) ? b : a);
 		const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zoomForBar(near)));
@@ -937,8 +859,6 @@ function stepWheel() {
 		if (e.key === '+' || e.key === '=') stepZoom(1); else if (e.key === '-' || e.key === '_') stepZoom(-1);
 	});
 }
-// drawScale shows the scale bar (always SCALE_PX long, with its length in
-// metres) and how much the view shows across, like the player's mini-map.
 function drawScale() {
 	const span = viewSpan(), km = m => m >= 1000 ? (m / 1000).toFixed(1).replace(/\.0$/, '') + ' km' : m + ' m';
 	if (!(span > 0)) return;
@@ -953,9 +873,9 @@ function initMap() {
 	setTouchDrag();
 	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled());
 	L.control.zoom({ position: 'bottomright' }).addTo(map);
-	// What covers what, top first: players, vehicles and predators, town
-	// names, events and deaths, the grid's numbers; then the grid lines
-	// (overlay pane, 400) and the map's picture. Popups (700) stay on top.
+	// Stacking, top first: players, vehicles/predators/placed, towns,
+	// events/deaths, grid numbers; then grid lines (overlay pane, 400) and
+	// the picture. Popups (700) stay above all.
 	for (const [name, z] of [['players', 640], ['vehicles', 630], ['towns', 620], ['events', 610], ['gridlabels', 450]]) map.createPane(name).style.zIndex = z;
 	map.getPane('towns').style.pointerEvents = 'none';
 	map.getPane('gridlabels').style.pointerEvents = 'none';
@@ -963,7 +883,6 @@ function initMap() {
 	labelLayer = L.layerGroup().addTo(map);
 	map.on('moveend zoomend', drawLabels);
 	map.on('moveend zoomend', () => drawFineGrid());
-	// Where the cursor is: X (east) and Y (north) in metres, and its grid.
 	map.on('mousemove', e => {
 		const x = e.latlng.lng, z = e.latlng.lat, el = document.getElementById('scaleXY');
 		el.textContent = x >= 0 && z >= 0 && (!size || (x <= size && z <= size)) ? 'X ' + Math.round(x) + ' · Y ' + Math.round(z) + ' · ' + grid(x, z) : '';
@@ -977,20 +896,16 @@ function initMap() {
 	map.setView([7680, 7680], -5);
 }
 
-// The map's picture: tiles sliced ahead of time (satmap),
-// maps/<world>/<level>/<column>_<row>.jpg, else the whole picture,
-// maps/<world>.jpg. Level 0 is the whole map in one tile and each level
-// after it has twice the detail, so whatever the zoom only the few tiles in
-// view, from the least detailed level that is sharp enough, are loaded.
-// Either way only what is in view is drawn, at screen size: scaling a
-// whole picture up instead (an <img> or SVG <image>) made phones run out
-// of memory and reload the page.
-let pic = null; // { levels, tile, px, url(level, col, row) } for tiles, { img } for the whole picture
+// The map's picture: satmap tiles (maps/<world>/<level>/<col>_<row>.jpg,
+// level 0 the whole map, each level twice the detail), else one picture
+// (maps/<world>.jpg). Either way only what is in view is drawn, at screen
+// size: scaling a whole picture up made phones run out of memory.
+let pic = null; // tiles: { levels, tile, px, url(level, col, row) }; one picture: { img }
 
-// srcCache holds the loaded tiles by URL, the most recently used last.
+// srcCache holds the loaded tiles by URL, most recently used last.
 const srcCache = new Map();
-// srcImage is the tile at url once it has loaded, else null: it starts
-// loading it, and calls again() when it has.
+// srcImage is the tile at url if it has loaded; otherwise it starts loading
+// it, calls again() once it has, and returns null.
 function srcImage(url, again) {
 	let im = srcCache.get(url);
 	if (im) srcCache.delete(url);
@@ -1001,25 +916,23 @@ function srcImage(url, again) {
 	if (again) im.addEventListener('load', again, { once: true });
 	return null;
 }
-// srcLoaded is the tile at url if it has already loaded, without loading it.
+// srcLoaded is the tile at url if it has loaded, without loading it.
 function srcLoaded(url) {
 	const im = srcCache.get(url);
 	return im && im.complete && im.naturalWidth ? im : null;
 }
 
-// calPoints are the map's calibration points, oldest first: where a player
-// was (x, z, as the mod reported) and where on the picture they really
-// were (u from its west edge, v from its north edge, 0 to 1).
+// calPoints are the map's calibration points, oldest first: a player's
+// reported x, z and where they really were on the picture (u from its west
+// edge, v from its north edge, 0 to 1).
 let calPoints = [];
 const CAL_MIN = 1000; // metres two points must be apart to set the picture's size
-// placement is where the map's picture lies: its north-west corner at
-// (W, N), L metres across. Not calibrated, it covers the map (see L0); one point
-// moves it so that spot on it is where the player was; two at least
-// CAL_MIN apart set its size too.
+// placement is where the picture lies: its north-west corner at (W, N), L
+// metres across. One calibration point moves it; two CAL_MIN apart also size it.
 function placement() {
 	const S = size || 15360, p = calPoints;
-	// A picture within 2% of the map's size is taken as 1 px a metre from
-	// the map's north-west corner (Deer Isle's is 16512 px for 16384 m).
+	// A picture within 2% of the map's size is 1 px a metre (Deer Isle's is
+	// 16512 px for 16384 m).
 	const px = pic && (pic.px || (pic.img && pic.img.naturalWidth));
 	const L0 = px && Math.abs(px - S) <= S * 0.02 ? px : S;
 	if (!p.length) return { W: 0, N: S, L: L0 };
@@ -1034,18 +947,16 @@ function placement() {
 	return { W: W / use.length, N: N / use.length, L };
 }
 
-// drawPicture draws the map's picture from (x0, z0), span metres across,
-// onto all of the canvas cv (north up); again() is called when a tile it
-// needed has loaded, to draw it again.
+// drawPicture draws the square of map from (x0, z0), span metres across,
+// onto canvas cv; again() is called when a missing tile has loaded.
 function drawPicture(cv, x0, z0, span, again) {
 	const ctx = cv.getContext('2d');
 	ctx.clearRect(0, 0, cv.width, cv.height);
 	if (!pic || !span) return;
 	const P = placement(), f = cv.width / span; // canvas px a metre
 	ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-	// put draws image im, covering the map from (ix, iTop) w × h metres
-	// (iTop its north edge), clipped to the canvas and to the box
-	// [cx0, cx1] × [cb, ct] if given.
+	// put draws image im, which covers w × h metres west-north from (ix, iTop),
+	// clipped to the canvas and to the box [cx0, cx1] × [cb, ct].
 	const put = (im, ix, iTop, w, h, cx0 = -Infinity, cx1 = Infinity, cb = -Infinity, ct = Infinity) => {
 		const vx0 = Math.max(x0, ix, cx0), vx1 = Math.min(x0 + span, ix + w, cx1);
 		const vt = Math.min(z0 + span, iTop, ct), vb = Math.max(z0, iTop - h, cb);
@@ -1055,13 +966,12 @@ function drawPicture(cv, x0, z0, span, again) {
 			(vx0 - x0) * f, (z0 + span - vt) * f, (vx1 - vx0) * f + 0.5, (vt - vb) * f + 0.5);
 	};
 	if (pic.img) { put(pic.img, P.W, P.N, P.L, P.L); return; }
-	// At level k a tile pixel is m(k) metres; pick the first level whose
-	// pixels are no bigger than the canvas's.
+	// At level k a tile pixel is m(k) metres: use the first level as sharp as the canvas.
 	const top = pic.levels - 1, m = k => Math.pow(2, top - k) * P.L / pic.px;
 	let k = 0;
 	while (k < top && m(k) > 1 / f) k++;
-	// drawTile draws level k's tile (c, r) if it has loaded (loading it
-	// when load), clipped to the box; true if it drew.
+	// drawTile draws level k's tile (c, r) if loaded (starting the load if
+	// load), clipped to box; true if it drew.
 	const drawTile = (k, c, r, load, box = []) => {
 		const url = pic.url(k, c, r), im = load ? srcImage(url, again) : srcLoaded(url);
 		if (!im) return false;
@@ -1075,8 +985,7 @@ function drawPicture(cv, x0, z0, span, again) {
 	for (let r = r0; r <= r1; r++) {
 		for (let c = c0; c <= c1; c++) {
 			if (drawTile(k, c, r, true)) continue;
-			// Not loaded yet: draw its area from the nearest coarser level
-			// that has (level 0, the whole map, is loaded first).
+			// Not loaded yet: fill in from the nearest coarser level that is.
 			const box = [P.W + c * T, P.W + (c + 1) * T, P.N - (r + 1) * T, P.N - r * T];
 			for (let j = k - 1; j >= 0; j--) {
 				const d = Math.pow(2, k - j);
@@ -1086,9 +995,7 @@ function drawPicture(cv, x0, z0, span, again) {
 	}
 }
 
-// PictureLayer shows the map's picture on the big map as 256 px canvas
-// tiles, made only for what is on screen and just around it (Leaflet's
-// keepBuffer), which load the picture's tiles they cover.
+// PictureLayer draws the picture as Leaflet canvas tiles, only around the view.
 const PictureLayer = L.GridLayer.extend({
 	options: { tileSize: 256, noWrap: true, updateWhenZooming: false, minZoom: -6, maxZoom: 3, className: 'piclayer' },
 	createTile(c) {
@@ -1103,9 +1010,8 @@ const PictureLayer = L.GridLayer.extend({
 	},
 });
 
-// loadPicture puts the map's picture under the grid: the tiles in
-// maps/<world>/ if there are any, else maps/<world>.jpg if there is one
-// (never both: the whole picture is too big to load when there are tiles).
+// loadPicture loads the map's tiles, or its one picture if it has no tiles,
+// and its calibration.
 function loadPicture() {
 	if (imageLayer) { imageLayer.remove(); imageLayer = null; }
 	pic = null; srcCache.clear(); calPoints = [];
@@ -1124,7 +1030,7 @@ function loadPicture() {
 		const base = '/api/mod/map/' + encodeURIComponent(w) + '/tile/';
 		const url = (k, c, r) => base + k + '/' + c + '_' + r + '.' + t.ext + '?v=' + t.version;
 		const p = { levels: t.levels, tile: t.tile, px: t.px, url };
-		const first = new Image(); // level 0 first: it is under everything still loading
+		const first = new Image(); // level 0 first: it stands in for every tile still loading
 		first.onload = first.onerror = () => show(p);
 		first.decoding = 'async';
 		first.src = url(0, 0, 0);
@@ -1136,7 +1042,6 @@ function loadPicture() {
 		img.src = '/api/mod/map/' + encodeURIComponent(w);
 	});
 }
-// placePicture (re)draws the map's picture where placement() puts it.
 function placePicture() {
 	if (imageLayer) { imageLayer.remove(); imageLayer = null; }
 	if (pic) {
@@ -1149,8 +1054,7 @@ function placePicture() {
 	calUI();
 }
 
-// setWorld sizes the map and draws its 1 km grid, with the map's picture
-// under it if ReCON's data folder has one (maps/<world>.jpg).
+// setWorld sizes the map, draws its 1 km grid and loads its picture.
 function setWorld(w, s) {
 	if (w === world && s === size) return;
 	const newWorld = w !== world;
@@ -1164,15 +1068,11 @@ function setWorld(w, s) {
 	}
 	L.polyline([[0, 0], [0, size], [size, size], [size, 0], [0, 0]], { className: 'gridedge', weight: 1, interactive: false }).addTo(gridLayer);
 	const bounds = [[-size * 0.25, -size * 0.25], [size * 1.25, size * 1.25]];
-	// The whole map (Fit) when the page first knows the map, and when the
-	// server's map changes; never on its own otherwise (a player joining
-	// used to zoom the map back out).
+	// Fit only on the first map and on a change of map, never otherwise.
 	if (!fitted || newWorld) {
-		// The map's bounds only once it is fitted (and so inside them): set
-		// first, on a wide screen they start an animated pan, which Leaflet
-		// restarts whenever it is stopped and which then undid the fit (the
-		// map a grid square too far south).
-		map.setMaxBounds(L.latLngBounds([])); // none for now (and its pan-back off)
+		// Max bounds go on after the fit: set before it, they start an
+		// animated pan back inside them that undoes the fit.
+		map.setMaxBounds(L.latLngBounds([]));
 		map.invalidateSize({ pan: false });
 		limitZoomOut();
 		fitNow(() => map.setMaxBounds(bounds));
@@ -1184,8 +1084,7 @@ function setWorld(w, s) {
 	drawLabels();
 }
 
-// drawLabels writes the grid's numbers along the bottom (east, x) and left
-// (north, z) edges of what's in view, so they show at any zoom.
+// drawLabels writes the grid's numbers along the bottom and left edges of the view.
 function drawLabels() {
 	if (!labelLayer || !size) return;
 	labelLayer.clearLayers();
@@ -1201,8 +1100,7 @@ function drawLabels() {
 function arrowSVG(color) {
 	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><circle r="8.5" fill="none" stroke="#8ab4f8" stroke-width="1.5" style="display:none"/>' +
 		'<path class="arr" d="M0,-8 L5.6,6.4 L0,2.8 L-5.6,6.4 Z" fill="' + color + '" stroke="#111" stroke-width="1.2"/>' +
-		// Dead: a skull instead of the arrow.
-		'<g class="dx" stroke="#111" stroke-width="1.6" transform="scale(1)"><circle cy="-1.8" r="6" fill="#e8eaed"/><rect x="-3.6" y="2" width="7.2" height="4.6" rx="1.4" fill="#e8eaed"/>' +
+		'<g class="dx" stroke="#111" stroke-width="1.6"><circle cy="-1.8" r="6" fill="#e8eaed"/><rect x="-3.6" y="2" width="7.2" height="4.6" rx="1.4" fill="#e8eaed"/>' +
 		'<circle cx="-2.3" cy="-1.6" r="1.7" fill="#111" stroke="none"/><circle cx="2.3" cy="-1.6" r="1.7" fill="#111" stroke="none"/>' +
 		'<path d="M0 0.6 L-0.9 2 L0.9 2 Z" fill="#111" stroke="none"/><path d="M-1.2 3.4 V6.2 M1.2 3.4 V6.2" stroke-width="1.4"/></g></svg>';
 }
@@ -1227,35 +1125,30 @@ function drawMarkers() {
 			el.querySelector('span').textContent = p.name;
 			el.classList.toggle('sel', p.guid === selGuid);
 			el.classList.toggle('dead', !p.alive);
-			// In a vehicle the map shows: the vehicle stands for them (in
-			// their colour), so their arrow isn't drawn on top of it.
+			// In a shown vehicle the vehicle's marker stands for them.
 			el.style.display = inShownVehicle(p) ? 'none' : '';
 		}
 	});
 	for (const g in markers) if (!seen[g]) { markers[g].remove(); delete markers[g]; }
 	if (track && track.kind === 'player') followTrack();
-	renderPlayerPopup(); // follows them, with their stats now
+	renderPlayerPopup();
 }
 
-// fitAll shows the whole map in the window.
-// limitZoomOut makes Fit's zoom (the whole map in view) the furthest out
-// the map goes; again whenever the map's box changes size.
+// limitZoomOut makes Fit's zoom the furthest out the map goes.
 function limitZoomOut() {
 	const v = map.getSize();
 	if (!(v.x > 0 && v.y > 0)) return;
-	// getBoundsZoom never answers below the current minZoom, so lift it
-	// first: a smaller window needs a lower limit than the last one.
+	// getBoundsZoom never answers below the current minZoom: lift it first.
 	map.options.minZoom = -20;
 	const z = map.getBoundsZoom([[0, 0], [size || 15360, size || 15360]]);
-	// Not setMinZoom: below the new limit it zooms in *animated*, and Leaflet
-	// drops any setView or fitBounds made while that runs (Fit on load was).
+	// Not setMinZoom: it zooms in animated, and Leaflet drops a fit made
+	// while that runs.
 	map.options.minZoom = z;
 	map.fire('zoomlevelschange');
 	if (map.getZoom() < z) map.setZoom(z, { animate: false });
 }
-// fitNow is Fit without animating, for the page itself (first load, a new
-// map), then runs after (if given). If a zoom is still animating it waits
-// for it to end: Leaflet ignores a fit made mid-animation.
+// fitNow fits without animating, then runs after. Leaflet ignores a fit made
+// mid zoom animation, so it waits for one to end.
 function fitNow(after) {
 	if (map._animatingZoom) { map.once('zoomend', () => fitNow(after)); return; }
 	const s = size || 15360;
@@ -1266,19 +1159,15 @@ function fitAll() {
 	const s = size || 15360;
 	map.fitBounds([[0, 0], [s, s]]);
 }
-// toggleFull makes the map fill the browser's window, or puts it back.
-// Touch screens: one finger scrolls the page, two move and zoom the map
-// (as with a map in any page); in full screen, with no page to scroll, one
-// finger moves it too. A one-finger drag on the map says how.
+// On a touch screen one finger scrolls the page and two move the map,
+// except in full screen, where one finger moves it too.
 const TOUCH = matchMedia('(pointer: coarse)').matches;
 function setTouchDrag() {
 	if (!TOUCH || !map) return;
 	if (document.querySelector('.mapwrap').classList.contains('full')) map.dragging.enable(); else map.dragging.disable();
 }
-// watchTouches shows the hint for a one-finger drag only: one touch from
-// first finger down to last finger up is one gesture, and a gesture that
-// ever has two fingers (a pinch, its start and its release, when one finger
-// lifts first) never shows it; nor does a finger that has barely moved yet.
+// watchTouches shows the two-finger hint on a one-finger drag: never for a
+// gesture that ever had two fingers, nor for a finger that has barely moved.
 function watchTouches(el, hintId, applies) {
 	let g = null;
 	el.addEventListener('touchstart', e => {
@@ -1303,6 +1192,7 @@ function twoFingerHint(id) {
 	hintTimers[id] = setTimeout(() => h.classList.remove('on'), 1200);
 }
 function hideHint(id) { clearTimeout(hintTimers[id]); document.getElementById(id).classList.remove('on'); }
+// toggleFull makes the map fill the window, or puts it back.
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
@@ -1316,16 +1206,13 @@ function toggleFull(on) {
 	map.panTo(c, { animate: false });
 	setTouchDrag();
 }
-// ---- Vehicles: every car, motorbike and boat on the server (mod 0.0.1i) -
-// Shown while the Vehicles button is on (remembered in this browser), read
-// every 5 s. A click on one opens its details, with Delete.
+// ---- Vehicles ---------------------------------------------------------------
 
-let vehOn = false, vehicles = [], vehSent = true, vehLayer = null, vehMarkers = {}, vehOpen = null, vehPending = {}, vehDetail = null;
-try { vehOn = localStorage.getItem('live.vehicles') === '1'; } catch (e) { }
+let vehOn = layerPref('vehicles', '0') === '1', vehicles = [], vehLayer = null, vehMarkers = {}, vehOpen = null, vehPending = {}, vehDetail = null;
 const vehPopup = L.popup({ autoPan: false, offset: [0, -6], autoPanPaddingTopLeft: [10, 60] });
 function toggleVehicles() {
 	vehOn = !vehOn;
-	try { localStorage.setItem('live.vehicles', vehOn ? '1' : '0'); } catch (e) { }
+	setLayerPref('vehicles', vehOn ? '1' : '0');
 	if (!vehOn) map.closePopup(vehPopup);
 	drawVehicles();
 	loadVehicles();
@@ -1335,43 +1222,35 @@ async function loadVehicles() {
 	try {
 		const d = await api('GET', '/api/mod/vehicles');
 		vehicles = d.vehicles || [];
-		vehSent = !!d.sent;
 	} catch (e) { return; }
 	drawVehicles();
 }
-// loadCrewVehicles moves the vehicles with someone in them (recon-mod 1.0.3
-// sends them every second; an older mod: nothing, the 10 s list moves them).
+// loadCrewVehicles updates the occupied vehicles between full lists.
 async function loadCrewVehicles() {
 	if (!vehOn) return;
 	try {
 		const d = await api('GET', '/api/mod/vehicles?occupied=1');
-		if (!d.sent) return;
 		const at = new Map(vehicles.map((v, i) => [v.id, i]));
 		for (const v of d.vehicles || []) { if (at.has(v.id)) vehicles[at.get(v.id)] = v; else vehicles.push(v); }
 	} catch (e) { return; }
 	drawVehicles();
 }
-// crewOf is who is in vehicle v (recon-mod 1.0.3 sends each player's
-// vehicle), the driver first, then by seat.
+// crewOf is who is in vehicle v, the driver first, then by seat.
 function crewOf(v) {
-	return players.filter(p => p.seat != null && p.seat >= 0 && p.vehicleId === v.id)
+	return players.filter(p => p.seat >= 0 && p.vehicleId === v.id)
 		.sort((a, b) => (b.driver ? 1 : 0) - (a.driver ? 1 : 0) || a.seat - b.seat);
 }
-// drawArrowsShown hides the arrows of players in a shown vehicle, and shows
-// the rest (after the vehicles change).
 function drawArrowsShown() {
 	for (const p of players) { const m = markers[p.guid], el = m && m.getElement(); if (el) el.style.display = inShownVehicle(p) ? 'none' : ''; }
 }
-function inShownVehicle(p) { return vehOn && p.seat != null && p.seat >= 0 && vehicles.some(v => v.id === p.vehicleId); }
-// vehColor: occupied by a driver, the driver's colour; by passengers only
-// (or by someone not known), blue; parked with the engine running, green;
-// parked with it off, grey.
+function inShownVehicle(p) { return vehOn && p.seat >= 0 && vehicles.some(v => v.id === p.vehicleId); }
+// vehColor: the driver's colour; blue with passengers only; green parked
+// with the engine running; grey parked.
 function vehColor(v) {
 	const driver = crewOf(v).find(p => p.driver);
 	if (driver) return colorOf(driver.guid);
 	return v.crew || crewOf(v).length ? '#8ab4f8' : v.engine ? '#81c995' : '#e8eaed';
 }
-// vehShape is a vehicle's marker: a car seen from above, front first.
 function vehShape(color, heading) {
 	return '<svg width="18" height="18" viewBox="-9 -9 18 18"><g transform="rotate(' + Math.round(heading || 0) + ')">' +
 		'<rect x="-4.5" y="-7.5" width="9" height="15" rx="2.5" fill="' + color + '" stroke="#111" stroke-width="1.2"/>' +
@@ -1385,10 +1264,8 @@ function vehSVG(v) {
 function drawVehicles() {
 	const btn = document.getElementById('vehBtn');
 	btn.classList.toggle('on', vehOn);
-	btn.textContent = 'Vehicles' + (vehOn && vehSent ? ' ' + vehicles.length : '');
+	btn.textContent = 'Vehicles' + (vehOn ? ' ' + vehicles.length : '');
 	renderOvBtn();
-	btn.title = vehOn && !vehSent ? 'The mod on the server doesn\'t send vehicles: it needs recon-mod 0.0.1i or later'
-		: 'Show every car, motorbike and boat on the server';
 	if (!vehLayer) vehLayer = L.layerGroup();
 	if (!vehOn) { vehLayer.remove(); drawArrowsShown(); return; }
 	if (!map.hasLayer(vehLayer)) vehLayer.addTo(map);
@@ -1415,19 +1292,21 @@ function drawVehicles() {
 	if (track && track.kind === 'vehicle') followTrack();
 }
 function catLabel(v) { return v.name && v.name[0] !== '$' ? v.name : item(v.type); }
-// openVehicle opens the popup on the map: what the vehicle list says.
+// openPanned opens a popup, panning the map to fit it as it opens but not on
+// every redraw after.
+function openPanned(popup) {
+	popup.options.autoPan = true;
+	popup.openOn(map);
+	popup.options.autoPan = false;
+}
 function openVehicle(id) {
 	vehOpen = id;
 	renderVehicle();
-	// Pan the map to fit it as it opens, not on every redraw after.
-	vehPopup.options.autoPan = true;
-	vehPopup.openOn(map);
-	vehPopup.options.autoPan = false;
+	openPanned(vehPopup);
 }
-// The vehicle dialog (Info…): laid out like a placed object's. The
-// vehicle on the left; on the right its facts, damage, parts and cargo
-// (asked of the mod when it opens and on Refresh, not otherwise), and any
-// item picked in them (vehItemSel), with what is on and in it.
+// The vehicle dialog: the vehicle on the left; its facts, damage, parts and
+// cargo on the right (asked of the mod on open and Refresh), or the item
+// picked in them (vehItemSel).
 let vehInfo = null, vehAsk = 0, vehItemSel = null;
 function openVehicleInfo(id) {
 	map.closePopup(vehPopup);
@@ -1437,9 +1316,8 @@ function openVehicleInfo(id) {
 	askVehicle();
 }
 function closeVehicleInfo() { document.getElementById('vModal').style.display = 'none'; vehInfo = null; vehDetail = null; vehItemSel = null; vehAsk++; }
-// askVehicle asks the mod, once, for what is in the vehicle in the dialog
-// (its damage zones, parts and cargo), then reads it as soon as it has
-// come (a sync or two): no more asking after that, until Refresh.
+// askVehicle asks the mod once for the dialog's vehicle's damage, parts and
+// cargo, then polls until they come (a sync or two).
 async function askVehicle() {
 	if (vehInfo == null) return;
 	const id = vehInfo, ask = ++vehAsk;
@@ -1458,14 +1336,18 @@ async function askVehicle() {
 		renderVehicleInfo();
 	}
 }
-// zoneName makes a damage zone's name readable: FuelTank → Fuel tank.
+// zoneName makes a damage zone's name readable: FuelTank -> Fuel tank.
 function zoneName(z) { const w = z.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2'); return w[0].toUpperCase() + w.slice(1).toLowerCase(); }
 function partRow(name, level, extra) {
 	const [cn, cc] = CONDITION[Math.max(0, Math.min(4, level))];
 	return '<div class="part"><span class="dot" style="background:' + cc + '"></span><span class="nm">' + esc(name) + '</span>' +
 		'<span class="lv" style="color:' + cc + '">' + cn + (extra ? ' · ' + extra : '') + '</span></div>';
 }
-function vehCondition(h) { return CONDITION[h > 0.7 ? 0 : h > 0.5 ? 1 : h > 0.3 ? 2 : h > 0 ? 3 : 4]; }
+// condLevel is the CONDITION index for a health of 0 to 1.
+function condLevel(h) { return h > 0.7 ? 0 : h > 0.5 ? 1 : h > 0.3 ? 2 : h > 0 ? 3 : 4; }
+function vehCondition(h) { return CONDITION[condLevel(h)]; }
+// props is label/value rows as a .props grid.
+function props(rows) { return '<div class="props">' + rows.map(([k, v]) => '<span class="k">' + k + '</span><span>' + v + '</span>').join('') + '</div>'; }
 // vehFacts is what the vehicle list says about v, as label/value rows.
 function vehFacts(v) {
 	const [cn, cc] = vehCondition(v.health);
@@ -1476,15 +1358,14 @@ function vehFacts(v) {
 			: v.crew ? v.crew + (v.crew === 1 ? ' person' : ' people') : 'Nobody'],
 		['Engine', v.engine ? 'Running' : 'Off']];
 }
-// vehDeleteState is how deleting v went, if it was asked.
 function vehDeleteState(v) {
 	const cmd = vehPending[v.id] && commands.find(c => c.id === vehPending[v.id]);
 	if (cmd && (cmd.status === 'queued' || cmd.status === 'sent')) return '<span class="st" style="color:#fdd663">Deleting…</span>';
 	if (cmd && cmd.status !== 'done') return '<span class="st" style="color:#f28b82">Not deleted: ' + esc(cmd.error || cmd.status) + '</span>';
 	return '';
 }
+// deleteButton: allowed with people in it, as the mod puts them out first.
 function deleteButton(v) {
-	// Allowed with people in it: the mod puts them out first (mod 1.0.1).
 	return confirmPair('veh:' + v.id, 'Delete', 'deleteVehicle(' + v.id + ')',
 		v.crew ? v.crew + (v.crew === 1 ? ' person is' : ' people are') + ' in it: they get out first' : 'Delete it and everything in it');
 }
@@ -1499,9 +1380,7 @@ function renderVehicle() {
 	renderVehicleInfo();
 	drawArrowsShown();
 }
-// The details' sections that fold away (Damage; a vehicle's Parts and
-// Inventory): a row like an item's; a click shows or hides what is in
-// it, each remembered on its own.
+// The details' folding sections (Damage, Parts, Inventory), each remembered.
 const SEC_DEFAULT = { damage: '0', parts: '0', cargo: '1' };
 const secOpen = Object.fromEntries(Object.keys(SEC_DEFAULT).map(k => [k, layerPref('sec.' + k, SEC_DEFAULT[k]) === '1']));
 function toggleSec(k) { secOpen[k] = !secOpen[k]; setLayerPref('sec.' + k, secOpen[k] ? '1' : '0'); renderVehicleInfo(); renderGroupInfo(); }
@@ -1512,47 +1391,100 @@ function secHead(k, label) {
 }
 function damageBlock(zones) {
 	if (!zones || !zones.length) return '';
-	const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
 	const sorted = zones.slice().sort((a, b) => a.health - b.health);
 	return secHead('damage', 'Damage') +
-		(secOpen.damage ? '<div class="seclist dmglist">' + sorted.map(z => partRow(zoneName(z.name), lvl(z.health), Math.round(z.health * 100) + '%')).join('') + '</div>' : '');
+		(secOpen.damage ? '<div class="seclist dmglist">' + sorted.map(z => partRow(zoneName(z.name), condLevel(z.health), Math.round(z.health * 100) + '%')).join('') + '</div>' : '');
 }
-// itemsBlock is a folding section of item rows (a vehicle's Parts or
-// Inventory, a placed object's Inventory); rows draws them (default: the
-// vehicle dialog's).
+// itemsBlock is a folding section of item rows drawn by rows.
 function itemsBlock(k, label, items, none, rows) {
 	return secHead(k, label + ' · ' + items.length) +
-		(secOpen[k] ? (items.length ? '<div class="sub-items seclist">' + (rows || vItemRows)(items) + '</div>' : '<div class="muted seclist">' + none + '</div>') : '');
+		(secOpen[k] ? (items.length ? '<div class="sub-items seclist">' + rows(items) + '</div>' : '<div class="muted seclist">' + none + '</div>') : '');
 }
-// vIrow is a row for an item in the vehicle dialog (click: its details).
-function vIrow(it, label, extra) {
-	const [cn, cc] = condOf(it);
-	return '<button type="button" class="irow' + (it.id === vehItemSel ? ' sel' : '') + '" data-vitem="' + it.id + '">' +
-		'<span class="sl">' + esc(label) + '</span><span class="nm">' + esc(itemName(it)) + '</span>' +
+// ---- Inventory dialogs ------------------------------------------------------
+// A player's inventory, a vehicle and placed objects share one layout: rows
+// on the left (data-obj for a whole object, data-item for an item), the
+// details of what is picked on the right. On a narrow screen the details
+// open under the picked row instead.
+
+// irow is one row of an inventory list: label, name, extra and a condition dot.
+function irow(attrs, label, name, extra, [cn, cc], sel, cls) {
+	return '<button type="button" class="irow' + (cls ? ' ' + cls : '') + (sel ? ' sel' : '') + '" ' + attrs + '>' +
+		'<span class="sl">' + esc(label) + '</span><span class="nm">' + esc(name) + '</span>' +
 		'<span class="ex">' + esc(extra || '') + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
 }
-function vItemRows(items) {
+function itemRow(it, label, extra, sel, attrs) { return irow(attrs || 'data-item="' + it.id + '"', label, itemName(it), extra, condOf(it), sel); }
+function objRow(id, label, name, extra, cond, sel) { return irow('data-obj="' + id + '"', label, name, extra, cond, sel, 'gobj'); }
+// containerRows is items as rows (fitted first, then cargo in grid order),
+// drawn by row(it, label, extra).
+function containerRows(items, row) {
 	return (items || []).slice().sort((a, b) => !!b.slot - !!a.slot || a.row - b.row || a.col - b.col).map(it => {
 		const n = countIn(it);
-		return vIrow(it, it.slot ? slotLabel(it.slot) : 'Cargo', n ? itemsText(n) : qty(it));
+		return row(it, it.slot ? slotLabel(it.slot) : 'Cargo', n ? itemsText(n) : qty(it));
 	}).join('');
 }
-// On a narrow screen (one column) the vehicle's details open right under
-// it, like a player's inventory; picking it again closes them.
-let vehShut = false; // narrow screen: the vehicle's details closed
+// itemDetail is the details of the last item in path: crumbs (from root, a
+// link to the whole object, if given), its facts, Set condition (setCond),
+// and what is on and in it, drawn by rows.
+function itemDetail(path, { root, attrs = x => 'data-item="' + x.id + '"', rows, setCond }) {
+	const it = path[path.length - 1], [cn, cc] = condOf(it);
+	const links = (root ? [root] : []).concat(path.slice(0, -1).map(x => '<a ' + attrs(x) + '>' + esc(itemName(x)) + '</a>'));
+	let h = links.length ? '<div class="crumbs">' + links.map(l => l + ' ›').join(' ') + '</div>' : '';
+	h += '<h3>' + esc(itemName(it)) + '</h3><div class="ty">' + esc(it.type) + '</div>';
+	const facts = [['Where', esc(it.slot ? slotLabel(it.slot) + (path.length > 1 ? ' (attached)' : '') : 'Cargo, row ' + (it.row + 1) + ', column ' + (it.col + 1))],
+		['Condition', '<span style="color:' + cc + '">' + cn + '</span>' + (it.healthMax ? ' · ' + num(it.health) + ' / ' + num(it.healthMax) : '')]];
+	if (it.quantityMax) facts.push([it.unit === 'rounds' ? 'Rounds' : 'Quantity', esc(qty(it))]);
+	if (it.wet != null) facts.push(['Wetness', it.wet > 0 ? Math.round(100 * it.wet) + '%' : 'Dry']);
+	if (it.temperature != null) facts.push(['Temperature', (Math.round(it.temperature * 10) / 10) + ' °C']);
+	h += props(facts);
+	if (setCond) {
+		const lvl = Math.max(0, Math.min(4, it.healthLevel | 0));
+		h += '<div class="setcond"><span class="k">Set condition</span>' + CONDITION.map(([n, c], i) =>
+			'<button type="button" data-cond="' + i + '" data-cond-item="' + it.id + '" style="--c:' + c + '"' + (i === lvl ? ' class="on" aria-pressed="true"' : '') + '>' + n + '</button>').join('') + '</div>';
+	}
+	const att = it.attachments || [], cargo = it.cargo || [];
+	if (att.length) h += '<h5>Attachments · ' + att.length + '</h5><div class="sub-items">' + rows(att) + '</div>';
+	if (cargo.length) h += '<h5>Contents · ' + cargo.length + '</h5><div class="sub-items">' + rows(cargo) + '</div>';
+	return h;
+}
+// placeDetails puts a dialog's details under row on a narrow screen (hidden
+// there without one), beside the list otherwise. A move redraws them, so
+// they are moved only when they aren't already in place.
+function placeDetails(list, det, row) {
+	const narrow = NARROW_INV.matches;
+	if (!narrow) row = null;
+	det.classList.toggle('under', !!row);
+	if (row) { if (row.nextElementSibling !== det) row.after(det); }
+	else if (det.parentElement !== list.parentElement) list.parentElement.appendChild(det);
+	const disp = narrow && !row ? 'none' : '';
+	if (det.style.display !== disp) det.style.display = disp;
+}
+// picked is what a click in an inventory dialog was on: an action button
+// (data-act), an item (data-item, with data-of: whose) or a whole object
+// (data-obj, with inList when it was its row in the list).
+function picked(e, listId) {
+	const a = e.target.closest('[data-act]');
+	if (a) return { act: a.dataset.act, of: a.dataset.of };
+	const it = e.target.closest('[data-item]');
+	if (it) return { item: +it.dataset.item, of: it.dataset.of, inList: it.parentElement && it.parentElement.id === listId };
+	const ob = e.target.closest('[data-obj]');
+	if (ob) return { obj: ob.dataset.obj, inList: ob.parentElement && ob.parentElement.id === listId };
+	return {};
+}
+
+function vItemRows(items) {
+	return containerRows(items, (it, label, extra) => itemRow(it, label, extra, it.id === vehItemSel));
+}
+// vehShut: on a narrow screen, the vehicle's row picked again closes its details.
+let vehShut = false;
 function renderVehicleInfo() {
 	if (vehInfo == null) return;
-	const list = document.getElementById('vList'), det = document.getElementById('vDet');
-	if (det.parentElement !== list.parentElement) list.parentElement.appendChild(det); // out of the list before it is redrawn
+	const list = document.getElementById('vList');
 	renderVehicleInfoBody();
-	const narrow = NARROW_INV.matches, row = narrow && !vehShut ? list.querySelector(':scope > .irow[data-vobj]') : null;
-	det.classList.toggle('under', !!row);
-	if (row) row.after(det);
-	det.style.display = narrow && !row ? 'none' : '';
+	placeDetails(list, document.getElementById('vDet'), vehShut ? null : list.querySelector(':scope > .irow[data-obj]'));
 }
 NARROW_INV.addEventListener('change', renderVehicleInfo);
-// renderVehicleInfoBody draws the dialog (each side keeps where it was
-// scrolled to: it is redrawn with every vehicle update).
+// renderVehicleInfoBody draws the dialog, keeping the details' scroll (it is
+// redrawn with every vehicle update).
 function renderVehicleInfoBody() {
 	const v = vehicles.find(x => x.id === vehInfo), list = document.getElementById('vList'), det = document.getElementById('vDet');
 	if (!v) {
@@ -1565,57 +1497,33 @@ function renderVehicleInfoBody() {
 	document.getElementById('vTitle').textContent = catLabel(v);
 	document.getElementById('vWhere').textContent = grid(v.x, v.z);
 	document.getElementById('vSum').textContent = !d ? 'Loading…' : d.failed ? '' : itemsText(objCount(d)).replace('empty', 'nothing') + ' inside';
-	const [cn, cc] = vehCondition(v.health);
-	setHTML(list, '<button type="button" class="irow gobj' + (vehItemSel == null ? ' sel' : '') + '" data-vobj="1">' +
-		'<span class="sl">' + (v.fuel < 0 ? 'Boat' : 'Vehicle') + '</span><span class="nm">' + esc(catLabel(v)) + '</span>' +
-		'<span class="ex">' + count + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>');
+	setHTML(list, objRow('v', v.fuel < 0 ? 'Boat' : 'Vehicle', catLabel(v), count, vehCondition(v.health), vehItemSel == null));
 	const top = det.scrollTop, path = vehItemSel != null && has ? pathTo(d.items, vehItemSel) : null;
 	let h = '';
 	if (path) {
-		const it = path[path.length - 1], [icn, icc] = condOf(it);
-		h += '<div class="crumbs"><a data-vobj="1">' + esc(catLabel(v)) + '</a> ›' + path.slice(0, -1).map(x => ' <a data-vitem="' + x.id + '">' + esc(itemName(x)) + '</a> ›').join('') + '</div>';
-		h += '<h3>' + esc(itemName(it)) + '</h3><div class="ty">' + esc(it.type) + '</div><div class="props">';
-		const props = [['Where', it.slot ? slotLabel(it.slot) + ' (fitted)' : 'Cargo, row ' + (it.row + 1) + ', column ' + (it.col + 1)],
-			['Condition', '<span style="color:' + icc + '">' + icn + '</span>']];
-		if (it.quantityMax) props.push([it.unit === 'rounds' ? 'Rounds' : 'Quantity', esc(qty(it))]);
-		h += props.map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
-		const att = it.attachments || [], cargo = it.cargo || [];
-		if (att.length) h += '<h5>Attachments · ' + att.length + '</h5><div class="sub-items">' + vItemRows(att) + '</div>';
-		if (cargo.length) h += '<h5>Contents · ' + cargo.length + '</h5><div class="sub-items">' + vItemRows(cargo) + '</div>';
+		h += itemDetail(path, { root: '<a data-obj="v">' + esc(catLabel(v)) + '</a>', rows: vItemRows });
 	} else {
 		vehItemSel = null;
-		h += '<h3>' + esc(catLabel(v)) + '</h3><div class="ty">' + esc(v.type) + '</div><div class="props">' +
-			vehFacts(v).concat([['Contents', count]]).map(([k, x]) => '<span class="k">' + k + '</span><span>' + x + '</span>').join('') + '</div>';
+		h += '<h3>' + esc(catLabel(v)) + '</h3><div class="ty">' + esc(v.type) + '</div>' + props(vehFacts(v).concat([['Contents', count]]));
 		if (!d) h += '<div class="muted" style="margin-top:10px">Loading…</div>';
-		else if (d.failed) h += '<div class="muted" style="margin-top:10px">recon-mod didn\'t send its parts, damage and cargo (it needs 0.0.1i or later).</div>';
+		else if (d.failed) h += '<div class="muted" style="margin-top:10px">recon-mod didn\'t send its parts, damage and cargo.</div>';
 		else {
-			const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
 			const parts = d.items.filter(it => it.slot), cargo = d.items.filter(it => !it.slot);
 			h += damageBlock(d.zones);
-			h += itemsBlock('parts', 'Parts', parts, 'None fitted') + itemsBlock('cargo', 'Inventory', cargo, 'Empty');
+			h += itemsBlock('parts', 'Parts', parts, 'None fitted', vItemRows) + itemsBlock('cargo', 'Inventory', cargo, 'Empty', vItemRows);
 		}
 	}
-	h += '<div class="gacts">' + vehDeleteState(v) + '<button type="button" data-vact="show">Show on map</button>' +
-		'<button type="button" data-vact="refresh" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + '</div>';
+	h += '<div class="gacts">' + vehDeleteState(v) + '<button type="button" data-act="show">Show on map</button>' +
+		'<button type="button" data-act="refresh" title="Read its parts, damage and cargo again">Refresh</button>' + deleteButton(v) + '</div>';
 	setHTML(det, h);
 	det.scrollTop = top;
 }
 document.getElementById('vModal').addEventListener('click', e => {
-	const a = e.target.closest('[data-vact]');
-	if (a) {
-		const v = vehicles.find(x => x.id === vehInfo);
-		if (a.dataset.vact === 'refresh') askVehicle();
-		else if (v) { closeVehicleInfo(); map.setView([v.z, v.x], Math.min(map.getMaxZoom(), Math.log2(map.getSize().x / ZOOM_IN_M))); openVehicle(v.id); }
-		return;
-	}
-	const it = e.target.closest('[data-vitem]');
-	if (it) { vehItemSel = +it.dataset.vitem; renderVehicleInfo(); return; }
-	const ob = e.target.closest('[data-vobj]');
-	if (ob) {
-		// The vehicle's row in the list, picked again: its details close (or open).
-		if (ob.parentElement && ob.parentElement.id === 'vList' && NARROW_INV.matches) vehShut = !vehShut; else vehShut = false;
-		vehItemSel = null; renderVehicleInfo();
-	}
+	const p = picked(e, 'vList'), v = vehicles.find(x => x.id === vehInfo);
+	if (p.act === 'refresh') askVehicle();
+	else if (p.act === 'show') { if (v) { closeVehicleInfo(); showOnMap(v.x, v.z); openVehicle(v.id); } }
+	else if (p.item != null) { vehItemSel = p.item; renderVehicleInfo(); }
+	else if (p.obj != null) { vehShut = p.inList && vehItemSel == null && !vehShut && NARROW_INV.matches; vehItemSel = null; renderVehicleInfo(); }
 });
 async function deleteVehicle(id) {
 	const v = vehicles.find(x => x.id === id), err = document.getElementById('vErr');
@@ -1629,12 +1537,11 @@ async function deleteVehicle(id) {
 	renderVehicle();
 }
 
-// ---- Towns, events and deaths on the map ---------------------------------
-// Each layer is shown while its button is on (remembered in this browser).
+// ---- Confirm in place, layer preferences, the Overlays and Legend menus ------
 
-// confirmPair is a button that asks again in place: clicked, it becomes
-// Cancel and the red action (no question, no browser pop-up). key names what
-// it is for (one at a time); go is the JavaScript that does it.
+// confirmPair is a red button that, clicked, turns into Cancel and the red
+// action in place. key names what it is for (one at a time); go is the
+// onclick JavaScript that does it.
 let confirming = null;
 function confirmPair(key, label, go, title) {
 	if (confirming === key)
@@ -1642,8 +1549,7 @@ function confirmPair(key, label, go, title) {
 			'<button type="button" class="danger go" onclick="event.stopPropagation(); confirming = null; ' + go + '">' + label + '</button>';
 	return '<button type="button" class="danger" onclick="event.stopPropagation(); askConfirm(\'' + key + '\')"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</button>';
 }
-// inlineConfirm does the same for a button that stays put (not redrawn):
-// it hides the button and puts Cancel and the red action after it.
+// inlineConfirm does the same for a button that isn't redrawn.
 function inlineConfirm(btn, label, go) {
 	if (!btn || btn.dataset.asking) return;
 	btn.dataset.asking = '1';
@@ -1672,19 +1578,15 @@ function layerButton(id, on, text, title) {
 	if (title) b.title = title;
 	renderOvBtn();
 }
-// The Overlays button says how many layers are on; its menu opens below it
-// and closes with a click anywhere else.
+// renderOvBtn counts the layers on (not their filters).
 function renderOvBtn() {
-	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length; // not a layer's own filter (a heading is on while it shows something)
+	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length;
 	document.getElementById('ovBtn').textContent = 'Overlays' + (n ? ' · ' + n : '');
 }
-// fitMenu keeps an open menu (Overlays, Legend) inside the map: no wider
-// than it, moved left if it would run off its right edge, and no taller
-// than the room below its button (what is left scrolls inside it). The map
-// cuts off anything outside it, which on a phone was most of a menu.
+// fitMenu keeps an open menu inside the map (which clips it): moved left and
+// capped in width and height, scrolling inside. While one is open the bar
+// goes above the map's zoom buttons.
 function fitMenu(m) {
-	// While a menu is open the bar it hangs from goes over the map's own
-	// controls (+ and −), which would otherwise cover it.
 	document.querySelector('.mapbar').classList.toggle('menuopen', !document.getElementById('ovMenu').hidden || !document.getElementById('lgMenu').hidden);
 	if (!m || m.hidden) return;
 	const box = document.querySelector('.mapwrap').getBoundingClientRect(), wrap = m.parentElement.getBoundingClientRect();
@@ -1703,14 +1605,13 @@ function toggleOvMenu(open) {
 	b.classList.toggle('open', open);
 	b.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
-// (capture: the map stops its own mousedowns before they reach the page)
+// Capture: the map stops its own mousedowns before they reach the page.
 document.addEventListener('mousedown', e => {
 	if (!e.target.closest('#ovMenu, #ovBtn')) toggleOvMenu(false);
 	if (!e.target.closest('#lgWrap')) toggleLegend(false);
 }, true);
 
-// The Legend: every mark the map draws and what it means, drawn by the
-// same functions as the map's, so it can't drift from them.
+// The Legend draws its marks with the map's own functions, so it can't drift from them.
 function toggleLegend(open) {
 	const m = document.getElementById('lgMenu'), b = document.getElementById('lgBtn');
 	open = open === undefined ? m.hidden : open;
@@ -1748,8 +1649,9 @@ function legendHTML() {
 			'<div class="lgscale">' + CONDITION.map(([n, c]) => '<span><i style="background:' + c + '"></i>' + n + '</span>').join('') + '</div>']));
 }
 
-// Players: their arrows and names (on unless switched off); hiding them
-// hides their pane, so nothing else about them changes.
+// ---- Layers -----------------------------------------------------------------
+
+// Players are hidden by hiding their pane.
 let playersOn = layerPref('players', '1') === '1';
 function togglePlayers() { playersOn = !playersOn; setLayerPref('players', playersOn ? '1' : '0'); drawPlayersToggle(); }
 function drawPlayersToggle() {
@@ -1758,20 +1660,19 @@ function drawPlayersToggle() {
 	if (!playersOn) map.closePopup(plPopup);
 }
 
-// Grid: the 1 km lines and their numbers (on unless switched off).
 let gridOn = layerPref('grid', '1') === '1';
 function toggleGrid() { gridOn = !gridOn; setLayerPref('grid', gridOn ? '1' : '0'); drawGridToggle(); }
 function drawGridToggle() {
 	layerButton('gridBtn', gridOn, 'Grid');
 	for (const l of [gridLayer, labelLayer, fineGrid]) if (l) { if (gridOn) l.addTo(map); else l.remove(); }
 	drawFineGrid();
+	drawMiniGrid();
 }
-// drawFineGrid adds 100 m lines (in view) once the scale bar is 200 m or
-// less, fainter than the 1 km ones.
+// drawFineGrid adds faint 100 m lines in view once the scale bar is 200 m or less.
 const fineGrid = L.layerGroup();
 function drawFineGrid() {
 	fineGrid.clearLayers();
-	if (!gridOn || !size || 100 / Math.pow(2, map.getZoom()) > 200 * 1.01) return;
+	if (!gridOn || !size || barMetres(map.getZoom()) > 200 * 1.01) return;
 	const b = map.getBounds().pad(0.2), line = { className: 'gridfine', weight: 1, interactive: false };
 	const x0 = Math.max(0, Math.floor(b.getWest() / 100) * 100), x1 = Math.min(size, b.getEast());
 	const z0 = Math.max(0, Math.floor(b.getSouth() / 100) * 100), z1 = Math.min(size, b.getNorth());
@@ -1779,13 +1680,12 @@ function drawFineGrid() {
 	for (let g = z0; g <= z1; g += 100) if (g % 1000) L.polyline([[g, Math.max(0, b.getWest())], [g, Math.min(size, b.getEast())]], line).addTo(fineGrid);
 }
 
-// Towns: the map's place names, sent by recon-mod once a connection.
+// Towns: the map's place names, sent once a connection.
 let townsOn = layerPref('towns', '0') === '1', places = null, placesWorld = '';
 const townLayer = L.layerGroup();
 const TOWN_TYPES = { Capital: 1, City: 1, Village: 1, Local: 1, Marine: 1, Camp: 1, Ruin: 1, RailroadStation: 1 };
-// townType is a place's type the way Chernarus names it: other maps (Deer
-// Isle) say NameCityCapital, NameCity, NameVillage, NameLocal...; an
-// airfield shows like a local name.
+// townType is a place's type as Chernarus names it (Deer Isle says
+// NameCityCapital, NameCity...); an airfield shows as a local name.
 function townType(t) {
 	t = String(t || '').replace(/^Name/, '');
 	return t === 'CityCapital' ? 'Capital' : t === 'Airport' ? 'Local' : t;
@@ -1808,24 +1708,20 @@ async function loadPlaces() {
 	drawTowns();
 }
 function drawTowns() {
-	layerButton('townBtn', townsOn, 'Towns', townsOn && !places ? 'recon-mod hasn\'t sent the place names: it needs 0.0.1i or later' : 'Show the map\'s town and place names');
+	layerButton('townBtn', townsOn, 'Towns');
 	if (townsOn && places) townLayer.addTo(map); else townLayer.remove();
 }
-// zoomBand sets which town names show: far (cities), mid (and villages), near (all).
 function zoomBand() {
 	const z = map.getZoom();
 	document.getElementById('map').dataset.zb = z < -3.5 ? 'far' : z < -2 ? 'mid' : 'near';
 }
 setInterval(loadPlaces, 10000);
 
-// Event spots (recon-mod 1.0.3 on), every 10 s: every place the mission spawns an event,
-// up ones in their category's colour, the rest grey. The heading opens and
-// closes the filters: Active / Inactive and one per category. A mod before
-// 1.0.3 has only the events that are up (crashes and gas zones).
+// Event spots: every place the mission spawns an event, active ones in their category's colour.
 const EVENT_CATS = [['heli', 'Heli crashes', '#f2a65a'], ['convoy', 'Convoys', '#8ab4f8'], ['police', 'Police', '#a78bfa'],
 	['medical', 'Medical', '#f28b82'], ['gas', 'Gas zones', '#c5d86d'], ['other', 'Other', '#e0e0e0']];
 const EVENT_DEFAULT = { heli: '1', convoy: '1', gas: '1' };
-let eventSpots = [], eventsSent = true, eventsExpanded = layerPref('events.open', '0') === '1';
+let eventSpots = [], eventsExpanded = layerPref('events.open', '0') === '1';
 const eventCatOn = Object.fromEntries(EVENT_CATS.map(([k]) => [k, layerPref('events.' + k, EVENT_DEFAULT[k] || '0') === '1']));
 const eventStateOn = { active: layerPref('events.active', '1') === '1', inactive: layerPref('events.inactive', '1') === '1' };
 const eventLayer = L.layerGroup();
@@ -1844,26 +1740,15 @@ function toggleEventState(k) {
 async function loadEvents() {
 	if (!eventsWanted()) return;
 	try {
-		const d = await api('GET', '/api/mod/eventspots');
-		if (d.sent) { eventSpots = d.spots || []; eventsSent = true; }
-		else {
-			// An older mod: only what is up, from its world events.
-			const w = await api('GET', '/api/mod/worldevents');
-			eventsSent = !!w.sent;
-			eventSpots = (w.events || []).map((e, i) => ({ id: i + 1, name: e.kind === 'crash' ? 'Heli crash' : e.kind === 'area' ? 'Hot zone' : 'Gas zone',
-				category: e.kind === 'crash' ? 'heli' : 'gas', x: e.x, z: e.z, on: true, checked: true, radius: e.kind === 'crash' ? 0 : e.radius, static: /static/i.test(e.type || '') }));
-		}
+		eventSpots = (await api('GET', '/api/mod/eventspots')).spots || [];
 	} catch (e) { return; }
 	drawEvents();
 }
-// bioSVG is the biohazard sign an active gas zone is drawn with: three
-// hooked lobes, with a thin shadow so it reads on any ground.
 function bioSVG(c) {
 	const lobes = [0, 120, 240].map(r => '<g transform="rotate(' + r + ')"><circle cy="-3.7" r="4.3" fill="#fff"/><circle cy="-4.9" r="3.1" fill="#000"/></g>').join('');
 	return '<svg width="20" height="20" viewBox="-10 -10 20 20"><defs><mask id="bioM" maskUnits="userSpaceOnUse" x="-10" y="-10" width="20" height="20">' + lobes +
 		'</mask></defs><rect x="-10" y="-10" width="20" height="20" fill="' + c + '" mask="url(#bioM)" style="filter: drop-shadow(0 0 1px #000)"/></svg>';
 }
-// spotSVG is an event spot's diamond: bigger while the event is up.
 function spotSVG(c, on) {
 	const sz = on ? 14 : 10, h = sz / 2 - 1;
 	return '<svg width="' + sz + '" height="' + sz + '" viewBox="' + (-sz / 2) + ' ' + (-sz / 2) + ' ' + sz + ' ' + sz + '"' + (on ? '' : ' opacity="0.75"') + '>' +
@@ -1875,8 +1760,7 @@ function drawEvents() {
 	const on = eventsWanted(), up = {}, all = {};
 	for (const e of eventSpots) { all[e.category] = (all[e.category] || 0) + 1; if (e.on) up[e.category] = (up[e.category] || 0) + 1; }
 	const shownUp = EVENT_CATS.reduce((n, [k]) => n + (eventCatOn[k] ? up[k] || 0 : 0), 0);
-	layerButton('eventBtn', on, 'Events' + (on && eventsSent ? ' ' + shownUp : ''),
-		on && !eventsSent ? 'recon-mod doesn\'t send events: it needs 0.0.1i or later' : 'Where events spawn: tick what to show');
+	layerButton('eventBtn', on, 'Events' + (on ? ' ' + shownUp : ''));
 	const btn = document.getElementById('eventBtn');
 	btn.classList.toggle('open', eventsExpanded); btn.setAttribute('aria-expanded', eventsExpanded ? 'true' : 'false');
 	const sub = document.getElementById('eventKinds');
@@ -1884,30 +1768,34 @@ function drawEvents() {
 	sub.innerHTML = '<div class="ovpair">' + [['active', 'Active'], ['inactive', 'Inactive']].map(([k, label]) =>
 		'<button type="button" class="' + (eventStateOn[k] ? 'on' : '') + '" onclick="toggleEventState(\'' + k + '\')">' + label + '</button>').join('') + '</div><div class="ovsep"></div>' +
 		EVENT_CATS.map(([k, label]) => '<button type="button" class="' + (eventCatOn[k] ? 'on' : '') + '" onclick="toggleEventCat(\'' + k + '\')">' + label +
-			(eventsSent && all[k] ? ' ' + (up[k] || 0) + '/' + all[k] : '') + '</button>').join('');
+			(all[k] ? ' ' + (up[k] || 0) + '/' + all[k] : '') + '</button>').join('');
 	eventLayer.clearLayers();
 	if (!on) { eventLayer.remove(); return; }
 	eventLayer.addTo(map);
-	for (const e of eventSpots) {
-		if (!eventCatOn[e.category] || !(e.on ? eventStateOn.active : eventStateOn.inactive)) continue;
-		// Gas zones: a biohazard sign and the area, red when static (always
-		// there), in the category's colour while a dynamic one is up, grey
-		// where one can come (with the size it had when last up, if seen up).
+	for (const s of shownSpots()) {
+		if (s.radius) spotCircle(s, 'events').addTo(eventLayer);
+		L.marker([s.e.z, s.e.x], { pane: 'events', icon: L.divIcon({ className: 'emark', html: s.html, iconSize: [0, 0] }), keyboard: false })
+			.bindTooltip(s.tip, { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
+	}
+}
+// shownSpots is the event spots the filters show, with how each is drawn.
+// Gas zones: red when static, the category's colour while a dynamic one is
+// up, grey (at its last known size) while down.
+function shownSpots() {
+	return eventSpots.filter(e => eventCatOn[e.category] && (e.on ? eventStateOn.active : eventStateOn.inactive)).map(e => {
 		const gas = e.category === 'gas' && !e.hot, [, , c0] = eventCat(e.category);
 		const c = gas ? (e.static ? GAS_STATIC : e.on ? c0 : GAS_OFF) : e.on ? c0 : '#7a7a7a';
-		const tip = esc(gas ? (e.static ? 'Static gas zone' : e.on ? 'Gas zone' : 'Gas zone (inactive)') : e.name) + ' · ' + grid(e.x, e.z);
-		if ((e.on || gas) && e.radius > 0)
-			L.circle([e.z, e.x], { radius: e.radius, color: c, weight: 1.5, dashArray: '5 4', fillColor: c, fillOpacity: e.on ? 0.15 : 0.06, pane: 'events', interactive: false }).addTo(eventLayer);
-		const html = gas ? bioSVG(c) : spotSVG(c, e.on);
-		L.marker([e.z, e.x], { pane: 'events', icon: L.divIcon({ className: 'emark', html, iconSize: [0, 0] }), keyboard: false })
-			.bindTooltip(tip, { direction: 'top', offset: [0, -8] }).addTo(eventLayer);
-	}
+		return { e, c, html: gas ? bioSVG(c) : spotSVG(c, e.on), radius: (e.on || gas) && e.radius > 0 ? e.radius : 0,
+			tip: esc(gas ? (e.static ? 'Static gas zone' : e.on ? 'Gas zone' : 'Gas zone (inactive)') : e.name) + ' · ' + grid(e.x, e.z) };
+	});
+}
+function spotCircle(s, pane) {
+	return L.circle([s.e.z, s.e.x], { radius: s.radius, color: s.c, weight: 1.5, dashArray: '5 4', fillColor: s.c, fillOpacity: s.e.on ? 0.15 : 0.06, pane, interactive: false });
 }
 setInterval(loadEvents, 10000);
 
-// Predators: the bears, wolves and guard dogs alive on the server, every
-// 2 s (recon-mod 0.0.1l on). A marker points the way the animal faces.
-let predOn = layerPref('predators', '0') === '1', predators = [], predSent = true, predMarkers = {};
+// Predators: the bears, wolves and guard dogs on the server.
+let predOn = layerPref('predators', '0') === '1', predators = [], predMarkers = {};
 const predLayer = L.layerGroup();
 const PRED = { bear: ['Bear', '#d08b5b'], wolf: ['Wolf', '#f28b82'], dog: ['Dog', '#fdd663'] };
 function togglePredators() { predOn = !predOn; setLayerPref('predators', predOn ? '1' : '0'); drawPredators(); loadPredators(); }
@@ -1915,19 +1803,17 @@ async function loadPredators() {
 	if (!predOn) return;
 	try {
 		const d = await api('GET', '/api/mod/predators');
-		predators = d.predators || []; predSent = !!d.sent;
+		predators = d.predators || [];
 	} catch (e) { return; }
 	drawPredators();
 }
-// A predator's popup: its health and whether it is attacking (recon-mod
-// 1.0.3 on), and Remove.
 const predPopup = L.popup({ autoPan: false, offset: [0, -6], autoPanPaddingTopLeft: [10, 60] });
 let predOpen = null, predErr = '';
 function openPredator(id) {
 	if (!predators.some(x => x.id === id)) return;
 	predOpen = id; predErr = ''; confirming = null;
 	renderPredator();
-	predPopup.options.autoPan = true; predPopup.openOn(map); predPopup.options.autoPan = false;
+	openPanned(predPopup);
 }
 function renderPredator() {
 	if (predOpen == null) return;
@@ -1936,11 +1822,9 @@ function renderPredator() {
 	const [name, c] = PRED[a.kind] || [item(a.type), '#ccc'];
 	const row = (k, v) => '<div class="row"><span>' + k + '</span><span>' + v + '</span></div>';
 	let h = '<div class="vpop" data-noicon><h4>' + esc(name) + '</h4><div class="ty">' + esc(a.type) + '</div>';
-	if (a.health != null) {
-		const [, hc] = vehCondition(a.health);
-		h += row('Health', '<span style="color:' + hc + '">' + Math.round(a.health * 100) + '%</span>');
-		h += row('Attacking', a.attacking ? '<b style="color:#f28b82">Yes</b>' : 'No');
-	} else h += '<div class="muted st">Health and attacking need recon-mod 1.0.3.</div>';
+	const [, hc] = vehCondition(a.health);
+	h += row('Health', '<span style="color:' + hc + '">' + Math.round(a.health * 100) + '%</span>');
+	h += row('Attacking', a.attacking ? '<b style="color:#f28b82">Yes</b>' : 'No');
 	h += '<div class="err">' + esc(predErr) + '</div><div class="acts" style="justify-content:flex-end">' +
 		confirmPair('pred:' + a.id, 'Remove', 'removePredator(' + a.id + ')', 'Remove this animal from the server') + '</div></div>';
 	predPopup.setLatLng([a.z, a.x]).setContent(h);
@@ -1952,8 +1836,7 @@ async function removePredator(id) {
 	map.closePopup(predPopup);
 	setTimeout(loadPredators, 1500);
 }
-// predShape is a predator's marker: a dot in its colour, the notch on
-// the side it faces.
+// predShape is a dot with a notch on the side it faces.
 function predShape(c, heading) {
 	return '<svg width="12" height="12" viewBox="-6 -6 12 12"><g transform="rotate(' + Math.round(heading || 0) + ')"><path d="M0 -9 L3.5 -4.5 L-3.5 -4.5 Z" fill="' + c + '" stroke="#111" stroke-width="1"/></g>' +
 		'<circle r="4.5" fill="' + c + '" stroke="#111" stroke-width="1.2"/></svg>';
@@ -1965,9 +1848,8 @@ function predSVG(a) {
 function drawPredators() {
 	const n = {};
 	for (const a of predators) n[a.kind] = (n[a.kind] || 0) + 1;
-	layerButton('predBtn', predOn, 'Predators' + (predOn && predSent ? ' ' + predators.length : ''),
-		predOn && !predSent ? 'recon-mod doesn\'t send predators: it needs 0.0.1l or later'
-			: predOn ? (n.bear || 0) + ' bears · ' + (n.wolf || 0) + ' wolves · ' + (n.dog || 0) + ' dogs' : 'Show the bears, wolves and guard dogs');
+	layerButton('predBtn', predOn, 'Predators' + (predOn ? ' ' + predators.length : ''),
+		predOn ? (n.bear || 0) + ' bears · ' + (n.wolf || 0) + ' wolves · ' + (n.dog || 0) + ' dogs' : 'Show the bears, wolves and guard dogs');
 	if (!predOn) { predLayer.remove(); predLayer.clearLayers(); predMarkers = {}; return; }
 	if (!map.hasLayer(predLayer)) predLayer.addTo(map);
 	const seen = {};
@@ -1985,11 +1867,9 @@ function drawPredators() {
 	renderPredator();
 }
 
-// ---- Restore: give back chosen items from an inventory saved at death -----
-// Nothing is ticked at first. Ticking a container or a weapon ticks what is
-// in and on it (each can be unticked again); a ticked item without its
-// container comes back on its own. Items given back already are marked, and
-// Select all leaves them out.
+// ---- Restore: give back chosen items from an inventory saved at death -------
+// Ticking an item ticks what is in and on it; Select all leaves out what was
+// given back already.
 let restoreSave = null;
 async function openRestore(id) {
 	const tree = document.getElementById('rTree');
@@ -2022,7 +1902,6 @@ function restoreCount() {
 document.getElementById('rTree').addEventListener('change', e => {
 	const box = e.target.closest('input[data-id]');
 	if (!box) return;
-	// What is in and on it follows it.
 	box.closest('.rnode').querySelectorAll('.rkids input').forEach(c => { c.checked = box.checked; });
 	restoreCount();
 });
@@ -2042,19 +1921,15 @@ document.getElementById('rGo').addEventListener('click', async () => {
 	loadDetail();
 });
 
-// Placed objects: what players placed (recon-mod 1.0.1 on), every 30 s,
-// filtered by kind. Thousands are possible, so markers are drawn only for
-// what's in view, and only from mid zoom in.
+// ---- Placed objects ---------------------------------------------------------
+// Thousands are possible, so markers are drawn only for what is in view, and
+// only from a 200 m scale bar in. Nothing ticked: nothing is read.
 const PLACED_KINDS = [['base', 'Base building'], ['tent', 'Tents & shelters'], ['storage', 'Storage'], ['trap', 'Traps'], ['other', 'Other']];
-// From zoom -1 (2 m per pixel: a 100 px scale bar reads 200 m).
-const PLACED_MIN_ZOOM = -1;
-let placedList = [], placedSent = true, placedMarkers = {}, placedOpen = null;
-// Each kind is off until ticked (remembered); the heading only opens and
-// closes the list (remembered too). Nothing ticked: nothing is read.
+const PLACED_MIN_ZOOM = -1; // a 200 m scale bar
+let placedList = [], placedMarkers = {}, placedOpen = null;
 const placedKindOn = Object.fromEntries(PLACED_KINDS.map(([k]) => [k, layerPref('placed.' + k, '0') === '1']));
 let placedExpanded = layerPref('placed.open', '0') === '1';
 function placedWanted() { return PLACED_KINDS.some(([k]) => placedKindOn[k]); }
-// It opens below the map's top bar (Overlays, Fit...), which sits over the map.
 const plcPopup = L.popup({ autoPan: false, offset: [0, -4], autoPanPaddingTopLeft: [10, 60] });
 function togglePlacedOpen() { placedExpanded = !placedExpanded; setLayerPref('placed.open', placedExpanded ? '1' : '0'); drawPlaced(); }
 function togglePlacedKind(k) {
@@ -2067,34 +1942,33 @@ async function loadPlaced() {
 	if (!placedWanted()) return;
 	try {
 		const d = await api('GET', '/api/mod/placed');
-		placedList = d.placed || []; placedSent = !!d.sent;
+		placedList = d.placed || [];
 	} catch (e) { return; }
 	drawPlaced();
 }
 function placedKind(o) { return PLACED_KINDS.some(([k]) => k === o.kind) ? o.kind : 'other'; }
 function placedName(o) { return o.name && o.name[0] !== '$' ? o.name : item(o.type); }
+function placedKindLabel(o) { return PLACED_KINDS.find(([k]) => k === placedKind(o))[1]; }
 function drawPlaced() {
 	const count = {};
 	for (const o of placedList) count[placedKind(o)] = (count[placedKind(o)] || 0) + 1;
 	const shown = PLACED_KINDS.reduce((n, [k]) => n + (placedKindOn[k] ? count[k] || 0 : 0), 0);
 	const zoomedOut = map.getZoom() < PLACED_MIN_ZOOM - 1e-6, placedOn = placedWanted();
-	layerButton('placedBtn', placedOn, 'Placed objects' + (placedOn && placedSent ? ' ' + shown : ''),
-		placedOn && !placedSent ? 'recon-mod doesn\'t send placed objects: it needs 1.0.1'
-			: placedOn && zoomedOut ? 'Zoom in to see placed objects (200 m on the scale bar)' : 'What players placed: tick the kinds to show');
+	layerButton('placedBtn', placedOn, 'Placed objects' + (placedOn ? ' ' + shown : ''),
+		placedOn && zoomedOut ? 'Zoom in to see placed objects (200 m on the scale bar)' : 'What players placed: tick the kinds to show');
 	const btn = document.getElementById('placedBtn');
 	btn.classList.toggle('open', placedExpanded); btn.setAttribute('aria-expanded', placedExpanded ? 'true' : 'false');
 	const sub = document.getElementById('placedKinds');
 	sub.hidden = !placedExpanded;
 	sub.innerHTML = PLACED_KINDS.map(([k, label]) => '<button type="button" class="' + (placedKindOn[k] ? 'on' : '') + '" onclick="togglePlacedKind(\'' + k + '\')">' +
-		label + (placedSent ? ' ' + (count[k] || 0) : '') + '</button>').join('');
+		label + ' ' + (count[k] || 0) + '</button>').join('');
 	const want = {};
 	if (placedOn && !zoomedOut) {
 		const b = map.getBounds().pad(0.2);
 		for (const o of placedList) if (placedKindOn[placedKind(o)] && b.contains([o.z, o.x])) want[o.id] = o;
 	}
-	// By the scale bar: from 140 m one block per 100 m square (a click zooms
-	// in on it), from 70 m one per 50 m square (a click opens its popup),
-	// closer each object on its own (no square drawn round a group).
+	// Grouped by groupLevel(): a 100 m block zooms in when clicked, a 50 m
+	// group opens its popup; closer in each object shows on its own.
 	const level = groupLevel(), keep = {}, groups = {};
 	for (const id in want) { const k = groupKey(want[id], level || GROUP_M); (groups[k] = groups[k] || []).push(want[id]); }
 	for (const key in groups) {
@@ -2127,15 +2001,14 @@ function drawPlaced() {
 	if (groupOpen != null) renderGroupPopup();
 	renderGroupInfo();
 }
-// placedSVG is one placed object's square; groupSVG a group's (white
-// edged, with ×N beside it); both in the colour of the worst condition.
+// placedSVG is one placed object's square; groupSVG a group's, white edged.
 function placedSVG(c) { return '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + c + '" stroke="#111" stroke-width="1"/></svg>'; }
 function groupSVG(c) { return '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2" fill="' + c + '" stroke="#fff" stroke-width="2"/></svg>'; }
 function placedBy(o) { return o.placer ? esc(o.placer) : '<span class="muted">unknown</span>'; }
 function openPlacedPopup(id) {
 	placedOpen = id; groupOpen = null;
 	renderPlacedPopup();
-	plcPopup.options.autoPan = true; plcPopup.openOn(map); plcPopup.options.autoPan = false;
+	openPanned(plcPopup);
 }
 function renderPlacedPopup() {
 	const o = placedList.find(x => x.id === placedOpen);
@@ -2146,28 +2019,25 @@ function renderPlacedPopup() {
 		row('Condition', '<span style="color:' + cc + '">' + cn + '</span>') + row('Placed by', placedBy(o)) +
 		'<div class="acts"><button type="button" onclick="event.stopPropagation(); openPlacedInfo(' + o.id + ')" title="What is in and on it, and Remove">Info</button></div></div>');
 }
-// Info on one object opens the same dialog as a group's, with just it in it.
+// openPlacedInfo opens the group dialog with just that object (and those near it).
 function openPlacedInfo(id) { openGroupInfo('id:' + id); }
-// ---- Placed objects close together -------------------------------------
-// A group is the shown objects in one GROUP_M square of the map (metres,
-// lined up with 0,0). Its popup and Info ask the mod for what is in each.
-// Placed objects group by 50 m squares, and by 100 m (BLOCK_M) further out.
+// A group is the shown objects in one GROUP_M (or, further out, BLOCK_M)
+// square of the map. Its popup and dialog ask the mod for what is in each.
 const GROUP_M = 50, BLOCK_M = 100, ZOOM_IN_M = 300;
+// showOnMap centres the map on x, z, ZOOM_IN_M metres across.
+function showOnMap(x, z) { map.setView([z, x], Math.min(map.getMaxZoom(), Math.log2(map.getSize().x / ZOOM_IN_M))); }
 let groupOpen = null, groupInfo = null, groupSel = null, groupItemSel = null, groupDetail = {}, groupRun = 0;
 // groupKey names the square of size m (metres) an object is in: "50:12,40".
 function groupKey(o, m) { m = m || GROUP_M; return m + ':' + Math.floor(o.x / m) + ',' + Math.floor(o.z / m); }
-// isOneKey: a key "id:<n>" is the one object n (Info on a single object).
+// isOneKey: "id:<n>" is the single object n.
 function isOneKey(key) { return String(key).startsWith('id:'); }
 function keyParts(key) { const [m, ij] = key.split(':'), [i, j] = ij.split(',').map(Number); return [+m, i, j]; }
-// groupLevel is the square size placed objects group by at this zoom: by
-// the scale bar's length (100 px), 140 m or more: BLOCK_M; 70 m or more:
-// GROUP_M; closer 0 (each on its own).
+// groupLevel is the square size placed objects group by at this zoom (0: none).
 function groupLevel() {
-	const bar = 100 / Math.pow(2, map.getZoom());
+	const bar = barMetres(map.getZoom());
 	return bar >= 140 ? BLOCK_M : bar >= 70 ? GROUP_M : 0;
 }
-// nearbyOf is, for one object's dialog (key "id:<n>"), the other shown
-// objects in its 50 m square: those its group would list.
+// nearbyOf is, for a single object's key, the other shown objects in its 50 m square.
 function nearbyOf(key) {
 	if (!isOneKey(key)) return [];
 	const o = groupOf(key)[0];
@@ -2186,13 +2056,11 @@ function groupGrid(key) {
 	if (isOneKey(key)) { const o = groupOf(key)[0]; return o ? grid(o.x, o.z) : ''; }
 	const [x, z] = squareCentre(key); return grid(x, z);
 }
-// objCount is every item in and on an object, all levels.
 function objCount(d) { return (d.items || []).reduce((n, it) => n + 1 + countIn(it), 0); }
 function itemsText(n) { return n ? n + (n === 1 ? ' item' : ' items') : 'empty'; }
 function countText(id) { const d = groupDetail[id]; return !d ? 'Loading…' : d.failed ? '?' : itemsText(objCount(d)); }
-// askGroup has the mod send what is in these objects, then reads them back
-// each second until all came (or 15 tries: the rest show ?). Closing the
-// popup and the dialog stops it.
+// askGroup has the mod send what is in these objects and polls until all
+// came (or 15 tries). stopGroup cancels it.
 async function askGroup(ids) {
 	ids = ids.slice(0, 200);
 	const run = groupRun;
@@ -2218,14 +2086,8 @@ function openGroupPopup(key) {
 	stopGroup();
 	placedOpen = null; groupOpen = key;
 	renderGroupPopup();
-	plcPopup.options.autoPan = true; plcPopup.openOn(map); plcPopup.options.autoPan = false;
+	openPanned(plcPopup);
 	askGroup(groupOf(key).map(o => o.id));
-}
-function placersText(objs) {
-	const n = {};
-	for (const o of objs) n[o.placer || ''] = (n[o.placer || ''] || 0) + 1;
-	return Object.keys(n).sort((a, b) => (a === '') - (b === '') || n[b] - n[a] || a.localeCompare(b))
-		.map(p => (p ? esc(p) : 'unknown') + ' (' + n[p] + ')').join(', ');
 }
 function renderGroupPopup() {
 	const objs = groupOf(groupOpen);
@@ -2235,17 +2097,15 @@ function renderGroupPopup() {
 	const [x, z] = squareCentre(groupOpen), q = '\'' + groupOpen + '\'';
 	plcPopup.setLatLng([z, x]).setContent('<div class="vpop gpop" data-noicon><h4>' + objs.length + ' placed objects</h4><div class="ty">' + groupGrid(groupOpen) + '</div>' +
 		'<div class="glist">' + objs.map(o => '<button type="button" onclick="event.stopPropagation(); openPlacedPopup(' + o.id + ')" title="' + esc(o.type) + '">' +
-			'<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="' + vehCondition(o.health)[1] + '" stroke="#111" stroke-width="1"/></svg>' +
+			placedSVG(vehCondition(o.health)[1]) +
 			'<span class="nm">' + esc(placedName(o)) + '</span><span class="ct">' + countText(o.id) + '</span></button>').join('') + '</div>' +
-		'<div class="muted">Placed by ' + placersText(objs) + '</div>' +
 		'<div class="acts split"><button type="button" onclick="event.stopPropagation(); zoomToGroup(' + q + ')" title="Zoom in so each object shows">Zoom in</button>' +
 		'<button type="button" onclick="event.stopPropagation(); openGroupInfo(' + q + ')" title="Each object and what is in it">Info</button></div></div>');
 	const nl = plcPopup.getElement() && plcPopup.getElement().querySelector('.glist');
 	if (nl) nl.scrollTop = top;
 }
-// zoomToGroup centres a 50 m square at the 50 m step, where each object
-// shows; zoomToBlock a 100 m block at the 100 m step, where its 50 m
-// squares show.
+// zoomToGroup zooms to a group where each object shows; zoomToBlock to a
+// block where its groups show.
 function zoomToGroup(key) {
 	map.closePopup(plcPopup);
 	const [x, z] = squareCentre(key);
@@ -2258,41 +2118,26 @@ function zoomToBlock(key) {
 function openGroupInfo(key) {
 	const ids = groupOf(key).concat(nearbyOf(key)).map(o => o.id), have = groupOpen === key;
 	if (!have) stopGroup();
-	groupInfo = key; // before closing the popup, so its counts are kept
+	groupInfo = key; // before closing the popup, so stopGroup keeps its counts
 	map.closePopup(plcPopup);
 	groupSel = ids[0] ?? null; groupItemSel = null; groupShut = ids.length > 1;
 	document.getElementById('gErr').textContent = '';
 	document.getElementById('gModal').style.display = 'flex';
 	renderGroupInfo();
-	// The popup's counts may still be coming: ask again only for what is missing.
 	const missing = ids.filter(id => !groupDetail[id] || groupDetail[id].failed);
 	if (!have || missing.length) askGroup(have ? missing : ids);
 }
 function closeGroupInfo() { document.getElementById('gModal').style.display = 'none'; groupInfo = null; stopGroup(); }
-function gIrow(it, label, extra, obj) {
-	const [cn, cc] = condOf(it);
-	return '<button type="button" class="irow' + (it.id === groupItemSel && obj === groupSel ? ' sel' : '') + '" data-item="' + it.id + '" data-of="' + obj + '">' +
-		'<span class="sl">' + esc(label) + '</span><span class="nm">' + esc(itemName(it)) + '</span>' +
-		'<span class="ex">' + esc(extra || '') + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
-}
 function gItemRows(items, obj) {
-	return (items || []).slice().sort((a, b) => !!b.slot - !!a.slot || a.row - b.row || a.col - b.col).map(it => {
-		const n = countIn(it);
-		return gIrow(it, it.slot ? slotLabel(it.slot) : 'Cargo', n ? itemsText(n) : qty(it), obj);
-	}).join('');
+	return containerRows(items, (it, label, extra) => itemRow(it, label, extra, it.id === groupItemSel && obj === groupSel, 'data-item="' + it.id + '" data-of="' + obj + '"'));
 }
-// On a narrow screen (one column) an object's details open right under it,
-// like a player's inventory; picking it again closes them.
-let groupShut = false; // narrow screen: the picked object's details closed
+// groupShut: on a narrow screen, the picked object's row picked again closes its details.
+let groupShut = false;
 function renderGroupInfo() {
 	if (groupInfo == null) return;
-	const list = document.getElementById('gList'), det = document.getElementById('gDet');
-	if (det.parentElement !== list.parentElement) list.parentElement.appendChild(det); // out of the list before it is redrawn
+	const list = document.getElementById('gList');
 	renderGroupInfoBody();
-	const narrow = NARROW_INV.matches, row = narrow && !groupShut && groupSel != null ? list.querySelector(':scope > .irow[data-obj="' + groupSel + '"]') : null;
-	det.classList.toggle('under', !!row);
-	if (row) row.after(det);
-	det.style.display = narrow && !row ? 'none' : '';
+	placeDetails(list, document.getElementById('gDet'), groupShut || groupSel == null ? null : list.querySelector(':scope > .irow[data-obj="' + groupSel + '"]'));
 }
 NARROW_INV.addEventListener('change', renderGroupInfo);
 function renderGroupInfoBody() {
@@ -2311,43 +2156,28 @@ function renderGroupInfoBody() {
 	const near = nearbyOf(groupInfo), all = objs.concat(near);
 	if (!all.some(o => o.id === groupSel)) { groupSel = objs[0].id; groupItemSel = null; }
 	const top = list.scrollTop;
-	const objRow = o => {
-		const [cn, cc] = vehCondition(o.health);
-		return '<button type="button" class="irow gobj' + (o.id === groupSel ? ' sel' : '') + '" data-obj="' + o.id + '">' +
-			'<span class="sl">' + esc((PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1]) + '</span><span class="nm">' + esc(placedName(o)) + '</span>' +
-			'<span class="ex">' + countText(o.id) + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
-	};
-	setHTML(list, objs.map(objRow).join('') +
-		(near.length ? '<div class="gnear">Nearby items · ' + near.length + '</div>' + near.map(objRow).join('') : ''));
+	const row = o => objRow(o.id, placedKindLabel(o), placedName(o), countText(o.id), vehCondition(o.health), o.id === groupSel);
+	setHTML(list, objs.map(row).join('') +
+		(near.length ? '<div class="gnear">Nearby items · ' + near.length + '</div>' + near.map(row).join('') : ''));
 	list.scrollTop = top;
 
-	const o = all.find(x => x.id === groupSel), d = groupDetail[o.id];
+	const o = all.find(x => x.id === groupSel), d = groupDetail[o.id], rows = its => gItemRows(its, o.id);
 	const path = groupItemSel != null && d && !d.failed ? pathTo(d.items, groupItemSel) : null;
 	let h = '';
 	if (path) {
-		const it = path[path.length - 1], [cn, cc] = condOf(it);
-		h += '<div class="crumbs"><a data-obj="' + o.id + '">' + esc(placedName(o)) + '</a> ›' + path.slice(0, -1).map(x => ' <a data-item="' + x.id + '" data-of="' + o.id + '">' + esc(itemName(x)) + '</a> ›').join('') + '</div>';
-		h += '<h3>' + esc(itemName(it)) + '</h3><div class="ty">' + esc(it.type) + '</div><div class="props">';
-		const props = [['Where', it.slot ? slotLabel(it.slot) + ' (attached)' : 'Cargo, row ' + (it.row + 1) + ', column ' + (it.col + 1)],
-			['Condition', '<span style="color:' + cc + '">' + cn + '</span>']];
-		if (it.quantityMax) props.push([it.unit === 'rounds' ? 'Rounds' : 'Quantity', esc(qty(it))]);
-		h += props.map(([k, v]) => '<span class="k">' + k + '</span><span>' + v + '</span>').join('') + '</div>';
-		const att = it.attachments || [], cargo = it.cargo || [];
-		if (att.length) h += '<h5>Attachments · ' + att.length + '</h5><div class="sub-items">' + gItemRows(att, o.id) + '</div>';
-		if (cargo.length) h += '<h5>Contents · ' + cargo.length + '</h5><div class="sub-items">' + gItemRows(cargo, o.id) + '</div>';
+		h += itemDetail(path, { root: '<a data-obj="' + o.id + '">' + esc(placedName(o)) + '</a>', attrs: x => 'data-item="' + x.id + '" data-of="' + o.id + '"', rows });
 	} else {
 		groupItemSel = null;
-		const [cn, cc] = vehCondition(o.health), kind = (PLACED_KINDS.find(([k]) => k === placedKind(o)) || [, 'Other'])[1];
-		h += '<h3>' + esc(placedName(o)) + '</h3><div class="ty">' + esc(o.type) + '</div><div class="props">' +
-			[['Kind', esc(kind)], ['Where', grid(o.x, o.z) + ' <span class="muted">' + Math.round(o.x) + ', ' + Math.round(o.z) + '</span>'],
+		const [cn, cc] = vehCondition(o.health);
+		h += '<h3>' + esc(placedName(o)) + '</h3><div class="ty">' + esc(o.type) + '</div>' +
+			props([['Kind', esc(placedKindLabel(o))], ['Where', grid(o.x, o.z) + ' <span class="muted">' + Math.round(o.x) + ', ' + Math.round(o.z) + '</span>'],
 				['Condition', '<span style="color:' + cc + '">' + cn + '</span>'], ['Placed by', placedBy(o)],
 				['Placed', o.placedAt ? new Date(o.placedAt * 1000).toLocaleString() : '<span class="muted">unknown</span>'],
-				['Inside', countText(o.id)]].map(([k, v]) => '<span class="k">' + k + '</span><span>' + v + '</span>').join('') + '</div>';
+				['Inside', countText(o.id)]]);
 		if (d && d.failed) h += '<div class="muted" style="margin-top:10px">recon-mod didn\'t send what is in it.</div>';
 		else if (d) {
-			const lvl = x => x > 0.7 ? 0 : x > 0.5 ? 1 : x > 0.3 ? 2 : x > 0 ? 3 : 4;
 			h += damageBlock(d.zones);
-			if (d.items.length) h += itemsBlock('cargo', 'Inventory', d.items, '', its => gItemRows(its, o.id));
+			if (d.items.length) h += itemsBlock('cargo', 'Inventory', d.items, '', rows);
 		}
 	}
 	h += '<div class="gacts"><button type="button" data-act="show" data-of="' + o.id + '">Show on map</button>' +
@@ -2356,20 +2186,16 @@ function renderGroupInfoBody() {
 	setHTML(det, h);
 }
 document.getElementById('gModal').addEventListener('click', e => {
-	const a = e.target.closest('[data-act]');
-	if (a) {
-		const id = +a.dataset.of, o = placedList.find(x => x.id === id);
-		if (a.dataset.act === 'refresh') askGroup([id]);
-		else if (o) { closeGroupInfo(); map.setView([o.z, o.x], Math.min(map.getMaxZoom(), Math.log2(map.getSize().x / ZOOM_IN_M))); openPlacedPopup(id); }
-		return;
-	}
-	const it = e.target.closest('[data-item]');
-	if (it) { groupSel = +it.dataset.of; groupItemSel = +it.dataset.item; renderGroupInfo(); return; }
-	const ob = e.target.closest('[data-obj]');
-	if (ob) {
-		const id = +ob.dataset.obj;
-		// The object whose details are open, picked again in the list: they close.
-		groupShut = ob.parentElement && ob.parentElement.id === 'gList' && id === groupSel && !groupShut && NARROW_INV.matches;
+	const p = picked(e, 'gList');
+	if (p.act) {
+		const id = +p.of, o = placedList.find(x => x.id === id);
+		if (p.act === 'refresh') askGroup([id]);
+		else if (o) { closeGroupInfo(); showOnMap(o.x, o.z); openPlacedPopup(id); }
+	} else if (p.item != null) {
+		groupSel = +p.of; groupItemSel = p.item; renderGroupInfo();
+	} else if (p.obj != null) {
+		const id = +p.obj;
+		groupShut = p.inList && id === groupSel && groupItemSel == null && !groupShut && NARROW_INV.matches;
 		groupSel = id; groupItemSel = null;
 		renderGroupInfo();
 	}
@@ -2384,11 +2210,10 @@ async function removePlaced(id) {
 	if (groupInfo != null && isOneKey(groupInfo)) closeGroupInfo();
 	poll();
 }
-// recon-mod sends the list every 30 s; reading it every 10 s means a new one
-// shows within 10 s of reaching ReCON instead of up to 30 s.
+// The mod sends the list every 30 s; reading every 10 s shows a new one sooner.
 setInterval(loadPlaced, 10000);
 
-// Deaths: a red X where each death in the time picked was, every 30 s.
+// ---- Deaths -----------------------------------------------------------------
 let deathsOn = layerPref('deaths', '0') === '1', deathHours = +layerPref('deathHours', '24') || 24, deathList = [];
 const deathLayer = L.layerGroup();
 function toggleDeaths() { deathsOn = !deathsOn; setLayerPref('deaths', deathsOn ? '1' : '0'); drawDeaths(); loadDeaths(); }
@@ -2398,9 +2223,8 @@ async function loadDeaths() {
 	try { deathList = (await api('GET', '/api/mod/deaths?hours=' + deathHours)).deaths || []; } catch (e) { return; }
 	drawDeaths();
 }
-// deathText says who died and how (as on the Kills & deaths tab), and when.
 function deathText(k) {
-	const cause = causeOf(k), c = CAUSES[cause], w = k.weapon && !/^Survivor/i.test(k.weapon) ? item(k.weapon) : '';
+	const cause = k.cause, c = CAUSES[cause], w = k.weapon ? item(k.weapon) : '';
 	let how;
 	if (cause === 'player') how = 'killed by ' + (k.killerName || 'a player') + (w ? ' with ' + w : '') + (k.distance ? ' at ' + Math.round(k.distance) + ' m' : '');
 	else if (c) how = c[1][0].toLowerCase() + c[1].slice(1) + (cause === 'illness' && k.illnesses && k.illnesses.length ? ': ' + k.illnesses.join(', ') : w ? ' (' + w + ')' : '');
@@ -2408,7 +2232,6 @@ function deathText(k) {
 	const d = new Date(k.at);
 	return (k.victimName || 'Someone') + ' ' + how + ' · ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
-// DEATH_SVG is the red X a death is drawn with.
 const DEATH_SVG = '<svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#111" stroke-width="4" stroke-linecap="round"/>' +
 	'<path d="M-4.5 -4.5 L4.5 4.5 M4.5 -4.5 L-4.5 4.5" stroke="#ea4335" stroke-width="2.4" stroke-linecap="round"/></svg>';
 function drawDeaths() {
@@ -2419,20 +2242,17 @@ function drawDeaths() {
 	deathLayer.clearLayers();
 	if (!deathsOn) { deathLayer.remove(); return; }
 	deathLayer.addTo(map);
-	const x = DEATH_SVG;
 	for (const k of deathList) {
 		if (!k.x && !k.z) continue;
-		const m = L.marker([k.z, k.x], { pane: 'events', icon: L.divIcon({ className: 'dmark', html: x, iconSize: [0, 0] }), keyboard: false })
+		const m = L.marker([k.z, k.x], { pane: 'events', icon: L.divIcon({ className: 'dmark', html: DEATH_SVG, iconSize: [0, 0] }), keyboard: false })
 			.bindTooltip(esc(deathText(k)), { direction: 'top', offset: [0, -6] }).addTo(deathLayer);
 		if (k.victimGuid) m.on('click', () => { if (byGuid[k.victimGuid]) openPlayer(k.victimGuid); });
 	}
 }
 setInterval(loadDeaths, 30000);
 
-// ---- Right-click menus: on the map, a player or a vehicle -------------
-// One menu (#ctx) at the click, its items' data-a handled by the one that
-// opened it; it closes with Esc, a click elsewhere, or dragging or zooming
-// the map.
+// ---- Right-click menus: the map, a player, a vehicle ------------------------
+// One menu (#ctx); its items' data-a go to the handler that opened it.
 
 let ctxAt = null, ctxHandle = null;
 function closeCtx() { document.getElementById('ctx').hidden = true; ctxAt = null; ctxHandle = null; }
@@ -2446,9 +2266,8 @@ function openCtx(pt, at, html, handle) {
 	el.style.top = Math.max(4, Math.min(pt.y, wrap.height - h - 4)) + 'px';
 }
 function ctxMsg(text, bad) { const m = document.getElementById('ctxMsg'); if (m) { m.style.color = bad ? '#f28b82' : ''; m.textContent = text; } }
-// ctxConfirm turns a menu item (a) into Cancel and the red action in its
-// place; the action's own click then comes back as a + '!'. True when it
-// handled the click.
+// ctxConfirm turns menu item a into Cancel and the red action, whose click
+// comes back as a + '!'. True when it handled the click.
 function ctxConfirm(clicked, a, label) {
 	const menu = document.getElementById('ctx'), row = menu.querySelector('[data-a="' + a + '"]');
 	if (clicked === a && row) {
@@ -2463,20 +2282,18 @@ function ctxConfirm(clicked, a, label) {
 	return false;
 }
 function ctxItem(a, text, cls) { return '<button type="button" data-a="' + a + '"' + (cls ? ' class="' + cls + '"' : '') + '>' + text + '</button>'; }
-// ctxTeleportList is a button per online player, to send them there.
 function ctxTeleportList(label, except) {
 	const alive = players.filter(p => p.alive && p.guid !== except).sort((a, b) => a.name.localeCompare(b.name));
 	return '<div class="lbl">' + label + '</div><div class="plist">' + (alive.length
 		? alive.map(p => ctxItem('tp:' + p.guid, esc(p.name))).join('') : '<div class="muted">Nobody is online.</div>') + '</div>';
 }
-// ctxAsk handles a click on a player in a menu's teleport list: their name
-// turns into Confirm and Cancel (one slip would move the wrong player), and
-// Cancel puts the name back. True when it handled a (tp: or tpno:).
+// ctxAsk turns a teleport list's player into Confirm/Cancel (one slip would
+// move the wrong player). True when it handled a (tp: or tpno:).
 function ctxAsk(a) {
 	const menu = document.getElementById('ctx');
 	const restore = row => { const g = row.dataset.ask, p = byGuid[g]; row.outerHTML = ctxItem('tp:' + g, esc(p ? p.name : g)); };
 	if (a.startsWith('tp:')) {
-		menu.querySelectorAll('.ask').forEach(restore); // one at a time
+		menu.querySelectorAll('.ask').forEach(restore);
 		const g = a.slice(3), b = menu.querySelector('[data-a="tp:' + g + '"]'), p = byGuid[g];
 		if (b) b.outerHTML = '<div class="ask" data-ask="' + g + '"><span>' + esc(p ? p.name : g) + '</span>' +
 			'<button type="button" data-a="tpok:' + g + '" class="ok">Confirm</button><button type="button" data-a="tpno:' + g + '">Cancel</button></div>';
@@ -2489,7 +2306,6 @@ function ctxAsk(a) {
 	}
 	return false;
 }
-// ctxRun sends an action, says so in the menu, and closes it a moment later.
 async function ctxRun(text, path, body) {
 	const at = ctxAt;
 	ctxMsg(text + '…');
@@ -2505,8 +2321,6 @@ document.getElementById('ctx').addEventListener('click', e => {
 });
 document.addEventListener('mousedown', e => { if (ctxAt && !e.target.closest('#ctx')) closeCtx(); });
 
-// On the map: teleport a player here, spawn here. The header's position
-// can be selected and copied.
 function showCtx(e) {
 	const x = e.latlng.lng, z = e.latlng.lat;
 	if (!(x > 0 && z > 0) || (size && (x > size || z > size))) { closeCtx(); return; }
@@ -2520,8 +2334,6 @@ function showCtx(e) {
 		});
 }
 
-// On a player: open them (a tab), follow them, send them to a spot, and
-// the quick actions.
 function showPlayerCtx(guid, e) {
 	const p = byGuid[guid];
 	if (!p) return;
@@ -2534,7 +2346,7 @@ function showPlayerCtx(guid, e) {
 		a => {
 			const tab = t => { closeCtx(); openPlayer(guid); showPTab(t); };
 			if (a.startsWith('tab:')) tab(a.slice(4));
-			else if (a === 'message') { tab('stats'); showForm('message'); }
+			else if (a === 'message') { tab('stats'); document.getElementById('msgText').focus(); }
 			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'player', id: guid }); }
 			else if (a === 'send') { closeCtx(); startPick(guid); }
 			else if (a === 'heal') ctxRun('Healing ' + p.name, '/api/mod/players/' + guid + '/heal');
@@ -2542,7 +2354,6 @@ function showPlayerCtx(guid, e) {
 		});
 }
 
-// On a vehicle: its info, follow it, bring a player to it, delete it.
 function showVehicleCtx(id, e) {
 	const v = vehicles.find(x => x.id === id);
 	if (!v) return;
@@ -2554,17 +2365,15 @@ function showVehicleCtx(id, e) {
 		a => {
 			if (a === 'info') { closeCtx(); openVehicleInfo(id); }
 			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'vehicle', id }); }
-			// Beside it (3 m east), not on top of it.
 			else if (ctxAsk(a)) return;
+			// Beside it (3 m east), not on top of it.
 			else if (a.startsWith('tpok:')) { const p = byGuid[a.slice(5)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(5) + '/teleport', { x: v.x + 3, z: v.z, y: 0 }); }
 			else if (ctxConfirm(a, 'delete', 'Delete')) return;
 			else if (a === 'delete!') { closeCtx(); deleteVehicle(id); }
 		});
 }
 
-// ---- Following a player or vehicle on the map ----------------------------
-// The map keeps them in the middle (a player every second, a vehicle
-// every 5 s) until Stop, or the map is dragged.
+// ---- Following a player or vehicle (until Stop or a drag) ------------------
 
 let track = null; // { kind: 'player' | 'vehicle', id }
 function trackPos() {
@@ -2588,7 +2397,7 @@ function renderTrack() {
 	if (track) b.textContent = 'Following ' + (track.kind === 'player' ? (p ? p.name : '') : (p ? catLabel(p) : '')) + ' ✕';
 }
 
-// ---- Send a player to a spot: the next click on the map ------------------
+// ---- Send a player to the next spot clicked on the map ---------------------
 
 let pickSend = null; // the GUID of the player to send
 function startPick(guid) {
@@ -2612,7 +2421,7 @@ async function pickClick(e) {
 	catch (err) { b.hidden = false; b.textContent = 'Not sent: ' + err.message; setTimeout(() => { if (!pickSend) b.hidden = true; }, 5000); }
 }
 
-// Spawn at a spot: the item list, searched, and how many.
+// ---- Spawn here (the map's menu) ------------------------------------------
 let sAt = null, sSel = null;
 async function openSpawnAt(x, z) {
 	sAt = { x, z }; sSel = null;
@@ -2625,7 +2434,6 @@ async function openSpawnAt(x, z) {
 	if (!catalog) { await fetchCatalog(); renderSpawnAt(); }
 }
 function closeSpawnAt() { document.getElementById('sModal').style.display = 'none'; sAt = null; }
-// renderSpawnAt lists every match, with the A-Z bar, like Spawn item.
 function renderSpawnAt() {
 	const list = document.getElementById('sList');
 	if (!catalog) { list.innerHTML = '<div class="empty">Loading…</div>'; document.getElementById('sAZ').innerHTML = ''; renderSpawnPick(); return; }
@@ -2669,18 +2477,13 @@ async function doSpawnAt() {
 	} catch (e) { err.textContent = e.message; }
 }
 
-// fillWidth zooms so the map's width is exactly the view's, keeping the
-// part north to south in view (but not past the map's top or bottom edge).
+// fillWidth zooms so the map's width fills the view, keeping the centre's
+// north-south position (within the map).
 function fillWidth() {
 	const s = size || 15360, view = map.getSize();
 	const z = Math.log2(view.x / s), h = view.y / Math.pow(2, z); // metres the view is high
-	const c = map.getCenter();
-	const north = h >= s ? s / 2 : Math.min(s - h / 2, Math.max(h / 2, c.lat));
-	// Exactly that zoom, not the nearest zoomSnap step.
-	const snap = map.options.zoomSnap;
-	map.options.zoomSnap = 0;
+	const north = h >= s ? s / 2 : Math.min(s - h / 2, Math.max(h / 2, map.getCenter().lat));
 	map.setView([north, s / 2], z, { animate: false });
-	map.options.zoomSnap = snap;
 }
 
 // ---- The page -----------------------------------------------------------
@@ -2696,10 +2499,8 @@ function render() {
 		const last = mod && mod.lastSync && !mod.lastSync.startsWith('0001') ? new Date(mod.lastSync) : null;
 		line.textContent = 'No Connection to DayZ Server';
 		line.title = last ? 'recon-mod last sent at ' + last.toLocaleTimeString() : 'recon-mod hasn\'t connected';
-		document.getElementById('worldBtn').disabled = true;
 		document.getElementById('wxBadge').hidden = document.getElementById('timeBadge').hidden = true;
-		// The map's picture and grid don't need the mod: the map it last
-		// reported (ReCON keeps it), or the only map picture in the data folder.
+		// The map and picture still show: the mod's last map, or the only picture.
 		const w = ((mod && mod.world) || (dataMaps.length === 1 ? dataMaps[0] : '')).toLowerCase();
 		if (w) setWorld(w, SIZES[w] || (w === world && size) || 15360);
 	} else {
@@ -2707,7 +2508,6 @@ function render() {
 		const w = (mod.world || '').toLowerCase();
 		line.textContent = 'Connected to Server';
 		line.title = 'recon-mod ' + (mod.mod || '') + ' · ' + (NAMES[w] || mod.world) + ' · ' + players.length + ' online';
-		document.getElementById('worldBtn').disabled = false;
 		let s = SIZES[w];
 		if (!s) s = Math.max(size || 0, Math.ceil(Math.max(1, ...players.map(p => Math.max(p.x, p.z))) / 1024) * 1024);
 		setWorld(w, s);
@@ -2723,9 +2523,9 @@ function render() {
 	setStatusCount(connected ? players.length + ' player(s) on the map' : '');
 	renderList();
 	drawMarkers();
-	if (vehOn && players.some(p => p.seat != null && p.seat >= 0)) drawVehicles(); // in their colours
+	if (vehOn && players.some(p => p.seat >= 0)) drawVehicles(); // drivers' colours
 	if (selGuid) renderPlayer();
-	if (document.getElementById('wModal').style.display === 'flex') renderWorld();
+	if (isOpen('wModal')) renderWorld();
 }
 
 function flagsOf(p) {
@@ -2739,8 +2539,7 @@ function flagsOf(p) {
 	return f;
 }
 
-// The sidebar lists the players online (the mod's), or everyone else
-// ReCON has seen (offline: their last known inventory, kills and deaths).
+// The sidebar lists the players online, or everyone else ReCON has seen.
 let plistMode = layerPref('plist', 'online') === 'offline' ? 'offline' : 'online', offline = null, offlineBy = {};
 async function loadOffline() {
 	try {
@@ -2796,19 +2595,26 @@ function renderList() {
 	}).join(''));
 }
 
+// A click on an online player follows them on the map at the 100 m step; an
+// offline one (no position) opens their dialog.
 document.getElementById('plist').addEventListener('click', e => {
 	const b = e.target.closest('.prow');
-	if (b) openPlayer(b.getAttribute('data-guid'));
+	if (!b) return;
+	const g = b.dataset.guid, p = byGuid[g];
+	if (!p) { openPlayer(g); return; }
+	track = { kind: 'player', id: g };
+	renderTrack();
+	renderPlayerPopup();
+	map.setView([p.z, p.x], Math.min(map.getMaxZoom(), zoomForBar(100)));
+	document.querySelector('.mapwrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 });
 document.getElementById('find').addEventListener('input', renderList);
 document.querySelector('.ptoggle').addEventListener('click', e => { const b = e.target.closest('[data-plist]'); if (b) setPlistMode(b.dataset.plist); });
 loadOffline();
 
-// ---- A player's popup on the map ------------------------------------------
-// A click on a player opens their basic stats and what they wear and hold;
-// Info opens their dialog, Teleport and Spawn as on their right-click menu.
-// While it's open their gear is read every 2 s
-// (which also keeps ReCON asking the mod for it).
+// ---- A player's popup -------------------------------------------------------
+// Their gear is read every 2 s while it is open (which keeps ReCON asking
+// the mod for it).
 
 const plPopup = L.popup({ autoPan: false, offset: [0, -6] });
 let plOpen = null, plInv = null;
@@ -2816,9 +2622,7 @@ function openPlayerPopup(guid) {
 	map.closePopup(vehPopup);
 	plOpen = guid; plInv = null;
 	renderPlayerPopup();
-	plPopup.options.autoPan = true;
-	plPopup.openOn(map);
-	plPopup.options.autoPan = false;
+	openPanned(plPopup);
 	loadPlayerPopup();
 }
 async function loadPlayerPopup() {
@@ -2830,21 +2634,18 @@ async function loadPlayerPopup() {
 	} catch (e) { }
 }
 setInterval(() => { if (plOpen) loadPlayerPopup(); }, 2000);
-// playerPopupAct is the popup's Teleport (pick a spot on the map) and
-// Spawn (their Spawn item tab), as on their right-click menu.
-// vehicleFollow keeps the map on a vehicle (or stops), from its popup.
 function vehicleFollow(id) {
 	const following = track && track.kind === 'vehicle' && track.id === id;
 	setTrack(following ? null : { kind: 'vehicle', id });
 	renderVehicle();
 }
-// playerFollow keeps the map on them (or stops), from their popup, which
-// stays open: a moving player is hard to long-press for the map's menu.
+// playerFollow leaves the popup open: a moving player is hard to long-press.
 function playerFollow(guid) {
 	const following = track && track.kind === 'player' && track.id === guid;
 	setTrack(following ? null : { kind: 'player', id: guid });
 	renderPlayerPopup();
 }
+// playerPopupAct is the popup's Teleport (pick a spot) and Spawn.
 function playerPopupAct(guid, a) {
 	map.closePopup(plPopup);
 	if (a === 'send') startPick(guid);
@@ -2859,15 +2660,14 @@ function renderPlayerPopup() {
 	const state = !p.alive ? 'Dead' : p.unconscious ? 'Unconscious' : p.restrained ? 'Restrained' : '';
 	let h = '<div class="vpop" data-noicon><h4>' + esc(p.name) + '</h4><div class="ty">' + grid(p.x, p.z) + ' · ' + Math.round(p.x) + ', ' + Math.round(p.z) + '</div>' +
 		(state ? row('State', state) : '') +
-		// Two to a line: Health | Food, then Blood | Water.
 		'<div class="stats2">' + [[['Health', pc(p.health, 100)], ['Food', pc(p.energy, 5000)]], [['Blood', pc(p.blood, 5000)], ['Water', pc(p.water, 5000)]]]
 			.map(([[k1, v1], [k2, v2]]) => '<span class="k">' + k1 + '</span><span class="v">' + v1 + '</span><span class="sep">|</span><span class="k">' + k2 + '</span><span class="v">' + v2 + '</span>').join('') + '</div>' +
 		(p.bleeding ? row('Bleeding', p.bleeding + (p.bleeding === 1 ? ' cut' : ' cuts')) : '') +
-		(p.vehicleName || p.vehicle ? row('In', esc(p.vehicleName || item(p.vehicle))) : '') +
+		(p.vehicle ? row('In', esc(vehicleOf(p))) : '') +
 		'<div class="gear">';
 	const worn = plInv && (plInv.items || []).filter(it => it.slot).sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99));
 	if (worn) h += worn.length ? worn.map(it => row(slotLabel(it.slot), esc(itemName(it)))).join('') : '<div class="muted">Nothing worn or held</div>';
-	else h += (p.handsName || p.hands ? row('Hands', esc(p.handsName || item(p.hands))) : '') + '<div class="muted">Loading…</div>';
+	else h += (p.hands ? row('Hands', esc(handsOf(p))) : '') + '<div class="muted">Loading…</div>';
 	const g = '\'' + p.guid + '\'', following = track && track.kind === 'player' && track.id === p.guid;
 	h += '</div><div class="acts pairs">' +
 		'<button type="button" onclick="event.stopPropagation(); openPlayer(' + g + ')" title="Their stats, inventory, spawning and actions">Info</button>' +
@@ -2876,9 +2676,8 @@ function renderPlayerPopup() {
 		(following ? '<button type="button" class="on" onclick="event.stopPropagation(); playerFollow(' + g + ')" title="Stop keeping the map on them">Stop</button>'
 			: '<button type="button" onclick="event.stopPropagation(); playerFollow(' + g + ')" title="Keep the map on them as they move">Follow</button>') + '</div></div>';
 	plPopup.setLatLng([p.z, p.x]);
-	if (h === plPopup._html) return; // unchanged: not rebuilt (no flash)
+	if (h === plPopup._html) return; // unchanged: not rebuilt, so it doesn't flash
 	plPopup._html = h;
-	// Keep where the gear list was scrolled to across the redraws.
 	const old = plPopup.getElement() && plPopup.getElement().querySelector('.gear'), top = old ? old.scrollTop : 0;
 	plPopup.setContent(h);
 	const now = plPopup.getElement() && plPopup.getElement().querySelector('.gear');
@@ -2898,7 +2697,6 @@ function openPlayer(guid) {
 	detail = null;
 	invSel = null;
 	invAsked = Date.now();
-	showForm('');
 	showPTab(pTab);
 	document.getElementById('pErr').textContent = '';
 	document.getElementById('pModal').style.display = 'flex';
@@ -2929,7 +2727,7 @@ async function loadDetail() {
 		if (g === selGuid) { detail = d; renderPlayer(); }
 	} catch (e) { }
 }
-// Every 2 s while open: that also keeps ReCON asking the mod for their inventory.
+// Every 2 s while open, which keeps ReCON asking the mod for their inventory.
 setInterval(() => { if (selGuid) loadDetail(); }, 2000);
 
 function bar(label, v, max, colour, blink, text) {
@@ -2938,41 +2736,37 @@ function bar(label, v, max, colour, blink, text) {
 }
 function num(v) { return Math.round(v).toLocaleString(); }
 
-// Draggable stat bars: dragging one only marks the new value (staged, by
-// stat); Save sends every marked stat at once. pending is what was sent
-// and not yet reported back, by stat: { value, id } (the command), shown as
-// "setting …" until the command finishes.
+// Draggable stat bars: a drag stages the new value (staged, by stat) and
+// Save sends them all. pending is what was sent and not yet answered, by
+// stat: { value, id } (the command).
 let drag = null, pending = {}, staged = {};
 const STAT_LABEL = { health: 'health', blood: 'blood', water: 'water', energy: 'food', heatBuffer: 'comfort' };
+function statText(stat, v, max) { return stat === 'heatBuffer' ? Math.round(100 * v / max) + '%' : num(v); }
 function dragBar(stat, label, v, max, colour, blink, text, extra) {
-	const pct = Math.max(0, Math.min(100, 100 * v / max));
+	const now = Math.max(0, Math.min(100, 100 * v / max));
 	const pend = pending[stat], st = pend ? undefined : staged[stat];
-	const fmt = x => stat === 'heatBuffer' ? Math.round(100 * x / max) + '%' : num(x);
-	let shown = text, ghost = '', at = pct;
+	const fmt = x => statText(stat, x, max);
+	let shown = text, ghost = '', at = now;
 	if (pend) shown = '<span class="pend">setting ' + fmt(pend.value) + '…</span>';
 	else if (st !== undefined) {
-		// Marked, not saved yet: striped from now to the new value.
 		at = Math.max(0, Math.min(100, 100 * st / max));
-		ghost = '<div class="ghost" style="left:' + Math.min(pct, at) + '%;width:' + Math.abs(at - pct) + '%"></div>';
+		ghost = '<div class="ghost" style="left:' + Math.min(now, at) + '%;width:' + Math.abs(at - now) + '%"></div>';
 		shown = esc(fmt(v)) + ' → <span class="to">' + esc(fmt(st)) + '</span>';
 	}
 	return '<div class="bar can' + (st !== undefined ? ' staged' : '') + (blink && !pend ? ' blink' : '') + '" data-stat="' + stat + '" data-max="' + max + '" data-v="' + v + '">' +
 		'<span class="k">' + label + '</span><div class="track" title="Drag to set ' + STAT_LABEL[stat] + ', then Save">' +
-		'<div class="fill" style="width:' + pct + '%;background:' + colour + '"></div>' + extra + ghost +
+		'<div class="fill" style="width:' + now + '%;background:' + colour + '"></div>' + extra + ghost +
 		'<div class="handle" style="left:' + at + '%"></div></div>' +
 		'<span class="v" style="color:' + colour + '">' + shown + '</span></div>';
 }
-// valueAt is the stat's value where the pointer is on the bar, rounded to
-// a sensible step.
+// valueAt is the stat's value under the pointer, rounded to a sensible step.
 function valueAt(row, clientX) {
 	const r = row.querySelector('.track').getBoundingClientRect(), max = +row.dataset.max;
 	const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
 	const step = max >= 1000 ? 50 : max > 30 ? 1 : max / 100;
 	return Math.round(frac * max / step) * step;
 }
-function dragText(row, v) {
-	return row.dataset.stat === 'heatBuffer' ? Math.round(100 * v / +row.dataset.max) + '%' : num(v);
-}
+function dragText(row, v) { return statText(row.dataset.stat, v, +row.dataset.max); }
 function showDrag(v) {
 	const row = drag.row, max = +row.dataset.max, from = 100 * drag.from / max, to = 100 * v / max;
 	const track = row.querySelector('.track');
@@ -2983,8 +2777,7 @@ function showDrag(v) {
 	row.querySelector('.v').innerHTML = esc(dragText(row, drag.from)) + ' → <span class="to">' + esc(dragText(row, v)) + '</span>';
 	drag.value = v;
 }
-// endDrag marks where the bar was let go (keep), or leaves it as it was
-// (Esc). Back at the live value, the mark goes.
+// endDrag stages where the bar was let go (keep), or drops the drag (Esc).
 function endDrag(keep) {
 	if (!drag) return;
 	const d = drag;
@@ -2997,7 +2790,6 @@ function endDrag(keep) {
 	}
 	renderPlayer();
 }
-// saveStats sends every marked stat; the last-action line shows them together.
 async function saveStats() {
 	const err = document.getElementById('pErr');
 	err.textContent = '';
@@ -3030,8 +2822,7 @@ document.getElementById('pBars').addEventListener('pointerdown', e => {
 document.getElementById('pBars').addEventListener('pointermove', e => { if (drag && e.pointerId === drag.pointer) showDrag(valueAt(drag.row, e.clientX)); });
 document.getElementById('pBars').addEventListener('pointerup', e => { if (drag && e.pointerId === drag.pointer) endDrag(true); });
 document.getElementById('pBars').addEventListener('pointercancel', () => endDrag(false));
-// clearPending drops what the mod has answered: done (the next sync shows
-// the new value) or failed (the error shows).
+// clearPending drops what the mod has answered, showing any failure.
 function clearPending() {
 	for (const stat in pending) {
 		const c = pending[stat].id && commands.find(x => x.id === pending[stat].id);
@@ -3051,9 +2842,7 @@ function renderPlayer() {
 	document.getElementById('pGuid').textContent = selGuid;
 	document.getElementById('pWhen').textContent = p && mod && mod.connected ? 'Live from recon-mod · updated ' + Math.max(0, Math.round((Date.now() - new Date(mod.lastSync)) / 1000)) + ' s ago'
 		: 'Not on the server now' + (o && o.lastSeen ? ' · last seen ' + agoText(o.lastSeen * 1000) + ' · ' + playedText(o.played) : '') + ' · what ReCON has on file';
-	// Offline: what ReCON keeps (their last known inventory, kills and
-	// deaths); every tab stays where it is, but nothing that needs them on
-	// the server: no Kill, Restore or Set condition, and Spawn is off.
+	// Offline: what ReCON keeps, without the actions that need them online.
 	document.querySelector('#pModal .pbox').classList.toggle('offline', !p);
 	const spawnBtn = document.querySelector('#fSpawn .setfoot button.go');
 	spawnBtn.disabled = !p;
@@ -3066,8 +2855,7 @@ function renderPlayer() {
 			h += dragBar(k, label, p[k], max, c, b, num(p[k]) + ' / ' + num(max), '');
 		}
 		h += bar('Shock', p.shock, 100, 'var(--lm-muted)', false, num(p.shock) + ' / 100');
-		// Stamina: out of DayZ's maximum, with a mark at the most their load
-		// lets them have (carried weight lowers it).
+		// Stamina, with a mark at the cap their load sets.
 		const sMax = p.staminaMax || 100, sCap = p.staminaCap > 0 ? Math.min(p.staminaCap, sMax) : sMax;
 		h += '<div class="bar"><span class="k">Stamina</span><div class="track"><div class="fill" style="width:' + Math.max(0, Math.min(100, 100 * p.stamina / sMax)) + '%;background:var(--lm-muted)"></div>' +
 			(sCap < sMax ? '<div class="cap" style="left:' + (100 * sCap / sMax) + '%" title="The most their load lets them have"></div>' : '') +
@@ -3078,13 +2866,12 @@ function renderPlayer() {
 		const stage = ['none', '+', '++', '+++'][p.heatBufferStage] || 'none';
 		h += dragBar('heatBuffer', 'Comfort', p.heatBuffer, p.heatBufferMax || 30, 'var(--hud-white)', false, stage + ' · ' + Math.round(100 * hbFrac) + '%',
 			p.heatBufferCap > 0 ? '<div class="cap" style="left:' + (100 * p.heatBufferCap) + '%" title="The most their clothes allow"></div>' : '');
-		// Not while a bar is being dragged: redrawing would drop the drag.
 		const n = Object.keys(staged).length;
 		const foot = n
 			? '<div class="savebar"><span>' + n + (n === 1 ? ' change' : ' changes') + ' not saved</span><span class="sp"></span>' +
 				'<button type="button" class="go" onclick="saveStats()">Save</button><button type="button" onclick="resetStats()">Reset</button></div>'
 			: '';
-		if (!drag) document.getElementById('pBars').innerHTML = h;
+		if (!drag) document.getElementById('pBars').innerHTML = h; // a redraw would drop the drag
 		// Apart from the bars (redrawn every second), so a click on Save isn't lost.
 		const save = document.getElementById('pSave');
 		if (save.getAttribute('data-n') !== String(n)) { save.innerHTML = foot; save.setAttribute('data-n', n); }
@@ -3110,7 +2897,6 @@ function renderPlayer() {
 		['tHands', 'tVehicle', 'tKD'].forEach(id => document.getElementById(id).textContent = '—');
 	}
 	document.getElementById('tKDall').textContent = detail && detail.kills != null ? detail.kills + ' / ' + detail.deaths + ' all time' : '';
-	// Teleport to or from: everyone else online.
 	const opts = '<option value="">—</option>' + players.filter(o => o.guid !== selGuid).map(o => '<option value="' + o.guid + '">' + esc(o.name) + '</option>').join('');
 	for (const sel of [document.getElementById('tpTo'), document.getElementById('tpFrom')]) {
 		const keep = sel.value;
@@ -3119,7 +2905,6 @@ function renderPlayer() {
 	document.querySelectorAll('#fTeleport .tpName').forEach(b => { b.textContent = p ? p.name : 'them'; });
 	tpReady(); // a picked player may have left
 	renderLast();
-	// Previous: back to where they were before their last teleport.
 	const prev = detail && detail.previous, bb = document.getElementById('bBack');
 	bb.disabled = !p || !prev;
 	bb.textContent = prev ? 'Previous · ' + grid(prev.x, prev.z) : 'Previous';
@@ -3131,7 +2916,7 @@ function renderPlayer() {
 // ---- Inventory ----------------------------------------------------------
 
 let invSel = null, invAsked = 0;
-// The player's slots, in the order DayZ's inventory shows them.
+// The player's slots, in DayZ's inventory order.
 const SLOTS = [['Hands', 'Hands'], ['Headgear', 'Head'], ['Mask', 'Face'], ['Eyewear', 'Eyes'], ['Gloves', 'Gloves'], ['Armband', 'Armband'],
 	['Body', 'Top'], ['Vest', 'Vest'], ['Back', 'Back'], ['Hips', 'Belt'], ['Legs', 'Pants'], ['Feet', 'Shoes'], ['Shoulder', 'L Shoulder'], ['Melee', 'R Shoulder']];
 const SLOT_LABEL = Object.fromEntries(SLOTS);
@@ -3157,31 +2942,14 @@ function pathTo(items, id) {
 	}
 	return null;
 }
-// findItem is the item with that id anywhere in items, or null.
-function findItem(items, id) {
-	for (const it of items) {
-		if (it.id === id) return it;
-		const f = findItem((it.attachments || []).concat(it.cargo || []), id);
-		if (f) return f;
-	}
-	return null;
-}
-function irow(it, label, extra) {
-	const [cn, cc] = condOf(it);
-	return '<button type="button" class="irow' + (it.id === invSel ? ' sel' : '') + '" data-item="' + it.id + '">' +
-		'<span class="sl">' + esc(label) + '</span><span class="nm">' + esc(itemName(it)) + '</span>' +
-		'<span class="ex">' + esc(extra || '') + '<span class="cond" style="background:' + cc + '" title="' + cn + '"></span></span></button>';
-}
-
+function findItem(items, id) { const p = pathTo(items, id); return p ? p[p.length - 1] : null; }
 function agoText(at) {
 	const s = Math.max(0, Math.round((Date.now() - new Date(at)) / 1000));
 	return s < 90 ? s + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : new Date(at).toLocaleString();
 }
-// setHTML sets an element's content only when it differs from what it
-// was last set to: the dialogs and lists redraw every second, and
-// rebuilding unchanged rows made them flicker (the picked one's highlight,
-// a hover). The inventory list may be holding the details panel (a narrow
-// screen): it is put back first.
+// setHTML sets an element's content only when it changed: the dialogs redraw
+// every second, and rebuilding unchanged rows made them flicker. An
+// inventory list holding its details panel (narrow screen) gives it back first.
 function setHTML(el, h) {
 	if (el._html === h) return;
 	const detId = { iList: 'iDet', gList: 'gDet', vList: 'vDet' }[el.id];
@@ -3189,26 +2957,20 @@ function setHTML(el, h) {
 	el.innerHTML = h;
 	el._html = h;
 }
-// On a narrow screen (one column) the item's details open right under the
-// slot picked, the slots below it moving down, instead of under them all.
-let invRoot = null; // the slot item the details are for (null: none picked)
+function invRows(items) {
+	return containerRows(items, (it, label, extra) => itemRow(it, label, extra, it.id === invSel));
+}
+let invRoot = null; // the slot item whose details are open
 function renderInv(p) {
-	const list = document.getElementById('iList'), det = document.getElementById('iDet'), box = list.parentElement;
+	const list = document.getElementById('iList');
 	renderInvBody(p);
-	const narrow = NARROW_INV.matches, row = narrow && invRoot != null ? list.querySelector(':scope > .irow[data-item="' + invRoot + '"]') : null;
-	det.classList.toggle('under', !!row);
-	// Moved only when it isn't where it belongs (a move redraws it).
-	if (row) { if (row.nextElementSibling !== det) row.after(det); }
-	else if (det.parentElement !== box) box.appendChild(det);
-	const disp = narrow && !row ? 'none' : '';
-	if (det.style.display !== disp) det.style.display = disp;
+	placeDetails(list, document.getElementById('iDet'), invRoot == null ? null : list.querySelector(':scope > .irow[data-item="' + invRoot + '"]'));
 }
 NARROW_INV.addEventListener('change', () => { if (selGuid) renderInv(byGuid[selGuid]); });
 function renderInvBody(p) {
 	invRoot = null;
 	const list = document.getElementById('iList'), det = document.getElementById('iDet'), when = document.getElementById('invWhen');
-	// Until the live inventory comes (or while they're offline): their last
-	// known one, at most about 5 min old while they're online.
+	// Until the live inventory comes (or while they're offline): the last known one.
 	const live = detail && detail.inventory, cached = !live && detail && detail.lastInventory;
 	const inv = live || cached;
 	if (!p && !cached) {
@@ -3217,18 +2979,17 @@ function renderInvBody(p) {
 		setHTML(det, '');
 		return;
 	}
-	// Every slot is always listed, empty or not (and while the inventory is
-	// still coming), so rows never pop in; slots DayZ has beyond these follow.
+	// Every slot is always listed, so rows never pop in; any others follow.
 	const items = inv ? (inv.items || []).slice().sort((a, b) => (SLOT_RANK[a.slot] ?? 99) - (SLOT_RANK[b.slot] ?? 99)) : [];
 	const bySlot = {};
 	for (const it of items) bySlot[it.slot] = it;
-	const row = it => { const n = countIn(it); return irow(it, slotLabel(it.slot), n ? n + (n === 1 ? ' item' : ' items') : qty(it)); };
+	const row = it => { const n = countIn(it); return itemRow(it, slotLabel(it.slot), n ? itemsText(n) : qty(it), it.id === invSel); };
 	setHTML(list, SLOTS.map(([slot, label]) => bySlot[slot] ? row(bySlot[slot])
 		: '<div class="irow none"><span class="sl">' + label + '</span><span class="nm">' + (inv ? 'Empty' : '…') + '</span><span class="ex"></span></div>').join('') +
 		items.filter(it => SLOT_RANK[it.slot] == null).map(row).join(''));
 	if (!inv) {
 		when.textContent = Date.now() - invAsked > 10000
-			? '· recon-mod hasn\'t sent their inventory (the mod on the server may be a version without it)'
+			? '· recon-mod hasn\'t sent their inventory'
 			: '· loading…';
 		setHTML(det, '');
 		return;
@@ -3243,43 +3004,14 @@ function renderInvBody(p) {
 		return;
 	}
 	invRoot = path[0].id;
-	const it = path[path.length - 1];
-	const [cn, cc] = condOf(it);
-	let h = '';
-	if (path.length > 1) h += '<div class="crumbs">' + path.slice(0, -1).map(x => '<a data-item="' + x.id + '">' + esc(itemName(x)) + '</a> ›').join(' ') + '</div>';
-	h += '<h3>' + esc(itemName(it)) + '</h3><div class="ty">' + esc(it.type) + '</div><div class="props">';
-	const where = it.slot ? slotLabel(it.slot) + (path.length > 1 ? ' (attached)' : '') : 'Cargo, row ' + (it.row + 1) + ', column ' + (it.col + 1);
-	const props = [['Slot', where],
-		['Condition', '<span style="color:' + cc + '">' + cn + '</span> · ' + num(it.health) + ' / ' + num(it.healthMax)]];
-	if (it.quantityMax) props.push([it.unit === 'rounds' ? 'Rounds' : 'Quantity', esc(qty(it))]);
-	props.push(['Wetness', it.wet > 0 ? Math.round(100 * it.wet) + '%' : 'Dry']);
-	props.push(['Temperature', (Math.round(it.temperature * 10) / 10) + ' °C']);
-	h += props.map(([k, v]) => '<span class="k">' + k + '</span><span>' + (k === 'Condition' ? v : esc(v)) + '</span>').join('') + '</div>';
-	// Set its condition: DayZ's five levels, the one it is at marked.
-	const lvl = Math.max(0, Math.min(4, it.healthLevel | 0));
-	h += '<div class="setcond"><span class="k">Set condition</span>' + CONDITION.map(([n, c], i) =>
-		'<button type="button" data-cond="' + i + '" data-cond-item="' + it.id + '" style="--c:' + c + '"' + (i === lvl ? ' class="on" aria-pressed="true"' : '') + '>' + n + '</button>').join('') + '</div>';
-	const att = it.attachments || [], cargo = (it.cargo || []).slice().sort((a, b) => a.row - b.row || a.col - b.col);
-	h += '<h5>Attachments' + (att.length ? ' · ' + att.length : '') + '</h5>' + (att.length
-		? '<div class="sub-items">' + att.map(a => irow(a, slotLabel(a.slot), qty(a))).join('') + '</div>' : '<div class="muted">None</div>');
-	if (cargo.length)
-		h += '<h5>Contents · ' + cargo.length + '</h5><div class="sub-items">' + cargo.map(c => {
-			const n = countIn(c);
-			return irow(c, 'Row ' + (c.row + 1) + ', ' + (c.col + 1), n ? n + (n === 1 ? ' item' : ' items') : qty(c));
-		}).join('') + '</div>';
-	setHTML(det, h);
+	setHTML(det, itemDetail(path, { rows: invRows, setCond: true }));
 }
 document.getElementById('pModal').addEventListener('click', e => {
 	const c = e.target.closest('[data-cond]');
-	if (c) {
-		act('condition', { text: c.getAttribute('data-cond-item'), value: +c.getAttribute('data-cond') }, true);
-		return;
-	}
-	const t = e.target.closest('[data-item]');
-	if (!t) return;
-	// The slot whose details are open, picked again: they close.
-	const id = +t.getAttribute('data-item');
-	invSel = t.parentElement && t.parentElement.id === 'iList' && id === invRoot ? null : id;
+	if (c) { act('condition', { text: c.dataset.condItem, value: +c.dataset.cond }); return; }
+	const p = picked(e, 'iList');
+	if (p.item == null) return;
+	invSel = p.inList && p.item === invRoot ? null : p.item;
 	renderInv(byGuid[selGuid]);
 });
 
@@ -3317,8 +3049,7 @@ function statusHTML(c) {
 	const text = c.status === 'queued' ? 'waiting for the mod' : (c.status === 'failed' || c.status === 'expired') && c.error ? c.status + ': ' + c.error : c.status;
 	return '<span class="' + cls + '">' + esc(text) + '</span>';
 }
-// The dialog's last action line: the newest command to this player, or
-// every stat of the last Save together.
+// renderLast shows the newest command to this player, or every stat of the last Save.
 let lastBatch = [];
 function renderLast() {
 	const el = document.getElementById('pLast');
@@ -3332,8 +3063,7 @@ function renderLast() {
 	el.innerHTML = 'Last action: ' + text + ' · ' + statusHTML(bad || open || batch[0]) +
 		' <span class="muted">' + new Date(batch[0].queued).toLocaleTimeString() + '</span>';
 }
-// What killed them (a kill's cause, from mod 0.0.1h): its kind and the
-// words for it.
+// CAUSES is each death cause's kind and wording.
 const CAUSES = {
 	player: ['player'], infected: ['infected', 'Killed by an infected'], animal: ['animal', 'Killed by an animal'],
 	vehicle: ['env', 'Hit by a vehicle'], explosion: ['env', 'Blown up'], trap: ['env', 'Caught in a trap'],
@@ -3346,20 +3076,9 @@ const KILL_KINDS = [['', 'All'], ['kill', 'Kills'], ['player', 'By players'], ['
 const KIND_CHIP = { kill: ['red', 'Kill'], player: ['red', 'Player'], infected: ['amber', 'Infected'], animal: ['amber', 'Animal'],
 	env: ['blue', 'Environment'], ailment: ['violet', 'Ailment'], other: ['', 'Other'] };
 let killKind = '';
-// causeOf is what killed them; for a death from before mod 0.0.1h, as
-// much as who killed them and with what tells.
-function causeOf(k) {
-	if (k.cause) return k.cause;
-	if (k.killerGuid && k.killerGuid !== k.victimGuid) return 'player';
-	if (/^Zmb/i.test(k.weapon)) return 'infected';
-	if (/^Animal_/i.test(k.weapon)) return 'animal';
-	if (k.killerGuid && k.weapon && !/^Survivor/i.test(k.weapon)) return 'suicide';
-	return '';
-}
-// killKindOf is the row's kind: the player's own kill, or what killed them.
 function killKindOf(k) {
 	if (k.killerGuid === selGuid && k.victimGuid !== selGuid) return 'kill';
-	const c = CAUSES[causeOf(k)];
+	const c = CAUSES[k.cause];
 	return c ? c[0] : 'other';
 }
 function renderKills() {
@@ -3381,9 +3100,8 @@ function renderKills() {
 	tb.innerHTML = ks.map(k => {
 		const d = new Date(k.at), when = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 		const w = k.weapon ? item(k.weapon) : 'something', far = k.distance ? ' at ' + Math.round(k.distance) + ' m' : '';
-		const cause = causeOf(k), kind = killKindOf(k), c = CAUSES[cause];
-		// The weapon, unless it is only their own body (an older mod's report).
-		const wpn = k.weapon && !/^Survivor/i.test(k.weapon) ? ' (' + esc(w) + ')' : '';
+		const cause = k.cause, kind = killKindOf(k), c = CAUSES[cause];
+		const wpn = k.weapon ? ' (' + esc(w) + ')' : '';
 		let t;
 		if (kind === 'kill') t = 'Killed ' + link(k.victimGuid, k.victimName || 'someone') + ' with ' + esc(w) + far;
 		else if (cause === 'player') t = 'Killed by ' + link(k.killerGuid, k.killerName || 'a player') + (k.weapon ? ' with ' + esc(w) : '') + far;
@@ -3393,7 +3111,6 @@ function renderKills() {
 		if (cause !== 'illness' && kind !== 'kill' && k.illnesses && k.illnesses.length) t += ' <span class="muted">· had ' + esc(k.illnesses.join(', ')) + '</span>';
 		const chip = KIND_CHIP[kind];
 		const where = k.x || k.z ? grid(k.x, k.z) + ' <span class="muted">' + Math.round(k.x) + ', ' + Math.round(k.z) + '</span>' : '';
-		// Their own death with the inventory saved: Restore….
 		const save = k.victimGuid === selGuid && (detail.saves || []).find(sv => sv.killId === k.id);
 		const rs = save ? ' <button type="button" class="rs" data-save="' + save.id + '" title="Give back chosen items from what they had (' + save.items + ' items' +
 			(save.restored ? ', ' + save.restored + ' given back already' : '') + ')">Restore…</button>' : '';
@@ -3415,14 +3132,9 @@ document.getElementById('pKills').addEventListener('click', e => {
 	if (byGuid[g]) openPlayer(g); else location.href = '/players#details=' + g;
 });
 
-// The mini-map: a small Leaflet map of the player's surroundings, with
-// the big map's picture and a grid, the others in view (and how far), and
-// the spot picked to teleport to. It opens on the player at the 50 m step
-// and follows them until it is moved; it zooms in the big map's scale-bar
-// steps, out to 500 m at most (wheel, + and −, a pinch), and Recenter goes
-// back. A click (tap) picks a teleport spot, a double click teleports
-// there. On a touch screen one finger scrolls the dialog, two move and zoom
-// it (as on the big map).
+// ---- The mini-map ------------------------------------------------------------
+// The player's surroundings: it follows them until moved (Recenter goes back),
+// zooms in MINI_STEPS; a click picks a teleport spot, a double click goes there.
 const MINI_STEPS = [25, 50, 100, 200, 500], MINI_HOME = 50;
 let miniMap = null, miniPic = null, miniGrid = null, miniMarks = null, miniW = 0, mini = { follow: true }, tpPick = null;
 function resetMini() {
@@ -3431,8 +3143,8 @@ function resetMini() {
 }
 function miniBar() { return SCALE_PX / Math.pow(2, miniMap.getZoom()); }
 function miniSpan() { return miniMap.getSize().x / Math.pow(2, miniMap.getZoom()); }
-// ensureMini makes the map the first time the mini-map is on screen (a
-// Leaflet map made while hidden has no size), and keeps it sized.
+// ensureMini makes the mini-map once it is on screen (a Leaflet map made
+// while hidden has no size), and keeps it sized.
 function ensureMini() {
 	const el = document.getElementById('mini');
 	if (!el.clientWidth) return null;
@@ -3447,7 +3159,7 @@ function ensureMini() {
 		miniMarks = L.layerGroup().addTo(miniMap);
 		miniMap.on('dragstart', () => { mini.follow = false; });
 		miniMap.on('moveend zoomend', drawMiniGrid);
-		// A pinch ends on the nearest step (not the whole map's view).
+		// A pinch snaps to the nearest step.
 		miniMap.on('zoomend', () => {
 			if (mini.fit) { miniHud(); return; }
 			const m = miniBar(), near = MINI_STEPS.reduce((x, y) => Math.abs(y - m) < Math.abs(x - m) ? y : x);
@@ -3461,7 +3173,6 @@ function ensureMini() {
 			document.getElementById('miniXY').textContent = x >= 0 && z >= 0 ? Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z) : '';
 		});
 		miniMap.on('mouseout', () => { document.getElementById('miniXY').textContent = ''; });
-		// The wheel: one step a notch (a trackpad's small steps add up to one).
 		let wheel = 0;
 		el.addEventListener('wheel', e => {
 			e.preventDefault();
@@ -3471,7 +3182,6 @@ function ensureMini() {
 			wheel = 0;
 			stepMini(-Math.sign(n), miniMap.mouseEventToContainerPoint(e));
 		}, { passive: false });
-		// Two fingers on a touch screen: the map leaves the player.
 		el.addEventListener('touchstart', e => { if (e.touches.length > 1) mini.follow = false; }, { passive: true });
 		watchTouches(el, 'miniHint', () => true);
 		setMiniPicture();
@@ -3482,8 +3192,7 @@ function ensureMini() {
 	}
 	return miniMap;
 }
-// stepMini zooms one step in (dir 1) or out (-1), about the point given
-// (while not following the player; following, about them).
+// stepMini zooms one step, about the point given unless following the player.
 function stepMini(dir, around) {
 	if (!miniMap) return;
 	const cur = miniBar();
@@ -3491,8 +3200,6 @@ function stepMini(dir, around) {
 	if (!next) return;
 	if (around && !mini.follow) miniMap.setZoomAround(around, zoomForBar(next)); else miniMap.setZoom(zoomForBar(next));
 }
-// setMiniPicture puts the map's picture under the mini-map (again when
-// it, or its calibration, changes).
 function setMiniPicture() {
 	if (!miniMap) return;
 	if (miniPic) { miniPic.remove(); miniPic = null; }
@@ -3501,21 +3208,21 @@ function setMiniPicture() {
 	miniPic = new PictureLayer({ bounds: [[P.N - P.L, P.W], [P.N, P.W + P.L]] }).addTo(miniMap);
 	miniPic.bringToBack();
 }
-// drawMiniGrid: 100 m lines (500 m, then 1 km, for the whole map's view);
-// every km brighter. And the map's edges.
+// drawMiniGrid draws grid lines sized to the view, every km brighter, and the map's edge.
 function drawMiniGrid() {
 	if (!miniMap) return;
 	miniGrid.clearLayers();
 	const span = miniSpan(), b = miniMap.getBounds(), step = miniStep(span), major = step < 100 ? 100 : 1000;
 	const line = (pts, g) => L.polyline(pts, { color: g % major ? '#232a24' : '#3a463c', weight: 1, interactive: false }).addTo(miniGrid);
-	for (let g = Math.ceil(b.getWest() / step) * step; g <= b.getEast(); g += step) line([[b.getSouth(), g], [b.getNorth(), g]], g);
-	for (let g = Math.ceil(b.getSouth() / step) * step; g <= b.getNorth(); g += step) line([[g, b.getWest()], [g, b.getEast()]], g);
+	if (gridOn) {
+		for (let g = Math.ceil(b.getWest() / step) * step; g <= b.getEast(); g += step) line([[b.getSouth(), g], [b.getNorth(), g]], g);
+		for (let g = Math.ceil(b.getSouth() / step) * step; g <= b.getNorth(); g += step) line([[g, b.getWest()], [g, b.getEast()]], g);
+	}
 	const ms = size || 15360;
 	L.rectangle([[0, 0], [ms, ms]], { color: '#4a5a4d', weight: 1, fill: false, interactive: false }).addTo(miniGrid);
 	miniHud();
 }
-// miniHud: the grid and how far across the mini-map shows; Recenter while
-// it isn't on the player at the 50 m step.
+// miniHud shows the scale, and Recenter while off the player or MINI_HOME.
 function miniHud() {
 	if (!miniMap) return;
 	const span = Math.round(miniSpan()), step = miniStep(span);
@@ -3525,7 +3232,7 @@ function miniHud() {
 function miniStep(span) { return span <= 1500 ? 100 : span <= 6000 ? 500 : 1000; }
 function drawMini(p) {
 	if (!ensureMini()) return;
-	if (mini.fit) { // back from the whole map: on them at the 50 m step
+	if (mini.fit) { // back from fitMini
 		mini = { follow: true };
 		miniMap.setMinZoom(zoomForBar(MINI_STEPS[MINI_STEPS.length - 1]));
 		miniMap.setView([p.z, p.x], zoomForBar(MINI_HOME), { animate: false });
@@ -3533,9 +3240,24 @@ function drawMini(p) {
 	if (mini.follow) miniMap.setView([p.z, p.x], miniMap.getZoom(), { animate: false });
 	miniMarks.clearLayers();
 	const w = miniMap.getSize().x, b = miniMap.getBounds();
-	const mark = (x, z, html) => L.marker([z, x], { icon: L.divIcon({ className: 'mmark', html, iconSize: [0, 0] }), interactive: false, keyboard: false }).addTo(miniMarks);
-	players.forEach(o => {
-		if (o.guid === p.guid || !b.contains([o.z, o.x])) return;
+	const markAs = (className, x, z, html) => L.marker([z, x], { icon: L.divIcon({ className, html, iconSize: [0, 0] }), interactive: false, keyboard: false }).addTo(miniMarks);
+	const mark = (x, z, html) => markAs('mmark', x, z, html);
+	// The big map's overlays that are on, drawn the same way.
+	const inView = (x, z) => b.contains([z, x]);
+	if (townsOn && places) for (const t of places) {
+		const ty = townType(t.type);
+		if (TOWN_TYPES[ty] && inView(t.x, t.z)) markAs('town t-' + ty.toLowerCase(), t.x, t.z, '<span>' + esc(t.name) + '</span>');
+	}
+	if (eventsWanted()) for (const s of shownSpots()) {
+		if (s.radius) spotCircle(s).addTo(miniMarks);
+		if (inView(s.e.x, s.e.z)) markAs('emark', s.e.x, s.e.z, s.html);
+	}
+	if (deathsOn) for (const k of deathList) if ((k.x || k.z) && inView(k.x, k.z)) markAs('dmark', k.x, k.z, DEATH_SVG);
+	if (placedWanted()) for (const o of placedList) if (placedKindOn[placedKind(o)] && inView(o.x, o.z)) markAs('omark', o.x, o.z, placedSVG(vehCondition(o.health)[1]));
+	if (vehOn) for (const v of vehicles) if (inView(v.x, v.z)) markAs('vmark', v.x, v.z, vehSVG(v));
+	if (predOn) for (const a of predators) if (inView(a.x, a.z)) markAs('amark', a.x, a.z, predSVG(a));
+	if (playersOn) players.forEach(o => {
+		if (o.guid === p.guid || !inView(o.x, o.z)) return;
 		const d = Math.round(Math.hypot(o.x - p.x, o.z - p.z)), right = miniMap.latLngToContainerPoint([o.z, o.x]).x > w - 110;
 		mark(o.x, o.z, '<svg width="10" height="10" viewBox="-5 -5 10 10" style="left:-5px;top:-5px"><circle r="4.5" fill="' + colorOf(o.guid) + '" stroke="#111"/></svg>' +
 			'<span style="' + (right ? 'right:8px' : 'left:8px') + '">' + esc(o.name) + ' · ' + (d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m') + '</span>');
@@ -3545,8 +3267,7 @@ function drawMini(p) {
 	mark(p.x, p.z, '<svg width="20" height="20" viewBox="-10 -10 20 20" style="left:-10px;top:-10px"><path transform="rotate(' + p.heading + ')" d="M0,-9 L6.3,7.2 L0,3.2 L-6.3,7.2 Z" fill="' + colorOf(p.guid) + '" stroke="#111" stroke-width="1.2"/></svg>');
 	miniHud();
 }
-// fitMini shows the whole map (an offline player's dialog: nobody to
-// follow), the 500 m limit lifted for it.
+// fitMini shows the whole map (an offline player: nobody to follow).
 function fitMini() {
 	if (!ensureMini()) return;
 	miniMarks.clearLayers();
@@ -3558,8 +3279,7 @@ function fitMini() {
 	miniHud();
 }
 function redrawMini() { const p = byGuid[selGuid]; if (p) drawMini(p); }
-// A click (tap) on the mini-map picks that spot to teleport to; while
-// calibrating it is where the player really is on the picture.
+// miniPick picks a teleport spot, or while calibrating where the player really is.
 function miniPick(x, z) {
 	if (calMode) { calPick({ x, z }); return; }
 	if (!byGuid[selGuid]) return; // offline: nobody to send there
@@ -3569,18 +3289,16 @@ function miniPick(x, z) {
 	setTpMode('spot');
 	renderPlayer();
 }
-// A double click teleports them there at once: its two clicks have already
-// picked the spot, so this is the Teleport button without the trip.
+// miniTeleport (a double click) teleports them to the spot its clicks picked.
 function miniTeleport(x, z) {
-	if (calMode || Date.now() - calPicked < 1000) return; // a calibration click, not a teleport
+	if (calMode || Date.now() - calPicked < 1000) return; // a calibration click
 	if (!(x > 0) || !(z > 0) || (size && (x > size || z > size))) { document.getElementById('pErr').textContent = 'That spot is off the map.'; return; }
 	document.getElementById('tpTo').value = '';
-	act('teleport', { x, z, y: 0 }, true).then(ok => { if (ok) clearTeleport(); });
+	act('teleport', { x, z, y: 0 }).then(ok => { if (ok) clearTeleport(); });
 }
 
-// Calibrating: with Calibrate on, a click on the mini-map is where the
-// player really is on the map's picture, which then moves (and with two
-// points far enough apart, resizes) to put it under them.
+// Calibrating: a mini-map click is where the player really is on the
+// picture, which moves (and with two points far apart, resizes) to match.
 let calMode = false, calPicked = 0, calNote = '';
 function calUI() {
 	const b = document.getElementById('miniCal'), box = document.getElementById('miniCalBox');
@@ -3601,11 +3319,9 @@ function setCalMode(on) {
 	calUI();
 }
 document.getElementById('miniCal').addEventListener('click', () => setCalMode(!calMode));
-// saveCal saves the map's points; note is said once it has.
+// saveCal saves the map's points, then says note.
 function saveCal(points, note) {
 	const w = world;
-	// Out of calibrating at once, so what happens next (saved, or why not)
-	// shows in its place.
 	calMode = false; calNote = 'Saving…'; calUI();
 	return api('POST', '/api/mod/map/' + encodeURIComponent(w) + '/calibration', { points }).then(d => {
 		if (w !== world) return;
@@ -3615,9 +3331,7 @@ function saveCal(points, note) {
 		setTimeout(() => { if (calNote === note) { calNote = ''; calUI(); } }, 8000);
 	}).catch(err => { if (w === world) { calNote = 'Not saved: ' + err.message; calUI(); } });
 }
-// calPick adds the point: the player's position, and the spot at on the
-// picture. A point within CAL_MIN of one already there replaces it;
-// otherwise it replaces the oldest of two.
+// calPick adds a point; it replaces one within CAL_MIN, else the older of two.
 function calPick(at) {
 	const p = byGuid[selGuid];
 	if (!p) { calMode = false; calNote = "Not saved: the player isn't online."; calUI(); return; }
@@ -3636,14 +3350,7 @@ document.getElementById('miniCalReset').addEventListener('click', e => {
 });
 document.getElementById('miniFollow').addEventListener('click', () => { mini.follow = true; if (miniMap) miniMap.setZoom(zoomForBar(MINI_HOME), { animate: false }); redrawMini(); });
 
-// showForm('message') puts the cursor in the message box (always shown).
-function showForm(name) {
-	if (name === 'message') document.getElementById('msgText').focus();
-}
-
-// ---- The dialog's tabs: Stats, Inventory, Spawn item, Kills & deaths -----
-
-// pTab stays as it is from one player to the next (Prev / Next).
+// ---- The player dialog's tabs (kept from one player to the next) -----------
 let pTab = 'stats';
 function showPTab(name) {
 	pTab = name;
@@ -3660,18 +3367,17 @@ document.getElementById('pTabs').addEventListener('click', e => {
 	if (b) showPTab(b.dataset.ptab);
 });
 
-// ---- Spawn item: every item the server has loaded, on the ground --------
+// ---- Spawn item ----------------------------------------------------------------
 
 let catalog = null, catalogBy = {}, spSel = null;
 const KIND_TEXT = { weapon: 'Weapon', magazine: 'Magazine', ammo: 'Ammo', clothing: 'Clothing', vehicle: 'Vehicle', animal: 'Animal', item: 'Item' };
 function catName(it) { return it.name && it.name[0] !== '$' ? it.name : item(it.type); }
-// fetchCatalog loads the item list once the mod has sent all of it.
+// fetchCatalog loads the item list, sorted by name, once the mod has sent all of it.
 async function fetchCatalog() {
 	if (catalog) return;
 	try {
 		const d = await api('GET', '/api/mod/items');
 		if (d.complete) {
-			// Sorted by name, so the A-Z bar can jump to a letter.
 			catalog = d.items.map(it => Object.assign(it, { find: (catName(it) + ' ' + it.type).toLowerCase(), letter: letterOf(it) }))
 				.sort((a, b) => catName(a).localeCompare(catName(b), undefined, { sensitivity: 'base' }));
 			catalogBy = Object.fromEntries(catalog.map(it => [it.type, it]));
@@ -3682,11 +3388,9 @@ async function loadItems() {
 	if (catalog) { renderItems(); return; }
 	await fetchCatalog();
 	renderItems();
-	// Still coming in from the mod: look again while the tab is open.
-	if (!catalog) setTimeout(() => { if (pTab === 'spawn' && document.getElementById('pModal').style.display === 'flex') loadItems(); }, 2000);
+	if (!catalog) setTimeout(() => { if (pTab === 'spawn' && isOpen('pModal')) loadItems(); }, 2000); // still coming from the mod
 }
-// letterOf is the A-Z bar's letter for an item: its name's first letter,
-// or # for a digit or anything else.
+// letterOf is an item's A-Z bar letter (# for anything but A-Z).
 const AZ = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 function letterOf(it) { const c = (catName(it)[0] || '').toUpperCase(); return c >= 'A' && c <= 'Z' ? c : '#'; }
 function renderItems() {
@@ -3695,16 +3399,14 @@ function renderItems() {
 	const words = document.getElementById('spFind').value.toLowerCase().split(/\s+/).filter(Boolean);
 	const kind = document.getElementById('spKind').value;
 	const hits = catalog.filter(it => (!kind || it.kind === kind) && words.every(w => it.find.includes(w)));
-	// Every match, in name order; the first item of each letter is marked
-	// for the A-Z bar.
 	const seen = {};
 	list.innerHTML = hits.length ? itemRows(hits, spSel, seen) : '<div class="empty">No item matches.</div>';
 	list.scrollTop = 0;
 	az.innerHTML = azBar(seen);
 	renderPick();
 }
-// itemRows is the item list's rows, sel highlighted; the first item of each
-// letter is marked (and noted in seen) for the A-Z bar.
+// itemRows is the spawn list's rows; the first of each letter is marked
+// (and noted in seen) for the A-Z bar.
 function itemRows(hits, sel, seen) {
 	return hits.map(it => {
 		const first = !seen[it.letter]; seen[it.letter] = true;
@@ -3715,7 +3417,6 @@ function itemRows(hits, sel, seen) {
 function azBar(seen) {
 	return AZ.map(l => '<button type="button" data-az="' + l + '"' + (seen[l] ? '' : ' disabled') + ' title="' + (l === '#' ? 'Digits and symbols' : l) + '">' + l + '</button>').join('');
 }
-// The A-Z bars (Spawn item, Spawn here) scroll their list to that letter.
 for (const [bar, lst] of [['spAZ', 'spList'], ['sAZ', 'sList']]) document.getElementById(bar).addEventListener('click', e => {
 	const b = e.target.closest('[data-az]');
 	if (!b || b.disabled) return;
@@ -3730,8 +3431,7 @@ function renderPick() {
 	document.getElementById('spPick').textContent = it
 		? catName(it) + (vehicle ? ', whole (parts and fluids), 8 m in front of them' : animal ? ', on the ground 4 m in front of them' : WHERE_TEXT[where])
 		: (catalog ? catalog.length.toLocaleString() + ' items' : '');
-	// A vehicle or an animal goes in front of them; a vehicle and anything
-	// for their hands come one at a time.
+	// A vehicle or animal goes on the ground; a vehicle or anything for their hands, one at a time.
 	if (vehicle || animal) whereEl.value = 'ground';
 	whereEl.disabled = !!(vehicle || animal);
 	const one = vehicle || where === 'hands', cnt = document.getElementById('spCount');
@@ -3745,7 +3445,7 @@ document.getElementById('spList').addEventListener('click', e => {
 	const t = e.target.closest('[data-type]');
 	if (!t) return;
 	spSel = t.getAttribute('data-type');
-	// Only the highlight moves: redrawing the list would lose its scroll.
+	// Only the highlight moves: a redraw would lose the list's scroll.
 	document.querySelectorAll('#spList .sprow.sel').forEach(r => r.classList.remove('sel'));
 	t.classList.add('sel');
 	renderPick();
@@ -3756,31 +3456,26 @@ function doSpawn() {
 	if (!spSel) { err.textContent = 'Pick an item to spawn.'; return; }
 	const n = parseInt(document.getElementById('spCount').value, 10);
 	if (!(n >= 1 && n <= 20)) { err.textContent = 'Spawn 1 to 20 at a time.'; return; }
-	act('spawn', { text: spSel, value: n, stat: document.getElementById('spWhere').value }, true); // stays open for the next item
+	act('spawn', { text: spSel, value: n, stat: document.getElementById('spWhere').value });
 }
 
-// act queues an action for the player in the dialog (or for guid, when
-// given); the panel it came from closes unless keepOpen.
-async function act(action, body, keepOpen, guid) {
+// act queues an action for the player in the dialog (or for guid).
+async function act(action, body, guid) {
 	const err = document.getElementById('pErr');
 	err.textContent = '';
 	try {
 		const d = await api('POST', '/api/mod/players/' + (guid || selGuid) + '/' + action, body || {});
 		lastBatch = d.command ? [d.command.id] : [];
-		if (!keepOpen) showForm('');
 		poll();
 		return true;
 	} catch (e) { err.textContent = e.message; return false; }
 }
 function killPlayer(btn) { inlineConfirm(btn, 'Kill', () => act('kill')); }
-// The teleport panel is always open; it empties after each teleport. Its
-// three ways: to a spot (typed, or a mini-map click), this player to
-// another (to), or another to this player (from). Typing or picking in one
-// selects it.
+// Teleport: to a spot (typed or a mini-map click), to another player (to),
+// or another player here (from); typing in one selects it.
 function tpMode() { const r = document.querySelector('#fTeleport input[name=tpMode]:checked'); return r ? r.value : 'spot'; }
 function setTpMode(m) { document.querySelector('#fTeleport input[name=tpMode][value=' + m + ']').checked = true; tpReady(); }
-// tpReady greys Teleport out until the way picked has what it needs: X and
-// Y typed (or a mini-map click), or a player picked.
+// tpReady enables Teleport once the way picked has what it needs.
 function tpReady() {
 	const m = tpMode(), v = id => document.getElementById(id).value;
 	const ok = m === 'to' ? !!v('tpTo') : m === 'from' ? !!v('tpFrom') : parseFloat(v('tpX')) > 0 && parseFloat(v('tpZ')) > 0;
@@ -3805,7 +3500,7 @@ function doTeleport() {
 		if (!other) { err.textContent = 'Pick a player.'; return; }
 		const done = ok => { if (ok) clearTeleport(); };
 		if (m === 'to') act('teleportTo', { target: other }).then(done);
-		else act('teleportTo', { target: selGuid }, false, other).then(done);
+		else act('teleportTo', { target: selGuid }, other).then(done);
 		return;
 	}
 	const x = parseFloat(document.getElementById('tpX').value), z = parseFloat(document.getElementById('tpZ').value);
@@ -3821,12 +3516,11 @@ document.getElementById('msgText').addEventListener('keydown', e => { if (e.key 
 
 // ---- The world ----------------------------------------------------------
 
-// Weather sliders: the part, its label, the slider's top, and how a value shows.
+// Weather sliders: part, label, max, and how a value shows.
 const WX = [
 	['overcast', 'Overcast', 100, v => v + '%'], ['rain', 'Rain', 100, v => v + '%'], ['fog', 'Fog', 100, v => v + '%'], ['snow', 'Snow', 100, v => v + '%'],
 	['windSpeed', 'Wind speed', 30, v => v + ' m/s'], ['windDir', 'Wind from', 359, v => compass(v) + ' ' + v + '°'],
 ];
-// Presets move several sliders at once, ready to Apply.
 const PRESETS = {
 	Clear: { overcast: 5, rain: 0, fog: 0, snow: 0, windSpeed: 3 }, Cloudy: { overcast: 55, rain: 0, fog: 5, snow: 0 },
 	Rain: { overcast: 80, rain: 60, fog: 10, snow: 0, windSpeed: 8 }, Thunderstorm: { overcast: 100, rain: 100, fog: 15, snow: 0, windSpeed: 16, lightning: 100 },
@@ -3834,7 +3528,7 @@ const PRESETS = {
 };
 let moved = {}, lightningMoved = false;
 
-// wxNow is a part's value now (target false) or where it is heading, as the slider shows it.
+// wxNow is a part's value now (or its target) in slider units.
 function wxNow(k, wx, target) {
 	const v = wx[target ? k + 'Target' : k] || 0;
 	if (k === 'windSpeed') return Math.round(v);
@@ -3923,21 +3617,17 @@ function setDate() {
 	if (d.length !== 3 || t.length < 2 || d.some(isNaN) || t.some(isNaN)) { document.getElementById('wErr').textContent = 'Pick a date and a time.'; return; }
 	worldAct('date', { year: d[0], month: d[1], day: d[2], hour: t[0], minute: t[1] });
 }
-// Time presets, today: dawn at sunrise, day at noon, dusk at sunset, night
-// at 23:59. Sunrise and sunset come from the map (06:00 and 18:00 from a
-// mod too old to send them).
+// Time presets today: the map's sunrise, noon, its sunset, and 23:59.
 function presetHour(t) {
 	const wx = (mod && mod.weather) || {};
-	return { dawn: wx.sunrise || 6, day: 12, dusk: wx.sunset || 18, night: 23 + 59 / 60 }[t];
+	return { dawn: wx.sunrise, day: 12, dusk: wx.sunset, night: 23 + 59 / 60 }[t];
 }
 function hhmm(h) { const m = Math.round(h * 60) % 1440; return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
 function renderTimePresets() {
-	const real = mod && mod.weather && mod.weather.sunrise > 0;
 	document.querySelectorAll('#timePresets button').forEach(b => {
 		const t = b.getAttribute('data-t');
 		b.textContent = b.textContent.split(' ')[0] + ' ' + hhmm(presetHour(t));
-		b.title = (t === 'dawn' ? 'Sunrise' : t === 'dusk' ? 'Sunset' : t === 'day' ? 'Noon' : 'The end of the day') +
-			(real || t === 'day' || t === 'night' ? '' : ' (about: the mod on the server is too old to say)');
+		b.title = { dawn: 'Sunrise', day: 'Noon', dusk: 'Sunset', night: 'The end of the day' }[t];
 	});
 }
 document.getElementById('timePresets').addEventListener('click', e => {
@@ -3966,25 +3656,31 @@ function setRainRange() {
 	worldAct('rainThresholds', { min: lo / 100, max: hi / 100, transition: stop });
 }
 
+// The dialogs, topmost first, and how each closes (Esc, or a click outside it).
+const DIALOGS = [['sModal', closeSpawnAt], ['vModal', closeVehicleInfo], ['rModal', closeRestore], ['gModal', closeGroupInfo], ['wModal', closeWorld], ['pModal', closePlayer]];
+function isOpen(id) { return document.getElementById(id).style.display === 'flex'; }
 document.addEventListener('keydown', e => {
 	if (e.key !== 'Escape') return;
 	if (drag) { endDrag(false); return; }
 	if (ctxAt) { closeCtx(); return; }
 	if (pickSend) { endPick(); return; }
-	if (document.getElementById('sModal').style.display === 'flex') { closeSpawnAt(); return; }
-	if (document.getElementById('vModal').style.display === 'flex') { closeVehicleInfo(); return; }
-	if (document.getElementById('rModal').style.display === 'flex') { closeRestore(); return; }
-	if (document.getElementById('gModal').style.display === 'flex') { closeGroupInfo(); return; }
-	if (document.getElementById('wModal').style.display === 'flex') closeWorld();
-	else if (document.getElementById('pModal').style.display === 'flex') closePlayer();
+	const open = DIALOGS.find(([id]) => isOpen(id));
+	if (open) open[1]();
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
-for (const id of ['pModal', 'wModal', 'sModal', 'vModal', 'gModal', 'rModal']) document.getElementById(id).addEventListener('mousedown', e => {
-	if (e.target.id === id) { if (id === 'pModal') closePlayer(); else if (id === 'sModal') closeSpawnAt(); else if (id === 'vModal') closeVehicleInfo(); else if (id === 'gModal') closeGroupInfo(); else if (id === 'rModal') closeRestore(); else closeWorld(); }
-});
+for (const [id, close] of DIALOGS) document.getElementById(id).addEventListener('mousedown', e => { if (e.target.id === id) close(); });
 
 initMap();
-map.on('popupclose', e => { if (e.popup === plcPopup) { placedOpen = null; if (groupOpen != null) { groupOpen = null; if (groupInfo == null) stopGroup(); } } if (e.popup === vehPopup) vehOpen = null; if (e.popup === predPopup) predOpen = null; confirming = null; if (e.popup === plPopup) { plOpen = null; plInv = null; } });
+map.on('popupclose', e => {
+	confirming = null;
+	if (e.popup === plcPopup) {
+		placedOpen = null;
+		if (groupOpen != null) { groupOpen = null; if (groupInfo == null) stopGroup(); }
+	}
+	if (e.popup === vehPopup) vehOpen = null;
+	if (e.popup === predPopup) predOpen = null;
+	if (e.popup === plPopup) { plOpen = null; plInv = null; }
+});
 buildWorld();
 drawVehicles();
 loadVehicles();
@@ -4000,13 +3696,9 @@ drawEvents(); loadEvents();
 drawPredators(); loadPredators();
 drawDeaths(); loadDeaths();
 poll();
-// How often players, predators and the vehicles with someone in them
-// refresh goes with the scale bar (100 px): 1 km or more, every 10 s;
-// 500-900 m, 5 s; 200-400 m, 2 s; closer, every second. While a player's
-// dialog is open, every second whatever the zoom (their stats, mini-map and
-// what an action did show at once). Every vehicle (parked ones too) is read
-// every 10 s at any zoom. A tick each second runs whichever is due, so zooming
-// in speeds things up within a second.
+// Players, predators and occupied vehicles refresh faster the further in the
+// map is zoomed (by the scale bar), and every second while a player's dialog
+// is open; the full vehicle list every 10 s.
 const REFRESH_BANDS = [[1000, 10000], [500, 5000], [200, 2000], [0, 1000]];
 const lastRun = { poll: Date.now(), crew: Date.now(), veh: Date.now(), pred: Date.now() };
 function bandFor(bar) {
@@ -4014,8 +3706,8 @@ function bandFor(bar) {
 	return 1000;
 }
 function refreshEvery() {
-	if (selGuid && document.getElementById('pModal').style.display === 'flex') return 1000;
-	return bandFor(100 / Math.pow(2, map.getZoom()));
+	if (selGuid && isOpen('pModal')) return 1000;
+	return bandFor(barMetres(map.getZoom()));
 }
 setInterval(() => {
 	const every = refreshEvery(), now = Date.now();
