@@ -89,6 +89,7 @@ html[data-theme]:not([data-theme="default"]) {
 .vpop a, .idet .props a { color: #8ab4f8; }
 .vmark .vname { position: absolute; left: 11px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
 .amark span { position: absolute; left: 9px; top: -8px; white-space: nowrap; font-size: 11px; font-weight: 600; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
+.leaflet-popup-content-wrapper { position: relative; } /* holds the close button */
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--lm-surface); color: var(--lm-text); border: 1px solid var(--lm-line); box-shadow: 0 2px 10px rgba(0,0,0,.5); }
 .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; min-width: 210px; }
 .leaflet-container a.leaflet-popup-close-button { color: var(--lm-muted); }
@@ -805,6 +806,13 @@ let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {};
 // inside, its tip still on the marker.
 const POPUP_TOP = 50, POPUP_GAP = 8;
 (function () {
+	// The close button goes inside the popup's body (Leaflet puts it beside
+	// it), so it stays in the body's corner wherever the body is.
+	const layout = L.Popup.prototype._initLayout;
+	L.Popup.prototype._initLayout = function () {
+		layout.call(this);
+		if (this._closeButton) this._wrapper.appendChild(this._closeButton);
+	};
 	const place = L.Popup.prototype._updatePosition;
 	L.Popup.prototype._updatePosition = function () {
 		const el = this._container, m = this._map;
@@ -819,9 +827,7 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 		const x = m.latLngToContainerPoint(this._latlng).x + base.x, w = el.offsetWidth, W = m.getSize().x;
 		const left = x - w / 2, right = x + w / 2, room = Math.max(0, w / 2 - 24);
 		const dx = Math.max(-room, Math.min(room, left < 6 ? 6 - left : right > W - 6 ? W - 6 - right : 0));
-		// The body and its close button (a sibling of it in Leaflet's popup) move together.
-		for (const part of el.querySelectorAll('.leaflet-popup-content-wrapper, .leaflet-popup-close-button'))
-			part.style.transform = dx ? 'translateX(' + Math.round(dx) + 'px)' : '';
+		if (this._wrapper) this._wrapper.style.transform = dx ? 'translateX(' + Math.round(dx) + 'px)' : '';
 		return r;
 	};
 })();
