@@ -800,7 +800,9 @@ let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {};
 // Every popup that would open under the map's button bar opens below its
 // marker instead (if it fits, or there is more room below). Patched into
 // Leaflet's placement, so it runs before auto-pan and a flipped popup that
-// fits doesn't move the map.
+// fits doesn't move the map. A popup past the map's left or right edge (the
+// map can't be panned past its edges to show it) slides its body back
+// inside, its tip still on the marker.
 const POPUP_TOP = 50, POPUP_GAP = 8;
 (function () {
 	const place = L.Popup.prototype._updatePosition;
@@ -813,7 +815,13 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 		const flip = above < POPUP_TOP && (below <= H - 6 || H - y > y - POPUP_TOP);
 		this.options.offset = flip ? [base.x, POPUP_GAP + 20 + h] : [base.x, base.y];
 		el.classList.toggle('flipped', flip);
-		return place.call(this);
+		const r = place.call(this);
+		const x = m.latLngToContainerPoint(this._latlng).x + base.x, w = el.offsetWidth, W = m.getSize().x;
+		const left = x - w / 2, right = x + w / 2, room = Math.max(0, w / 2 - 24);
+		const dx = Math.max(-room, Math.min(room, left < 6 ? 6 - left : right > W - 6 ? W - 6 - right : 0));
+		const body = el.querySelector('.leaflet-popup-content-wrapper');
+		if (body) body.style.transform = dx ? 'translateX(' + Math.round(dx) + 'px)' : '';
+		return r;
 	};
 })();
 // viewSpan is the metres across the map's view.
@@ -902,6 +910,7 @@ function initMap() {
 	map.on('mouseout', () => { document.getElementById('scaleXY').textContent = ''; });
 	map.on('zoomend', zoomBand);
 	map.on('contextmenu', showCtx);
+	map.on('move', () => { if (map._popup) map._popup._updatePosition(); }); // keep an open popup inside
 	map.on('dragstart zoomstart', closeCtx);
 	map.on('dragstart', () => { if (track) setTrack(null); });
 	map.on('click', pickClick);
