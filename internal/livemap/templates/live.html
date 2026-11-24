@@ -332,7 +332,11 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .mmark svg { position: absolute; overflow: visible; }
 .mmark span { position: absolute; top: -8px; white-space: nowrap; font-size: 11px; color: #ddd; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
 .miniwrap { position: relative; align-self: start; }
-.minihud, .minical, .miniscale { z-index: 1001; }
+.minihud, .minical, .miniscale, .minioff { z-index: 1001; }
+/* Offline: the mini-map is blank, "Offline" in the middle. */
+.minioff { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; color: var(--lm-muted); font-size: 16px; pointer-events: none; }
+.miniwrap.off .minioff { display: flex; }
+.miniwrap.off #mini > *, .miniwrap.off .minihud, .miniwrap.off .minical, .miniwrap.off .miniscale { visibility: hidden; }
 .minihud { position: absolute; top: 6px; left: 6px; right: 6px; display: flex; align-items: center; gap: 6px; pointer-events: none; font-size: 11.5px; color: var(--lm-text); }
 .minihud #miniXY { background: var(--lm-overlay); border-radius: 4px; padding: 1px 6px; }
 .minihud #miniXY:empty { display: none; }
@@ -581,6 +585,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 				<div class="minical" id="miniCalBox" hidden><span id="miniCalMsg"></span><span class="sp"></span><button type="button" id="miniCalReset" hidden title="Forget this map's calibration">Reset</button></div>
 				<div class="miniscale" id="miniScale"></div>
 				<div class="twohint minihint" id="miniHint" aria-hidden="true">Use two fingers to move the map</div>
+				<div class="minioff">Offline</div>
 			</div>
 		</div>
 		<div class="tiles">
@@ -2564,6 +2569,10 @@ function setPlistMode(m) {
 	if (m === 'offline') loadOffline();
 }
 setInterval(() => { if (plistMode === 'offline' || offline === null) loadOffline(); }, 30000);
+// shortSpan is seconds as "40s", "12m", "5h" or (from 2 days) "3d".
+function shortSpan(s) { s = Math.max(0, s); return s < 60 ? Math.round(s) + 's' : s < 3600 ? Math.round(s / 60) + 'm' : s < 172800 ? Math.round(s / 3600) + 'h' : Math.round(s / 86400) + 'd'; }
+// activeText is time played as "48h", or "25m" under an hour.
+function activeText(s) { return s >= 3600 ? Math.round(s / 3600) + 'h' : Math.max(1, Math.round(s / 60)) + 'm'; }
 function playedText(s) { const h = s / 3600; return h >= 10 ? Math.round(h) + ' h played' : h >= 1 ? h.toFixed(1) + ' h played' : Math.max(1, Math.round(s / 60)) + ' min played'; }
 function renderList() {
 	const q = document.getElementById('find').value.trim().toLowerCase();
@@ -2846,7 +2855,7 @@ function renderPlayer() {
 	badge.className = 'badge ' + (p && p.alive ? 'online' : 'gone');
 	document.getElementById('pGuid').textContent = selGuid;
 	document.getElementById('pWhen').textContent = p && mod && mod.connected ? 'Live from recon-mod · updated ' + Math.max(0, Math.round((Date.now() - new Date(mod.lastSync)) / 1000)) + ' s ago'
-		: 'Not on the server now' + (o && o.lastSeen ? ' · last seen ' + agoText(o.lastSeen * 1000) + ' · ' + playedText(o.played) : '') + ' · what ReCON has on file';
+		: 'Offline' + (o && o.lastSeen ? ' · Last seen: ' + shortSpan((Date.now() - o.lastSeen * 1000) / 1000) + ' ago' : '') + (o ? ' · ' + activeText(o.played) + ' active' : '');
 	// Offline: what ReCON keeps, without the actions that need them online.
 	document.querySelector('#pModal .pbox').classList.toggle('offline', !p);
 	const spawnBtn = document.querySelector('#fSpawn .setfoot button.go');
@@ -2891,6 +2900,7 @@ function renderPlayer() {
 		document.getElementById('tHands').textContent = p.hands ? handsOf(p) : 'Nothing';
 		document.getElementById('tVehicle').textContent = p.vehicle ? vehicleOf(p) : 'On foot';
 		document.getElementById('tKD').innerHTML = p.kills + ' / ' + p.deaths + ' <span class="s">this session</span>';
+		setMiniOffline(false);
 		drawMini(p);
 	} else {
 		document.getElementById('pBars').innerHTML = '<div class="empty">They aren\'t on the server now, so there is no live data.</div>';
@@ -2898,7 +2908,7 @@ function renderPlayer() {
 		const save = document.getElementById('pSave');
 		save.innerHTML = ''; save.setAttribute('data-n', '');
 		document.getElementById('pChips').innerHTML = '';
-		fitMini();
+		setMiniOffline(true);
 		['tHands', 'tVehicle', 'tKD'].forEach(id => document.getElementById(id).textContent = '—');
 	}
 	document.getElementById('tKDall').textContent = detail && detail.kills != null ? detail.kills + ' / ' + detail.deaths + ' all time' : '';
@@ -3144,7 +3154,7 @@ const MINI_STEPS = [25, 50, 100, 200, 500], MINI_HOME = 50;
 let miniMap = null, miniPic = null, miniGrid = null, miniMarks = null, miniW = 0, mini = { follow: true }, tpPick = null;
 function resetMini() {
 	mini = { follow: true };
-	if (miniMap) { miniMap.setMinZoom(zoomForBar(MINI_STEPS[MINI_STEPS.length - 1])); miniMap.setZoom(zoomForBar(MINI_HOME), { animate: false }); }
+	if (miniMap) miniMap.setZoom(zoomForBar(MINI_HOME), { animate: false });
 }
 function miniBar() { return SCALE_PX / Math.pow(2, miniMap.getZoom()); }
 function miniSpan() { return miniMap.getSize().x / Math.pow(2, miniMap.getZoom()); }
@@ -3166,7 +3176,6 @@ function ensureMini() {
 		miniMap.on('moveend zoomend', drawMiniGrid);
 		// A pinch snaps to the nearest step.
 		miniMap.on('zoomend', () => {
-			if (mini.fit) { miniHud(); return; }
 			const m = miniBar(), near = MINI_STEPS.reduce((x, y) => Math.abs(y - m) < Math.abs(x - m) ? y : x);
 			if (Math.abs(zoomForBar(near) - miniMap.getZoom()) > 1e-6) miniMap.setZoom(zoomForBar(near));
 			miniHud();
@@ -3232,16 +3241,11 @@ function miniHud() {
 	if (!miniMap) return;
 	const span = Math.round(miniSpan()), step = miniStep(span);
 	document.getElementById('miniScale').textContent = (step >= 1000 ? step / 1000 + ' km' : step + ' m') + ' grid · ' + (span >= 1000 ? (span / 1000).toFixed(1).replace(/\.0$/, '') + ' km' : span + ' m') + ' across';
-	document.getElementById('miniFollow').hidden = mini.fit || (mini.follow && Math.abs(miniBar() - MINI_HOME) < 0.5);
+	document.getElementById('miniFollow').hidden = mini.follow && Math.abs(miniBar() - MINI_HOME) < 0.5;
 }
 function miniStep(span) { return span <= 1500 ? 100 : span <= 6000 ? 500 : 1000; }
 function drawMini(p) {
 	if (!ensureMini()) return;
-	if (mini.fit) { // back from fitMini
-		mini = { follow: true };
-		miniMap.setMinZoom(zoomForBar(MINI_STEPS[MINI_STEPS.length - 1]));
-		miniMap.setView([p.z, p.x], zoomForBar(MINI_HOME), { animate: false });
-	}
 	if (mini.follow) miniMap.setView([p.z, p.x], miniMap.getZoom(), { animate: false });
 	miniMarks.clearLayers();
 	const w = miniMap.getSize().x, b = miniMap.getBounds();
@@ -3272,17 +3276,8 @@ function drawMini(p) {
 	mark(p.x, p.z, '<svg width="20" height="20" viewBox="-10 -10 20 20" style="left:-10px;top:-10px"><path transform="rotate(' + p.heading + ')" d="M0,-9 L6.3,7.2 L0,3.2 L-6.3,7.2 Z" fill="' + colorOf(p.guid) + '" stroke="#111" stroke-width="1.2"/></svg>');
 	miniHud();
 }
-// fitMini shows the whole map (an offline player: nobody to follow).
-function fitMini() {
-	if (!ensureMini()) return;
-	miniMarks.clearLayers();
-	if (mini.fit && mini.fitW === miniW && mini.fitSize === size) return;
-	const ms = size || 15360;
-	mini = { follow: false, fit: true, fitW: miniW, fitSize: size };
-	miniMap.setMinZoom(-8);
-	miniMap.fitBounds([[0, 0], [ms, ms]], { animate: false, padding: [4, 4] });
-	miniHud();
-}
+// setMiniOffline blanks the mini-map with "Offline" in the middle (nobody to show).
+function setMiniOffline(off) { document.querySelector('.miniwrap').classList.toggle('off', off); }
 function redrawMini() { const p = byGuid[selGuid]; if (p) drawMini(p); }
 // miniPick picks a teleport spot, or while calibrating where the player really is.
 function miniPick(x, z) {
