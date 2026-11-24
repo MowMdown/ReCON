@@ -875,7 +875,7 @@ function barMetres(z) {
 	return SCALE_PX / Math.pow(2, z);
 }
 // stepZoom zooms one step in (dir 1) or out (dir -1) about a container
-// point (default: the centre); while following, on who is followed.
+// point (default: the center); while following, on who is followed.
 function stepZoom(dir, around) {
 	const cur = barMetres();
 	const next = dir > 0 ? [...SCALE_STEPS].reverse().find(m => m < cur * 0.99) : SCALE_STEPS.find(m => m > cur * 1.01);
@@ -886,7 +886,7 @@ function stepZoom(dir, around) {
 	if (at) map.setView(at, z); else if (around) map.setZoomAround(around, z); else map.setZoom(z);
 }
 // smoothWheel zooms map m with the wheel the way a pinch does: gliding,
-// about the cursor (or its centre while centre() says so, or centred on what
+// about the cursor (or its center while centre() says so, or centered on what
 // pin() gives, if anything), WHEEL_ZOOM a mouse
 // wheel click, continuously on a trackpad. Like Leaflet's pinch, it moves the
 // map frame by frame (tiles and lines scaled) and redraws them sharp at the end.
@@ -2638,7 +2638,7 @@ function followTrack() {
 // trackLatLng is where who (or what) is followed is, or null.
 function trackLatLng() { const p = trackPos(); return p ? L.latLng(p.z, p.x) : null; }
 function renderTrack() {
-	// A pinch zooms on the centre (where they are) while following, without moving the map.
+	// A pinch zooms on the center (where they are) while following, without moving the map.
 	if (map) map.options.touchZoom = track ? 'center' : true;
 	const b = document.getElementById('trackBtn'), p = trackPos();
 	b.hidden = !track;

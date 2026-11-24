@@ -5,4 +5,5 @@
 - Before starting new work, make sure the last pull request from `claude` is merged, then reset `claude` to the branch the next pull request will go into (`origin/testing` or `origin/dev`).
 - Don't open a pull request until asked to.
 - Don't report commits, pushes or pull requests unless one fails.
-- Never redraw a whole popup or dialog (modal) when its data updates. Patch only the parts whose values changed (text, colours, rows added or removed), so scroll position, focus, hover, open menus and in-progress input survive refreshes and nothing flashes. A full redraw is only for opening it or switching what it shows.
+- Write American English (color, center, meter, gray) in UI text, docs, comments and commit messages. Leave identifiers, data keys and game class names as they are.
+- Never redraw a whole popup or dialog (modal) when its data updates. Patch only the parts whose values changed (text, colors, rows added or removed), so scroll position, focus, hover, open menus and in-progress input survive refreshes and nothing flashes. A full redraw is only for opening it or switching what it shows.
