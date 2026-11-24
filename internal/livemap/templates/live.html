@@ -1339,18 +1339,20 @@ function hideHint(id) { clearTimeout(hintTimers[id]); document.getElementById(id
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
-	const c = map.getCenter(), z = map.getZoom(), wasFit = atFit();
+	const c = map.getCenter(), z = map.getZoom(), wasFit = atFit(), pastFill = z > fillZoom() + 1e-6;
 	wrap.classList.toggle('full', on);
 	document.body.style.overflow = on ? 'hidden' : '';
 	const b = document.getElementById('fullBtn');
 	b.textContent = on ? 'Exit' : 'Full';
 	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
 	// Leaflet fires moveend before resize, so with the edges on its pan back
-	// inside them would start before the view is set. Full opens at Fill; Exit
-	// fits again, or goes back to where the map was.
+	// inside them would start before the view is set. Full opens at Fill, or
+	// zoomed in past Fill keeps the spot and zoom (at least Fill, so the wider
+	// window has no empty sides); Exit fits again, or goes back to where it was.
 	setEdges(false);
 	map.invalidateSize({ pan: false });
-	if (on) fillWidth();
+	if (on && pastFill) map.setView(c, Math.max(z, fillZoom()), { animate: false });
+	else if (on) fillWidth();
 	else if (wasFit) fitMap();
 	else map.setView(c, Math.max(z, map.getMinZoom()), { animate: false });
 	setEdges(true);
@@ -2621,11 +2623,13 @@ async function doSpawnAt() {
 	} catch (e) { err.textContent = e.message; }
 }
 
+// fillZoom is the zoom at which the map's width just fills the view.
+function fillZoom() { const b = mapBounds(); return Math.log2(map.getSize().x / (b.getEast() - b.getWest())); }
 // fillWidth zooms so the map's width fills the view, keeping the centre's
 // north-south position (within the map).
 function fillWidth() {
 	const b = mapBounds(), view = map.getSize(), s = b.getNorth() - b.getSouth();
-	const z = Math.log2(view.x / (b.getEast() - b.getWest())), h = view.y / Math.pow(2, z); // metres the view is high
+	const z = fillZoom(), h = view.y / Math.pow(2, z); // metres the view is high
 	const lat = h >= s ? (b.getNorth() + b.getSouth()) / 2 : Math.min(b.getNorth() - h / 2, Math.max(b.getSouth() + h / 2, map.getCenter().lat));
 	map.setView([lat, (b.getWest() + b.getEast()) / 2], z, { animate: false });
 }
