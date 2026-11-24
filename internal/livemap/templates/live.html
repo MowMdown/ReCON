@@ -1462,7 +1462,6 @@ function drawVehicles() {
 	const btn = document.getElementById('vehBtn');
 	btn.classList.toggle('on', vehOn);
 	btn.textContent = 'Vehicles' + (vehOn ? ' ' + vehicles.length : '');
-	renderOvBtn();
 	if (!vehLayer) vehLayer = L.layerGroup();
 	if (!vehOn) { vehLayer.remove(); drawArrowsShown(); return; }
 	if (!map.hasLayer(vehLayer)) vehLayer.addTo(map);
@@ -1795,12 +1794,6 @@ function layerButton(id, on, text, title) {
 	b.classList.toggle('on', on);
 	b.textContent = text;
 	if (title) b.title = title;
-	renderOvBtn();
-}
-// renderOvBtn counts the layers on (not their filters).
-function renderOvBtn() {
-	const n = document.querySelectorAll('#ovMenu > button.on, #ovMenu > .ovrow > button.on').length;
-	document.getElementById('ovBtn').textContent = 'Layers' + (n ? ' · ' + n : '');
 }
 // fitMenu keeps an open menu inside the map (which clips it): moved left and
 // capped in width and height, scrolling inside. While one is open the bar
