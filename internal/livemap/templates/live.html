@@ -809,12 +809,12 @@ api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).ca
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {};
 
 // Opening a popup never moves the map (every popup has autoPan off). One that
-// would open under the map's button bar opens below its marker instead, if it
+// would go past the map's top edge opens below its marker instead, if it
 // fits there, and stays below, as its marker moves or the map is panned,
 // until it reaches the map's bottom edge. One that fits neither way stays
 // above, so it never flips back and forth. One past the map's left or right
 // edge slides its body back inside, its tip still on the marker.
-const POPUP_TOP = 50, POPUP_GAP = 8;
+const POPUP_TOP = 6, POPUP_GAP = 8;
 (function () {
 	// The close button goes inside the popup's body (Leaflet puts it beside
 	// it), so it stays in the body's corner wherever the body is.
