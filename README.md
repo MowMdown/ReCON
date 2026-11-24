@@ -263,7 +263,7 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
 **Clicking** a mark opens its popup:
 
 - **A player:** their state, health, food, blood and water, bleeding, vehicle, and what they wear and hold. **Info** opens their dialog, **Teleport** sends them to the next spot you click on the map (Esc cancels), **Spawn** opens their Spawn item tab, and **Follow** keeps the map on them until you drag it or click the **Following** button.
-- **A vehicle:** its condition, engine and fuel, then its driver and passengers (a name opens their popup). **Info…** opens its dialog; **Follow** as for a player.
+- **A vehicle:** its condition, engine and fuel, then its driver and passengers (a name opens their popup). **Info…** opens its dialog; **Follow** (only while someone is driving) as for a player.
 - **A predator:** its health and whether it's attacking, and **Remove**.
 - **A placed object:** its condition and who placed it, and **Info**.
 

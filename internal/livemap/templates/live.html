@@ -107,6 +107,7 @@ html[data-theme]:not([data-theme="default"]) {
 .vpop .acts { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .vpop .acts.pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .vpop .acts.pairs button { width: 100%; }
+.vpop .acts.pairs > button:only-child { grid-column: 1 / -1; }
 .vpop .acts button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vpop .acts.split { justify-content: space-between; }
 /* Popup buttons keep the popup's look, not the page theme's. */
@@ -1587,9 +1588,11 @@ function renderVehicle() {
 	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop" data-noicon>' + backLink('veh', v.id) + '<h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
 		vehPopRows(v) +
 		'<div class="acts pairs"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage, cargo and Delete">Info…</button>' +
+		// Follow only with a driver (Stop while already following it); Info
+		// alone spans the row, so the popup keeps its width.
 		(track && track.kind === 'vehicle' && track.id === v.id
 			? '<button type="button" class="on" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Stop keeping the map on it">Stop</button>'
-			: '<button type="button" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Keep the map on it as it moves">Follow</button>') + '</div></div>');
+			: crewOf(v).some(p => p.driver) ? '<button type="button" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Keep the map on it as it moves">Follow</button>' : '') + '</div></div>');
 	renderVehicleInfo();
 	drawArrowsShown();
 }
