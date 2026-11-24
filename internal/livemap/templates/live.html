@@ -211,8 +211,10 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .mapbar button { margin: 0; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); }
 .mapbar button:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .mapbar button:disabled { opacity: .45; }
-/* A narrow map: smaller bar buttons, so the row still fits. */
+/* A narrow map: smaller bar buttons, so the row still fits; + and − move up
+   (still on the right) so the scale fits under them. */
 @container mapwrap (max-width: 520px) {
+	#map .leaflet-bottom.leaflet-right .leaflet-control-zoom { margin-bottom: 44px; }
 	.mapbar { gap: 5px; left: 6px; right: 6px; top: 6px; }
 	.mapbar .mapbtns { gap: 5px; }
 	.mapbar > button, .mapbar > .ovwrap > button, .mapbar .mapbtns > button, .mapbar .pick { padding: 4px 8px; font-size: 12px; }
