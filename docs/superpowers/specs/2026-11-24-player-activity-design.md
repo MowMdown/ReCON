@@ -54,8 +54,9 @@ records.
 | Died | ☠ Killed by Wren · SVD · 340 m / ☠ Died: bled out | `mod_kills` (victim, cause) |
 | Respawned | 🔁 Respawned | alive again after dying |
 | Admin action | 🛠 Admin: healed / teleported 3.1 km / spawned M4A1 … | the commands ReCON sends for them |
-| Possible teleport | ⚠ Possible teleport (420 m in 1 s) | a jump of more than ~100 m in one sync, on foot, with no admin teleport behind it |
-| Possible speed hack | ⚠ Possible speed hack | on-foot speed over a limit no player reaches, held for several syncs |
+| Staff teleport | 🛠 Teleported 420 m · Mod | the same jump by a player with the Mod or Admin role (they may teleport in game) |
+| Possible teleport | ⚠ Possible teleport (420 m in 1 s) | a jump of more than ~100 m in one sync, on foot, with no admin teleport behind it, by a player below Mod |
+| Possible speed hack | ⚠ Possible speed hack | on-foot speed over a limit no player reaches, held for several syncs, by a player below Mod |
 
 Not recorded: chat, "now driving" (a seat change to driver mid-trip), and
 the item in their hands.
@@ -71,7 +72,16 @@ moved after the fact, "Got in" is written once the car has gone 10 m.
 don't record the admin today.
 
 **Cheat flags** only show as red events in Activity and on the trail; they
-raise no alert and take no action.
+raise no alert and take no action. Players with the **Mod or Admin** role
+(Players page) are never flagged: they may teleport and move fast in game.
+Their jumps are still recorded, as a purple "Teleported" event with their
+role, like a teleport sent from ReCON. The role is the one they have when
+it happens.
+
+**Teleports on the trail.** A teleport isn't drawn as a walked path: a thin
+dotted line joins where they left to where they arrived, with an icon at
+each end. Purple 🛠 for a teleport sent from ReCON or by staff, red ⚠ for a
+possible teleport. Example: https://claude.ai/artifact/N8qUgPuyAWMX1prxG7wVUw
 
 ### Storage
 
