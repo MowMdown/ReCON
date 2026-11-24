@@ -819,8 +819,9 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 		const x = m.latLngToContainerPoint(this._latlng).x + base.x, w = el.offsetWidth, W = m.getSize().x;
 		const left = x - w / 2, right = x + w / 2, room = Math.max(0, w / 2 - 24);
 		const dx = Math.max(-room, Math.min(room, left < 6 ? 6 - left : right > W - 6 ? W - 6 - right : 0));
-		const body = el.querySelector('.leaflet-popup-content-wrapper');
-		if (body) body.style.transform = dx ? 'translateX(' + Math.round(dx) + 'px)' : '';
+		// The body and its close button (a sibling of it in Leaflet's popup) move together.
+		for (const part of el.querySelectorAll('.leaflet-popup-content-wrapper, .leaflet-popup-close-button'))
+			part.style.transform = dx ? 'translateX(' + Math.round(dx) + 'px)' : '';
 		return r;
 	};
 })();
