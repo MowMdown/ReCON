@@ -89,6 +89,9 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar #trackBtn, .mapbar .pick, .mapbar .ovwrap { flex: 0 1 auto; min-width: 0; }
 .mapbar #trackBtn, .mapbar .pick, .mapbar .ovwrap > button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mapbar > * { pointer-events: auto; }
+/* Hidden (and not clickable) while zoomed in at the map's top edge: see edgeBar. */
+.mapbar { transition: opacity .15s, visibility 0s; }
+.mapbar.edgehide { opacity: 0; visibility: hidden; transition: opacity .15s, visibility 0s .15s; }
 .mapbar.menuopen { z-index: 1001; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
@@ -974,7 +977,19 @@ function initMap() {
 	map.on('dragstart zoomstart', closeCtx);
 	map.on('dragstart', () => { if (track) setTrack(null); });
 	map.on('click', pickClick);
+	map.on('move zoom', edgeBar);
 	map.setView([7680, 7680], -5);
+}
+// edgeBar hides the bar over the map (<<, Layers … Full) while zoomed in to
+// EDGE_HIDE_M or closer with the map's top edge under it, so marks along the
+// edge can be clicked. It comes back once the edge moves out from under it,
+// or zoomed out. Not while one of its menus is open.
+const EDGE_HIDE_M = 501;
+function edgeBar() {
+	const bar = document.querySelector('.mapbar');
+	if (!bar) return;
+	const edge = map.latLngToContainerPoint([mapBounds().getNorth(), 0]).y;
+	bar.classList.toggle('edgehide', barMetres() <= EDGE_HIDE_M && edge > -(bar.offsetTop + bar.offsetHeight) && !bar.classList.contains('menuopen'));
 }
 
 // The map's picture: satmap tiles (maps/<world>/<level>/<col>_<row>.jpg,
