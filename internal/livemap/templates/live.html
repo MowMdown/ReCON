@@ -2862,8 +2862,10 @@ function shapeBox(m) {
 	}
 	return r;
 }
-// Marks up to STACK_PX apart stack (mouse or touch).
-const STACK_PX = 4;
+// Marks that touch stack (1 px apart with a mouse). On a touch screen a
+// finger can't pick between near-touching marks, so those STACK_TOUCH_PX
+// apart stack too.
+const STACK_TOUCH_PX = 4;
 function boxesTouch(a, b, pad) { return a[0] <= b[2] + pad && b[0] <= a[2] + pad && a[1] <= b[3] + pad && b[1] <= a[3] + pad; }
 // stackOf is what marker m's stack lists: vehicles (each with its crew),
 // players, predators, placed objects, placed groups.
@@ -2873,7 +2875,7 @@ function stackOf(m) {
 	const left = [];
 	for (const set of [markers, vehMarkers, predMarkers, placedMarkers])
 		for (const id in set) { const x = set[id]; if (x !== m && x._st && map.hasLayer(x)) { const b = shapeBox(x); if (b) left.push([x, b]); } }
-	const got = [m], boxes = [first], pad = STACK_PX;
+	const got = [m], boxes = [first], pad = matchMedia('(pointer: coarse)').matches ? STACK_TOUCH_PX : 1;
 	for (let i = 0; i < boxes.length; i++)
 		for (let j = left.length - 1; j >= 0; j--)
 			if (boxesTouch(boxes[i], left[j][1], pad)) { got.push(left[j][0]); boxes.push(left[j][1]); left.splice(j, 1); }
