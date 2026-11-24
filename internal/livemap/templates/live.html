@@ -70,15 +70,13 @@ html[data-theme]:not([data-theme="default"]) {
 /* Full screen covers the window, under the dialogs. */
 .live .mapwrap.full { position: fixed; inset: 0; z-index: 900; border: none; border-radius: 0; height: auto; min-height: 0; max-height: none; aspect-ratio: auto; order: 0; }
 .leaflet-container { font: inherit; }
-.mapscale { position: absolute; left: 10px; bottom: 10px; z-index: 500; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--lm-text); background: color-mix(in srgb, var(--lm-ground) 80%, transparent); border-radius: 4px; padding: 3px 8px; pointer-events: none; }
+.mapscale { position: absolute; left: 10px; bottom: 10px; z-index: 500; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font-size: 11.5px; color: var(--lm-text); background: color-mix(in srgb, var(--lm-ground) 80%, transparent); border-radius: 4px; padding: 3px 8px; pointer-events: none; }
+/* The cursor's position on its own line above the scale; the box fits its text. */
+.mapscale .scalerow { display: flex; align-items: center; gap: 8px; }
 .mapscale .bar { height: 5px; border: 1.5px solid currentColor; border-top: 0; box-sizing: border-box; }
 .mapscale .muted { font-size: 11.5px; }
-/* Fixed widths and even digits: the box doesn't change size as the numbers do. */
 .mapscale span { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.mapscale #scaleLen { min-width: 6ch; }
-.mapscale #scaleSpan { min-width: 14ch; }
-.mapscale #scaleXY:not(:empty) { min-width: 30ch; }
-.mapscale #scaleXY:not(:empty)::before { content: '·'; margin-right: 8px; color: var(--lm-muted); }
+.mapscale #scaleXY:empty { display: none; }
 .mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; pointer-events: none; }
 /* One row that never overflows: Fit, Fill and Full keep their size; the
    chips, then Overlays and Legend, shrink (with …) instead. */
@@ -532,7 +530,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 	</div>
 	<div class="mapwrap">
 		<div id="map"></div>
-		<div class="mapscale" aria-hidden="true"><span class="bar" id="scaleBar"></span><span id="scaleLen"></span><span class="muted" id="scaleSpan"></span><span id="scaleXY"></span></div>
+		<div class="mapscale" aria-hidden="true"><span id="scaleXY"></span><div class="scalerow"><span class="bar" id="scaleBar"></span><span id="scaleLen"></span><span class="muted" id="scaleSpan"></span></div></div>
 		<div class="ctx" id="ctx" hidden role="menu" data-noicon></div>
 		<div class="twohint" id="twoHint" aria-hidden="true">Use two fingers to move the map</div>
 		<div class="mapbar">
