@@ -195,8 +195,9 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .gmark { position: relative; }
 .gmark svg { position: absolute; left: -6px; top: -6px; overflow: visible; cursor: pointer; }
 .gmark .n { position: absolute; left: 9px; top: -8px; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000; white-space: nowrap; cursor: pointer; }
-.gsquare { stroke: rgba(255, 255, 255, 0.45); stroke-dasharray: 4 4; fill: none; }
-.gpop .glist { display: flex; flex-direction: column; gap: 1px; margin: 4px 0 6px; max-height: calc(8 * 26px); overflow-y: auto; }
+.gpop .glist { display: flex; flex-direction: column; gap: 1px; margin: 4px 0 6px; max-height: calc(8 * 26px); overflow-y: auto; scrollbar-width: none; }
+/* It still scrolls (wheel, swipe), like the gear list; no scrollbar. */
+.gpop .glist::-webkit-scrollbar { display: none; }
 .gpop .glist button { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 0; padding: 3px 4px; background: transparent; border: 0; border-radius: 4px; color: var(--lm-text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 .gpop .glist button:hover { background: var(--lm-sel); }
 .gpop .glist .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2055,7 +2056,7 @@ function drawPlaced() {
 	}
 	// By the scale bar: from 140 m one block per 100 m square (a click zooms
 	// in on it), from 70 m one per 50 m square (a click opens its popup),
-	// closer each object, inside its 50 m square's outline.
+	// closer each object on its own (no square drawn round a group).
 	const level = groupLevel(), keep = {}, groups = {};
 	for (const id in want) { const k = groupKey(want[id], level || GROUP_M); (groups[k] = groups[k] || []).push(want[id]); }
 	for (const key in groups) {
@@ -2071,19 +2072,7 @@ function drawPlaced() {
 				} else { m.setLatLng([o.z, o.x]); m.setIcon(icon); }
 				keep[o.id] = true;
 			}
-			if (objs.length > 1) {
-				const [m, i, j] = keyParts(key);
-				if (!placedMarkers['r' + key]) placedMarkers['r' + key] = L.rectangle([[j * m, i * m], [(j + 1) * m, (i + 1) * m]],
-					{ className: 'gsquare', weight: 1, interactive: false, fill: false }).addTo(map);
-				keep['r' + key] = true;
-			}
 			continue;
-		}
-		if (level === GROUP_M) {
-			const [m, i, j] = keyParts(key);
-			if (!placedMarkers['r' + key]) placedMarkers['r' + key] = L.rectangle([[j * m, i * m], [(j + 1) * m, (i + 1) * m]],
-				{ className: 'gsquare', weight: 1, interactive: false, fill: false }).addTo(map);
-			keep['r' + key] = true;
 		}
 		const [, c] = vehCondition(worstHealth(objs)), at = centreOf(objs);
 		const icon = L.divIcon({ className: 'gmark', iconSize: [0, 0], html: groupSVG(c) + '<span class="n">×' + objs.length + '</span>' });
