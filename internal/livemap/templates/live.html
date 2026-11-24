@@ -233,8 +233,8 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .ovmenu .ovsub .ovpair { display: flex; gap: 2px; }
 .ovmenu .ovsub .ovpair button { flex: 1; }
 .ovmenu .ovsub .ovsep { height: 1px; background: var(--lm-line); margin: 3px 8px; }
-.ovmenu.legend { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 0 22px; width: 640px; padding: 10px 12px; }
-.legend .lgcol { flex: 1 1 260px; min-width: 0; }
+.ovmenu.legend { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 0 18px; width: 440px; padding: 10px 12px; }
+.legend .lgcol { flex: 1 1 190px; min-width: 0; }
 .legend .lgsec { margin-bottom: 10px; }
 .ovmenu.legend[hidden] { display: none; }
 .legend .lgsec h5 { margin: 0 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--lm-muted); font-weight: 600; }
@@ -247,8 +247,6 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .legend .lgi .dx { display: none; }
 .legend .lgdead .dx { display: inline; }
 .legend .lgdead .arr { display: none; }
-.legend .lgscale { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 3px 0 0 44px; font-size: 11.5px; color: var(--lm-muted); }
-.legend .lgscale i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
 /* A heading's filters, indented under it. */
 .ovmenu .ovsub { display: flex; flex-direction: column; gap: 1px; padding-left: 18px; }
 .ovmenu .ovsub[hidden] { display: none; }
@@ -1659,8 +1657,8 @@ function legendHTML() {
 			row(bioSVG(GAS_OFF), 'Dynamic, inactive')]) +
 		sec('Placed objects', [
 			row(placedSVG(pristine), 'Placed object'),
-			row(groupSVG(worst) + '<span class="lgname" style="color:#fff">×5</span>', 'Several in one 50 m square', true),
-			'<div class="lgscale">' + CONDITION.map(([n, c]) => '<span><i style="background:' + c + '"></i>' + n + '</span>').join('') + '</div>']));
+			row(groupSVG(worst) + '<span class="lgname" style="color:#fff">×5</span>', 'Several in one 50 m square', true)]) +
+		sec('Condition', CONDITION.map(([n, c]) => row(placedSVG(c), n))));
 }
 
 // ---- Layers -----------------------------------------------------------------
