@@ -89,9 +89,9 @@ html[data-theme]:not([data-theme="default"]) {
 .mapbar #trackBtn, .mapbar .pick, .mapbar .ovwrap { flex: 0 1 auto; min-width: 0; }
 .mapbar #trackBtn, .mapbar .pick, .mapbar .ovwrap > button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mapbar > * { pointer-events: auto; }
-/* Hidden (and not clickable) while zoomed in at the map's top edge: see edgeBar. */
-.mapbar { transition: opacity .15s, visibility 0s; }
-.mapbar.edgehide { opacity: 0; visibility: hidden; transition: opacity .15s, visibility 0s .15s; }
+/* Hidden (and not clickable) while zoomed in at the map's top or bottom edge: see edgeBar. */
+.mapbar, .mapscale, #map .leaflet-bottom.leaflet-right { transition: opacity .15s, visibility 0s; }
+:is(.mapbar, .mapscale, #map .leaflet-bottom.leaflet-right).edgehide { opacity: 0; visibility: hidden; transition: opacity .15s, visibility 0s .15s; }
 .mapbar.menuopen { z-index: 1001; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .vmark svg { position: absolute; left: -9px; top: -9px; overflow: visible; cursor: pointer; }
@@ -980,17 +980,25 @@ function initMap() {
 	map.on('move zoom', edgeBar);
 	map.setView([7680, 7680], -5);
 }
-// edgeBar hides the bar over the map (<<, Layers … Full) while zoomed in to
-// EDGE_HIDE_M or closer with the map's top edge less than EDGE_HIDE_PX above
-// the view's top (the bar is about 40 px tall: the rest is margin), so marks
-// along the edge can be clicked. It comes back once the edge is further up,
-// or zoomed out. Not while one of its menus is open.
+// edgeBar hides what sits over the map's edges while zoomed in to
+// EDGE_HIDE_M or closer, so marks along the edge can be clicked: the bar
+// (<<, Layers … Full) while the map's top edge is less than EDGE_HIDE_PX
+// above the view's top, the scale and the zoom buttons while its bottom edge
+// is less than that below the view's bottom (the bar is about 40 px tall:
+// the rest is margin). They come back once the edge is further off, or
+// zoomed out. The bar stays while one of its menus is open; the zoom buttons
+// while zooming to an area (marks can't be clicked then, and its button ends it).
 const EDGE_HIDE_M = 501, EDGE_HIDE_PX = 100;
 function edgeBar() {
-	const bar = document.querySelector('.mapbar');
+	const bar = document.querySelector('.mapbar'), el = map.getContainer();
 	if (!bar) return;
-	const edge = map.latLngToContainerPoint([mapBounds().getNorth(), 0]).y;
-	bar.classList.toggle('edgehide', barMetres() <= EDGE_HIDE_M && edge > -EDGE_HIDE_PX && !bar.classList.contains('menuopen'));
+	const close = barMetres() <= EDGE_HIDE_M, b = mapBounds();
+	const top = map.latLngToContainerPoint([b.getNorth(), 0]).y, bottom = map.latLngToContainerPoint([b.getSouth(), 0]).y - map.getSize().y;
+	bar.classList.toggle('edgehide', close && top > -EDGE_HIDE_PX && !bar.classList.contains('menuopen'));
+	const low = close && bottom < EDGE_HIDE_PX;
+	document.querySelector('.mapscale').classList.toggle('edgehide', low);
+	const zoom = el.querySelector('.leaflet-bottom.leaflet-right');
+	if (zoom) zoom.classList.toggle('edgehide', low && !boxMode);
 }
 
 // The map's picture: satmap tiles (maps/<world>/<level>/<col>_<row>.jpg,
@@ -1312,6 +1320,7 @@ function setBoxMode(on) {
 	}
 	map.getContainer().classList.toggle('boxing', on);
 	setTouchDrag();
+	edgeBar();
 }
 // initBoxZoom draws the box while boxMode is on and zooms to it on release.
 function initBoxZoom() {
