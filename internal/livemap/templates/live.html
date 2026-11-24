@@ -1160,7 +1160,7 @@ function setWorld(w, s) {
 	// The whole map (Fit) when the page first knows the map, and when the
 	// server's map changes; never on its own otherwise (a player joining
 	// used to zoom the map back out).
-	if (!fitted || newWorld) { map.invalidateSize({ pan: false }); map.fitBounds([[0, 0], [size, size]], { animate: false }); fitted = true; }
+	if (!fitted || newWorld) { map.invalidateSize({ pan: false }); fitNow(); fitted = true; }
 	drawLabels();
 }
 
@@ -1226,7 +1226,20 @@ function limitZoomOut() {
 	// getBoundsZoom never answers below the current minZoom, so lift it
 	// first: a smaller window needs a lower limit than the last one.
 	map.options.minZoom = -20;
-	map.setMinZoom(map.getBoundsZoom([[0, 0], [size || 15360, size || 15360]]));
+	const z = map.getBoundsZoom([[0, 0], [size || 15360, size || 15360]]);
+	// Not setMinZoom: below the new limit it zooms in *animated*, and Leaflet
+	// drops any setView or fitBounds made while that runs (Fit on load was).
+	map.options.minZoom = z;
+	map.fire('zoomlevelschange');
+	if (map.getZoom() < z) map.setZoom(z, { animate: false });
+}
+// fitNow is Fit without animating, for the page itself (first load, a new
+// map). If a zoom is still animating it waits for it to end: Leaflet
+// ignores a fit made mid-animation.
+function fitNow() {
+	if (map._animatingZoom) { map.once('zoomend', fitNow); return; }
+	const s = size || 15360;
+	map.fitBounds([[0, 0], [s, s]], { animate: false });
 }
 function fitAll() {
 	const s = size || 15360;
