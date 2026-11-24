@@ -920,8 +920,14 @@ function drawScale() {
 }
 function initMap() {
 	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, maxBoundsViscosity: 0.5, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
-	// Springing back inside the edges takes 0.5 s (Leaflet's pan: 0.25 s).
-	map._panInsideMaxBounds = function () { if (!this._enforcingBounds) this.panInsideBounds(this.options.maxBounds, { duration: 0.5 }); };
+	// Springing back inside the edges waits 0.2 s, then takes 0.5 s (Leaflet:
+	// at once, 0.25 s); grabbing or zooming the map again in the wait cancels it.
+	map._panInsideMaxBounds = function () {
+		clearTimeout(this._bounceTimer);
+		if (this._enforcingBounds) return;
+		this._bounceTimer = setTimeout(() => { if (this.options.maxBounds) this.panInsideBounds(this.options.maxBounds, { duration: 0.5 }); }, 200);
+	};
+	map.on('dragstart zoomstart', () => clearTimeout(map._bounceTimer));
 	stepWheel();
 	setTouchDrag();
 	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled() && !boxMode);
