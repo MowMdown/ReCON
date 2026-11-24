@@ -288,7 +288,8 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 #rModal .rtree { max-height: 60vh; overflow-y: auto; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 6px; padding: 6px 10px; }
 #rModal .rkids { padding-left: 22px; }
 #rModal label.rn { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; cursor: pointer; }
-#rModal label.rn input { margin: 0; accent-color: var(--lm-accent); }
+/* width/padding: the default theme sizes every input to the full width. */
+#rModal label.rn input { width: auto; flex: none; margin: 0; padding: 0; accent-color: var(--lm-accent); }
 #rModal label.rn .sl { color: var(--lm-muted); font-size: 12px; min-width: 64px; }
 #rModal label.rn .ex { color: var(--lm-muted); font-size: 12px; }
 #rModal label.rn .done { color: var(--lm-faint); font-size: 11px; border: 1px solid var(--lm-line); border-radius: 4px; padding: 0 5px; }
@@ -456,7 +457,7 @@ table.dt a { color: var(--lm-accent); text-decoration: none; cursor: pointer; }
 #fTeleport { align-items: center; }
 #fTeleport .tpopts { flex: 1; display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; min-width: 0; }
 #fTeleport .tpopt { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
-#fTeleport .tpopt input[type=radio] { margin: 0; padding: 0; accent-color: var(--lm-accent); }
+#fTeleport .tpopt input[type=radio] { width: auto; flex: none; margin: 0; padding: 0; accent-color: var(--lm-accent); }
 #fTeleport .tpopt b { font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 #fTeleport .tpbtns { display: flex; gap: 8px; margin-left: auto; }
 @media (max-width: 900px) { #fTeleport .tpopts { flex-direction: column; align-items: flex-start; flex-basis: 100%; } #fTeleport .tpbtns { margin-left: 0; } }
