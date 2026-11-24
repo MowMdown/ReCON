@@ -159,6 +159,12 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .mapbar .pick[hidden] { display: none; }
 .mapbar button[hidden] { display: none; }
 #map.picking, #map.picking .leaflet-interactive { cursor: crosshair; }
+/* Zoom to an area: the button above +, and the box being drawn. One finger
+   draws on a touch screen while it is on. */
+#map.boxing, #map.boxing .leaflet-interactive { cursor: crosshair; touch-action: none; }
+#map .zoombox a { display: flex; align-items: center; justify-content: center; color: #333; }
+#map .zoombox a.on { background: var(--lm-sel); color: var(--lm-text-hi); }
+.zoomrect { position: absolute; z-index: 800; box-sizing: border-box; border: 1.5px dashed var(--lm-accent); background: color-mix(in srgb, var(--lm-accent) 15%, transparent); pointer-events: none; }
 .ctx .muted { padding: 2px 8px; }
 #sModal .box { width: min(900px, 96vw); }
 #sModal .splist { max-height: min(640px, 62vh); }
@@ -918,8 +924,10 @@ function initMap() {
 	map._panInsideMaxBounds = function () { if (!this._enforcingBounds) this.panInsideBounds(this.options.maxBounds, { duration: 0.5 }); };
 	stepWheel();
 	setTouchDrag();
-	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled());
+	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled() && !boxMode);
 	L.control.zoom({ position: 'bottomright' }).addTo(map);
+	new BoxControl().addTo(map); // added after +/−, so it sits above them
+	initBoxZoom();
 	// Stacking, top first: players, vehicles/predators/placed, towns,
 	// events/deaths, grid numbers; then grid lines (overlay pane, 400) and
 	// the picture. Popups (700) stay above all.
@@ -1227,8 +1235,73 @@ function mapChanged(refit) {
 // except in full screen, where one finger moves it too.
 const TOUCH = matchMedia('(pointer: coarse)').matches;
 function setTouchDrag() {
-	if (!TOUCH || !map) return;
-	if (document.querySelector('.mapwrap').classList.contains('full')) map.dragging.enable(); else map.dragging.disable();
+	if (!map) return;
+	if (boxMode) map.dragging.disable(); // a drag draws a box instead
+	else if (!TOUCH || document.querySelector('.mapwrap').classList.contains('full')) map.dragging.enable();
+	else map.dragging.disable();
+}
+
+// ---- Zoom to an area ----------------------------------------------------------
+// The button above + switches the map between moving it (drag) and zooming to
+// an area (drag a box around it; letting go zooms to fit the box). It stays on
+// until clicked again or Esc. A click without a drag still opens a marker.
+let boxMode = false, boxEndedAt = 0;
+const BoxControl = L.Control.extend({
+	options: { position: 'bottomright' },
+	onAdd() {
+		const bar = L.DomUtil.create('div', 'leaflet-bar zoombox'), a = L.DomUtil.create('a', '', bar);
+		a.href = '#'; a.id = 'boxBtn'; a.setAttribute('role', 'button');
+		a.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
+			'<rect x="2" y="2" width="12" height="12" rx="1" stroke-dasharray="2.5 2"/><path d="M8 5.5v5M5.5 8h5"/></svg>';
+		L.DomEvent.disableClickPropagation(bar);
+		L.DomEvent.on(a, 'click', e => { L.DomEvent.preventDefault(e); setBoxMode(!boxMode); });
+		return bar;
+	},
+	onRemove() { },
+});
+function setBoxMode(on) {
+	boxMode = on;
+	const b = document.getElementById('boxBtn');
+	if (b) {
+		b.classList.toggle('on', on);
+		b.setAttribute('aria-pressed', on ? 'true' : 'false');
+		b.title = on ? 'Drag a box to zoom to it; click to move the map again (Esc)' : 'Zoom to an area: drag a box around it';
+	}
+	map.getContainer().classList.toggle('boxing', on);
+	setTouchDrag();
+}
+// initBoxZoom draws the box while boxMode is on and zooms to it on release.
+function initBoxZoom() {
+	const el = map.getContainer();
+	let start = null, rect = null;
+	const at = e => { const r = el.getBoundingClientRect(); return L.point(e.clientX - r.left, e.clientY - r.top); };
+	const stop = () => { if (rect) { rect.remove(); rect = null; } start = null; };
+	el.addEventListener('pointerdown', e => {
+		if (!boxMode || e.button !== 0) return;
+		if (start) { stop(); return; } // a second finger: a pinch, not a box
+		if (e.target.closest('.leaflet-control, .leaflet-popup')) return;
+		start = { from: at(e), to: null, id: e.pointerId };
+	});
+	el.addEventListener('pointermove', e => {
+		if (!start || e.pointerId !== start.id) return;
+		const p = at(e);
+		if (!rect && p.distanceTo(start.from) < 6) return; // not a drag yet: maybe a click on a marker
+		if (!rect) { rect = L.DomUtil.create('div', 'zoomrect', el); el.setPointerCapture(e.pointerId); }
+		start.to = p;
+		const min = L.point(Math.min(p.x, start.from.x), Math.min(p.y, start.from.y));
+		Object.assign(rect.style, { left: min.x + 'px', top: min.y + 'px', width: Math.abs(p.x - start.from.x) + 'px', height: Math.abs(p.y - start.from.y) + 'px' });
+	});
+	const end = e => {
+		if (!start || e.pointerId !== start.id) return;
+		const s = start, drew = !!rect;
+		stop();
+		if (!drew) return;
+		boxEndedAt = Date.now(); // the click that follows the drag isn't a click on the map
+		if (e.type === 'pointerup') map.fitBounds(L.latLngBounds(map.containerPointToLatLng(s.from), map.containerPointToLatLng(s.to)));
+	};
+	el.addEventListener('pointerup', end);
+	el.addEventListener('pointercancel', end);
+	el.addEventListener('click', e => { if (Date.now() - boxEndedAt < 400) { e.stopPropagation(); e.preventDefault(); } }, true);
 }
 // watchTouches shows the two-finger hint on a one-finger drag: never for a
 // gesture that ever had two fingers, nor for a finger that has barely moved.
@@ -3710,6 +3783,7 @@ document.addEventListener('keydown', e => {
 	if (pickSend) { endPick(); return; }
 	const open = DIALOGS.find(([id]) => isOpen(id));
 	if (open) open[1]();
+	else if (boxMode) setBoxMode(false);
 	else if (document.querySelector('.mapwrap.full')) toggleFull(false);
 });
 for (const [id, close] of DIALOGS) document.getElementById(id).addEventListener('mousedown', e => { if (e.target.id === id) close(); });
