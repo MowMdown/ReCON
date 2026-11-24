@@ -802,12 +802,10 @@ const NARROW_INV = matchMedia('(max-width: 700px)');
 api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).catch(() => { });
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {};
 
-// Every popup that would open under the map's button bar opens below its
-// marker instead (if it fits, or there is more room below). Patched into
-// Leaflet's placement, so it runs before auto-pan and a flipped popup that
-// fits doesn't move the map. A popup past the map's left or right edge (the
-// map can't be panned past its edges to show it) slides its body back
-// inside, its tip still on the marker.
+// Opening a popup never moves the map (every popup has autoPan off). One that
+// would open under the map's button bar opens below its marker instead (if it
+// fits, or there is more room below), and one past the map's left or right
+// edge slides its body back inside, its tip still on the marker.
 const POPUP_TOP = 50, POPUP_GAP = 8;
 (function () {
 	// The close button goes inside the popup's body (Leaflet puts it beside
@@ -816,16 +814,6 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 	L.Popup.prototype._initLayout = function () {
 		layout.call(this);
 		if (this._closeButton) this._wrapper.appendChild(this._closeButton);
-	};
-	// Auto-pan only moves the map up or down: sideways a popup slides inside
-	// the map itself (below), so it opens in place instead of sliding there.
-	const adjust = L.Popup.prototype._adjustPan;
-	L.Popup.prototype._adjustPan = function () {
-		const m = this._map;
-		if (!m) return;
-		const panBy = m.panBy;
-		m.panBy = function (offset, options) { const o = L.point(offset); return o.y ? panBy.call(this, [0, o.y], options) : this; };
-		try { adjust.call(this); } finally { m.panBy = panBy; }
 	};
 	const place = L.Popup.prototype._updatePosition;
 	L.Popup.prototype._updatePosition = function () {
@@ -1293,7 +1281,7 @@ function toggleFull(on) {
 // ---- Vehicles ---------------------------------------------------------------
 
 let vehOn = layerPref('vehicles', '0') === '1', vehicles = [], vehLayer = null, vehMarkers = {}, vehOpen = null, vehPending = {}, vehDetail = null;
-const vehPopup = L.popup({ autoPan: false, offset: [0, -6], autoPanPaddingTopLeft: [10, 60] });
+const vehPopup = L.popup({ autoPan: false, offset: [0, -6] });
 function toggleVehicles() {
 	vehOn = !vehOn;
 	setLayerPref('vehicles', vehOn ? '1' : '0');
@@ -1376,17 +1364,10 @@ function drawVehicles() {
 	if (track && track.kind === 'vehicle') followTrack();
 }
 function catLabel(v) { return v.name && v.name[0] !== '$' ? v.name : item(v.type); }
-// openPanned opens a popup, panning the map to fit it as it opens but not on
-// every redraw after.
-function openPanned(popup) {
-	popup.options.autoPan = true;
-	popup.openOn(map);
-	popup.options.autoPan = false;
-}
 function openVehicle(id) {
 	vehOpen = id;
 	renderVehicle();
-	openPanned(vehPopup);
+	vehPopup.openOn(map);
 }
 // The vehicle dialog: the vehicle on the left; its facts, damage, parts and
 // cargo on the right (asked of the mod on open and Refresh), or the item
@@ -1891,13 +1872,13 @@ async function loadPredators() {
 	} catch (e) { return; }
 	drawPredators();
 }
-const predPopup = L.popup({ autoPan: false, offset: [0, -6], autoPanPaddingTopLeft: [10, 60] });
+const predPopup = L.popup({ autoPan: false, offset: [0, -6] });
 let predOpen = null, predErr = '';
 function openPredator(id) {
 	if (!predators.some(x => x.id === id)) return;
 	predOpen = id; predErr = ''; confirming = null;
 	renderPredator();
-	openPanned(predPopup);
+	predPopup.openOn(map);
 }
 function renderPredator() {
 	if (predOpen == null) return;
@@ -2014,7 +1995,7 @@ let placedList = [], placedMarkers = {}, placedOpen = null;
 const placedKindOn = Object.fromEntries(PLACED_KINDS.map(([k]) => [k, layerPref('placed.' + k, '0') === '1']));
 let placedExpanded = layerPref('placed.open', '0') === '1';
 function placedWanted() { return PLACED_KINDS.some(([k]) => placedKindOn[k]); }
-const plcPopup = L.popup({ autoPan: false, offset: [0, -4], autoPanPaddingTopLeft: [10, 60] });
+const plcPopup = L.popup({ autoPan: false, offset: [0, -4] });
 function togglePlacedOpen() { placedExpanded = !placedExpanded; setLayerPref('placed.open', placedExpanded ? '1' : '0'); drawPlaced(); }
 function togglePlacedKind(k) {
 	const was = placedWanted();
@@ -2092,7 +2073,7 @@ function placedBy(o) { return o.placer ? esc(o.placer) : '<span class="muted">un
 function openPlacedPopup(id) {
 	placedOpen = id; groupOpen = null;
 	renderPlacedPopup();
-	openPanned(plcPopup);
+	plcPopup.openOn(map);
 }
 function renderPlacedPopup() {
 	const o = placedList.find(x => x.id === placedOpen);
@@ -2170,7 +2151,7 @@ function openGroupPopup(key) {
 	stopGroup();
 	placedOpen = null; groupOpen = key;
 	renderGroupPopup();
-	openPanned(plcPopup);
+	plcPopup.openOn(map);
 	askGroup(groupOf(key).map(o => o.id));
 }
 function renderGroupPopup() {
@@ -2710,7 +2691,7 @@ function openPlayerPopup(guid) {
 	map.closePopup(vehPopup);
 	plOpen = guid; plInv = null;
 	renderPlayerPopup();
-	openPanned(plPopup);
+	plPopup.openOn(map);
 	loadPlayerPopup();
 }
 async function loadPlayerPopup() {
