@@ -246,7 +246,7 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
 
 **The map** shows each player as an arrow in their own colour, pointing the way they face (a skull when dead).
 
-- **Zoom** moves in steps of the scale bar (bottom left: 25 m, 50 m, 100 m, 200 m, 500 m, 1 km, then the whole map), by wheel, **+** and **−**, double-click (Shift: out) or a pinch. The scale also says how far the view shows across and, under the mouse, its X, Y and grid square. **Fit** shows the whole map, **Fill** makes its width fill the view, and **Full** fills the browser's window (**Exit** or Esc puts it back). They stay on the right of the bar's one row. On a touch screen one finger scrolls the page and two move the map, except in full screen.
+- **Zoom** moves in steps of the scale bar (bottom left: 25 m, 50 m, 100 m, 200 m, 500 m, 1 km, then the whole map), by wheel, **+** and **−**, double-click (Shift: out) or a pinch. The scale also says how far the view shows across and, under the mouse, its X, Y and grid square. **Fit** shows the whole map, **Fill** makes its width fill the view, and **Full** fills the browser's window, at Fill (**Exit** or Esc puts it back). They stay on the right of the bar's one row. On a touch screen one finger scrolls the page and two move the map, except in full screen.
 - **Overlays** turns layers on and off, each remembered in this browser:
   - **Players** (on by default).
   - **Vehicles:** every car, motorbike and boat, in the driver's colour, blue with only passengers, green parked with the engine running, grey parked. The driver's name is beside it.

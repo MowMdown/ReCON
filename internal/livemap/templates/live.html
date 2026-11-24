@@ -1207,7 +1207,7 @@ function twoFingerHint(id) {
 	hintTimers[id] = setTimeout(() => h.classList.remove('on'), 1200);
 }
 function hideHint(id) { clearTimeout(hintTimers[id]); document.getElementById(id).classList.remove('on'); }
-// toggleFull makes the map fill the window, or puts it back.
+// toggleFull makes the map fill the window, at Fill, or puts it back.
 function toggleFull(on) {
 	const wrap = document.querySelector('.mapwrap');
 	on = on === undefined ? !wrap.classList.contains('full') : on;
@@ -1218,7 +1218,8 @@ function toggleFull(on) {
 	b.textContent = on ? 'Exit' : 'Full';
 	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
 	map.invalidateSize({ pan: false }); // at Fit, its resize fits again
-	if (!wasFit) map.setView(c, map.getZoom(), { animate: false });
+	if (on) fillWidth(); // full screen opens at Fill
+	else if (!wasFit) map.setView(c, map.getZoom(), { animate: false });
 	setTouchDrag();
 }
 // ---- Vehicles ---------------------------------------------------------------
