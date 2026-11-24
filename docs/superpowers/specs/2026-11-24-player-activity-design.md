@@ -131,6 +131,8 @@ A new tab in the Live Map's player dialog, for online and offline players
 - Opening a session lists its events in order with their times. Filters by
   kind: vehicles, combat, health, admin, cheat flags.
 - Clicking an event shows that spot on the mini-map.
+- That map shows only the session's trail and events: no Layers, Legend or
+  other map buttons, and none of the live layers.
 - **Replay** on each session.
 
 ## Replay
