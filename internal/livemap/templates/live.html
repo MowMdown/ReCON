@@ -168,6 +168,8 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 /* Zoom to an area: the button above +, and the box being drawn. One finger
    draws on a touch screen while it is on. */
 #map.boxing, #map.boxing .leaflet-interactive { cursor: crosshair; touch-action: none; }
+/* Zooming to an area: marks can't be clicked or hovered, and the cursor stays a + over them. */
+#map.boxing .leaflet-marker-icon, #map.boxing .leaflet-marker-icon *, #map.boxing .leaflet-interactive { pointer-events: none !important; cursor: crosshair !important; }
 #map .zoombox a { display: flex; align-items: center; justify-content: center; color: #333; }
 #map .zoombox a.on { background: var(--lm-sel); color: var(--lm-text-hi); }
 .zoomrect { position: absolute; z-index: 800; box-sizing: border-box; border: 1.5px dashed var(--lm-accent); background: color-mix(in srgb, var(--lm-accent) 15%, transparent); pointer-events: none; }
@@ -1269,7 +1271,7 @@ function setTouchDrag() {
 // ---- Zoom to an area ----------------------------------------------------------
 // The button above + switches the map between moving it (drag) and zooming to
 // an area (drag a box around it; letting go zooms to fit the box). It stays on
-// until clicked again or Esc. A click without a drag still opens a marker.
+// until clicked again or Esc. Marks can't be clicked meanwhile.
 let boxMode = false, boxEndedAt = 0;
 const BoxControl = L.Control.extend({
 	options: { position: 'bottomright' },
