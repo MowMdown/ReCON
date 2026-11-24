@@ -205,6 +205,10 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 :is(#gModal, #vModal) .box { width: min(1000px, 95vw); }
 :is(#gModal, #vModal) .ilist { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
 :is(#gModal, #vModal) .idet { max-height: 62vh; overflow-y: auto; }
+/* Narrow: the details open inside the list, under their object; the
+   dialog scrolls, not the list and the details each. */
+@media (max-width: 700px) { #gModal .ilist, #gModal .ilist > .idet.under { max-height: none; overflow: visible; } }
+#gModal .ilist > .idet .sub-items { margin-left: 0; }
 :is(#gModal, #vModal) .irow.gobj { font-weight: 600; }
 :is(#gModal, #vModal) .irow.gobj .sl { color: var(--lm-muted); font-weight: 400; }
 :is(#gModal, #vModal) .sub-items { display: flex; flex-direction: column; gap: 4px; }
@@ -845,6 +849,9 @@ const NAMES = { chernarusplus: 'Chernarus', enoch: 'Livonia', namalsk: 'Namalsk'
 // dataMaps: the maps with a picture in ReCON's data folder (for a map to
 // show before the mod has ever said which it is).
 let dataMaps = [];
+// A narrow screen: the inventories (a player's, placed objects') are one
+// column, and an item's details open under the row picked.
+const NARROW_INV = matchMedia('(max-width: 700px)');
 api('GET', '/api/mod/maps').then(d => { dataMaps = d.maps || []; render(); }).catch(() => { });
 let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {}, fitted = false;
 
@@ -2222,7 +2229,7 @@ function openGroupInfo(key) {
 	if (!have) stopGroup();
 	groupInfo = key; // before closing the popup, so its counts are kept
 	map.closePopup(plcPopup);
-	groupSel = ids[0] ?? null; groupItemSel = null;
+	groupSel = ids[0] ?? null; groupItemSel = null; groupShut = ids.length > 1;
 	document.getElementById('gErr').textContent = '';
 	document.getElementById('gModal').style.display = 'flex';
 	renderGroupInfo();
@@ -2243,8 +2250,21 @@ function gItemRows(items, obj) {
 		return gIrow(it, it.slot ? slotLabel(it.slot) : 'Cargo', n ? itemsText(n) : qty(it), obj);
 	}).join('');
 }
+// On a narrow screen (one column) an object's details open right under it,
+// like a player's inventory; picking it again closes them.
+let groupShut = false; // narrow screen: the picked object's details closed
 function renderGroupInfo() {
 	if (groupInfo == null) return;
+	const list = document.getElementById('gList'), det = document.getElementById('gDet');
+	if (det.parentElement !== list.parentElement) list.parentElement.appendChild(det); // out of the list before it is redrawn
+	renderGroupInfoBody();
+	const narrow = NARROW_INV.matches, row = narrow && !groupShut && groupSel != null ? list.querySelector(':scope > .irow[data-obj="' + groupSel + '"]') : null;
+	det.classList.toggle('under', !!row);
+	if (row) row.after(det);
+	det.style.display = narrow && !row ? 'none' : '';
+}
+NARROW_INV.addEventListener('change', renderGroupInfo);
+function renderGroupInfoBody() {
 	const objs = groupOf(groupInfo), list = document.getElementById('gList'), det = document.getElementById('gDet');
 	document.getElementById('gWhere').textContent = groupGrid(groupInfo);
 	if (!objs.length) {
@@ -2316,7 +2336,10 @@ document.getElementById('gModal').addEventListener('click', e => {
 	if (it) { groupSel = +it.dataset.of; groupItemSel = +it.dataset.item; renderGroupInfo(); return; }
 	const ob = e.target.closest('[data-obj]');
 	if (ob) {
-		groupSel = +ob.dataset.obj; groupItemSel = null;
+		const id = +ob.dataset.obj;
+		// The object whose details are open, picked again in the list: they close.
+		groupShut = ob.parentElement && ob.parentElement.id === 'gList' && id === groupSel && !groupShut && NARROW_INV.matches;
+		groupSel = id; groupItemSel = null;
 		renderGroupInfo();
 	}
 });
@@ -3130,13 +3153,13 @@ function agoText(at) {
 // screen): it is put back first.
 function setHTML(el, h) {
 	if (el._html === h) return;
-	if (el.id === 'iList') { const det = document.getElementById('iDet'); if (det.parentElement === el) el.parentElement.appendChild(det); }
+	const detId = { iList: 'iDet', gList: 'gDet' }[el.id];
+	if (detId) { const det = document.getElementById(detId); if (det.parentElement === el) el.parentElement.appendChild(det); }
 	el.innerHTML = h;
 	el._html = h;
 }
 // On a narrow screen (one column) the item's details open right under the
 // slot picked, the slots below it moving down, instead of under them all.
-const NARROW_INV = matchMedia('(max-width: 700px)');
 let invRoot = null; // the slot item the details are for (null: none picked)
 function renderInv(p) {
 	const list = document.getElementById('iList'), det = document.getElementById('iDet'), box = list.parentElement;
