@@ -55,12 +55,13 @@ records.
 | Long kill | Killed By Wren - SVD - 1.4 km (Possible Hack) | ⚠ | a kill over 1 km: flagged on the killer's and the victim's side |
 | Respawned | Respawned | 🔁 | alive again after dying |
 | Admin action | Admin Heal / Admin Spawn: M4A1 | 🛠 | the commands ReCON sends for them |
-| Admin teleport | Admin Teleport: 3.1 km | 🛠 | a teleport sent from ReCON, or a jump by a Mod or Admin player |
-| Possible teleport | Possible Teleport: 420 m | ⚠ | a jump of more than ~100 m in one sync, on foot, not sent from ReCON, by a player below Mod |
+| Admin teleport | Admin Teleport | 🛠 | a teleport sent from ReCON, or a jump by a Mod or Admin player |
+| Possible teleport | Possible Teleport | ⚠ | a jump of more than ~100 m in one sync, on foot, not sent from ReCON, by a player below Mod |
 | Possible speed hack | Possible Speed Hack | ⚠ | on-foot speed over a limit no player reaches, held for several syncs, by a player below Mod |
 
 **Text style:** short, no emojis (emojis are only map icons). The pattern is
-what, then the key numbers, separated by " - ". Tooltips add the time; nothing
+what, then the key numbers, separated by " - ". Distances only for
+walking and driving (vehicle trips, the session's Covered) and kills and deaths. Tooltips add the time; nothing
 longer. Session summary: `2 Kills, 1 Death, Covered 5.1 km`.
 
 Not recorded: chat, "now driving" (a seat change to driver mid-trip), and
