@@ -44,8 +44,7 @@ func handleModSync(w http.ResponseWriter, r *http.Request) {
 		code = http.StatusBadRequest
 	}
 	writeJSON(w, code, reply)
-	// The map's first vehicles.json, once the item list is in (after the
-	// reply, so the mod isn't kept waiting).
+	// After the reply, so the mod isn't kept waiting.
 	if err == nil {
 		maybeWriteVehicleFile(time.Now())
 	}
@@ -66,12 +65,9 @@ func handleModItems(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleModVehicles serves GET /api/mod/vehicles: every vehicle on the
-// server, as the mod last sent them (sent: false when it hasn't, as a mod
-// before 0.0.1i doesn't).
+// server as the mod last sent them, or with ?occupied=1 only the ones with
+// someone in them (sent every second).
 func handleModVehicles(w http.ResponseWriter, r *http.Request) {
-	// ?occupied=1: only the ones with someone in them (mod 1.0.3 on), sent
-	// every second; sent false when the mod can't, and the page then reads
-	// the whole list.
 	if r.URL.Query().Get("occupied") == "1" {
 		vs, sent := OccupiedVehicles(time.Now())
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "vehicles": vs, "sent": sent})
@@ -83,13 +79,6 @@ func handleModVehicles(w http.ResponseWriter, r *http.Request) {
 		out["at"] = at
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-// handleModWorldEvents serves GET /api/mod/worldevents: the map's dynamic
-// events (helicopter crashes, toxic zones) as the mod last sent them.
-func handleModWorldEvents(w http.ResponseWriter, r *http.Request) {
-	es, sent := WorldEvents(time.Now())
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "events": es, "sent": sent})
 }
 
 // handleModPredators serves GET /api/mod/predators: the bears, wolves and
@@ -184,11 +173,8 @@ func handleModPlayer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleModAction serves POST /api/mod/players/{guid}/{action}: queue an
-// action (heal, kill, teleport, teleportTo, back, set, message) for the mod.
-// Body: teleport {x, y, z}; teleportTo {target: GUID}; back {} (to where
-// they were before their last teleport); set {stat, value}; message {text,
-// title, seconds}; spawn {text: class name, value: how many}.
+// handleModAction serves POST /api/mod/players/{guid}/{action}: queue one of
+// Actions for the player (see Queue for each one's fields).
 func handleModAction(w http.ResponseWriter, r *http.Request) {
 	var c Command
 	if err := decodeBody(w, r, &c, 1<<16); err != nil {
@@ -204,10 +190,8 @@ func handleModAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "command": cs})
 }
 
-// handleModWorld serves POST /api/mod/world/{action}: queue a weather or
-// time change for the mod. Body: weather {stat, value, transition, hold};
-// weatherMode {text}; storm {value, min, hold}; rainThresholds {min, max,
-// transition}; date {year, month, day, hour, minute}; freezeTime {value}.
+// handleModWorld serves POST /api/mod/world/{action}: queue one of
+// WorldActions (see checkWorld for each one's fields).
 func handleModWorld(w http.ResponseWriter, r *http.Request) {
 	var c Command
 	if err := decodeBody(w, r, &c, 1<<16); err != nil {

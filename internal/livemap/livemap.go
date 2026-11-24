@@ -64,7 +64,7 @@ func Start(h Host) error {
 		return fmt.Errorf("recon-mod: creating its chat_vehicles table: %w", err)
 	}
 	if err := openKills(h.DB); err != nil {
-		return fmt.Errorf("recon-mod: creating its table: %w", err)
+		return fmt.Errorf("recon-mod: creating its mod_kills table: %w", err)
 	}
 	keySource, saveSteamID = h.RCONPassword, h.SaveSteamID
 	dataDir = h.DataDir
@@ -82,10 +82,9 @@ func Start(h Host) error {
 	h.AddRoute("POST /api/mod/map/{world}/calibration", setCalibration(h.DataDir)) // {"points"}: set them (none: not calibrated)
 	h.AddRoute("POST /api/mod/sync", handleModSync)                                // the mod's player data in, commands out
 	h.AddRoute("GET /api/mod/vehicles", handleModVehicles)                         // every vehicle on the server
-	h.AddRoute("GET /api/mod/worldevents", handleModWorldEvents)                   // helicopter crashes and toxic zones
 	h.AddRoute("GET /api/mod/eventspots", handleModEventSpots)                     // every place an event can spawn, and which are up
 	h.AddRoute("GET /api/mod/players/{guid}/saves", handleModSaves)                // their inventories saved at death
-	h.AddRoute("POST /api/mod/saves/{id}/restore", handleModRestore)               // {"items": [ids]}: give those back (mod 1.0.1 on)
+	h.AddRoute("POST /api/mod/saves/{id}/restore", handleModRestore)               // {"items": [ids]}: give those back
 	h.AddRoute("GET /api/mod/saves/{id}", handleModSave)                           // one, with its items
 	h.AddRoute("GET /api/mod/placed", handleModPlaced)                             // the objects players placed
 	h.AddRoute("GET /api/mod/placed/details", handleModPlacedDetails)              // several, with what is in them (?ids=1,2&ask=1)
@@ -97,8 +96,8 @@ func Start(h Host) error {
 	h.AddRoute("GET /api/mod/items", handleModItems)                               // every item the server can spawn
 	h.AddRoute("GET /api/mod/players", handleModPlayers)                           // every online player's live state, the weather
 	h.AddRoute("GET /api/mod/players/{guid}", handleModPlayer)                     // one player's live state, kills, commands
-	h.AddRoute("POST /api/mod/players/{guid}/{action}", handleModAction)           // heal | kill | teleport | teleportTo | back | set | message | spawn
-	h.AddRoute("POST /api/mod/world/{action}", handleModWorld)                     // weather | weatherMode | storm | rainThresholds | date | freezeTime | deleteVehicle | deleteAnimal | spawnAt
+	h.AddRoute("POST /api/mod/players/{guid}/{action}", handleModAction)           // Actions
+	h.AddRoute("POST /api/mod/world/{action}", handleModWorld)                     // WorldActions
 	if h.AddNavLink != nil {
 		h.AddNavLink("live", "Live Map", "/live")
 	}

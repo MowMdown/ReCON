@@ -85,9 +85,9 @@ func TestTakeSpots(t *testing.T) {
 	now := time.Now()
 	zero := 0
 	req := SyncRequest{Mod: "1.0.3", World: "deerisle", SpotsHeld: &zero}
-	// An older mod is never asked (the keys would break its JSON reader).
-	if w, set, _ := takeSpots(SyncRequest{Mod: "1.0.2", World: "deerisle"}, now); w != nil || set {
-		t.Fatalf("1.0.2 asked: %v %v", w, set)
+	// A sync without SpotsHeld isn't asked.
+	if w, set, _ := takeSpots(SyncRequest{Mod: "1.0.3", World: "deerisle"}, now); w != nil || set {
+		t.Fatalf("asked without SpotsHeld: %v %v", w, set)
 	}
 	w, _, _ := takeSpots(req, now)
 	if len(w) != 1 || w[0] != "db/events.xml" {

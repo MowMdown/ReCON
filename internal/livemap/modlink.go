@@ -29,6 +29,46 @@ import (
 // Protocol is the sync format version this ReCON speaks.
 const Protocol = 1
 
+// MinMod is the oldest recon-mod this ReCON takes syncs from.
+const MinMod = "1.0.3"
+
+// modAtLeast says whether the mod's version v is at least want (both
+// "1.0.3"; a version with a suffix, "1.0.3-dev", counts as its numbers).
+func modAtLeast(v, want string) bool {
+	num := func(s string) []int {
+		s = strings.TrimPrefix(strings.TrimSpace(s), "v")
+		if i := strings.IndexAny(s, "-+ "); i >= 0 {
+			s = s[:i]
+		}
+		var out []int
+		for _, p := range strings.Split(s, ".") {
+			n := 0
+			for _, r := range p {
+				if r < '0' || r > '9' {
+					break
+				}
+				n = n*10 + int(r-'0')
+			}
+			out = append(out, n)
+		}
+		return out
+	}
+	a, b := num(v), num(want)
+	for i := 0; i < len(a) || i < len(b); i++ {
+		x, y := 0, 0
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			return x > y
+		}
+	}
+	return true
+}
+
 var (
 	// staleAfter is how long after the last sync the mod counts as
 	// disconnected and its data as old.
@@ -63,34 +103,33 @@ type SyncRequest struct {
 	CatalogTotal int           `json:"catalogTotal"`
 	CatalogAt    int           `json:"catalogAt"`
 	Catalog      []CatalogItem `json:"catalog"`
-	// Every vehicle on the server (mod 0.0.1i on), in the syncs that have
-	// them (every few seconds: VehiclesSent).
+	// Every vehicle on the server, in the syncs that have them (every few
+	// seconds: VehiclesSent).
 	VehiclesSent Flag      `json:"vehiclesSent"`
 	Vehicles     []Vehicle `json:"vehicles"`
 	// The vehicles the reply's WatchVehicles asked to see inside.
 	VehicleDetails []VehicleDetail `json:"vehicleDetails"`
 	// The map's dynamic events, sent with the vehicles.
 	WorldEvents []WorldEvent `json:"worldEvents"`
-	// The bears, wolves and guard dogs alive on the server, every sync
-	// (mod 0.0.1l on: PredatorsSent).
-	// The objects players placed, every 30 s (mod 1.0.1 on: PlacedSent), and
-	// what is in the ones the reply's WatchPlaced asked about.
+	// The objects players placed, every 30 s (PlacedSent), and what is in
+	// the ones the reply's WatchPlaced asked about.
 	PlacedSent    Flag           `json:"placedSent"`
 	Placed        []Placed       `json:"placed"`
 	PlacedDetails []PlacedDetail `json:"placedDetails"`
-	PredatorsSent Flag           `json:"predatorsSent"`
-	Predators     []Predator     `json:"predators"`
+	// The bears, wolves and guard dogs alive on the server, every sync.
+	PredatorsSent Flag       `json:"predatorsSent"`
+	Predators     []Predator `json:"predators"`
 	// The map's place names, when the reply asked for them (WantPlaces).
 	PlacesSent Flag    `json:"placesSent"`
 	Places     []Place `json:"places"`
-	// The vehicles with someone in them, every sync (mod 1.0.3 on:
-	// CrewSent), plus each once more after its last player got out.
+	// The vehicles with someone in them, every sync (CrewSent), plus each
+	// once more after its last player got out.
 	CrewSent     Flag      `json:"crewSent"`
 	CrewVehicles []Vehicle `json:"crewVehicles"`
 	// Mission files the reply's WantMission asked for (eventspots.go).
 	MissionFiles []MissionFile `json:"missionFiles"`
-	// How many event spots the mod holds to check (nil: a mod before
-	// 1.0.3), and the ones it checked this sync.
+	// How many event spots the mod holds to check, and the ones it checked
+	// this sync.
 	SpotsHeld *int        `json:"spotsHeld"`
 	Spots     []SpotState `json:"spots"`
 }
@@ -113,9 +152,8 @@ type Predator struct {
 	X       float64 `json:"x"`
 	Z       float64 `json:"z"`
 	Heading float64 `json:"heading"` // degrees, 0 = north, clockwise
-	// Mod 1.0.3 on (nil before): health 0-1; Behaviour is the AI's
-	// DayZAnimalBehaviourSlot, Activity its DayZAnimalBehaviourAction
-	// (-1 unknown); Attacking while it bites.
+	// Health 0-1; Behaviour is the AI's DayZAnimalBehaviourSlot, Activity
+	// its DayZAnimalBehaviourAction (-1 unknown); Attacking while it bites.
 	Health    *float64 `json:"health,omitempty"`
 	Behaviour *int     `json:"behaviour,omitempty"`
 	Activity  *int     `json:"activity,omitempty"`
@@ -200,7 +238,7 @@ type PlayerState struct {
 	HandsName       string  `json:"handsName"` // as the game shows them ("Wood Axe")
 	VehicleName     string  `json:"vehicleName"`
 	// The vehicle they are in (Vehicle.ID) and their crew position in it
-	// (nil: a mod before 1.0.3; -1: not in one); Driver when driving.
+	// (-1: not in one); Driver when driving.
 	VehicleID int  `json:"vehicleId"`
 	Seat      *int `json:"seat,omitempty"`
 	Driver    Flag `json:"driver"`
@@ -268,15 +306,14 @@ type Event struct {
 	Killer     string  `json:"killer"`
 	KillerName string  `json:"killerName"`
 	Weapon     string  `json:"weapon"`
-	Cause      string  `json:"cause"`  // what killed them (from mod 0.0.1h; see Kill.Cause)
+	Cause      string  `json:"cause"`  // what killed them (see Kill.Cause)
 	Agents     int     `json:"agents"` // the illnesses they had (eAgents bits)
 	Distance   float64 `json:"distance"`
 	X          float64 `json:"x"`
 	Y          float64 `json:"y"`
 	Z          float64 `json:"z"`
 	At         int     `json:"at"`
-	// A player victim's inventory as they died (mod 1.0.1 on), kept for a
-	// restore (invsaves.go).
+	// A player victim's inventory as they died, kept for a restore (invsaves.go).
 	Inventory []Item `json:"inventory"`
 }
 
@@ -285,8 +322,7 @@ type Result struct {
 	ID    int    `json:"id"`
 	OK    Flag   `json:"ok"`
 	Error string `json:"error"`
-	// A vehicle spawn's new vehicle, by persistent ID (b1:b2:b3:b4), from
-	// mod 0.0.1m; "" otherwise.
+	// A vehicle spawn's new vehicle, by persistent ID (b1:b2:b3:b4); "" otherwise.
 	Entity string `json:"entity"`
 }
 
@@ -304,7 +340,7 @@ type Command struct {
 	Value   float64 `json:"value"`
 	Text    string  `json:"text"`
 	// spawn: the vehicle to delete once the new one exists (persistent
-	// ID), for a chat car (chatcars.go); mod 0.0.1m on.
+	// ID), for a chat car (chatcars.go).
 	Replace string `json:"replace,omitempty"`
 	// ...and its class: the mod deletes it only if both match, so an ID
 	// the game ever gave to another vehicle can't take that one with it.
@@ -312,8 +348,8 @@ type Command struct {
 	// restore: the items to give back, as a list (in the inventory's shape),
 	// not JSON in Text: the mod's JSON reader broke on nested JSON.
 	Items []Item `json:"items,omitempty"`
-	// restore (mod 1.0.3 on): worn, pristine or "" (as saved); Clear
-	// empties their inventory first. Left out when empty, for older mods.
+	// restore: worn, pristine or "" (as saved); Clear empties their
+	// inventory first.
 	Condition string  `json:"condition,omitempty"`
 	Clear     bool    `json:"clear,omitempty"`
 	Title     string  `json:"title"`
@@ -337,19 +373,16 @@ type SyncReply struct {
 	Interval int       `json:"interval"`
 	Commands []Command `json:"commands"`
 	Watch    []string  `json:"watch"` // SteamID64s whose inventory to send
-	// Vehicle ids whose parts and cargo to send (left out when none, for a
-	// mod before 0.0.1i).
+	// Vehicle ids whose parts and cargo to send.
 	WatchVehicles []int `json:"watchVehicles,omitempty"`
 	// Placed objects (ids) to send the contents of (placed.go).
 	WatchPlaced []int `json:"watchPlaced,omitempty"`
-	// WantPlaces asks for the map's place names (once a connection; left
-	// out when false, for a mod before 0.0.1i).
+	// WantPlaces asks for the map's place names (once a connection).
 	WantPlaces bool `json:"wantPlaces,omitempty"`
 	// CatalogNext is 1 + the first catalog entry wanted next (0: none).
 	CatalogNext int `json:"catalogNext"`
-	// Mod 1.0.3 on only (a key an older mod doesn't know breaks its JSON
-	// reader): mission files to send, and the event spots to check
-	// (SpotsSet: SpotChecks is the new list).
+	// Mission files to send, and the event spots to check (SpotsSet:
+	// SpotChecks is the new list).
 	WantMission []string    `json:"wantMission,omitempty"`
 	SpotsSet    bool        `json:"spotsSet,omitempty"`
 	SpotChecks  []SpotCheck `json:"spotChecks,omitempty"`
@@ -405,26 +438,26 @@ var state struct {
 	catalog      []CatalogItem
 	catalogTotal int
 	catalogTypes map[string]CatalogItem
-	// The vehicles as last sent, and when (zero: never, so a mod before 0.0.1i).
+	// The vehicles as last sent, and when (zero: not yet this connection).
 	vehicles   []Vehicle
 	vehiclesAt time.Time
 	// Vehicles asked about (by id: until when to keep asking), and what is
 	// in them. An ask is answered once: the mod sends it in one sync.
 	vehWatch  map[int]time.Time
 	vehDetail map[int]VehicleDetail
-	// The map's dynamic events (with the vehicles), and its place names
-	// (placesFor: the world they are of; asked for once a connection).
+	// The map's dynamic events, sent with the vehicles.
 	worldEvents []WorldEvent
 	// The map whose vehicles.json was looked for this connection.
 	vehFileFor string
 	// The map the mod last reported, kept in the database (mapstate.go), so
 	// the Live Map can show it while the mod isn't connected.
 	lastWorld string
-	// The mod sends occupied vehicles every sync (1.0.3 on).
+	// The mod has sent occupied vehicles this connection.
 	crewSent bool
 	crewLast []Vehicle // the occupied ones the last sync brought
-	// The predators as last sent (nil: never, so a mod before 0.0.1l).
+	// The predators as last sent (nil: not yet this connection).
 	predators []Predator
+	// The map's place names, and the world they are of (asked for once a connection).
 	places    []Place
 	placesFor string
 	nextID    int
@@ -458,14 +491,21 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		logRefusal(msg)
 		return SyncReply{Error: msg}, errors.New(msg)
 	}
+	if !modAtLeast(req.Mod, MinMod) {
+		msg := "recon-mod " + req.Mod + " is too old: this ReCON needs recon-mod " + MinMod + " or later"
+		logRefusal(msg)
+		return SyncReply{Error: msg}, errors.New(msg)
+	}
 	players := make(map[string]Player, len(req.Players))
 	var newSteam [][2]string
 	var chatCars []chatCarResult // chat cars the results reported, kept after the lock
-	untracked := false
-	var forgetCars []string // chat cars !remove got rid of, forgotten after the lock
+	var forgetCars []string      // chat cars !remove got rid of, forgotten after the lock
 	saveWorld := ""
-	var gotInv []Inventory // inventories the mod sent, saved as last known after the lock
-	var gotInvGUID []string
+	type gotInv struct {
+		guid  string
+		items []Item
+	}
+	var gotInvs []gotInv // inventories the mod sent, saved as last known after the lock
 	state.Lock()
 	if w := strings.ToLower(req.World); w != "" && w != state.lastWorld {
 		state.lastWorld, saveWorld = w, w
@@ -507,7 +547,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		}
 	}
 	if req.PlacesSent {
-		state.places, state.placesFor = req.Places, strings.ToLower(req.World)
+		state.places, state.placesFor = latinPlaces(req.Places), strings.ToLower(req.World)
 		if state.places == nil {
 			state.places = []Place{}
 		}
@@ -550,8 +590,7 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 				items = []Item{}
 			}
 			state.inventory[guid] = Inventory{Items: items, At: now}
-			gotInv = append(gotInv, Inventory{Items: items, At: now})
-			gotInvGUID = append(gotInvGUID, guid)
+			gotInvs = append(gotInvs, gotInv{guid, items})
 		}
 		p.Inv, p.Inventory = false, nil
 		players[guid] = Player{GUID: guid, PlayerState: p, Illnesses: Illnesses(p.Agents)}
@@ -575,20 +614,11 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 			continue
 		}
 		c.Status, c.Error, c.Finished = "done", "", now
-		if c.RemoveFor != "" {
-			switch {
-			case bool(r.OK), r.Error == "it's already gone":
-				forgetCars = append(forgetCars, c.RemoveFor)
-			case strings.HasPrefix(r.Error, "unknown action"):
-				oldRemoveOnce.Do(func() { log.Printf("recon-mod: !remove needs recon-mod 1.0.1") })
-			}
+		if c.RemoveFor != "" && (bool(r.OK) || r.Error == "it's already gone") {
+			forgetCars = append(forgetCars, c.RemoveFor)
 		}
-		if bool(r.OK) && c.ChatCar {
-			if r.Entity != "" {
-				chatCars = append(chatCars, chatCarResult{c.GUID, r.Entity, c.Text})
-			} else {
-				untracked = true
-			}
+		if bool(r.OK) && c.ChatCar && r.Entity != "" {
+			chatCars = append(chatCars, chatCarResult{c.GUID, r.Entity, c.Text})
 		}
 		if !r.OK {
 			c.Status, c.Error = "failed", r.Error
@@ -654,15 +684,15 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	trimCommands()
 	state.Unlock()
 
-	for i, g := range gotInvGUID {
-		if err := saveLastInventory(g, "watched", gotInv[i].Items, now); err != nil {
-			log.Printf("recon-mod: saving %s's last inventory: %v", g, err)
+	for _, g := range gotInvs {
+		if err := saveLastInventory(g.guid, "watched", g.items, now); err != nil {
+			log.Printf("recon-mod: saving %s's last inventory: %v", g.guid, err)
 		}
 	}
 
 	reply.WatchPlaced = takePlaced(req, now)
 	reply.WantMission, reply.SpotsSet, reply.SpotChecks = takeSpots(req, now)
-	keepChatCars(chatCars, untracked, now)
+	keepChatCars(chatCars, now)
 	for _, g := range forgetCars {
 		forgetChatCar(g)
 	}
@@ -753,8 +783,7 @@ func Catalog(now time.Time) (items []CatalogItem, complete bool) {
 }
 
 // Vehicles is every vehicle on the server as the mod last sent them, and
-// when; none while the mod isn't connected (sent false: it hasn't sent
-// any, so it may be a mod before 0.0.1i).
+// when (sent false: none yet, or the mod isn't connected).
 func Vehicles(now time.Time) (vs []Vehicle, at time.Time, sent bool) {
 	state.Lock()
 	defer state.Unlock()
@@ -765,7 +794,7 @@ func Vehicles(now time.Time) (vs []Vehicle, at time.Time, sent bool) {
 }
 
 // Predators is the bears, wolves and guard dogs as the mod last sent them
-// (sent false: it hasn't, as a mod before 0.0.1l doesn't).
+// (sent false: none yet, or the mod isn't connected).
 func Predators(now time.Time) (ps []Predator, sent bool) {
 	state.Lock()
 	defer state.Unlock()
@@ -776,7 +805,7 @@ func Predators(now time.Time) (ps []Predator, sent bool) {
 }
 
 // WorldEvents is the map's dynamic events as the mod last sent them (sent
-// false: it hasn't, as a mod before 0.0.1i doesn't).
+// false: none yet, or the mod isn't connected).
 func WorldEvents(now time.Time) (es []WorldEvent, sent bool) {
 	state.Lock()
 	defer state.Unlock()
@@ -787,7 +816,7 @@ func WorldEvents(now time.Time) (es []WorldEvent, sent bool) {
 }
 
 // Places is the map's place names, and the world they are of (sent false:
-// the mod hasn't sent them, as one before 0.0.1i doesn't).
+// none yet, or the mod isn't connected).
 func Places(now time.Time) (ps []Place, world string, sent bool) {
 	state.Lock()
 	defer state.Unlock()
@@ -876,7 +905,7 @@ func Current(now time.Time) (Status, []Player) {
 	if st.World == "" {
 		st.World = state.lastWorld // the mod isn't connected (or not since a restart): its last map
 	}
-	st.Connected = !state.lastSync.IsZero() && now.Sub(state.lastSync) <= staleAfter
+	st.Connected = connected(now)
 	out := []Player{}
 	if st.Connected {
 		for _, p := range state.players {
@@ -966,12 +995,11 @@ func Commands(guid string) []CommandStatus {
 	return out
 }
 
-// Actions are the commands the mod runs, and the stats "set" can change
-// with their largest values.
+// Actions are the commands the mod runs on a player (back is a teleport to
+// where they were before the last one), and StatMaxs the stats "set" can
+// change, with their largest values (shock, stamina and temperature are
+// read only).
 var (
-	// back is a teleport to where they were before the last one.
-	// spawn puts Value (1 to maxSpawn) of the item class Text in front of them.
-	// Shock, stamina and temperature are read only.
 	Actions  = map[string]bool{"heal": true, "dry": true, "kill": true, "teleport": true, "teleportTo": true, "back": true, "set": true, "message": true, "spawn": true, "condition": true, "restore": true}
 	StatMaxs = map[string]float64{"health": 100, "blood": 5000, "water": 5000, "energy": 5000, "heatBuffer": 30}
 )
@@ -997,7 +1025,7 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 			return CommandStatus{}, errors.New("pick where to teleport them")
 		}
 	case "restore":
-		// Items are what to give back (invsaves.go; mod 1.0.2 on).
+		// Items are what to give back (invsaves.go).
 		if len(c.Items) == 0 {
 			return CommandStatus{}, errors.New("pick the items to give back")
 		}
@@ -1009,8 +1037,7 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 		if c.Value != float64(int(c.Value)) || c.Value < 1 || c.Value > maxSpawn {
 			return CommandStatus{}, errors.New("spawn 1 to " + strconv.Itoa(maxSpawn) + " at a time")
 		}
-		// Where it goes rides in Stat: ground (""), inventory or hands
-		// (one). A mod before 0.0.1h puts everything on the ground.
+		// Where it goes rides in Stat: ground (""), inventory or hands (one).
 		switch c.Stat {
 		case "", "ground":
 			c.Stat = ""
@@ -1050,13 +1077,6 @@ func Queue(guid string, c Command, now time.Time) (CommandStatus, error) {
 	}
 	c.SteamID = p.SteamID
 	back := false
-	if c.Action == "restore" && !modAtLeast(state.mod, "1.0.3") {
-		// An older mod doesn't know these keys (its JSON reader would fail).
-		if c.Clear {
-			return CommandStatus{}, errors.New("replacing their gear needs recon-mod 1.0.3")
-		}
-		c.Condition = ""
-	}
 	switch c.Action {
 	case "teleportTo":
 		t, ok := state.players[strings.ToLower(c.Target)]
@@ -1114,6 +1134,13 @@ func connected(now time.Time) bool {
 	return !state.lastSync.IsZero() && now.Sub(state.lastSync) <= staleAfter
 }
 
+// isConnected is connected, taking the lock.
+func isConnected(now time.Time) bool {
+	state.Lock()
+	defer state.Unlock()
+	return connected(now)
+}
+
 // add queues a checked command (state is locked).
 func add(c Command, guid string, now time.Time) CommandStatus {
 	state.nextID++
@@ -1163,7 +1190,7 @@ func checkWorld(c *Command) error {
 	switch c.Action {
 	case "removeEntity":
 		// Text is the object's persistent ID, Stat its class: the mod removes
-		// it only if both match (mod 1.0.1 on).
+		// it only if both match.
 		c.Text, c.Stat = strings.TrimSpace(c.Text), strings.TrimSpace(c.Stat)
 		if c.Text == "" || c.Stat == "" {
 			return errors.New("pick what to remove")
@@ -1174,12 +1201,12 @@ func checkWorld(c *Command) error {
 			return errors.New("pick a vehicle")
 		}
 	case "deleteAnimal":
-		// Text is the predator's id (Predator.ID); mod 1.0.3 on.
+		// Text is the predator's id (Predator.ID).
 		if _, err := strconv.Atoi(c.Text); err != nil {
 			return errors.New("pick an animal")
 		}
 	case "spawnAt":
-		// Text is the class, Value how many, X and Z where (mod 0.0.1j on).
+		// Text is the class, Value how many, X and Z where.
 		c.Text = strings.TrimSpace(c.Text)
 		if c.Text == "" {
 			return errors.New("pick an item to spawn")

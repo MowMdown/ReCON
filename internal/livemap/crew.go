@@ -4,8 +4,7 @@ import (
 	"time"
 )
 
-// mergeVehicles puts the occupied vehicles a sync brought (mod 1.0.3 on)
-// into the last full list, by id (a new one is added). It returns a new
+// mergeVehicles puts the occupied vehicles a sync brought into the last full list, by id (a new one is added). It returns a new
 // slice: the old one may be being written out to a page.
 func mergeVehicles(all, crewed []Vehicle) []Vehicle {
 	out := make([]Vehicle, len(all), len(all)+len(crewed))
@@ -27,7 +26,7 @@ func mergeVehicles(all, crewed []Vehicle) []Vehicle {
 
 // OccupiedVehicles is the vehicles with someone in them (and any whose last
 // player just got out), for the Live Map to move every second (sent false:
-// the mod doesn't send them apart, as one before 1.0.3).
+// none yet, or the mod isn't connected).
 func OccupiedVehicles(now time.Time) (vs []Vehicle, sent bool) {
 	state.Lock()
 	defer state.Unlock()

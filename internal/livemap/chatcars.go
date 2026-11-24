@@ -11,7 +11,6 @@ import (
 	"errors"
 	"log"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -62,34 +61,31 @@ func SpawnChatVehicle(guid, class string, now time.Time) (CommandStatus, error) 
 	if err != nil {
 		return c, err
 	}
+	return markCommand(c, func(q *CommandStatus) { q.ChatCar = true }), nil
+}
+
+// markCommand changes the stored command c and returns it.
+func markCommand(c CommandStatus, mark func(*CommandStatus)) CommandStatus {
 	state.Lock()
+	defer state.Unlock()
 	for _, q := range state.commands {
 		if q.ID == c.ID {
-			q.ChatCar = true
-			c = *q
+			mark(q)
+			return *q
 		}
 	}
-	state.Unlock()
-	return c, nil
+	return c
 }
 
 // chatCarResult is a chat car the mod reported, to keep (after the lock).
 type chatCarResult struct{ guid, entity, class string }
 
-var oldModOnce sync.Once
-
-// keepChatCars stores what the results reported; a chat spawn that worked
-// without an entity is a mod before 0.0.1m, said once.
-func keepChatCars(found []chatCarResult, untracked bool, now time.Time) {
+// keepChatCars stores the chat cars the results reported.
+func keepChatCars(found []chatCarResult, now time.Time) {
 	for _, f := range found {
 		if err := saveChatCar(f.guid, f.entity, f.class, now); err != nil {
 			log.Printf("recon-mod: keeping %s's chat vehicle: %v", f.guid, err)
 		}
-	}
-	if untracked {
-		oldModOnce.Do(func() {
-			log.Printf("recon-mod: tracking chat vehicles needs recon-mod 0.0.1m (vehicles spawn, but the next one won't replace them)")
-		})
 	}
 }
 
@@ -108,15 +104,7 @@ func RemoveChatVehicle(guid string, now time.Time) (CommandStatus, string, error
 	if err != nil {
 		return c, class, err
 	}
-	state.Lock()
-	for _, q := range state.commands {
-		if q.ID == c.ID {
-			q.RemoveFor = guid
-			c = *q
-		}
-	}
-	state.Unlock()
-	return c, class, nil
+	return markCommand(c, func(q *CommandStatus) { q.RemoveFor = guid }), class, nil
 }
 
 func forgetChatCar(guid string) {
@@ -127,5 +115,3 @@ func forgetChatCar(guid string) {
 		log.Printf("recon-mod: forgetting %s's chat vehicle: %v", guid, err)
 	}
 }
-
-var oldRemoveOnce sync.Once

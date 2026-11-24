@@ -25,7 +25,7 @@ func TestModSyncOverHTTP(t *testing.T) {
 		json.Unmarshal(rec.Body.Bytes(), &out)
 		return rec.Code, out
 	}
-	sync := `{"v":1,"mod":"0.1.0","key":"%s","world":"chernarusplus","year":2026,"month":11,"day":20,"hour":14,"minute":5,
+	sync := `{"v":1,"mod":"1.0.3","key":"%s","world":"chernarusplus","year":2026,"month":11,"day":20,"hour":14,"minute":5,
 		"players":[{"steamId":"76561198000000001","name":"bob","x":7500.5,"y":10,"z":7600,"alive":true,"health":100,"unconscious":false}],
 		"events":[],"results":[]}`
 	if code, out := post("/api/mod/sync", strings.Replace(sync, "%s", "wrong", 1)); code != http.StatusForbidden || out["ok"] != false || out["error"] == "" {
@@ -130,7 +130,7 @@ func TestSyncFlagsAndBadJSON(t *testing.T) {
 		json.Unmarshal(rec.Body.Bytes(), &out)
 		return rec.Code, out
 	}
-	code, out := post(`{"v":1,"key":"secret","world":"enoch","weather":{"timeFrozen":1},
+	code, out := post(`{"v":1,"mod":"1.0.3","key":"secret","world":"enoch","weather":{"timeFrozen":1},
 		"players":[{"steamId":"76561198000000001","name":"a","alive":1,"unconscious":0,"restrained":false}],
 		"results":[{"id":1,"ok":1,"error":""}]}`)
 	if code != 200 || out["ok"] != true {
@@ -139,7 +139,7 @@ func TestSyncFlagsAndBadJSON(t *testing.T) {
 	if p, ok := PlayerOf(battlEyeGUID(76561198000000001), time.Now()); !ok || !bool(p.Alive) || bool(p.Unconscious) {
 		t.Errorf("player %+v", p)
 	}
-	code, out = post(`{"v":1,"key":"secret","players":[{"alive":"maybe"}]}`)
+	code, out = post(`{"v":1,"mod":"1.0.3","key":"secret","players":[{"alive":"maybe"}]}`)
 	if code != http.StatusBadRequest || !strings.Contains(out["error"].(string), "couldn't read") {
 		t.Errorf("bad JSON: %d %v", code, out)
 	}

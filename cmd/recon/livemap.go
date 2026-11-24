@@ -4,9 +4,7 @@ package main
 // server-side mod (github.com/MowMdown/ReCON-Mod), talks to.
 
 import (
-	"io/fs"
 	"log"
-	"net/http"
 	"path/filepath"
 
 	"github.com/MowMdown/ReCON/internal/game"
@@ -29,7 +27,7 @@ func init() {
 				web.AddNavLink(web.NavLink{Key: key, Label: label, Href: href, Icon: "map-trifold"})
 			},
 			AddQuiet:    web.AddQuiet,
-			Page:        func(files fs.FS, name string) http.HandlerFunc { return web.AddonPage(files, name) },
+			Page:        web.AddonPage,
 			SetGameDate: web.SetGameDate,
 			DataDir:     filepath.Dir(environmentOrDefault("DB_PATH", "/data/players.db")),
 		})

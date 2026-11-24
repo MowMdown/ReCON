@@ -1,10 +1,6 @@
 package livemap
 
 import (
-	"bytes"
-	"log"
-	"os"
-	"strings"
 	"testing"
 	"time"
 )
@@ -74,19 +70,13 @@ func TestChatCarKeptOnFailure(t *testing.T) {
 	}
 }
 
-func TestChatCarOldMod(t *testing.T) {
+func TestChatCarNoEntity(t *testing.T) {
 	now, sync := chatCarSetup(t)
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	c, _ := SpawnChatVehicle(guid(steamA), "Hatchback_02", now)
 	sync()
 	sync(Result{ID: c.ID, OK: true})
 	if _, ok := ChatVehicleOf(guid(steamA)); ok {
 		t.Error("stored a car without an entity")
-	}
-	if !strings.Contains(buf.String(), "tracking chat vehicles needs recon-mod") {
-		t.Errorf("no log line: %q", buf.String())
 	}
 }
 

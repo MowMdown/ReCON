@@ -67,6 +67,42 @@ type Save struct {
 	RestoredIDs []int  `json:"restoredIds"`
 }
 
+// gzipJSON is v as gzipped JSON, the way the item tables store items.
+func gzipJSON(v any) ([]byte, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return gzipBytes(raw)
+}
+
+func gzipBytes(raw []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	zw.Write(raw)
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// unpackItems reads items stored by gzipJSON.
+func unpackItems(blob []byte) ([]Item, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(blob))
+	if err != nil {
+		return nil, err
+	}
+	raw, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, err
+	}
+	var items []Item
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func countItems(items []Item) int {
 	n := 0
 	for _, it := range items {
@@ -80,16 +116,12 @@ func saveDeath(guid string, killID int64, items []Item, at time.Time) error {
 	if db == nil || len(items) == 0 {
 		return nil
 	}
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	if err := json.NewEncoder(zw).Encode(items); err != nil {
+	blob, err := gzipJSON(items)
+	if err != nil {
 		return err
 	}
-	if err := zw.Close(); err != nil {
-		return err
-	}
-	_, err := db.Exec(`INSERT INTO inventory_saves (guid, at, reason, kill_id, items, count) VALUES (lower(?), ?, 'death', ?, ?, ?)`,
-		guid, at.Unix(), killID, buf.Bytes(), countItems(items))
+	_, err = db.Exec(`INSERT INTO inventory_saves (guid, at, reason, kill_id, items, count) VALUES (lower(?), ?, 'death', ?, ?, ?)`,
+		guid, at.Unix(), killID, blob, countItems(items))
 	return err
 }
 
@@ -142,15 +174,7 @@ func InventorySave(id int64) (Save, error) {
 		return s, err
 	}
 	s.At = time.Unix(at, 0)
-	zr, err := gzip.NewReader(bytes.NewReader(blob))
-	if err != nil {
-		return s, err
-	}
-	data, err := io.ReadAll(zr)
-	if err != nil {
-		return s, err
-	}
-	if err := json.Unmarshal(data, &s.Items); err != nil {
+	if s.Items, err = unpackItems(blob); err != nil {
 		return s, err
 	}
 	json.Unmarshal([]byte(restored), &s.RestoredIDs)
@@ -234,7 +258,7 @@ func RestoreSaved(id int64, itemIDs []int, now time.Time) (CommandStatus, error)
 		return CommandStatus{}, errors.New("none of those items are in that saved inventory")
 	}
 	// Worn: a death restore makes up for a bug or a cheater, so gear ruined
-	// in the fight comes back usable (recon-mod 1.0.3 on; as saved before).
+	// in the fight comes back usable.
 	c, err := Queue(s.GUID, Command{Action: "restore", Items: noNulls(tree), Condition: "worn"}, now)
 	if err != nil {
 		return c, err
