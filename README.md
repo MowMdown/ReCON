@@ -260,7 +260,7 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
 - **Legend** shows what every mark means.
 - **Players, predators and occupied vehicles** refresh every second close in and more slowly zoomed out (every 10 s at 1 km), and every second while a player's dialog is open.
 
-**Clicking** a mark opens its popup:
+**Clicking** a mark opens its popup (on a small map, like a phone's, as a card in the middle of the screen; tap beside it to close):
 
 - **A player:** their state, health, food, blood and water, bleeding, vehicle, and what they wear and hold. **Info** opens their dialog, **Teleport** sends them to the next spot you click on the map (Esc cancels), **Spawn** opens their Spawn item tab, and **Follow** zooms to the 100 m step on them and keeps the map on them (as clicking them in the list does) until you drag it or click the **Following** button; zooming meanwhile (wheel, +/−, double-click, pinch) stays centered on them.
 - **A vehicle:** its condition, engine and fuel, then its driver and passengers (a name opens their popup). **Info…** opens its dialog; **Follow** (only while someone is driving) does the same for its driver, and stays on them after they get out.
