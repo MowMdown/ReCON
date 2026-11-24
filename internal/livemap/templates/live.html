@@ -810,7 +810,8 @@ let map, size = 0, world = '', gridLayer, labelLayer, imageLayer, markers = {};
 
 // Opening a popup never moves the map (every popup has autoPan off). One that
 // would open under the map's button bar opens below its marker instead (if it
-// fits, or there is more room below), and one past the map's left or right
+// fits, or there is more room below) and stays below, as its marker moves or
+// the map is panned, until it reaches the map's bottom edge; one past the map's left or right
 // edge slides its body back inside, its tip still on the marker.
 const POPUP_TOP = 50, POPUP_GAP = 8;
 (function () {
@@ -821,6 +822,9 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 		layout.call(this);
 		if (this._closeButton) this._wrapper.appendChild(this._closeButton);
 	};
+	// Each opening decides afresh whether it goes below.
+	const add = L.Popup.prototype.onAdd;
+	L.Popup.prototype.onAdd = function (m) { this._flipped = false; return add.call(this, m); };
 	const place = L.Popup.prototype._updatePosition;
 	L.Popup.prototype._updatePosition = function () {
 		const el = this._container, m = this._map;
@@ -828,7 +832,8 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 		const base = this._baseOffset || (this._baseOffset = L.point(this.options.offset));
 		const y = m.latLngToContainerPoint(this._latlng).y, h = el.offsetHeight, H = m.getSize().y;
 		const above = y + base.y - 20 - h, below = y + POPUP_GAP + 20 + h;
-		const flip = above < POPUP_TOP && (below <= H - 6 || H - y > y - POPUP_TOP);
+		const flip = this._flipped && below <= H - 6 || above < POPUP_TOP && (below <= H - 6 || H - y > y - POPUP_TOP);
+		this._flipped = flip;
 		this.options.offset = flip ? [base.x, POPUP_GAP + 20 + h] : [base.x, base.y];
 		el.classList.toggle('flipped', flip);
 		const r = place.call(this);
