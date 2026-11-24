@@ -5,3 +5,4 @@
 - Before starting new work, make sure the last pull request from `claude` is merged, then reset `claude` to the branch the next pull request will go into (`origin/testing` or `origin/dev`).
 - Don't open a pull request until asked to.
 - Don't report commits, pushes or pull requests unless one fails.
+- Never redraw a whole popup or dialog (modal) when its data updates. Patch only the parts whose values changed (text, colours, rows added or removed), so scroll position, focus, hover, open menus and in-progress input survive refreshes and nothing flashes. A full redraw is only for opening it or switching what it shows.
