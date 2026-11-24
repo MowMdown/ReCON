@@ -901,7 +901,7 @@ function drawScale() {
 	document.getElementById('scaleSpan').textContent = km(span) + ' across';
 }
 function initMap() {
-	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, maxBoundsViscosity: 1, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
+	map = L.map('map', { crs: L.CRS.Simple, minZoom: -6, maxZoom: zoomForBar(SCALE_STEPS[0]), zoomSnap: 0, maxBoundsViscosity: 0.8, scrollWheelZoom: false, doubleClickZoom: false, keyboardZoomOffset: 0, attributionControl: false, zoomControl: false });
 	stepWheel();
 	setTouchDrag();
 	watchTouches(map.getContainer(), 'twoHint', () => !map.dragging.enabled());
@@ -1196,8 +1196,9 @@ function fitMap(animate) {
 	map.fitBounds(b, { animate: false });
 	setEdges(true);
 }
-// setEdges makes the map picture's edges a hard stop: an edge can't be dragged
-// or zoomed inside the view, and a map smaller than the view stays centred.
+// setEdges makes the map picture's edges the limit: an edge drags a little way
+// inside the view, stiffly, and springs back when let go (maxBoundsViscosity);
+// a map smaller than the view stays centred.
 // Off while the view is set: Leaflet's pan back inside them is animated and
 // would undo it.
 function setEdges(on) { map.setMaxBounds(on ? mapBounds() : L.latLngBounds([])); }
