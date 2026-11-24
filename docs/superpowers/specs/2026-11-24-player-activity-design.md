@@ -168,6 +168,21 @@ Replay plays one session from start to end.
 - Alerts or Flows triggers for cheat flags.
 - Recording who (which admin) sent a command.
 
+## Future: cheat detection
+
+Activity's flags are the start of a cheat detection system:
+
+- **Flags on the web:** a flagged player shows a red badge in the Live Map's
+  player list and on the Players page, with their flags listed (Possible
+  Teleport, Possible Speed Hack, Possible Hack kills).
+- **Hit checks (needs a recon-mod update):** a hit from beyond the weapon's
+  max range, or doing more damage than its ammo can at that distance (after
+  falloff), is flagged; a death from it is a Possible Hack kill.
+- **`!cheat` chat command:** a player reports a suspected cheater in game.
+  ReCON gathers the evidence (that player's flags, their trail and events
+  around the time, the kills involved) and presents it to admins as a case
+  on the web, to review, dismiss or act on (kick, ban).
+
 ## Open questions for the plan
 
 - The speed limit for "Possible speed hack" (a sprint is about 6–7 m/s;
