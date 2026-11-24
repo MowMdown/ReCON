@@ -833,9 +833,10 @@ const POPUP_TOP = 50, POPUP_GAP = 8;
 })();
 // viewSpan is the metres across the map's view.
 function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoom())); }
-// Zoom moves in scale-bar steps: the bar is always SCALE_PX long and reads
-// one of SCALE_STEPS metres; out past the last step is Fit.
-const SCALE_PX = 100, SCALE_STEPS = [25, 50, 100, 200, 500, 1000];
+// The scale bar is always SCALE_PX long. + and −, a double-click and the
+// keyboard zoom in its SCALE_STEPS (out past the last one is Fit); the wheel
+// zooms WHEEL_ZOOM a click, and a pinch stops wherever it lands.
+const SCALE_PX = 100, SCALE_STEPS = [25, 50, 100, 200, 500, 1000], WHEEL_ZOOM = 1.2;
 function zoomForBar(m) { return Math.log2(SCALE_PX / m); }
 // barMetres is the scale bar's length in metres at zoom z (default: the
 // zoom the map is at or animating to).
@@ -853,32 +854,31 @@ function stepZoom(dir, around) {
 	if (Math.abs(z - map.getZoom()) < 1e-6) return;
 	if (around) map.setZoomAround(around, z); else map.setZoom(z);
 }
-// stepWheel makes the wheel, pinch, +/- and double-click zoom in steps
-// (a trackpad's small scrolls add up to one).
-function stepWheel() {
+// onWheel calls zoom(dir, point) once a wheel click (1 in, -1 out), with a
+// trackpad's small scrolls adding up to one.
+function onWheel(el, zoom) {
 	let acc = 0, last = 0;
-	map.getContainer().addEventListener('wheel', e => {
+	el.addEventListener('wheel', e => {
 		e.preventDefault();
-		const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
-		acc += d;
+		acc += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
 		const now = Date.now();
-		if (Math.abs(acc) < 50 || now - last < 120) return;
+		if (Math.abs(acc) < 50 || now - last < 60) return;
 		last = now;
 		const dir = acc < 0 ? 1 : -1;
 		acc = 0;
-		stepZoom(dir, map.mouseEventToContainerPoint(e));
+		zoom(dir, e);
 	}, { passive: false });
-	// A pinch snaps to the nearest step (or Fit) once it ends.
-	let pinched = false;
-	map.getContainer().addEventListener('touchstart', e => { if (e.touches.length > 1) pinched = true; }, { passive: true });
-	map.on('zoomend', () => {
-		if (!pinched) return;
-		pinched = false;
-		const m = barMetres(map.getZoom());
-		const near = SCALE_STEPS.concat([barMetres(map.getMinZoom())]).reduce((a, b) => Math.abs(b - m) < Math.abs(a - m) ? b : a);
-		const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zoomForBar(near)));
-		if (Math.abs(z - map.getZoom()) > 1e-6) map.setZoom(z);
-	});
+}
+// wheelZoom zooms map m by WHEEL_ZOOM, in (1) or out (-1), within its limits,
+// about the point given (none: its centre).
+function wheelZoom(m, dir, point) {
+	const z = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), m.getZoom() + dir * Math.log2(WHEEL_ZOOM)));
+	if (Math.abs(z - m.getZoom()) < 1e-6) return;
+	if (point) m.setZoomAround(point, z, { animate: false }); else m.setZoom(z, { animate: false });
+}
+// stepWheel sets up the big map's zoom: the wheel, + and −, double-click and keys.
+function stepWheel() {
+	onWheel(map.getContainer(), (dir, e) => wheelZoom(map, dir, map.mouseEventToContainerPoint(e)));
 	map.zoomIn = function () { stepZoom(1); return this; };
 	map.zoomOut = function () { stepZoom(-1); return this; };
 	map.on('dblclick', e => stepZoom(e.originalEvent.shiftKey ? -1 : 1, e.containerPoint));
@@ -891,7 +891,7 @@ function drawScale() {
 	if (!(span > 0)) return;
 	const m = barMetres(map.getZoom()), step = SCALE_STEPS.find(s => Math.abs(s - m) / s < 0.01);
 	document.getElementById('scaleBar').style.width = SCALE_PX + 'px';
-	document.getElementById('scaleLen').textContent = km(step || (m >= 1000 ? Math.round(m / 100) * 100 : Math.round(m)));
+	document.getElementById('scaleLen').textContent = km(step || (m >= 1000 ? Math.round(m / 100) * 100 : m >= 100 ? Math.round(m / 10) * 10 : Math.round(m)));
 	document.getElementById('scaleSpan').textContent = km(span) + ' across';
 }
 function initMap() {
@@ -3182,7 +3182,8 @@ document.getElementById('pKills').addEventListener('click', e => {
 
 // ---- The mini-map ------------------------------------------------------------
 // The player's surroundings: it follows them until moved (Recenter goes back),
-// zooms in MINI_STEPS; a click picks a teleport spot, a double click goes there.
+// + and − zoom in MINI_STEPS (the wheel 20% a click, a pinch anywhere, all from
+// 25 m to 500 m); a click picks a teleport spot, a double click goes there.
 const MINI_STEPS = [25, 50, 100, 200, 500], MINI_HOME = 50;
 let miniMap = null, miniPic = null, miniGrid = null, miniMarks = null, miniW = 0, mini = { follow: true }, tpPick = null;
 function resetMini() {
@@ -3207,12 +3208,7 @@ function ensureMini() {
 		miniMarks = L.layerGroup().addTo(miniMap);
 		miniMap.on('dragstart', () => { mini.follow = false; });
 		miniMap.on('moveend zoomend', drawMiniGrid);
-		// A pinch snaps to the nearest step.
-		miniMap.on('zoomend', () => {
-			const m = miniBar(), near = MINI_STEPS.reduce((x, y) => Math.abs(y - m) < Math.abs(x - m) ? y : x);
-			if (Math.abs(zoomForBar(near) - miniMap.getZoom()) > 1e-6) miniMap.setZoom(zoomForBar(near));
-			miniHud();
-		});
+		miniMap.on('zoomend', miniHud);
 		miniMap.on('click', e => miniPick(e.latlng.lng, e.latlng.lat));
 		miniMap.on('dblclick', e => miniTeleport(e.latlng.lng, e.latlng.lat));
 		miniMap.on('mousemove', e => {
@@ -3220,15 +3216,8 @@ function ensureMini() {
 			document.getElementById('miniXY').textContent = x >= 0 && z >= 0 ? Math.round(x) + ', ' + Math.round(z) + ' · ' + grid(x, z) : '';
 		});
 		miniMap.on('mouseout', () => { document.getElementById('miniXY').textContent = ''; });
-		let wheel = 0;
-		el.addEventListener('wheel', e => {
-			e.preventDefault();
-			wheel += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-			const n = Math.trunc(wheel / 100) || (Math.abs(e.deltaY) >= 50 && e.deltaMode === 0 ? Math.sign(e.deltaY) : 0);
-			if (!n) return;
-			wheel = 0;
-			stepMini(-Math.sign(n), miniMap.mouseEventToContainerPoint(e));
-		}, { passive: false });
+		// The wheel as on the big map: about the cursor, or the player while following them.
+		onWheel(el, (dir, e) => wheelZoom(miniMap, dir, mini.follow ? null : miniMap.mouseEventToContainerPoint(e)));
 		el.addEventListener('touchstart', e => { if (e.touches.length > 1) mini.follow = false; }, { passive: true });
 		watchTouches(el, 'miniHint', () => true);
 		setMiniPicture();
