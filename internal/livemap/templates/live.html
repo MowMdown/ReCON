@@ -58,7 +58,7 @@ html[data-theme]:not([data-theme="default"]) {
 .empty { color: var(--lm-muted); font-size: 13px; line-height: 1.5; }
 /* No text selection or callout: a long press opens the map's own menu. */
 .mapwrap { position: relative; border: 1px solid var(--lm-line); border-radius: 6px; overflow: hidden; background: var(--lm-ground); min-height: 420px;
-	-webkit-user-select: none; user-select: none; -webkit-touch-callout: none; container: mapwrap / inline-size; }
+	-webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 /* A popup flipped below its marker (see L.Popup patch). */
 .leaflet-popup.flipped { margin-bottom: 0; }
 .leaflet-popup.flipped .leaflet-popup-tip-container { top: -20px; margin-top: 0; transform: rotate(180deg); }
@@ -75,7 +75,10 @@ html[data-theme]:not([data-theme="default"]) {
 .mapscale .muted { font-size: 11.5px; }
 .mapscale #scaleXY { font-variant-numeric: tabular-nums; }
 .mapscale #scaleXY:not(:empty)::before { content: '·'; margin-right: 8px; color: var(--lm-muted); }
-.mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
+.mapbar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 500; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; pointer-events: none; }
+/* One row: the Following and pick chips shrink (with …) before anything wraps. */
+.mapbar > * { flex: none; }
+.mapbar #trackBtn, .mapbar .pick { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mapbar > * { pointer-events: auto; }
 .mapbar.menuopen { z-index: 1001; }
 .mapbar button.on { border-color: var(--lm-accent); color: var(--lm-text-hi); }
@@ -196,14 +199,8 @@ button.danger.go { background: #5c3533 !important; color: #fff !important; borde
 .worldbar .badge { margin: 0; font: inherit; font-size: 12px; background: var(--lm-surface); border: 1px solid var(--lm-line); border-radius: 4px; padding: 3px 8px; color: var(--lm-text); cursor: pointer; }
 .worldbar .badge:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .worldbar .badge[hidden] { display: none; }
-/* Fit, Fill and Full screen stay on the right; on a narrow map Full screen
-   goes under Fit and Fill rather than the group wrapping below Overlays. */
-.mapbar .mapbtns { margin-left: auto; display: flex; gap: 8px; pointer-events: none; }
-.mapbar .mapbtns > * { pointer-events: auto; }
-@container mapwrap (max-width: 520px) {
-	.mapbar .mapbtns { display: grid; grid-template-columns: auto auto; }
-	.mapbar #fullBtn { grid-column: 1 / -1; justify-self: end; }
-}
+/* Fit, Fill and Full on the right. */
+.mapbar .mapbtns { margin-left: auto; display: flex; gap: 8px; }
 .mapbar button { margin: 0; background: var(--lm-overlay); color: var(--lm-text); border: 1px solid var(--lm-line2); }
 .mapbar button:hover { border-color: var(--lm-accent); color: var(--lm-text-hi); }
 .mapbar button:disabled { opacity: .45; }
@@ -543,7 +540,7 @@ html[data-theme]:not([data-theme="default"]) .killkinds button.on, html[data-the
 			<div class="mapbtns">
 				<button type="button" onclick="fitAll()" title="Show the whole map">Fit</button>
 				<button type="button" onclick="fillWidth()" title="Zoom so the map's width fills the view, edge to edge">Fill</button>
-				<button type="button" id="fullBtn" onclick="toggleFull()" title="Make the map fill the window (Esc to go back)">Full screen</button>
+				<button type="button" id="fullBtn" onclick="toggleFull()" title="Make the map fill the window (Esc to go back)">Full</button>
 			</div>
 		</div>
 	</div>
@@ -1200,7 +1197,7 @@ function toggleFull(on) {
 	wrap.classList.toggle('full', on);
 	document.body.style.overflow = on ? 'hidden' : '';
 	const b = document.getElementById('fullBtn');
-	b.textContent = on ? 'Exit full screen' : 'Full screen';
+	b.textContent = on ? 'Exit' : 'Full';
 	b.title = on ? 'Put the map back in the page (Esc)' : 'Make the map fill the window (Esc to go back)';
 	map.invalidateSize({ pan: false });
 	map.panTo(c, { animate: false });
