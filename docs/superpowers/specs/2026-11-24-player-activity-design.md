@@ -44,19 +44,22 @@ records.
 |---|---|---|
 | Joined | 🟢 Joined | session start (`session_history` / `active_sessions`) |
 | Left | 🔴 Left | session end |
-| Vehicle trip | 🚗 Got in Olga 24 · driver / 🚗 Got out of Olga 24 · drove 2.4 km | `vehicleId`, `seat`, `driver` |
-| Bleeding | 🩸 Started bleeding (2 cuts) / Stopped bleeding | `bleeding` |
-| Broken leg | 🦴 Broke a leg / Leg mended | `brokenLegs` |
-| Sickness | 🤢 Got sick: cholera / Cured: cholera | `agents` bits |
-| Knocked out | 💤 Knocked out / Woke up | `unconscious` |
+| Vehicle trip | 🚗 Olga 24 · driver / 🚗 Out · 2.4 km | `vehicleId`, `seat`, `driver` |
+| Bleeding | 🩸 Bleeding · 2 / Stopped | `bleeding` |
+| Broken leg | 🦴 Broken leg / Mended | `brokenLegs` |
+| Sickness | 🤢 Cholera / Cured | `agents` bits |
+| Knocked out | 💤 Out / Awake | `unconscious` |
 | Restrained | ⛓ Restrained / Freed | `restrained` |
-| Killed someone | ⚔ Killed Mossy · M4A1 · 120 m | `mod_kills` (killer) |
-| Died | ☠ Killed by Wren · SVD · 340 m / ☠ Died: bled out | `mod_kills` (victim, cause) |
+| Killed someone | ⚔ Mossy · M4A1 · 120 m | `mod_kills` (killer) |
+| Died | ☠ Wren · SVD · 340 m / ☠ Bled out | `mod_kills` (victim, cause) |
 | Respawned | 🔁 Respawned | alive again after dying |
-| Admin action | 🛠 Admin: healed / teleported 3.1 km / spawned M4A1 … | the commands ReCON sends for them |
+| Admin action | 🛠 Healed / Teleported 3.1 km / Spawned M4A1 | the commands ReCON sends for them |
 | Staff teleport | 🛠 Teleported 420 m · Mod | the same jump by a player with the Mod or Admin role (they may teleport in game) |
-| Possible teleport | ⚠ Possible teleport (420 m in 1 s) | a jump of more than ~100 m in one sync, on foot, with no admin teleport behind it, by a player below Mod |
-| Possible speed hack | ⚠ Possible speed hack | on-foot speed over a limit no player reaches, held for several syncs, by a player below Mod |
+| Possible teleport | ⚠ Teleport? 420 m | a jump of more than ~100 m in one sync, on foot, with no admin teleport behind it, by a player below Mod |
+| Possible speed hack | ⚠ Speed? 14 m/s | on-foot speed over a limit no player reaches, held for several syncs, by a player below Mod |
+
+Labels stay short: what, then the key numbers. Tooltips add the time and
+place; nothing longer.
 
 Not recorded: chat, "now driving" (a seat change to driver mid-trip), and
 the item in their hands.
@@ -127,7 +130,7 @@ A new tab in the Live Map's player dialog, for online and offline players
 (offline ones open from the Offline list, as today). Not on the Players page.
 
 - Sessions, newest first, within the kept days: date, joined → left, length,
-  and a one-line summary (2 kills, 1 death, drove 5.1 km).
+  and a short summary: `2 kills · 1 death · 5.1 km`.
 - Opening a session lists its events in order with their times. Filters by
   kind: vehicles, combat, health, admin, cheat flags.
 - Clicking an event shows that spot on the mini-map.
