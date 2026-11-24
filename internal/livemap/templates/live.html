@@ -2842,17 +2842,25 @@ function renderList() {
 	}).join(''));
 }
 
-// A click on an online player follows them on the map at the 100 m step; an
-// offline one (no position) opens their dialog.
+// followPlayer follows an online player on the map at the 100 m step: a
+// click on them in the list, and Follow in a player's or vehicle's popup.
+function followPlayer(guid) {
+	const p = byGuid[guid];
+	if (!p) return;
+	track = { kind: 'player', id: guid };
+	renderTrack();
+	renderPlayerPopup();
+	renderVehicle();
+	map.setView([p.z, p.x], Math.min(map.getMaxZoom(), zoomForBar(100)));
+}
+// A click on an online player follows them; an offline one (no position)
+// opens their dialog.
 document.getElementById('plist').addEventListener('click', e => {
 	const b = e.target.closest('.prow');
 	if (!b) return;
-	const g = b.dataset.guid, p = byGuid[g];
-	if (!p) { openPlayer(g); return; }
-	track = { kind: 'player', id: g };
-	renderTrack();
-	renderPlayerPopup();
-	map.setView([p.z, p.x], Math.min(map.getMaxZoom(), zoomForBar(100)));
+	const g = b.dataset.guid;
+	if (!byGuid[g]) { openPlayer(g); return; }
+	followPlayer(g);
 	document.querySelector('.mapwrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 });
 document.getElementById('find').addEventListener('input', renderList);
@@ -3010,13 +3018,13 @@ function vehicleFollow(id) {
 	const v = vehicles.find(x => x.id === id), d = v && vehDriver(v);
 	if (!v) return;
 	if (followingVeh(v)) setTrack(null);
-	else if (d) setTrack({ kind: 'player', id: d.guid });
+	else if (d) followPlayer(d.guid);
 	renderVehicle();
 }
 // playerFollow leaves the popup open: a moving player is hard to long-press.
 function playerFollow(guid) {
 	const following = track && track.kind === 'player' && track.id === guid;
-	setTrack(following ? null : { kind: 'player', id: guid });
+	if (following) setTrack(null); else followPlayer(guid);
 	renderPlayerPopup();
 }
 // playerPopupAct is the popup's Teleport (pick a spot) and Spawn.
