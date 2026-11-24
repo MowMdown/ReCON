@@ -1588,11 +1588,11 @@ function renderVehicle() {
 	if (v) vehPopup.setLatLng([v.z, v.x]).setContent('<div class="vpop" data-noicon>' + backLink('veh', v.id) + '<h4>' + esc(catLabel(v)) + '</h4><div class="ty">' + esc(v.type) + '</div>' +
 		vehPopRows(v) +
 		'<div class="acts pairs"><button type="button" onclick="event.stopPropagation(); openVehicleInfo(' + v.id + ')" title="Its parts, damage, cargo and Delete">Info…</button>' +
-		// Follow only with a driver (Stop while already following it); Info
+		// Follow (its driver) only with a driver, Stop while following; Info
 		// alone spans the row, so the popup keeps its width.
-		(track && track.kind === 'vehicle' && track.id === v.id
-			? '<button type="button" class="on" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Stop keeping the map on it">Stop</button>'
-			: crewOf(v).some(p => p.driver) ? '<button type="button" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Keep the map on it as it moves">Follow</button>' : '') + '</div></div>');
+		(followingVeh(v)
+			? '<button type="button" class="on" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Stop keeping the map on them">Stop</button>'
+			: vehDriver(v) ? '<button type="button" onclick="event.stopPropagation(); vehicleFollow(' + v.id + ')" title="Keep the map on ' + esc(vehDriver(v).name) + ', its driver, as they move">Follow</button>' : '') + '</div></div>');
 	renderVehicleInfo();
 	drawArrowsShown();
 }
@@ -2578,14 +2578,14 @@ function showPlayerCtx(guid, e) {
 function showVehicleCtx(id, e) {
 	const v = vehicles.find(x => x.id === id);
 	if (!v) return;
-	const following = track && track.kind === 'vehicle' && track.id === id;
+	const following = followingVeh(v), d = vehDriver(v);
 	openCtx(e.containerPoint, { id },
 		'<div class="hd">' + esc(catLabel(v)) + ' · ' + grid(v.x, v.z) + '</div>' +
-		ctxItem('info', 'Info…') + ctxItem('follow', following ? 'Stop following' : 'Follow Vehicle') +
+		ctxItem('info', 'Info…') + (following ? ctxItem('follow', 'Stop following') : d ? ctxItem('follow', 'Follow ' + esc(d.name)) : '') +
 		ctxTeleportList('Teleport a player beside it') + '<div class="lbl">Vehicle</div>' + ctxItem('delete', 'Delete', 'bad'),
 		a => {
 			if (a === 'info') { closeCtx(); openVehicleInfo(id); }
-			else if (a === 'follow') { closeCtx(); setTrack(following ? null : { kind: 'vehicle', id }); }
+			else if (a === 'follow') { closeCtx(); vehicleFollow(id); }
 			else if (ctxAsk(a)) return;
 			// Beside it (3 m east), not on top of it.
 			else if (a.startsWith('tpok:')) { const p = byGuid[a.slice(5)]; ctxRun('Teleporting ' + (p ? p.name : 'them'), '/api/mod/players/' + a.slice(5) + '/teleport', { x: v.x + 3, z: v.z, y: 0 }); }
@@ -2978,9 +2978,18 @@ async function loadPlayerPopup() {
 	} catch (e) { }
 }
 setInterval(() => { if (plOpen) loadPlayerPopup(); }, 2000);
+// Following a vehicle follows its driver, so the map stays on them when
+// they get out. vehDriver is who drives v (none: no Follow).
+function vehDriver(v) { return crewOf(v).find(p => p.driver) || null; }
+function followingVeh(v) {
+	const d = vehDriver(v);
+	return !!track && (track.kind === 'vehicle' ? track.id === v.id : !!d && track.id === d.guid);
+}
 function vehicleFollow(id) {
-	const following = track && track.kind === 'vehicle' && track.id === id;
-	setTrack(following ? null : { kind: 'vehicle', id });
+	const v = vehicles.find(x => x.id === id), d = v && vehDriver(v);
+	if (!v) return;
+	if (followingVeh(v)) setTrack(null);
+	else if (d) setTrack({ kind: 'player', id: d.guid });
 	renderVehicle();
 }
 // playerFollow leaves the popup open: a moving player is hard to long-press.
