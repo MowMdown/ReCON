@@ -2185,7 +2185,7 @@ document.getElementById('rTree').addEventListener('change', e => {
 	box.closest('.rnode').querySelectorAll('.rkids input').forEach(c => { c.checked = box.checked; });
 	restoreCount();
 });
-document.getElementById('rAll').addEventListener('click', () => { document.querySelectorAll('#rTree input').forEach(c => { c.checked = !c.dataset.done; }); restoreCount(); });
+document.getElementById('rAll').addEventListener('click', () => { document.querySelectorAll('#rTree input').forEach(c => { c.checked = true; }); restoreCount(); }); // given back or not
 document.getElementById('rNone').addEventListener('click', () => { document.querySelectorAll('#rTree input').forEach(c => { c.checked = false; }); restoreCount(); });
 document.getElementById('rGo').addEventListener('click', async () => {
 	const s = restoreSave;
