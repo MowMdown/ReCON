@@ -84,7 +84,7 @@ var ChatCommandDefs = []chatCommandDef{
 		Fields: []chatField{
 			{"confirm", "Asks to confirm (to the player)", "Replace your gear with your saved loadout ({count} items)? Type confirm within 30 s", []string{"count"}},
 			{"equipped", "Equipped (to the player)", "Loadout equipped: {count} items", []string{"count"}},
-			{"cancelled", "Not confirmed (to the player: another message, or 30 s passed)", "Loadout not equipped", []string{}},
+			{"canceled", "Not confirmed (to the player: another message, or 30 s passed)", "Loadout not equipped", []string{}},
 			{"none", "No loadout (to the player)", "No loadout saved, use !save first", []string{}},
 		}},
 	{Cmd: "remove", Role: RoleVehicles, Cool: "0", NeedsMod: true,

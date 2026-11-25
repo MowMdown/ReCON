@@ -152,11 +152,7 @@ type Predator struct {
 	X       float64 `json:"x"`
 	Z       float64 `json:"z"`
 	Heading float64 `json:"heading"` // degrees, 0 = north, clockwise
-	// Health 0-1; Behaviour is the AI's DayZAnimalBehaviourSlot, Activity
-	// its DayZAnimalBehaviourAction (-1 unknown); Attacking while it bites.
 	Health    *float64 `json:"health,omitempty"`
-	Behaviour *int     `json:"behaviour,omitempty"`
-	Activity  *int     `json:"activity,omitempty"`
 	Attacking Flag     `json:"attacking"`
 }
 

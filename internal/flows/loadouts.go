@@ -87,7 +87,7 @@ func runEquipCommand(p battleye.Player, set chatSetting) {
 		}
 		equipPending.Unlock()
 		if ok {
-			chatSay(p, false, fillTemplate(ask.set.Msgs["cancelled"], nil))
+			chatSay(p, false, fillTemplate(ask.set.Msgs["canceled"], nil))
 		}
 	}()
 }
@@ -107,7 +107,7 @@ func answerEquip(p battleye.Player, message string) bool {
 	delete(equipPending.m, guid)
 	equipPending.Unlock()
 	if msg != "confirm" {
-		chatSay(p, false, fillTemplate(ask.set.Msgs["cancelled"], nil))
+		chatSay(p, false, fillTemplate(ask.set.Msgs["canceled"], nil))
 		return true
 	}
 	n, err := equipLoadout(p.GUID)

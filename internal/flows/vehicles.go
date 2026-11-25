@@ -132,7 +132,7 @@ func runVehicleCommand(cmd string, p battleye.Player, set chatSetting, args []st
 		chatSay(p, false, err.Error())
 		return
 	}
-	if chatSay(p, false, fillTemplate(set.Msgs["spawned"], map[string]string{"vehicle": shown, "color": color, "colour": color /* messages saved before {color} */})) {
+	if chatSay(p, false, fillTemplate(set.Msgs["spawned"], map[string]string{"vehicle": shown, "color": color})) {
 		markUsed(cmd)
 	}
 }
