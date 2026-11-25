@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -54,6 +55,10 @@ func handleModSync(w http.ResponseWriter, r *http.Request) {
 // connected, every online player's live state, and the recent commands.
 func handleModPlayers(w http.ResponseWriter, r *http.Request) {
 	st, players := Current(time.Now())
+	roles := staffRoles(time.Now())
+	for i := range players {
+		players[i].Role = roles[players[i].GUID]
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mod": st, "players": players, "commands": Commands("")})
 }
 
@@ -225,4 +230,36 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any, limit int64) er
 		return nil
 	}
 	return err
+}
+
+// staffRoles is lower-case GUID -> role for every Mod (1) and Admin (2),
+// read from the players table at most every 5 s (the page asks every second).
+var staffCache struct {
+	sync.Mutex
+	at    time.Time
+	roles map[string]int
+}
+
+func staffRoles(now time.Time) map[string]int {
+	staffCache.Lock()
+	defer staffCache.Unlock()
+	if staffCache.roles != nil && now.Sub(staffCache.at) < 5*time.Second {
+		return staffCache.roles
+	}
+	roles := map[string]int{}
+	if db != nil {
+		rows, err := db.Query(`SELECT lower(guid), role FROM players WHERE role IN (1, 2)`)
+		if err == nil {
+			for rows.Next() {
+				var g string
+				var r int
+				if rows.Scan(&g, &r) == nil {
+					roles[g] = r
+				}
+			}
+			rows.Close()
+		}
+	}
+	staffCache.at, staffCache.roles = now, roles
+	return roles
 }

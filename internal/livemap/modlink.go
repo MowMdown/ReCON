@@ -393,6 +393,9 @@ type Player struct {
 	GUID string `json:"guid"`
 	PlayerState
 	Illnesses []string `json:"illnesses"`
+	// Role is 1 for a Mod and 2 for an Admin (the Players page), else 0;
+	// filled in by the players API (staffRoles).
+	Role int `json:"role,omitempty"`
 }
 
 // Position is a spot in the world (y is the height).

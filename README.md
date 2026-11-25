@@ -257,6 +257,7 @@ It shows what [recon-mod](#with-recon-mod) sends; without the mod running on the
   - **Events:** where the mission spawns events (heli crashes, convoys, police, medical, gas zones, other), ticked by kind and by **Active** / **Inactive**; active ones in their colour, with counts. Gas zones show their area: red when static, grey (at the size it last had) while a dynamic one is down.
   - **Grid** (on by default): the 1 km lines and their numbers, and 100 m lines from the 200 m step in.
   - **Deaths:** a red X where each player died in the last hour, 6 hours, 24 hours, 7 days or 30 days; hover one for who, how and when.
+- A **Mod** has a small shield above their name on the map, an **Admin** a small crown (their role on the Players page).
 - **Legend** shows what every mark means.
 - **Players, predators and occupied vehicles** refresh every second close in and more slowly zoomed out (every 10 s at 1 km), and every second while a player's dialog is open.
 

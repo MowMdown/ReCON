@@ -319,6 +319,10 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .pmark span { position: absolute; left: 11px; top: -8px; white-space: nowrap; font-size: 12px; color: var(--lm-text); cursor: pointer; text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
 .pmark.sel svg circle { display: block !important; }
 .pmark .dx { display: none; }
+/* A Mod's shield or an Admin's crown, above the name. */
+.pmark .role { position: absolute; left: 11px; top: -23px; width: 12px; height: 12px; pointer-events: none; }
+.pmark .role svg { position: static; display: block; width: 12px; height: 12px; }
+.lgi .role svg { width: 12px; height: 12px; }
 .pmark.dead .dx { display: inline; }
 .pmark.dead .arr { display: none; }
 .modal { z-index: 1100; align-items: flex-start; padding-top: 4vh; overflow-y: auto; }
@@ -1253,6 +1257,12 @@ function arrowSVG(color) {
 		'<path d="M0 0.6 L-0.9 2 L0.9 2 Z" fill="#111" stroke="none"/><path d="M-1.2 3.4 V6.2 M1.2 3.4 V6.2" stroke-width="1.4"/></g></svg>';
 }
 
+// ROLE_SVG is a Mod's shield (1) and an Admin's crown (2).
+const ROLE_NAME = { 1: 'Mod', 2: 'Admin' };
+const ROLE_SVG = {
+	1: '<svg viewBox="0 0 12 12"><path d="M6 .8 L10.6 2.6 V6 C10.6 8.6 8.6 10.4 6 11.2 C3.4 10.4 1.4 8.6 1.4 6 V2.6 Z" fill="#8ab4f8" stroke="#111" stroke-width="1"/></svg>',
+	2: '<svg viewBox="0 0 12 12"><path d="M1.2 10 L.8 3.4 L3.8 6 L6 1.8 L8.2 6 L11.2 3.4 L10.8 10 Z" fill="#fdd663" stroke="#111" stroke-width="1"/></svg>',
+};
 function drawMarkers() {
 	const seen = {};
 	players.forEach(p => {
@@ -1260,7 +1270,7 @@ function drawMarkers() {
 		let m = markers[p.guid];
 		if (!m) {
 			const guid = p.guid;
-			m = L.marker([p.z, p.x], { pane: 'players', icon: L.divIcon({ className: 'pmark', html: arrowSVG(colorOf(guid)) + '<span></span>', iconSize: [0, 0] }), keyboard: false });
+			m = L.marker([p.z, p.x], { pane: 'players', icon: L.divIcon({ className: 'pmark', html: arrowSVG(colorOf(guid)) + '<span></span><i class="role"></i>', iconSize: [0, 0] }), keyboard: false });
 			m._st = { k: 'ply', id: guid };
 			m.on('click', () => stackOr(m, () => openPlayerPopup(guid)));
 			m.on('contextmenu', e => showPlayerCtx(guid, e));
@@ -1272,6 +1282,8 @@ function drawMarkers() {
 		if (el) {
 			el.querySelector('.arr').setAttribute('transform', 'rotate(' + (p.heading || 0) + ')');
 			el.querySelector('span').textContent = p.name;
+			const r = el.querySelector('.role'), role = p.role === 1 || p.role === 2 ? p.role : 0;
+			if (r && r.dataset.role !== String(role)) { r.dataset.role = role; r.innerHTML = ROLE_SVG[role] || ''; r.title = ROLE_NAME[role] || ''; }
 			el.classList.toggle('sel', p.guid === selGuid);
 			el.classList.toggle('dead', !p.alive);
 			// In a shown vehicle the vehicle's marker stands for them.
@@ -1913,6 +1925,8 @@ function legendHTML() {
 	return col(sec('Players', [
 			row(arrowSVG('#c58af9'), 'Player'),
 			row('<span class="lgdead">' + arrowSVG('#c58af9') + '</span>', 'Dead player'),
+			row('<span class="role">' + ROLE_SVG[1] + '</span>', 'Mod'),
+			row('<span class="role">' + ROLE_SVG[2] + '</span>', 'Admin'),
 			row(DEATH_SVG, 'Where a player died')]) +
 		sec('Vehicles', [
 			row(vehShape('#e8eaed'), 'Parked; Engine off'),
