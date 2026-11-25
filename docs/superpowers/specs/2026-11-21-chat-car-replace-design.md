@@ -68,7 +68,7 @@ scanning `ReCON_Vehicles`' list.
 - A mod before 0.0.1m ignores `replace` and reports no entity: the car
   spawns, nothing is tracked or deleted, and ReCON logs once that tracking
   needs recon-mod 0.0.1m.
-- The chat reply stays `Spawning <vehicle> (<colour>)`; no new message.
+- The chat reply stays `Spawning <vehicle> (<color>)`; no new message.
 
 ## Constraints
 

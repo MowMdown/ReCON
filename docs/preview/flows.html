@@ -597,7 +597,7 @@ var setStatusCount;
 				</tbody>
 			</table>
 			<h3>When stopped</h3>
-			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its dotted handle into When stopped, and back.</p>
+			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart canceled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its dotted handle into When stopped, and back.</p>
 		</div>
 
 		<div class="helppane" data-pane="conditions">
@@ -689,7 +689,7 @@ var setStatusCount;
 					<tr><td><code>!code</code></td><td>Sends the player's code (last 6 characters of their GUID) to the mods and admins online</td></tr>
 					<tr><td><code>!kick &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
 					<tr><td><code>!ban &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently; by code, even if they have left</td></tr>
-					<tr><td><code>!car</code>, <code>!truck</code>, <code>!boat</code>, <code>!vehicle &lt;name&gt; [colour]</code></td><td>Vehicles players, Mods and Admins, with recon-mod on the server: spawns that vehicle whole in front of them, from the map's <code>maps/&lt;map&gt;/vehicles.json</code> in ReCON's data folder. Alone (<code>!car</code>), lists the names. No colour picks <code>default</code>, or a random one. Case doesn't matter. ReCON writes a first file from the server's vehicles once the mod connects, and never changes it after; edits take effect straight away</td></tr>
+					<tr><td><code>!car</code>, <code>!truck</code>, <code>!boat</code>, <code>!vehicle &lt;name&gt; [color]</code></td><td>Vehicles players, Mods and Admins, with recon-mod on the server: spawns that vehicle whole in front of them, from the map's <code>maps/&lt;map&gt;/vehicles.json</code> in ReCON's data folder. Alone (<code>!car</code>), lists the names. No color picks <code>default</code>, or a random one. Case doesn't matter. ReCON writes a first file from the server's vehicles once the mod connects, and never changes it after; edits take effect straight away</td></tr>
 					<tr><td><code>!remove</code></td><td>Vehicles players, Mods and Admins, with recon-mod 1.0.1: removes the vehicle their last vehicle command spawned (anyone in it gets out first)</td></tr>
 					<tr><td><code>!warning &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: warns that player. The warning that reaches the threshold (2 by default, counted per visit) is followed 5 seconds later by a kick or a permanent ban with its reason, as set in the settings</td></tr>
 				</tbody>

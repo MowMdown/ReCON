@@ -134,7 +134,7 @@ var GUIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
 //	...
 //
 // Only the GUID section is read. ok is false when the "GUID Bans" header
-// wasn't found, so an unrecognised reply is never mistaken for an empty list.
+// wasn't found, so an unrecognized reply is never mistaken for an empty list.
 func ParseBansReply(out string) (bans []Ban, ok bool) {
 	bans = []Ban{}
 	section := ""
@@ -185,7 +185,7 @@ const (
 	EventKick       = "kick"       // Player #3 Name (guid) has been kicked by BattlEye: ...
 	EventChat       = "chat"       // (Global) Name: text
 	EventAdmin      = "admin"      // RCon admin #0 (1.2.3.4:5678) logged in
-	EventOther      = "other"      // anything not recognised; Text still has the line
+	EventOther      = "other"      // anything not recognized; Text still has the line
 
 	// Not from BattlEye: lines ReCON adds so the console shows both sides.
 	EventSent  = "sent"  // > say -1 hello   (a command typed in the console page)
@@ -222,7 +222,7 @@ var (
 )
 
 // ParseServerMessage turns one server message into a ServerEvent. Lines it
-// doesn't recognise come back as EventOther with Text set, so nothing is lost
+// doesn't recognize come back as EventOther with Text set, so nothing is lost
 // if BattlEye's wording differs from what's expected here.
 func ParseServerMessage(text string, at time.Time) ServerEvent {
 	ev := ServerEvent{Time: at, Kind: EventOther, Text: text, PlayerID: -1}
@@ -262,7 +262,7 @@ func (l *Session) serverMessage(text string) {
 	}
 }
 
-// KickReport summarises what a kickall run did (returned as JSON by /kickall).
+// KickReport summarizes what a kickall run did (returned as JSON by /kickall).
 type KickReport struct {
 	Order     []int  `json:"order"`         // IDs in the order they were kicked
 	Unacked   []int  `json:"unacked"`       // kick commands the server never acknowledged

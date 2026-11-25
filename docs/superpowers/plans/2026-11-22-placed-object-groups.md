@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- One map unit = one metre; squares are `GROUP_M = 50` m, lined up with 0,0.
+- One map unit = one meter; squares are `GROUP_M = 50` m, lined up with 0,0.
 - A square splits when `GROUP_M` m is at least `SPLIT_PX = 60` px on screen.
-- Zoom in: centre on the square, `ZOOM_IN_M = 300` m across.
+- Zoom in: center on the square, `ZOOM_IN_M = 300` m across.
 - Anything waiting on data says `Loading…`.
 - No "50 m" wording in the UI; the grid reference names a group.
 - Placed objects still only show from `PLACED_MIN_ZOOM` (-2).
@@ -52,7 +52,7 @@
 **Interfaces:**
 - Produces: `placedGroups(list) -> [{key, cx, cz, x0, z0, objs:[Placed]}]` (key `"<i>,<j>"`, `i = floor(x/GROUP_M)`), `groupSplit() -> bool` (true when `GROUP_M` m ≥ `SPLIT_PX` px), `worstHealth(objs)`.
 
-- [ ] Step 1: `drawPlaced` builds groups from the shown objects in view; a group of one, or any group while `groupSplit()`, draws its objects as today; otherwise one marker per group: the square in `vehCondition(worstHealth)` colour plus `×N` (class `gmark`), clicking opens `openGroupPopup(key)`.
+- [ ] Step 1: `drawPlaced` builds groups from the shown objects in view; a group of one, or any group while `groupSplit()`, draws its objects as today; otherwise one marker per group: the square in `vehCondition(worstHealth)` color plus `×N` (class `gmark`), clicking opens `openGroupPopup(key)`.
 - [ ] Step 2: while split, each group of 2+ draws a dashed `L.rectangle` of its square (non-interactive, class `gsquare`).
 - [ ] Step 3: markers keyed by `'g'+key` / object id, so redraws update in place; `zoomend` already calls `drawPlaced`.
 - [ ] Step 4: check in the browser against the fake mod (Task 5): grouped at whole-map-ish zoom, split close in.
@@ -78,7 +78,7 @@
 - Produces: `openGroupInfo(key)`, `closeGroupInfo()`, `groupInfo` (key), `groupSel` (object id), `groupItemSel` (item id).
 
 - [ ] Step 1: header `N placed objects`, grid badge, items inside in all, Close top right (`dlg-x`).
-- [ ] Step 2: left: one row per object (expand ▸/▾ shows its attachments and cargo as `irow` rows, nested); right: the selected object's facts (kind, where, condition, placed by, placed), damage zones, contents count, buttons Show on map (closes, centres at `ZOOM_IN_M`), Refresh (`askGroup([id])`), Remove (`removePlaced(id)`); selecting an item inside shows that item like the inventory detail (name, class, condition, quantity).
+- [ ] Step 2: left: one row per object (expand ▸/▾ shows its attachments and cargo as `irow` rows, nested); right: the selected object's facts (kind, where, condition, placed by, placed), damage zones, contents count, buttons Show on map (closes, centers at `ZOOM_IN_M`), Refresh (`askGroup([id])`), Remove (`removePlaced(id)`); selecting an item inside shows that item like the inventory detail (name, class, condition, quantity).
 - [ ] Step 3: all objects gone → "That isn't on the server any more."
 - [ ] Step 4: browser check.
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Mods and admins type `!car|!truck|!boat|!vehicle <name> [colour]` in game chat and a whole vehicle from the map's `vehicles.json` spawns in front of them.
+**Goal:** Mods and admins type `!car|!truck|!boat|!vehicle <name> [color]` in game chat and a whole vehicle from the map's `vehicles.json` spawns in front of them.
 
 **Architecture:** `internal/livemap` owns the per-map file (it has the data folder, the world, and the mod's item list): reading it, writing the first one from the item list, resolving classes. `internal/flows` adds the four chat commands and calls livemap through replaceable package vars, so its tests don't need a live mod. The chat-commands settings dialog marks the commands "needs recon-mod" and lists vehicles not in the file.
 
@@ -13,9 +13,9 @@
 ## Global Constraints
 
 - Branch: commit to `claude-mod` (the user's standing rule for this repo; overrides CLAUDE.md's `claude`). Push only when the user asks.
-- File: `<DataDir>/maps/<world lowercase>/vehicles.json`; shape `category -> name -> colour -> class`; categories `car`, `truck`, `boat`, `vehicle`.
-- Case never matters: command, category, name, colour, and class (sent with the item list's exact spelling).
-- No colour: `default` if present, else a random colour.
+- File: `<DataDir>/maps/<world lowercase>/vehicles.json`; shape `category -> name -> color -> class`; categories `car`, `truck`, `boat`, `vehicle`.
+- Case never matters: command, category, name, color, and class (sent with the item list's exact spelling).
+- No color: `default` if present, else a random color.
 - Role: `roleMod` and up. Cooldown default `"0"`.
 - Without the mod: no file, no `maps/<world>/` folder, no vehicle log lines; `!help` hides the four; typing one replies exactly `recon-mod isn't running on this server`.
 - ReCON never rewrites an existing `vehicles.json`.
@@ -28,7 +28,7 @@
 - A `vehicles.json` with a syntax error: the command replies `vehicles.json for <world> has an error at line <n>: <msg>` (not silence, not a crash). Test in Task 1.
 - A class in the file that the server doesn't have (typo or unloaded mod): reply passes on `<class> isn't an item the server can spawn`. Test in Task 3.
 - A file whose keys are mixed case (`"Car"`, `"Olga"`, `"Black"`): still matches. Test in Task 1.
-- A vehicle with only coloured classes and no `default`, typed without a colour: a random one spawns (never an error). Test in Task 3.
+- A vehicle with only colored classes and no `default`, typed without a color: a random one spawns (never an error). Test in Task 3.
 - The mod reconnects on a different map: a file is written for the new map too, and the old map's file is untouched. Test in Task 2.
 
 ---
@@ -41,7 +41,7 @@
 
 **Interfaces:**
 - Produces:
-  - `type VehicleFile map[string]map[string]map[string]string` (category -> name -> colour -> class; every key lowercased on load)
+  - `type VehicleFile map[string]map[string]map[string]string` (category -> name -> color -> class; every key lowercased on load)
   - `func LoadVehicleFile(path, world string) (VehicleFile, error)`: `os.ErrNotExist` passes through (wrapped, `errors.Is` works); a JSON error becomes `vehicles.json for <world> has an error at line <n>: <msg>` (line computed from the `json.SyntaxError`/`json.UnmarshalTypeError` offset).
   - `func GenerateVehicleFile(items []CatalogItem) VehicleFile`: only `Kind == "vehicle"`.
   - `func (f VehicleFile) Count() int`: number of vehicles (names) across categories.
@@ -50,7 +50,7 @@
 Generation rules (the algorithm the tests don't fully determine):
 - Group by display name; a name that is empty or starts with `$` groups alone by class.
 - Base = longest common prefix of the group's classes; if it isn't itself one of the classes, cut it back to before its last `_` (and drop a trailing `_`).
-- Colour = lowercased remainder after `base_`; the class equal to base is `default`; a group of one is `default`.
+- Color = lowercased remainder after `base_`; the class equal to base is `default`; a group of one is `default`.
 - Name = display name's first word, lowercased, `[a-z0-9]` only (fallback: lowercased base). Clash within a category: every clashing vehicle appends its next word (no separator) until unique; if words run out append `2`, `3`...
 - Category by lowercased base: contains `boat` -> `boat`; contains `truck` -> `truck`; base in the vanilla-car list -> `car`; else `vehicle`.
 
@@ -209,21 +209,21 @@ git commit -m "Live Map: write a map's first vehicles.json from the item list"
     - `var modConnected = func() bool { s, _ := livemap.Current(time.Now()); return s.Connected }`
     - `var vehicleChoices = func() (livemap.VehicleFile, string, error) { return livemap.VehicleChoices(time.Now()) }`
     - `var spawnVehicle = func(guid, class string) (displayName string, err error)`: resolves with `livemap.CatalogClass` (not found -> `errors.New(class + " isn't an item the server can spawn")`), then `livemap.Queue(guid, livemap.Command{Action: "spawn", Text: item.Type, Value: 1}, time.Now())`; returns the item's display name.
-    - `var pickColour = func(n int) int { return rand.IntN(n) }` (`math/rand/v2`)
+    - `var pickColor = func(n int) int { return rand.IntN(n) }` (`math/rand/v2`)
   - `func runVehicleCommand(cmd string, p battleye.Player, set chatSetting, args []string)`
 
 Defs (in this order, after `warning`), each `Role: roleMod, Cool: "0", NeedsMod: true`, fields:
-- `spawned` "Spawned (to the player)" default `Spawning {vehicle} ({colour})`, ph `vehicle`, `colour`
+- `spawned` "Spawned (to the player)" default `Spawning {vehicle} ({color})`, ph `vehicle`, `color`
 - `list` "List (to the player, for !<cmd> alone or a name it doesn't have)" default `{category}: {names}`, ph `category`, `names`
 
-Help, e.g. car: `!car <name> [colour] spawns that car in front of you. !car alone lists the names.` (truck/boat likewise; vehicle: `...spawns that vehicle (bikes, ATVs, helicopters and the rest)...`). Category labels for `{category}`: `Cars`, `Trucks`, `Boats`, `Vehicles`. `{names}`: `olga (black, wine), sarka (grey, red)`; colours sorted, `default` left out; names sorted; sent in lines of at most 5 names, `playersLinePause` apart, like `!players`.
+Help, e.g. car: `!car <name> [color] spawns that car in front of you. !car alone lists the names.` (truck/boat likewise; vehicle: `...spawns that vehicle (bikes, ATVs, helicopters and the rest)...`). Category labels for `{category}`: `Cars`, `Trucks`, `Boats`, `Vehicles`. `{names}`: `olga (black, wine), sarka (gray, red)`; colors sorted, `default` left out; names sorted; sent in lines of at most 5 names, `playersLinePause` apart, like `!players`.
 
-Behaviour of `runVehicleCommand` (replies always to `p` only):
+Behavior of `runVehicleCommand` (replies always to `p` only):
 - `vehicleChoices` error -> reply the error text; return.
 - No args -> list. Category empty -> list reply with `{names}` = `none yet: add some to vehicles.json`.
-- Name not found, or colour not found -> list reply (for a bad colour, `{names}` is just that vehicle's entry).
-- No colour: `default` if present, else sorted colours `[pickColour(n)]`.
-- `spawnVehicle` error -> reply its text; success -> `spawned` with `{vehicle}` = display name, `{colour}` = colour key; `markUsed(cmd)`.
+- Name not found, or color not found -> list reply (for a bad color, `{names}` is just that vehicle's entry).
+- No color: `default` if present, else sorted colors `[pickColor(n)]`.
+- `spawnVehicle` error -> reply its text; success -> `spawned` with `{vehicle}` = display name, `{color}` = color key; `markUsed(cmd)`.
 - In `handleChatCommand`: a `NeedsMod` command typed while `!modConnected()` replies `recon-mod isn't running on this server` (if role allows and it's on), before cooldown; `!help` and `!help !car` skip `NeedsMod` defs while `!modConnected()`.
 
 - [ ] **Step 1: Write the failing tests** (stub the four vars; `chatSay` records `said`; reset as `TestHelpListsWhatTheRoleMayUse` does)
@@ -234,8 +234,8 @@ func TestVehicleCommandSpawns(t *testing.T) {
 	// roleMod "!CAR Olga BLACK" -> spawned class "CivilianSedan_Black" for p.GUID; said == ["Spawning Olga 24 (black)"]
 	// roleMod "!car olga" -> class "CivilianSedan"; said "Spawning Olga 24 (default)"
 }
-func TestVehicleCommandRandomColour(t *testing.T) {
-	// {"boat":{"rubber":{"blue":"Boat_01_Blue","black":"Boat_01_Black"}}}, pickColour returns 1
+func TestVehicleCommandRandomColor(t *testing.T) {
+	// {"boat":{"rubber":{"blue":"Boat_01_Blue","black":"Boat_01_Black"}}}, pickColor returns 1
 	// "!boat rubber" -> class "Boat_01_Blue" (sorted [black, blue][1])
 }
 func TestVehicleCommandLists(t *testing.T) {
@@ -290,7 +290,7 @@ git commit -m "Chat commands: !car, !truck, !boat and !vehicle"
 UI (the user's requests, 2026-11-21):
 - **Tabs by role:** the dialog (`#cmdModal`) gets two tabs above `#cmdList`, `All Players` (commands with `role == 0`) and `Mods & Admins` (`role >= 1`, admin-only ones included, keeping their `ADMINS` tag). Use the page's existing tab look (`.dtabs`/`.tabs` buttons, as the Help dialog's `data-tab` buttons). `renderCmds` renders only the selected tab's commands; the draft keeps every command, so switching tabs never loses unsaved edits and Save/Reset still cover all of them. Opens on `All Players`.
 - **No intro paragraph:** delete `<p class="intro">` from `#cmdModal`.
-- **Its content moves to Help** (the page's Help button, `data-pane="chat"`): the paragraph there must also say that the cooldown is server-wide (after anyone uses it, it's ignored for everyone until the time is up; 0 = none), that times are seconds or h m s such as `1m30s`, that the wording and order of what ReCON sends can be changed, and that words in braces such as `{player_name}` are filled in when the message is sent. Keep its existing Players page / Permissions sentence. Add rows for `!car`, `!truck`, `!boat`, `!vehicle <name> [colour]` (Mods and Admins, needs recon-mod) to its table.
+- **Its content moves to Help** (the page's Help button, `data-pane="chat"`): the paragraph there must also say that the cooldown is server-wide (after anyone uses it, it's ignored for everyone until the time is up; 0 = none), that times are seconds or h m s such as `1m30s`, that the wording and order of what ReCON sends can be changed, and that words in braces such as `{player_name}` are filled in when the message is sent. Keep its existing Players page / Permissions sentence. Add rows for `!car`, `!truck`, `!boat`, `!vehicle <name> [color]` (Mods and Admins, needs recon-mod) to its table.
 - A `NeedsMod` command gets a `needs recon-mod` tag in its head (same style as `who`), shown always (it's a requirement, not a state).
 - Under `!vehicle`'s section only, when `unlistedVehicles` is non-empty: `On the server but not in maps/<world>/vehicles.json:` then `Name (Class)` items, comma-separated.
 
@@ -308,7 +308,7 @@ func TestChatCommandsGetHasVehicleFields(t *testing.T) {
 Run: `go test ./internal/web/ -run ChatCommandsGetHasVehicleFields`
 Expected: FAIL (missing keys)
 
-- [ ] **Step 3: Implement the API fields and the dialog changes; add the four commands to README's chat-commands section (syntax, roles, the file's path and shape, first-file rules, case-insensitivity, behaviour without the mod)**
+- [ ] **Step 3: Implement the API fields and the dialog changes; add the four commands to README's chat-commands section (syntax, roles, the file's path and shape, first-file rules, case-insensitivity, behavior without the mod)**
 
 - [ ] **Step 4: Run all tests and build**
 

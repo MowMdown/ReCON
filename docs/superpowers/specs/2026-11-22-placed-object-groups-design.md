@@ -5,7 +5,7 @@ and popup, 2: group Info dialog, 3: zoomed in, the group split).
 
 ## Why
 
-A base is many placed objects within a few metres (crates, tents, barrels,
+A base is many placed objects within a few meters (crates, tents, barrels,
 fences, traps). On the map they are a pile of 10 px squares on top of each
 other: hard to count, hard to click one. Admins want to see "there's a base
 here with 12 things", what they are, and what is in them, without zooming
@@ -14,17 +14,17 @@ in and hunting.
 ## Goals
 
 1. **Groups.** Placed objects are grouped by a fixed grid of 50 m squares
-   (metres on the map, lined up with its 0,0). A square holding two or more
-   objects is one marker: a square, coloured as its worst-condition object,
+   (meters on the map, lined up with its 0,0). A square holding two or more
+   objects is one marker: a square, colored as its worst-condition object,
    with `×N` beside it. A square with one object shows that object's own
    marker, as today.
 2. **Split when zoomed in.** Once a square is about 60 px wide on screen, its
    objects show one by one, and the square shows as a dashed outline (no
    label). Zooming out merges them again.
 3. **Group popup** (click the `×N` marker): the square's grid reference, then
-   each object (condition colour, name, how many items are in and on it:
+   each object (condition color, name, how many items are in and on it:
    `2 items`, `empty`), and who placed them (`Alice (3), Bob (1),
-   unknown (1)`). Buttons: **Zoom in** (centres on the square, about 300 m
+   unknown (1)`). Buttons: **Zoom in** (centers on the square, about 300 m
    across, so it splits) and **Info**. Clicking an object in the list opens
    that object's own popup.
 4. **Item counts on demand.** When the popup opens, ReCON asks the mod for
@@ -42,7 +42,7 @@ in and hunting.
 - Acting on a whole group at once (remove all, etc.).
 - Changing recon-mod: it already sends every placed object every 30 s, and
   sends an object's contents when asked.
-- Moving the other zoom limits to metres (placed objects from zoom -2, the
+- Moving the other zoom limits to meters (placed objects from zoom -2, the
   town names); that is separate and comes later.
 
 ## Anti-goals
@@ -53,8 +53,8 @@ in and hunting.
 
 ## Constraints
 
-- One map unit is one metre (`CRS.Simple`); groups and the split threshold
-  are worked out in metres and screen pixels, never by rescaling the map.
+- One map unit is one meter (`CRS.Simple`); groups and the split threshold
+  are worked out in meters and screen pixels, never by rescaling the map.
 - Anything waiting on data says `Loading…`.
 - Placed objects still only show from zoom -2 (unchanged here).
 
@@ -74,10 +74,10 @@ sending a count with every object every 30 s.
 ## Decided
 
 - 50 m squares; split at about 60 px per square on screen.
-- Group marker: square in the worst condition's colour plus `×N`; no "50 m"
+- Group marker: square in the worst condition's color plus `×N`; no "50 m"
   wording anywhere, the square's outline shows when split.
 - Popup rows show only a count (`2 items`, `empty`), not item names.
-- Zoom in centres on the square at about 300 m across.
+- Zoom in centers on the square at about 300 m across.
 
 ## Left to the builder
 

@@ -3,7 +3,7 @@ package livemap
 // gasradius.go remembers, in memory, how big each dynamic gas zone was the
 // last time it was up, by map and spot (a new mod connection doesn't forget
 // it; a ReCON restart does). The mod only sends a zone's radius while it is
-// up; while it is down the Live Map draws that last size greyed out, and no
+// up; while it is down the Live Map draws that last size grayed out, and no
 // circle at all for a spot not seen up yet.
 
 import (
@@ -17,7 +17,7 @@ var gasRadii = struct {
 	m map[string]float64 // gasKey -> radius (m)
 }{m: map[string]float64{}}
 
-// gasKey names a spot: its map and where it is, to the metre.
+// gasKey names a spot: its map and where it is, to the meter.
 func gasKey(world string, x, z float64) string {
 	return fmt.Sprintf("%s|%d|%d", world, int(math.Round(x)), int(math.Round(z)))
 }

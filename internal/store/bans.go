@@ -67,7 +67,7 @@ type storedBan struct {
 //     Unban on the web pages removes a permanent ban, so the caller puts it
 //     back with addBan.
 //
-// Callers must pass a list parsed from a complete, recognised `bans` reply.
+// Callers must pass a list parsed from a complete, recognized `bans` reply.
 func (db *Database) SyncBansFromServer(bans []battleye.Ban, readAt time.Time) ([]storedBan, error) {
 	live := make(map[string]battleye.Ban, len(bans))
 	for _, b := range bans {

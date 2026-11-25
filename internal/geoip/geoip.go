@@ -42,7 +42,7 @@ const legacyFileName = "GeoLite2-Country.mmdb"
 
 var (
 	// downloadURL is MaxMind's download for GeoLite2-City, with the
-	// account ID and licence key as basic auth.
+	// account ID and license key as basic auth.
 	downloadURL = "https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz"
 	// refreshAfter is how old the file may get before it is downloaded again.
 	refreshAfter = 7 * 24 * time.Hour

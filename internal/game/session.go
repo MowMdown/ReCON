@@ -185,7 +185,7 @@ func Dial(src string, enableKeepalive bool) (*battleye.Session, error) {
 	return battleye.Dial(address, password, connectOptions(src, enableKeepalive))
 }
 
-// connectOptions are the battleye.DialOptions for a session labelled src.
+// connectOptions are the battleye.DialOptions for a session labeled src.
 func connectOptions(src string, keepalive bool) battleye.DialOptions {
 	if src == webSource {
 		return battleye.DialOptions{Source: src, Tries: 1, ReplyWait: battleye.ReloginReplyWait, KeepWaiting: true, Keepalive: keepalive, OnMessage: handleServerMessage, OnLogin: signalLogin}
@@ -194,7 +194,7 @@ func connectOptions(src string, keepalive bool) battleye.DialOptions {
 }
 
 // webConnection holds the one long-lived session. The Mutex protects the
-// fields; battleye.Session serialises the commands themselves.
+// fields; battleye.Session serializes the commands themselves.
 // Keepalive is off because the server watch already keeps the session busy.
 // Being permanently logged in is also what lets it receive server messages.
 //

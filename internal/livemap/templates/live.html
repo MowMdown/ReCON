@@ -23,7 +23,7 @@ html[data-theme]:not([data-theme="default"]) {
 	--lm-muted: var(--color-neutral-400); --lm-faint: var(--color-neutral-500);
 	--lm-overlay: color-mix(in srgb, var(--color-surface) 92%, transparent);
 }
-/* HUD colours and thresholds come from DayZ's scripts (Bohemia Interactive,
+/* HUD colors and thresholds come from DayZ's scripts (Bohemia Interactive,
    DayZ Public License; see NOTICE). */
 :root { --hud-white: rgb(220,220,220); --hud-yellow: rgb(220,220,0); --hud-red: rgb(220,0,0); --hud-lblue: rgb(0,206,209); --hud-blue: rgb(30,144,220); }
 .live { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; height: calc(100vh - 210px); min-height: 420px; }
@@ -786,7 +786,7 @@ function item(s) { return s ? s.replace(/_/g, ' ') : ''; }
 function handsOf(p) { return p.handsName || item(p.hands); }
 function vehicleOf(p) { return p.vehicleName || item(p.vehicle); }
 
-// hud is DayZ's HUD colour (and blink) for a stat, per PlayerBase.GetStatLevel
+// hud is DayZ's HUD color (and blink) for a stat, per PlayerBase.GetStatLevel
 // and PlayerConstants.SL_* (critical, low, normal).
 const LEVELS = { health: [15, 30, 50], blood: [3000, 3500, 4000], energy: [0, 300, 800], water: [0, 300, 1000] };
 function hud(stat, v) {
@@ -835,7 +835,7 @@ async function poll() {
 
 // ---- The map ------------------------------------------------------------
 
-// Map sizes in metres; an unknown map is sized to fit its players.
+// Map sizes in meters; an unknown map is sized to fit its players.
 const SIZES = { chernarusplus: 15360, enoch: 12800, namalsk: 12800, deerisle: 16384, sakhal: 15360, esseker: 12800, takistanplus: 12800, banov: 15360, chiemsee: 10240, pripyat: 20480, rostow: 14336, iztek: 8192, alteria: 8192, nasdara: 16384 };
 const NAMES = { chernarusplus: 'Chernarus', enoch: 'Livonia', namalsk: 'Namalsk', deerisle: 'Deer Isle', sakhal: 'Sakhal', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', pripyat: 'Pripyat', rostow: 'Rostow', iztek: 'Iztek', alteria: 'Alteria', nasdara: 'Nasdara' };
 // dataMaps are the maps with a picture in ReCON's data folder, so one can
@@ -908,23 +908,23 @@ const POPUP_TOP = 6, POPUP_GAP = 8, POPUP_SMALL_W = 560, POPUP_SMALL_H = 480;
 	L.Popup.prototype._updatePosition = function () { if (!this._centered) return pos.call(this); };
 	L.Popup.prototype._animateZoom = function (e) { if (!this._centered) return anim.call(this, e); };
 })();
-// viewSpan is the metres across the map's view.
+// viewSpan is the meters across the map's view.
 function viewSpan() { return Math.round(map.getSize().x / Math.pow(2, map.getZoom())); }
 // The scale bar is always SCALE_PX long. + and −, a double-click and the
 // keyboard zoom in its SCALE_STEPS, out until the whole map is in view; the
 // wheel zooms WHEEL_ZOOM a click, and a pinch stops wherever it lands.
 const SCALE_PX = 100, SCALE_STEPS = [25, 50, 100, 200, 500, 1000, 2000, 5000, 10000], WHEEL_ZOOM = 1.2;
 function zoomForBar(m) { return Math.log2(SCALE_PX / m); }
-// barMetres is the scale bar's length in metres at zoom z (default: the
+// barMeters is the scale bar's length in meters at zoom z (default: the
 // zoom the map is at or animating to).
-function barMetres(z) {
+function barMeters(z) {
 	if (z === undefined) z = map._animatingZoom ? map._animateToZoom : map.getZoom();
 	return SCALE_PX / Math.pow(2, z);
 }
 // stepZoom zooms one step in (dir 1) or out (dir -1) about a container
 // point (default: the center); while following, on who is followed.
 function stepZoom(dir, around) {
-	const cur = barMetres();
+	const cur = barMeters();
 	const next = dir > 0 ? [...SCALE_STEPS].reverse().find(m => m < cur * 0.99) : SCALE_STEPS.find(m => m > cur * 1.01);
 	// Out past the last step, or a step past the whole map: all the way out.
 	const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), next ? zoomForBar(next) : dir > 0 ? map.getMaxZoom() : map.getMinZoom()));
@@ -933,11 +933,11 @@ function stepZoom(dir, around) {
 	if (at) map.setView(at, z); else if (around) map.setZoomAround(around, z); else map.setZoom(z);
 }
 // smoothWheel zooms map m with the wheel the way a pinch does: gliding,
-// about the cursor (or its center while centre() says so, or centered on what
+// about the cursor (or its center while center() says so, or centered on what
 // pin() gives, if anything), WHEEL_ZOOM a mouse
 // wheel click, continuously on a trackpad. Like Leaflet's pinch, it moves the
 // map frame by frame (tiles and lines scaled) and redraws them sharp at the end.
-function smoothWheel(m, el, centre, pin) {
+function smoothWheel(m, el, center, pin) {
 	let target = null, around = null, pinned = null, frame = 0, idle = 0;
 	const perPx = Math.log2(WHEEL_ZOOM) / 100; // a mouse click is about 100 px of wheel
 	const clamp = z => Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), z));
@@ -967,7 +967,7 @@ function smoothWheel(m, el, centre, pin) {
 		// A trackpad pinch comes as small wheel steps with Ctrl held: zoom faster.
 		target = clamp(target - px * perPx * (e.ctrlKey ? 4 : 1));
 		pinned = pin ? pin() : null;
-		around = centre && centre() ? null : m.mouseEventToContainerPoint(e);
+		around = center && center() ? null : m.mouseEventToContainerPoint(e);
 		clearTimeout(idle);
 		if (!frame) frame = requestAnimationFrame(step);
 	}, { passive: false });
@@ -985,7 +985,7 @@ function stepWheel() {
 function drawScale() {
 	const span = viewSpan(), km = m => m >= 1000 ? (m / 1000).toFixed(1).replace(/\.0$/, '') + ' km' : m + ' m';
 	if (!(span > 0)) return;
-	const m = barMetres(map.getZoom()), step = SCALE_STEPS.find(s => Math.abs(s - m) / s < 0.01);
+	const m = barMeters(map.getZoom()), step = SCALE_STEPS.find(s => Math.abs(s - m) / s < 0.01);
 	document.getElementById('scaleBar').style.width = SCALE_PX + 'px';
 	document.getElementById('scaleLen').textContent = km(step || (m >= 1000 ? Math.round(m / 100) * 100 : m >= 100 ? Math.round(m / 10) * 10 : Math.round(m)));
 	document.getElementById('scaleSpan').textContent = km(span) + ' across';
@@ -1042,7 +1042,7 @@ const EDGE_HIDE_M = 501, EDGE_HIDE_PX = 100;
 function edgeBar() {
 	const bar = document.querySelector('.mapbar'), el = map.getContainer();
 	if (!bar) return;
-	const close = barMetres() <= EDGE_HIDE_M, b = mapBounds();
+	const close = barMeters() <= EDGE_HIDE_M, b = mapBounds();
 	const top = map.latLngToContainerPoint([b.getNorth(), 0]).y, bottom = map.latLngToContainerPoint([b.getSouth(), 0]).y - map.getSize().y;
 	bar.classList.toggle('edgehide', close && top > -EDGE_HIDE_PX && !bar.classList.contains('menuopen'));
 	const low = close && bottom < EDGE_HIDE_PX;
@@ -1081,12 +1081,12 @@ function srcLoaded(url) {
 // reported x, z and where they really were on the picture (u from its west
 // edge, v from its north edge, 0 to 1).
 let calPoints = [];
-const CAL_MIN = 1000; // metres two points must be apart to set the picture's size
+const CAL_MIN = 1000; // meters two points must be apart to set the picture's size
 // placement is where the picture lies: its north-west corner at (W, N), L
-// metres across. One calibration point moves it; two CAL_MIN apart also size it.
+// meters across. One calibration point moves it; two CAL_MIN apart also size it.
 function placement() {
 	const S = size || 15360, p = calPoints;
-	// A picture within 2% of the map's size is 1 px a metre (Deer Isle's is
+	// A picture within 2% of the map's size is 1 px a meter (Deer Isle's is
 	// 16512 px for 16384 m).
 	const px = pic && (pic.px || (pic.img && pic.img.naturalWidth));
 	const L0 = px && Math.abs(px - S) <= S * 0.02 ? px : S;
@@ -1102,26 +1102,26 @@ function placement() {
 	return { W: W / use.length, N: N / use.length, L };
 }
 
-// drawPicture draws the square of map from (x0, z0), span metres across,
+// drawPicture draws the square of map from (x0, z0), span meters across,
 // onto canvas cv; again() is called when a missing tile has loaded.
 function drawPicture(cv, x0, z0, span, again) {
 	const ctx = cv.getContext('2d');
 	ctx.clearRect(0, 0, cv.width, cv.height);
 	if (!pic || !span) return;
-	const P = placement(), f = cv.width / span; // canvas px a metre
+	const P = placement(), f = cv.width / span; // canvas px a meter
 	ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-	// put draws image im, which covers w × h metres west-north from (ix, iTop),
+	// put draws image im, which covers w × h meters west-north from (ix, iTop),
 	// clipped to the canvas and to the box [cx0, cx1] × [cb, ct].
 	const put = (im, ix, iTop, w, h, cx0 = -Infinity, cx1 = Infinity, cb = -Infinity, ct = Infinity) => {
 		const vx0 = Math.max(x0, ix, cx0), vx1 = Math.min(x0 + span, ix + w, cx1);
 		const vt = Math.min(z0 + span, iTop, ct), vb = Math.max(z0, iTop - h, cb);
 		if (vx1 <= vx0 || vt <= vb) return;
-		const kx = im.naturalWidth / w, ky = im.naturalHeight / h; // image px a metre
+		const kx = im.naturalWidth / w, ky = im.naturalHeight / h; // image px a meter
 		ctx.drawImage(im, (vx0 - ix) * kx, (iTop - vt) * ky, (vx1 - vx0) * kx, (vt - vb) * ky,
 			(vx0 - x0) * f, (z0 + span - vt) * f, (vx1 - vx0) * f + 0.5, (vt - vb) * f + 0.5);
 	};
 	if (pic.img) { put(pic.img, P.W, P.N, P.L, P.L); return; }
-	// At level k a tile pixel is m(k) metres: use the first level as sharp as the canvas.
+	// At level k a tile pixel is m(k) meters: use the first level as sharp as the canvas.
 	const top = pic.levels - 1, m = k => Math.pow(2, top - k) * P.L / pic.px;
 	let k = 0;
 	while (k < top && m(k) > 1 / f) k++;
@@ -1165,7 +1165,7 @@ const PictureLayer = L.GridLayer.extend({
 		const t = document.createElement('canvas'), ts = this.getTileSize().x;
 		const dpr = Math.min(window.devicePixelRatio || 1, 2);
 		t.width = t.height = Math.round(ts * dpr);
-		// In CRS.Simple a pixel at zoom z is 2^-z metres; tile y grows south.
+		// In CRS.Simple a pixel at zoom z is 2^-z meters; tile y grows south.
 		const m = ts / Math.pow(2, c.z), x0 = c.x * m, z0 = -(c.y + 1) * m;
 		const again = () => { if (t.isConnected) drawPicture(t, x0, z0, m, again); };
 		drawPicture(t, x0, z0, m, again);
@@ -1314,7 +1314,7 @@ function fitZoom() {
 	map.fire('zoomlevelschange');
 	if (map.getZoom() < map.options.minZoom) map.setZoom(map.options.minZoom, { animate: false });
 }
-// fitMap shows the whole map, centred (Leaflet drops a fit made mid zoom
+// fitMap shows the whole map, centered (Leaflet drops a fit made mid zoom
 // animation, so it waits for one to end). Unanimated, it also resets the
 // map's edges (see setEdges).
 function fitMap(animate) {
@@ -1330,7 +1330,7 @@ function fitMap(animate) {
 }
 // setEdges makes the map picture's edges the limit: an edge drags a little way
 // inside the view, with some give, and springs back when let go (maxBoundsViscosity);
-// a map smaller than the view stays centred.
+// a map smaller than the view stays centered.
 // Off while the view is set: Leaflet's pan back inside them is animated and
 // would undo it.
 function setEdges(on) { map.setMaxBounds(on ? mapBounds() : L.latLngBounds([])); }
@@ -1525,8 +1525,8 @@ function drawArrowsShown() {
 	for (const p of players) { const m = markers[p.guid], el = m && m.getElement(); if (el) el.style.display = inShownVehicle(p) ? 'none' : ''; }
 }
 function inShownVehicle(p) { return vehOn && p.seat >= 0 && vehicles.some(v => v.id === p.vehicleId); }
-// vehColor: the driver's colour; blue with passengers only; green parked
-// with the engine running; grey parked.
+// vehColor: the driver's color; blue with passengers only; green parked
+// with the engine running; gray parked.
 function vehColor(v) {
 	const driver = crewOf(v).find(p => p.driver);
 	if (driver) return colorOf(driver.guid);
@@ -1970,7 +1970,7 @@ function drawGridToggle() {
 const fineGrid = L.layerGroup();
 function drawFineGrid() {
 	fineGrid.clearLayers();
-	if (!gridOn || !size || barMetres(map.getZoom()) > 200 * 1.01) return;
+	if (!gridOn || !size || barMeters(map.getZoom()) > 200 * 1.01) return;
 	const b = map.getBounds().pad(0.2), line = { className: 'gridfine', weight: 1, interactive: false };
 	const x0 = Math.max(0, Math.floor(b.getWest() / 100) * 100), x1 = Math.min(size, b.getEast());
 	const z0 = Math.max(0, Math.floor(b.getSouth() / 100) * 100), z1 = Math.min(size, b.getNorth());
@@ -2015,7 +2015,7 @@ function zoomBand() {
 }
 setInterval(loadPlaces, 10000);
 
-// Event spots: every place the mission spawns an event, active ones in their category's colour.
+// Event spots: every place the mission spawns an event, active ones in their category's color.
 const EVENT_CATS = [['heli', 'Heli crashes', '#f2a65a'], ['convoy', 'Convoys', '#8ab4f8'], ['police', 'Police', '#a78bfa'],
 	['medical', 'Medical', '#f28b82'], ['gas', 'Gas zones', '#c5d86d'], ['other', 'Other', '#e0e0e0']];
 const EVENT_DEFAULT = { heli: '1', convoy: '1', gas: '1' };
@@ -2077,8 +2077,8 @@ function drawEvents() {
 	}
 }
 // shownSpots is the event spots the filters show, with how each is drawn.
-// Gas zones: red when static, the category's colour while a dynamic one is
-// up, grey (at its last known size) while down.
+// Gas zones: red when static, the category's color while a dynamic one is
+// up, gray (at its last known size) while down.
 function shownSpots() {
 	return eventSpots.filter(e => eventCatOn[e.category] && (e.on ? eventStateOn.active : eventStateOn.inactive)).map(e => {
 		const gas = e.category === 'gas' && !e.hot, [, , c0] = eventCat(e.category);
@@ -2287,7 +2287,7 @@ function drawPlaced() {
 			}
 			continue;
 		}
-		const [, c] = vehCondition(worstHealth(objs)), at = centreOf(objs);
+		const [, c] = vehCondition(worstHealth(objs)), at = centerOf(objs);
 		const icon = L.divIcon({ className: 'gmark', iconSize: [0, 0], html: groupSVG(c) + '<span class="n">×' + objs.length + '</span>' });
 		let m = placedMarkers['g' + key];
 		if (!m) {
@@ -2326,17 +2326,17 @@ function openPlacedInfo(id) { openGroupInfo('id:' + id); }
 // A group is the shown objects in one GROUP_M (or, further out, BLOCK_M)
 // square of the map. Its popup and dialog ask the mod for what is in each.
 const GROUP_M = 50, BLOCK_M = 100, ZOOM_IN_M = 300;
-// showOnMap centres the map on x, z, ZOOM_IN_M metres across.
+// showOnMap centers the map on x, z, ZOOM_IN_M meters across.
 function showOnMap(x, z) { map.setView([z, x], Math.min(map.getMaxZoom(), Math.log2(map.getSize().x / ZOOM_IN_M))); }
 let groupOpen = null, groupInfo = null, groupSel = null, groupItemSel = null, groupDetail = {}, groupRun = 0;
-// groupKey names the square of size m (metres) an object is in: "50:12,40".
+// groupKey names the square of size m (meters) an object is in: "50:12,40".
 function groupKey(o, m) { m = m || GROUP_M; return m + ':' + Math.floor(o.x / m) + ',' + Math.floor(o.z / m); }
 // isOneKey: "id:<n>" is the single object n.
 function isOneKey(key) { return String(key).startsWith('id:'); }
 function keyParts(key) { const [m, ij] = key.split(':'), [i, j] = ij.split(',').map(Number); return [+m, i, j]; }
 // groupLevel is the square size placed objects group by at this zoom (0: none).
 function groupLevel() {
-	const bar = barMetres(map.getZoom());
+	const bar = barMeters(map.getZoom());
 	return bar >= 140 ? BLOCK_M : bar >= 70 ? GROUP_M : 0;
 }
 // nearbyOf is, for a single object's key, the other shown objects in its 50 m square.
@@ -2352,11 +2352,11 @@ function groupOf(key) {
 		.sort((a, b) => placedName(a).localeCompare(placedName(b)) || a.id - b.id);
 }
 function worstHealth(objs) { return Math.min(...objs.map(o => o.health)); }
-function centreOf(objs) { return [objs.reduce((n, o) => n + o.x, 0) / objs.length, objs.reduce((n, o) => n + o.z, 0) / objs.length]; }
-function squareCentre(key) { const [m, i, j] = keyParts(key); return [(i + 0.5) * m, (j + 0.5) * m]; }
+function centerOf(objs) { return [objs.reduce((n, o) => n + o.x, 0) / objs.length, objs.reduce((n, o) => n + o.z, 0) / objs.length]; }
+function squareCenter(key) { const [m, i, j] = keyParts(key); return [(i + 0.5) * m, (j + 0.5) * m]; }
 function groupGrid(key) {
 	if (isOneKey(key)) { const o = groupOf(key)[0]; return o ? grid(o.x, o.z) : ''; }
-	const [x, z] = squareCentre(key); return grid(x, z);
+	const [x, z] = squareCenter(key); return grid(x, z);
 }
 function objCount(d) { return (d.items || []).reduce((n, it) => n + 1 + countIn(it), 0); }
 function itemsText(n) { return n ? n + (n === 1 ? ' item' : ' items') : 'empty'; }
@@ -2396,7 +2396,7 @@ function renderGroupPopup() {
 	if (!objs.length) { map.closePopup(plcPopup); return; }
 	if (objs.length === 1) { openPlacedPopup(objs[0].id); return; }
 	const el = plcPopup.getElement(), list = el && el.querySelector('.glist'), top = list ? list.scrollTop : 0;
-	const [x, z] = squareCentre(groupOpen), q = '\'' + groupOpen + '\'';
+	const [x, z] = squareCenter(groupOpen), q = '\'' + groupOpen + '\'';
 	plcPopup.setLatLng([z, x]).setContent('<div class="vpop gpop" data-noicon>' + backLink('grp', groupOpen) + '<h4>' + objs.length + ' placed objects</h4><div class="ty">' + groupGrid(groupOpen) + '</div>' +
 		'<div class="glist">' + objs.map(o => '<button type="button" onclick="event.stopPropagation(); openPlacedPopup(' + o.id + ')" title="' + esc(o.type) + '">' +
 			placedSVG(vehCondition(o.health)[1]) +
@@ -2410,11 +2410,11 @@ function renderGroupPopup() {
 // block where its groups show.
 function zoomToGroup(key) {
 	map.closePopup(plcPopup);
-	const [x, z] = squareCentre(key);
+	const [x, z] = squareCenter(key);
 	map.setView([z, x], Math.min(map.getMaxZoom(), zoomForBar(50)));
 }
 function zoomToBlock(key) {
-	const [x, z] = squareCentre(key);
+	const [x, z] = squareCenter(key);
 	map.setView([z, x], Math.min(map.getMaxZoom(), zoomForBar(100)));
 }
 function openGroupInfo(key) {
@@ -2785,11 +2785,11 @@ async function doSpawnAt() {
 
 // fillZoom is the zoom at which the map's width just fills the view.
 function fillZoom() { const b = mapBounds(); return Math.log2(map.getSize().x / (b.getEast() - b.getWest())); }
-// fillWidth zooms so the map's width fills the view, keeping the centre's
+// fillWidth zooms so the map's width fills the view, keeping the center's
 // north-south position (within the map).
 function fillWidth() {
 	const b = mapBounds(), view = map.getSize(), s = b.getNorth() - b.getSouth();
-	const z = fillZoom(), h = view.y / Math.pow(2, z); // metres the view is high
+	const z = fillZoom(), h = view.y / Math.pow(2, z); // meters the view is high
 	const lat = h >= s ? (b.getNorth() + b.getSouth()) / 2 : Math.min(b.getNorth() - h / 2, Math.max(b.getSouth() + h / 2, map.getCenter().lat));
 	map.setView([lat, (b.getWest() + b.getEast()) / 2], z, { animate: false });
 }
@@ -2831,7 +2831,7 @@ function render() {
 	setStatusCount(connected ? players.length + ' player(s) on the map' : '');
 	renderList();
 	drawMarkers();
-	if (vehOn && players.some(p => p.seat >= 0)) drawVehicles(); // drivers' colours
+	if (vehOn && players.some(p => p.seat >= 0)) drawVehicles(); // drivers' colors
 	if (selGuid) renderPlayer();
 	if (isOpen('wModal')) renderWorld();
 }
@@ -3177,9 +3177,9 @@ async function loadDetail() {
 // Every 2 s while open, which keeps ReCON asking the mod for their inventory.
 setInterval(() => { if (selGuid) loadDetail(); }, 2000);
 
-function bar(label, v, max, colour, blink, text) {
+function bar(label, v, max, color, blink, text) {
 	return '<div class="bar' + (blink ? ' blink' : '') + '"><span class="k">' + label + '</span><div class="track"><div class="fill" style="width:' +
-		Math.max(0, Math.min(100, 100 * v / max)) + '%;background:' + colour + '"></div></div><span class="v" style="color:' + colour + '">' + text + '</span></div>';
+		Math.max(0, Math.min(100, 100 * v / max)) + '%;background:' + color + '"></div></div><span class="v" style="color:' + color + '">' + text + '</span></div>';
 }
 function num(v) { return Math.round(v).toLocaleString(); }
 
@@ -3189,7 +3189,7 @@ function num(v) { return Math.round(v).toLocaleString(); }
 let drag = null, pending = {}, staged = {};
 const STAT_LABEL = { health: 'health', blood: 'blood', water: 'water', energy: 'food', heatBuffer: 'comfort' };
 function statText(stat, v, max) { return stat === 'heatBuffer' ? Math.round(100 * v / max) + '%' : num(v); }
-function dragBar(stat, label, v, max, colour, blink, text, extra) {
+function dragBar(stat, label, v, max, color, blink, text, extra) {
 	const now = Math.max(0, Math.min(100, 100 * v / max));
 	const pend = pending[stat], st = pend ? undefined : staged[stat];
 	const fmt = x => statText(stat, x, max);
@@ -3202,9 +3202,9 @@ function dragBar(stat, label, v, max, colour, blink, text, extra) {
 	}
 	return '<div class="bar can' + (st !== undefined ? ' staged' : '') + (blink && !pend ? ' blink' : '') + '" data-stat="' + stat + '" data-max="' + max + '" data-v="' + v + '">' +
 		'<span class="k">' + label + '</span><div class="track" title="Drag to set ' + STAT_LABEL[stat] + ', then Save">' +
-		'<div class="fill" style="width:' + now + '%;background:' + colour + '"></div>' + extra + ghost +
+		'<div class="fill" style="width:' + now + '%;background:' + color + '"></div>' + extra + ghost +
 		'<div class="handle" style="left:' + at + '%"></div></div>' +
-		'<span class="v" style="color:' + colour + '">' + shown + '</span></div>';
+		'<span class="v" style="color:' + color + '">' + shown + '</span></div>';
 }
 // valueAt is the stat's value under the pointer, rounded to a sensible step.
 function valueAt(row, clientX) {
@@ -3936,7 +3936,7 @@ function doTeleport() {
 		return;
 	}
 	const x = parseFloat(document.getElementById('tpX').value), z = parseFloat(document.getElementById('tpZ').value);
-	if (!(x > 0) || !(z > 0)) { err.textContent = 'Enter where to (X and Y, in metres) or click the mini-map.'; return; }
+	if (!(x > 0) || !(z > 0)) { err.textContent = 'Enter where to (X and Y, in meters) or click the mini-map.'; return; }
 	act('teleport', { x, z, y: 0 }).then(ok => { if (ok) clearTeleport(); });
 }
 function doMessage() {
@@ -4144,7 +4144,7 @@ function bandFor(bar) {
 }
 function refreshEvery() {
 	if (selGuid && isOpen('pModal')) return 1000;
-	return bandFor(barMetres(map.getZoom()));
+	return bandFor(barMeters(map.getZoom()));
 }
 setInterval(() => {
 	const every = refreshEvery(), now = Date.now();

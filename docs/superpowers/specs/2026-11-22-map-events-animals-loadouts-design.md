@@ -24,11 +24,11 @@ Needs recon-mod 1.0.3 (items marked **mod**); ReCON keeps working with
    check (id, x, z, radius, classes); the mod checks a slice of them each
    sync (`GetObjectsAtPosition`) and reports which are up. Gas: a dynamic
    spot is up when a gas world event is within 100 m; static zones (all
-   `EffectArea`s not on a spot) always show, coloured. The page draws every
-   spot, active in colour, inactive grey, with Active/Inactive toggles and
+   `EffectArea`s not on a spot) always show, colored. The page draws every
+   spot, active in color, inactive gray, with Active/Inactive toggles and
    one per category.
 3. **Predator popup (mod).** The mod sends each predator's health (0-1),
-   behaviour (`GetBehaviourSlot`), activity (`GetBehaviourAction`),
+   behavior (`GetBehaviourSlot`), activity (`GetBehaviourAction`),
    attacking (`IsAttack`). New command `deleteAnimal` (text: its id). Popup:
    Health, Behavior, Activity, Attacking, Nearest player (only while
    Hunting/Enraged/attacking, the nearest online player and distance);
@@ -49,7 +49,7 @@ Needs recon-mod 1.0.3 (items marked **mod**); ReCON keeps working with
    inventories per sync so each is at most 5 min old; the player dialog
    shows that copy at once ("as of …") until the live one comes.
 9. **Occupied cars (mod).** Each player is sent with the vehicle id and
-   seat; a car with players is drawn in the driver's colour (or the first
+   seat; a car with players is drawn in the driver's color (or the first
    seat's), their arrows hidden; the popup lists the crew.
 10. **Left Shoulder / Right Shoulder** for the `Shoulder` / `Melee` slots.
 11. **Refresh by scale bar.** Players, predators and occupied vehicles:
@@ -66,7 +66,7 @@ Needs recon-mod 1.0.3 (items marked **mod**); ReCON keeps working with
 
 ## Decided
 
-- No guessing an animal's target: "Nearest player" is labelled as such.
+- No guessing an animal's target: "Nearest player" is labeled as such.
 - No question text in confirms.
 - Loadouts come back at 100%; death restores at Worn.
 - The mod never reads mission files on its own: only when ReCON asks.

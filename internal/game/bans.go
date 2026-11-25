@@ -67,7 +67,7 @@ func BanGUID(p battleye.Player, online bool, minutes int, reason, logAs string) 
 	return res
 }
 
-// BanListLock serialises everything that changes or mirrors the ban list
+// BanListLock serializes everything that changes or mirrors the ban list
 // (ban, unban, and BattlEye->DB sync) so a sync can't act on a stale
 // list and delete a ban that was just added.
 var BanListLock sync.Mutex
@@ -173,7 +173,7 @@ func ExpireBans(now time.Time) {
 }
 
 // ReadBanList reads the live GUID ban list from BattlEye (retrying read).
-// An unrecognised reply is logged and returned as an error, not an empty list.
+// An unrecognized reply is logged and returned as an error, not an empty list.
 func ReadBanList() ([]battleye.Ban, error) {
 	out, acked, err := Run("bans", 4*time.Second, true, "")
 	if err != nil {
@@ -187,7 +187,7 @@ func ReadBanList() ([]battleye.Ban, error) {
 		if len(out) > 500 {
 			out = out[:500]
 		}
-		log.Printf("bans: unrecognised output: %q", out)
+		log.Printf("bans: unrecognized output: %q", out)
 		return nil, fmt.Errorf("could not parse bans output")
 	}
 	return bans, nil

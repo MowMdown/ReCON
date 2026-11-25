@@ -178,7 +178,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .addrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; position: relative; }
 .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; background: #1e1e1e; border: 1px solid var(--line-strong); border-radius: 8px; padding: 14px; width: min(620px, calc(100vw - 48px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px 18px; box-shadow: 0 10px 30px #000a; }
 .menu .grp { display: flex; flex-direction: column; gap: 3px; }
-/* Each group heading takes its steps' colour, as in the step list's badges. */
+/* Each group heading takes its steps' color, as in the step list's badges. */
 .menu .gl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 2px; padding-left: 6px; border-left: 3px solid currentColor; }
 .menu .grp.msg .gl { color: var(--c-msg); }
 .menu .grp.time .gl { color: var(--c-time); }
@@ -186,7 +186,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .menu .grp.player .gl { color: var(--c-player); }
 .menu .grp.logic .gl { color: var(--c-logic); }
 .menu .grp.adv .gl { color: var(--c-adv); }
-/* Buttons have no colour of their own, so the label is set here: without it
+/* Buttons have no color of their own, so the label is set here: without it
    it fell back to the browser's black, unreadable on the dark menu. */
 .fb .menu button { text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 7px; color: var(--fg); font-size: 14px; cursor: pointer; }
 .fb .menu button:hover:not(:disabled), .fb .menu button:focus-visible { background: #2e2e2e; border-color: #444; outline: none; }
@@ -440,7 +440,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 				</tbody>
 			</table>
 			<h3>When stopped</h3>
-			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart cancelled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its dotted handle into When stopped, and back.</p>
+			<p>Schedule and Manual flows can have steps that run if you press <b>Stop</b> before the run ends, such as <i>Server restart canceled.</i> and Unlock server. They can be any steps, with the same rules as the main steps: a For each with Ifs and Kicks, Waits, and so on. Press <b>Stop</b> again to end them. <b>+ Add step</b> adds to the main steps; drag a step by its dotted handle into When stopped, and back.</p>
 		</div>
 
 		<div class="helppane" data-pane="conditions">
@@ -532,7 +532,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 					<tr><td><code>!code</code></td><td>Sends the player's code (last 6 characters of their GUID) to the mods and admins online</td></tr>
 					<tr><td><code>!kick &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: kicks that player</td></tr>
 					<tr><td><code>!ban &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: bans that player permanently; by code, even if they have left</td></tr>
-					<tr><td><code>!car</code>, <code>!truck</code>, <code>!boat</code>, <code>!vehicle &lt;name&gt; [colour]</code></td><td>Vehicles players, Mods and Admins, with recon-mod on the server: spawns that vehicle whole in front of them, from the map's <code>maps/&lt;map&gt;/vehicles.json</code> in ReCON's data folder. Alone (<code>!car</code>), lists the names. No colour picks <code>default</code>, or a random one. Case doesn't matter. ReCON writes a first file from the server's vehicles once the mod connects, and never changes it after; edits take effect straight away</td></tr>
+					<tr><td><code>!car</code>, <code>!truck</code>, <code>!boat</code>, <code>!vehicle &lt;name&gt; [color]</code></td><td>Vehicles players, Mods and Admins, with recon-mod on the server: spawns that vehicle whole in front of them, from the map's <code>maps/&lt;map&gt;/vehicles.json</code> in ReCON's data folder. Alone (<code>!car</code>), lists the names. No color picks <code>default</code>, or a random one. Case doesn't matter. ReCON writes a first file from the server's vehicles once the mod connects, and never changes it after; edits take effect straight away</td></tr>
 					<tr><td><code>!remove</code></td><td>Vehicles players, Mods and Admins, with recon-mod 1.0.1: removes the vehicle their last vehicle command spawned (anyone in it gets out first)</td></tr>
 					<tr><td><code>!warning &lt;code or number&gt; &lt;reason&gt;</code></td><td>Mods and Admins: warns that player. The warning that reaches the threshold (2 by default, counted per visit) is followed 5 seconds later by a kick or a permanent ban with its reason, as set in the settings</td></tr>
 				</tbody>
@@ -1360,8 +1360,8 @@ function findParent(root, target) {
 	return null;
 }
 
-// The fold arrows: triangles drawn in a 16px box and centred optically, on
-// their centroid (where they look centred) rather than their bounding box.
+// The fold arrows: triangles drawn in a 16px box and centered optically, on
+// their centroid (where they look centered) rather than their bounding box.
 // So the down arrow sits a little low and the right arrow a little right.
 const FOLD_DOWN = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5.33h10L8 13.33z" fill="currentColor"/></svg>';
 const FOLD_RIGHT = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.33 3v10l8-5z" fill="currentColor"/></svg>';
@@ -1405,7 +1405,7 @@ function renderSteps(key) {
 					(c.bad.length ? ' (error: step' + (c.bad.length === 1 ? ' ' : 's ') + c.bad.join(', ') + ')' : '');
 				if (c.bad.length) sentence.dataset.errInside = '1';
 			}
-			// An If or For each: the fold arrow on its own, centred on the row like the grip, and
+			// An If or For each: the fold arrow on its own, centered on the row like the grip, and
 			// the label, fields and value (which wraps to a second line) beside it.
 			if (isBlock(s)) {
 				const fold = sentence.firstChild, inner = el('div', { class: 'sentence' });
@@ -1480,7 +1480,7 @@ function field(s, p, key, inLoop) {
 	if (p.kind === 'select') {
 		let opts = p.opts;
 		// An If's subject is always a dropdown of every subject; the ones that
-		// don't apply here are greyed out. The chosen one always stays: if the
+		// don't apply here are grayed out. The chosen one always stays: if the
 		// trigger changes or the If moves out of a For each, its red note says
 		// what it needs.
 		if (opts === 'subjects') {

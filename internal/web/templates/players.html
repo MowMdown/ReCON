@@ -21,7 +21,7 @@ td:nth-child(3), td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis;
 .hdrbtn { width: 104px; justify-content: center; box-sizing: border-box; }
 
 /* RCON Settings dialog. Empty fields use the docker-compose defaults, shown
-   as the greyed-out placeholder text. */
+   as the grayed-out placeholder text. */
 .rcset input::placeholder { color: #666; }
 .rcset .row { display: flex; gap: 10px; }
 .rcset .row > div:first-child { flex: 1; }
@@ -50,7 +50,7 @@ td.lastmsg { text-overflow: ellipsis; color: #ccc; }
 /* The country flag to the left of an IP (flagHTML / flagEl). Inline-block:
    the theme makes images blocks. */
 img.flag { display: inline-block; width: 16px; height: 12px; margin-right: 7px; vertical-align: -1px; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px rgba(127, 127, 127, .35); }
-/* Delete Player: the name to type shows greyed out until typed over */
+/* Delete Player: the name to type shows grayed out until typed over */
 #delName::placeholder { color: #777; opacity: 1; }
 /* Prev / Next in the Details dialog's top right corner */
 .detnav { margin-left: auto; display: flex; gap: 6px; }
@@ -160,7 +160,7 @@ html[data-theme]:not([data-theme="default"]) #detIPs tr.iprow.open td { backgrou
 .log .ln { display: flex; gap: 12px; white-space: pre-wrap; word-break: break-word; }
 .log .t { color: #888; flex: none; min-width: 64px; }
 .log .empty { color: #888; }
-/* One colour per kind of line. */
+/* One color per kind of line. */
 .k-connect { color: #81c995; }
 .k-disconnect { color: #9aa0a6; }
 .k-guid { color: #777; }
@@ -723,7 +723,7 @@ function chatTime(iso) {
 }
 
 // logLine builds one row: time (formatted by fmt, logTime by default), then
-// the text in its kind's colour. Text is set with textContent, so nothing
+// the text in its kind's color. Text is set with textContent, so nothing
 // from the server is ever parsed as HTML.
 function logLine(time, kind, text, fmt) {
 	let row = document.createElement('div');
@@ -1467,7 +1467,7 @@ function steamHint(text) {
 	return h;
 }
 
-// steamCallout is a coloured box: bold first part, plain rest.
+// steamCallout is a colored box: bold first part, plain rest.
 function steamCallout(kind, bold, rest) {
 	let box = document.createElement('div');
 	box.className = 'callout ' + kind;
@@ -1687,7 +1687,7 @@ function rcsMsg(text, cls) {
 }
 
 // openRconSettings shows the saved overrides in the fields; the defaults
-// from docker-compose.yaml, the password included, are the greyed-out
+// from docker-compose.yaml, the password included, are the grayed-out
 // placeholders.
 async function openRconSettings() {
 	rcsMsg('');

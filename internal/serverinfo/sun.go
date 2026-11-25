@@ -47,7 +47,7 @@ func parseServerDate(s string, now time.Time) (time.Time, bool) {
 }
 
 // SunTimes is in-game sunrise and sunset ("05:21", "18:39") on date at the
-// latitude: the standard sunrise equation (the sun's centre 0.833° below
+// latitude: the standard sunrise equation (the sun's center 0.833° below
 // the horizon), in local solar time. A polar day or night gives no times
 // and polar "day" or "night".
 func SunTimes(date time.Time, latitude float64) (rise, set, polar string) {

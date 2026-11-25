@@ -191,7 +191,7 @@
 			{ type: 'kickAll' },
 			{ type: 'wait', time: '30s' },
 			{ type: 'shutdown' }
-		], onStop: [{ type: 'message', to: 'all', text: 'Restart cancelled.' }, { type: 'unlock' }]
+		], onStop: [{ type: 'message', to: 'all', text: 'Restart canceled.' }, { type: 'unlock' }]
 	});
 	var nextFlowId = 1;
 	flows.forEach(function (f) {

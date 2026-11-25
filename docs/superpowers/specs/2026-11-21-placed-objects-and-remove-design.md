@@ -97,7 +97,7 @@ objects. Objects placed before the update: "placed by: unknown".
     menu shows its kinds indented below, each ticked by default,
     remembered, with a count: Base building, Tents & shelters, Storage,
     Traps, Other. Placed objects' count is what's ticked.
-  - Markers: a small square per object, coloured by condition (pristine
+  - Markers: a small square per object, colored by condition (pristine
     green to ruined red). To stay fast with thousands, markers are drawn
     only for what's in view, and only at mid zoom and closer; zoomed out
     the button's tooltip says to zoom in.

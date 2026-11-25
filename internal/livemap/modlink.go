@@ -141,7 +141,7 @@ type WorldEvent struct {
 	Kind   string  `json:"kind"` // crash, gas or area
 	X      float64 `json:"x"`
 	Z      float64 `json:"z"`
-	Radius float64 `json:"radius"` // an area's, in metres
+	Radius float64 `json:"radius"` // an area's, in meters
 }
 
 // Predator is a bear, wolf or guard dog (ReCON_Predator).

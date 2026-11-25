@@ -1,7 +1,7 @@
 package livemap
 
 // vehiclefile.go is a map's vehicles.json: the vehicles the chat commands
-// !car, !truck, !boat and !vehicle can spawn, by short name and colour,
+// !car, !truck, !boat and !vehicle can spawn, by short name and color,
 // which the admin edits. ReCON writes a first one from the mod's item list.
 
 import (
@@ -18,7 +18,7 @@ import (
 )
 
 // VehicleFile is category (car, truck, boat, vehicle) -> short name ->
-// colour -> class. Every key is lowercase once loaded, so case never matters.
+// color -> class. Every key is lowercase once loaded, so case never matters.
 type VehicleFile map[string]map[string]map[string]string
 
 // Count is how many vehicles (short names) the file has.
@@ -59,13 +59,13 @@ func LoadVehicleFile(path, world string) (VehicleFile, error) {
 		if f[c] == nil {
 			f[c] = map[string]map[string]string{}
 		}
-		for name, colours := range names {
+		for name, colors := range names {
 			n := strings.ToLower(name)
 			if f[c][n] == nil {
 				f[c][n] = map[string]string{}
 			}
-			for colour, class := range colours {
-				f[c][n][strings.ToLower(colour)] = class
+			for color, class := range colors {
+				f[c][n][strings.ToLower(color)] = class
 			}
 		}
 	}
@@ -78,7 +78,7 @@ var vanillaCars = map[string]bool{"civiliansedan": true, "sedan_02": true, "hatc
 
 // GenerateVehicleFile makes the first vehicles.json from the item list's
 // vehicles. Classes that share a display name are one vehicle in its
-// colours; anything it can't place surely goes under vehicle, the catch-all.
+// colors; anything it can't place surely goes under vehicle, the catch-all.
 func GenerateVehicleFile(items []CatalogItem) VehicleFile {
 	groups := map[string][]string{}
 	names := map[string]string{}
@@ -95,9 +95,9 @@ func GenerateVehicleFile(items []CatalogItem) VehicleFile {
 	}
 
 	type entry struct {
-		words   []string
-		take    int
-		colours map[string]string
+		words  []string
+		take   int
+		colors map[string]string
 	}
 	byCat := map[string][]*entry{}
 	keysSorted := make([]string, 0, len(groups))
@@ -109,13 +109,13 @@ func GenerateVehicleFile(items []CatalogItem) VehicleFile {
 		classes := groups[k]
 		sort.Strings(classes)
 		base := vehicleBase(classes)
-		colours := map[string]string{}
+		colors := map[string]string{}
 		for _, c := range classes {
 			col := "default"
 			if len(classes) > 1 && c != base {
 				col = strings.ToLower(strings.TrimPrefix(c, base+"_"))
 			}
-			colours[col] = c
+			colors[col] = c
 		}
 		words := []string{}
 		if !strings.HasPrefix(k, "class:") {
@@ -128,7 +128,7 @@ func GenerateVehicleFile(items []CatalogItem) VehicleFile {
 		if len(words) == 0 {
 			words = []string{cleanName(base)}
 		}
-		byCat[vehicleCategory(base)] = append(byCat[vehicleCategory(base)], &entry{words: words, take: 1, colours: colours})
+		byCat[vehicleCategory(base)] = append(byCat[vehicleCategory(base)], &entry{words: words, take: 1, colors: colors})
 	}
 
 	f := VehicleFile{}
@@ -163,7 +163,7 @@ func GenerateVehicleFile(items []CatalogItem) VehicleFile {
 			for i := 2; f[cat][n] != nil; i++ {
 				n = name(e) + fmt.Sprint(i)
 			}
-			f[cat][n] = e.colours
+			f[cat][n] = e.colors
 		}
 	}
 	return f
@@ -314,8 +314,8 @@ func UnlistedVehicles(now time.Time) []CatalogItem {
 	}
 	listed := map[string]bool{}
 	for _, names := range f {
-		for _, colours := range names {
-			for _, class := range colours {
+		for _, colors := range names {
+			for _, class := range colors {
 				listed[strings.ToLower(class)] = true
 			}
 		}

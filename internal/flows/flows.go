@@ -973,7 +973,7 @@ func runFlowCommand(run *flowRun, cmd string) {
 	}
 }
 
-// sleepUntil waits for t. It returns false if ctx was cancelled first.
+// sleepUntil waits for t. It returns false if ctx was canceled first.
 func sleepUntil(ctx context.Context, t time.Time) bool {
 	d := time.Until(t)
 	if d <= 0 {

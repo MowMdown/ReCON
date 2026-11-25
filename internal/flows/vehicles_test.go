@@ -10,7 +10,7 @@ import (
 	"github.com/MowMdown/ReCON/internal/test"
 )
 
-// vehicleTest stubs the mod side: the file, what was spawned, the colour
+// vehicleTest stubs the mod side: the file, what was spawned, the color
 // picked, and whether the mod is connected. It returns the player, a way
 // to type a line as role, and what was said and spawned.
 type vehicleTest struct {
@@ -26,9 +26,9 @@ type vehicleTest struct {
 
 func newVehicleTest(t *testing.T) (*vehicleTest, func(role int, text string)) {
 	vt := &vehicleTest{connected: true}
-	oldSay, oldConn, oldChoices, oldSpawn, oldPick, oldRemove := chatSay, modConnected, vehicleChoices, spawnVehicle, pickColour, removeChatVehicle
+	oldSay, oldConn, oldChoices, oldSpawn, oldPick, oldRemove := chatSay, modConnected, vehicleChoices, spawnVehicle, pickColor, removeChatVehicle
 	t.Cleanup(func() {
-		chatSay, modConnected, vehicleChoices, spawnVehicle, pickColour, removeChatVehicle = oldSay, oldConn, oldChoices, oldSpawn, oldPick, oldRemove
+		chatSay, modConnected, vehicleChoices, spawnVehicle, pickColor, removeChatVehicle = oldSay, oldConn, oldChoices, oldSpawn, oldPick, oldRemove
 		chatState.Lock()
 		chatState.loaded = false
 		chatState.Unlock()
@@ -46,7 +46,7 @@ func newVehicleTest(t *testing.T) (*vehicleTest, func(role int, text string)) {
 		vt.spawned = append(vt.spawned, guid+"|"+class)
 		return "Olga 24", nil
 	}
-	pickColour = func(n int) int { return vt.pick }
+	pickColor = func(n int) int { return vt.pick }
 	removeChatVehicle = func(guid string) (string, error) {
 		if vt.removeErr != nil {
 			return "", vt.removeErr
@@ -82,7 +82,7 @@ func TestVehicleCommandSpawns(t *testing.T) {
 	eq(t, "said", vt.said, "Spawning Olga 24 (default)")
 }
 
-func TestVehicleCommandRandomColour(t *testing.T) {
+func TestVehicleCommandRandomColor(t *testing.T) {
 	vt, typ := newVehicleTest(t)
 	vt.file = livemap.VehicleFile{"boat": {"rubber": {"blue": "Boat_01_Blue", "black": "Boat_01_Black"}}}
 	vt.pick = 1

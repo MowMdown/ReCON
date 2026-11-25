@@ -123,7 +123,7 @@ type Session struct {
 	src         string        // label for log lines ("web", "console", "cli")
 	conn        net.Conn      // UDP connection
 	password    string        // what it logged in with, for reloginSameSocket()
-	writeLock   sync.Mutex    // serialises socket writes and seq allocation
+	writeLock   sync.Mutex    // serializes socket writes and seq allocation
 	commandLock sync.Mutex    // ensures only one command is in flight at a time
 	seq         byte          // next command sequence number (wraps at 255)
 	replies     chan []byte   // command replies (seq byte + body) handed from readServerPackets() to runRawCommand()

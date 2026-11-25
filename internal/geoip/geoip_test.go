@@ -38,7 +38,7 @@ func TestCountry(t *testing.T) {
 }
 
 // TestRefresh checks the download: MaxMind's tar.gz is fetched with the
-// account ID and licence key, the .mmdb in it saved to the folder and used,
+// account ID and license key, the .mmdb in it saved to the folder and used,
 // and a file newer than refreshAfter isn't downloaded again.
 func TestRefresh(t *testing.T) {
 	db.Store(nil)
@@ -70,7 +70,7 @@ func TestRefresh(t *testing.T) {
 
 	c := Config{Dir: t.TempDir(), AccountID: "123456", LicenseKey: "wrong"}
 	if err := Refresh(c); err == nil {
-		t.Fatal("a wrong licence key didn't fail")
+		t.Fatal("a wrong license key didn't fail")
 	}
 	c.LicenseKey = "key"
 	if err := Refresh(c); err != nil {
@@ -100,7 +100,7 @@ func TestConfigFromEnv(t *testing.T) {
 	t.Setenv("MAXMIND_LICENSE_KEY", "")
 	c := ConfigFromEnv("/data")
 	if c.Dir != "/data" || c.canDownload() {
-		t.Errorf("got %+v (canDownload %v), want /data and no download without a licence key", c, c.canDownload())
+		t.Errorf("got %+v (canDownload %v), want /data and no download without a license key", c, c.canDownload())
 	}
 	t.Setenv("GEOIP_DIR", "/geo")
 	t.Setenv("MAXMIND_LICENSE_KEY", "key")

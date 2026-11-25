@@ -77,7 +77,7 @@ var ChatCommandDefs = []chatCommandDef{
 	vehicleDef("boat", "that boat"),
 	vehicleDef("vehicle", "that vehicle (bikes, ATVs, helicopters and the rest)"),
 	{Cmd: "save", Role: roleMod, Cool: "0", NeedsMod: true,
-		Help: "!save keeps everything you wear, carry and hold as your loadout, for !equip.",
+		Help:   "!save keeps everything you wear, carry and hold as your loadout, for !equip.",
 		Fields: []chatField{{"saved", "Saved (to the player)", "Loadout saved: {count} items", []string{"count"}}}},
 	{Cmd: "equip", Role: roleMod, Cool: "0", NeedsMod: true,
 		Help: "!equip replaces your gear with your !save loadout, every item pristine, once you type confirm.",
@@ -88,7 +88,7 @@ var ChatCommandDefs = []chatCommandDef{
 			{"none", "No loadout (to the player)", "No loadout saved, use !save first", []string{}},
 		}},
 	{Cmd: "remove", Role: RoleVehicles, Cool: "0", NeedsMod: true,
-		Help: "!remove removes the vehicle your last !car, !truck, !boat or !vehicle spawned (anyone in it gets out first).",
+		Help:   "!remove removes the vehicle your last !car, !truck, !boat or !vehicle spawned (anyone in it gets out first).",
 		Fields: []chatField{{"removing", "Removing (to the player)", "Removing your {vehicle}", []string{"vehicle"}}}},
 }
 
@@ -96,9 +96,9 @@ var ChatCommandDefs = []chatCommandDef{
 // vehicles.json (see vehicles.go).
 func vehicleDef(cmd, what string) chatCommandDef {
 	return chatCommandDef{Cmd: cmd, Role: RoleVehicles, Cool: "0", NeedsMod: true,
-		Help: "!" + cmd + " <name> [colour] spawns " + what + " in front of you. !" + cmd + " alone lists the names.",
+		Help: "!" + cmd + " <name> [color] spawns " + what + " in front of you. !" + cmd + " alone lists the names.",
 		Fields: []chatField{
-			{"spawned", "Spawned (to the player)", "Spawning {vehicle} ({colour})", []string{"vehicle", "colour"}},
+			{"spawned", "Spawned (to the player)", "Spawning {vehicle} ({color})", []string{"vehicle", "color"}},
 			{"list", "List (to the player, for !" + cmd + " alone or a name it doesn't have)", "{category}: {names}", []string{"category", "names"}},
 		}}
 }

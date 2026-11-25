@@ -277,15 +277,15 @@ window.RECON_PREVIEW_DATA = {
 			"length": false,
 			"warn": false,
 			"needsMod": true,
-			"help": "!car \u003cname\u003e [colour] spawns that car in front of you. !car alone lists the names.",
+			"help": "!car \u003cname\u003e [color] spawns that car in front of you. !car alone lists the names.",
 			"fields": [
 				{
 					"key": "spawned",
 					"label": "Spawned (to the player)",
-					"def": "Spawning {vehicle} ({colour})",
+					"def": "Spawning {vehicle} ({color})",
 					"ph": [
 						"vehicle",
-						"colour"
+						"color"
 					]
 				},
 				{
@@ -307,15 +307,15 @@ window.RECON_PREVIEW_DATA = {
 			"length": false,
 			"warn": false,
 			"needsMod": true,
-			"help": "!truck \u003cname\u003e [colour] spawns that truck in front of you. !truck alone lists the names.",
+			"help": "!truck \u003cname\u003e [color] spawns that truck in front of you. !truck alone lists the names.",
 			"fields": [
 				{
 					"key": "spawned",
 					"label": "Spawned (to the player)",
-					"def": "Spawning {vehicle} ({colour})",
+					"def": "Spawning {vehicle} ({color})",
 					"ph": [
 						"vehicle",
-						"colour"
+						"color"
 					]
 				},
 				{
@@ -337,15 +337,15 @@ window.RECON_PREVIEW_DATA = {
 			"length": false,
 			"warn": false,
 			"needsMod": true,
-			"help": "!boat \u003cname\u003e [colour] spawns that boat in front of you. !boat alone lists the names.",
+			"help": "!boat \u003cname\u003e [color] spawns that boat in front of you. !boat alone lists the names.",
 			"fields": [
 				{
 					"key": "spawned",
 					"label": "Spawned (to the player)",
-					"def": "Spawning {vehicle} ({colour})",
+					"def": "Spawning {vehicle} ({color})",
 					"ph": [
 						"vehicle",
-						"colour"
+						"color"
 					]
 				},
 				{
@@ -367,15 +367,15 @@ window.RECON_PREVIEW_DATA = {
 			"length": false,
 			"warn": false,
 			"needsMod": true,
-			"help": "!vehicle \u003cname\u003e [colour] spawns that vehicle (bikes, ATVs, helicopters and the rest) in front of you. !vehicle alone lists the names.",
+			"help": "!vehicle \u003cname\u003e [color] spawns that vehicle (bikes, ATVs, helicopters and the rest) in front of you. !vehicle alone lists the names.",
 			"fields": [
 				{
 					"key": "spawned",
 					"label": "Spawned (to the player)",
-					"def": "Spawning {vehicle} ({colour})",
+					"def": "Spawning {vehicle} ({color})",
 					"ph": [
 						"vehicle",
-						"colour"
+						"color"
 					]
 				},
 				{
@@ -495,7 +495,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"msgs": {
 				"list": "{category}: {names}",
-				"spawned": "Spawning {vehicle} ({colour})"
+				"spawned": "Spawning {vehicle} ({color})"
 			}
 		},
 		"car": {
@@ -503,7 +503,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"msgs": {
 				"list": "{category}: {names}",
-				"spawned": "Spawning {vehicle} ({colour})"
+				"spawned": "Spawning {vehicle} ({color})"
 			}
 		},
 		"code": {
@@ -572,7 +572,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"msgs": {
 				"list": "{category}: {names}",
-				"spawned": "Spawning {vehicle} ({colour})"
+				"spawned": "Spawning {vehicle} ({color})"
 			}
 		},
 		"vehicle": {
@@ -580,7 +580,7 @@ window.RECON_PREVIEW_DATA = {
 			"cool": "0",
 			"msgs": {
 				"list": "{category}: {names}",
-				"spawned": "Spawning {vehicle} ({colour})"
+				"spawned": "Spawning {vehicle} ({color})"
 			}
 		},
 		"vote": {

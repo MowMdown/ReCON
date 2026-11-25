@@ -18,7 +18,7 @@
 - CF storage: `storageVersion = 1;` in `CfgMods ReCON_Mod`; key `"ReCON_Mod"`; writes placer name, placerId, placedAt (int).
 - Mod version 1.0.1; ReCON `recon-mod.version` v1.0.1.
 - `!remove` messages: `You don't have a spawned vehicle` (no row), `Removing your {vehicle}` (editable `removing`), `Your vehicle is already gone` (result "it's already gone"), `!remove needs recon-mod 1.0.1` (result "unknown action ..."). Row forgotten on ok or already-gone.
-- Layer: Overlays "Placed objects" off by default (pref `placed`), vehicles pane, markers only for objects in view and at zoom ≥ -2 (the "mid" band and closer); condition colours = `CONDITION` levels by health (>0.7, >0.5, >0.3, >0, else).
+- Layer: Overlays "Placed objects" off by default (pref `placed`), vehicles pane, markers only for objects in view and at zoom ≥ -2 (the "mid" band and closer); condition colors = `CONDITION` levels by health (>0.7, >0.5, >0.3, >0, else).
 
 ## Review Focus
 
@@ -62,9 +62,9 @@
 
 - Overlays button `placedBtn` "Placed objects N" (pref `placed`, default off); load `/api/mod/placed` every 30 s while on; markers in pane `vehicles`, drawn only within map bounds and when `map.getZoom() >= -2`; button title when zoomed out: `Zoom in to see placed objects`; not sent: `recon-mod doesn't send placed objects: it needs 1.0.1`.
 - Kinds filter: under `placedBtn`, rows `base` Base building, `tent` Tents & shelters, `storage` Storage, `trap` Traps, `other` Other (prefs `placed.<kind>`, default on), shown only while Placed objects is on, each with its count; Placed objects' count = ticked kinds; markers of unticked kinds not drawn. Info dialog shows the kind.
-- Marker: 10 px square, fill = condition colour, dark stroke; class `omark`.
-- Popup (`.vpop` look): name, `<grid>`, Condition (coloured), `Placed by <placer>` or `Placed by unknown`, `Info` button.
-- Info dialog `oModal` modelled on `vModal`: facts (Class, Where, Condition, Placed by, Placed at), columns Attachments / Damage / Cargo (reuse `partRow`, `zoneName`), foot: Refresh, **Remove** (`confirm('Remove this ' + name + ' and everything in it?')` → POST `/api/mod/world/removeEntity` {text: pid, stat: type}), Close.
+- Marker: 10 px square, fill = condition color, dark stroke; class `omark`.
+- Popup (`.vpop` look): name, `<grid>`, Condition (colored), `Placed by <placer>` or `Placed by unknown`, `Info` button.
+- Info dialog `oModal` modeled on `vModal`: facts (Class, Where, Condition, Placed by, Placed at), columns Attachments / Damage / Cargo (reuse `partRow`, `zoneName`), foot: Refresh, **Remove** (`confirm('Remove this ' + name + ' and everything in it?')` → POST `/api/mod/world/removeEntity` {text: pid, stat: type}), Close.
 - README: the layer, dialog, `!remove`.
 - [ ] `go test ./...` ok (templates parse); commit `Live Map: a Placed objects layer with Info and Remove`.
 

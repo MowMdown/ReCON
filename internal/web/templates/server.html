@@ -40,10 +40,10 @@
 .bar { height: 6px; background: #2a2a2a; border-radius: 3px; margin-top: 8px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: #81c995; }
 .daybar { position: relative; height: 10px; border-radius: 5px; margin: 30px 0 42px; }
-/* Sunrise and sunset: a tick through the bar, labelled above it */
+/* Sunrise and sunset: a tick through the bar, labeled above it */
 .daybar .tick { position: absolute; top: -4px; width: 2px; height: 18px; background: #ddd; }
 .daybar .tick span { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); font: 12px ui-monospace, Consolas, monospace; color: #aaa; white-space: nowrap; }
-/* The hour scale under the bar: a mark every hour, labelled every 4 (the end as 23:59) */
+/* The hour scale under the bar: a mark every hour, labeled every 4 (the end as 23:59) */
 .daybar .hr { position: absolute; top: 13px; width: 1px; height: 4px; background: #555; }
 .daybar .hr.major { height: 7px; background: #888; }
 .daybar .hr span { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); font: 11px ui-monospace, Consolas, monospace; color: #888; white-space: nowrap; }
@@ -304,7 +304,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		else if (sun.polar === 'night') bar.style.background = '#1d2340';
 		else {
 			// The fades scale with the day and night, so a short Arctic day
-			// keeps its colours in order: dawn, daylight, dusk.
+			// keeps its colors in order: dawn, daylight, dusk.
 			var dayH = set - rise, nightH = 24 - dayH;
 			var dawn = Math.min(2.5, dayH * 0.4), dusk = Math.min(1.5, dayH * 0.3), twi = Math.min(2, nightH * 0.25);
 			bar.style.background = 'linear-gradient(90deg, #1d2340 0%, #2a2f55 ' + pct(rise - twi) + ', #d6935a ' + pct(rise) + ', #7fd3ee ' + pct(rise + dawn) +
@@ -366,7 +366,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 		});
 	}
 
-	// drawSky draws the sky dial: the sky's colour follows the sun's height
+	// drawSky draws the sky dial: the sky's color follows the sun's height
 	// (night blue, an orange glow at dawn and dusk, daylight blue); the sun
 	// and moon go round one path, opposite each other, crossing the horizon at
 	// sunrise and sunset. The path's height follows the sun's noon height for
@@ -511,7 +511,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 			var d = await (await fetch('/api/server/busiest?tz=' + encodeURIComponent(tz))).json();
 			if (!d.ok) return;
 			$('tz').textContent = 'average players · ' + d.tz + ' · last 4 weeks';
-			// The day bar's colours: night purple when quiet, through dusk red, to
+			// The day bar's colors: night purple when quiet, through dusk red, to
 			// sunrise orange when busiest. Empty slots stay near the background.
 			var heat = $('heat'), shades = ['#1d2033', '#2a2f55', '#5b3a63', '#e07a4a', '#ffa64d'];
 			heat.textContent = '';
@@ -566,7 +566,7 @@ html[data-theme]:not([data-theme="default"]) .seg button.on { background: color-
 })();
 
 // Server Info Settings (GET/POST /api/server/settings): what is saved here
-// overrides the container's variables; empty fields use those, shown greyed out.
+// overrides the container's variables; empty fields use those, shown grayed out.
 function sisMsg(text, cls) { var m = document.getElementById('sisMsg'); m.textContent = text; m.className = cls || ''; }
 var SIS = { queryPort: 'sisPort', serverTime: 'sisTime', latitude: 'sisLat' };
 function showServerNow(d) {

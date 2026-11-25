@@ -10,8 +10,8 @@ each short name means, in a file, instead of ReCON guessing at spawn time.
 ## Goals
 
 - Four chat commands, mods and admins only: `!car`, `!truck`, `!boat`,
-  `!vehicle`, each followed by a short name and an optional colour:
-  `!<category> <name> [colour]`.
+  `!vehicle`, each followed by a short name and an optional color:
+  `!<category> <name> [color]`.
 - The vehicle spawns whole (parts and fluids), 8 m in front of the player
   who typed it, facing their way: the existing `spawn` action
   (`livemap.Queue`, as the Live Map's Spawn item uses).
@@ -58,15 +58,15 @@ reports it, e.g. `deerisle`):
 
 - Top level: the four categories (= the command names). A missing
   category means that command has nothing to spawn.
-- Then short name -> colour -> class name. Case never matters, anywhere:
+- Then short name -> color -> class name. Case never matters, anywhere:
   `!CAR Olga BLACK` works, and so does a file that says `"Car"`, `"Olga"`
   or `"civiliansedan_black"`. The command (already lowercased by the chat
-  handler), category, name and colour are compared ignoring case, and the
+  handler), category, name and color are compared ignoring case, and the
   class is looked up in the mod's item list ignoring case and sent with
   the item list's exact spelling (`livemap.Queue`'s check is
   case-sensitive today).
-- `!car olga` (no colour): `default` if there is one, otherwise a random
-  colour of that vehicle.
+- `!car olga` (no color): `default` if there is one, otherwise a random
+  color of that vehicle.
 - The file is read when a command runs (cheap; edits take effect without
   a restart). A file that doesn't parse: the command replies that
   `vehicles.json` has an error (and where), and the error is logged.
@@ -77,9 +77,9 @@ Written once, when all of these are true: the mod is connected, its item
 list is complete, the world is known, and `maps/<world>/vehicles.json`
 does not exist. If it exists ReCON never writes it again.
 
-- **Grouping colours:** catalog items of kind `vehicle` that share a
+- **Grouping colors:** catalog items of kind `vehicle` that share a
   display name are one vehicle. Its base is their longest common class-name
-  prefix (trimmed back to an `_` boundary); each class's colour is what
+  prefix (trimmed back to an `_` boundary); each class's color is what
   follows the base (`CivilianSedan_Black` -> `black`), and the class equal
   to the base is `default`. A display name starting with `$` (untranslated)
   falls back to grouping by class.
@@ -111,15 +111,15 @@ appear nowhere in this map's `vehicles.json`, so the admin can add them.
 
 In `internal/flows/commands.go`, as four `ChatCommandDefs` entries with
 `Role: roleMod`, each with the usual on/off, cooldown (default `0`) and
-editable messages. Help text, e.g. `!car <name> [colour] spawns that car
+editable messages. Help text, e.g. `!car <name> [color] spawns that car
 in front of you. !car alone lists the names.`
 
 - `!car` alone: replies with the names in that category (and their
-  colours), e.g. `Cars: olga (black, wine), sarka (grey, red)...`, split
+  colors), e.g. `Cars: olga (black, wine), sarka (gray, red)...`, split
   over several lines like `!players` if long.
 - `!car olga black`: queues `spawn` (`Text`: the class, `Value`: 1,
   ground) for the typing player's GUID; replies `Spawning Olga 24 (black)`.
-- Unknown name or colour: replies with what that name/category has.
+- Unknown name or color: replies with what that name/category has.
 - Replies go to the typing player only (`chatSay(p, false, ...)`).
 
 **Servers without the mod.** Some admins run ReCON without recon-mod on
@@ -129,7 +129,7 @@ and the settings dialog marks the four commands "needs recon-mod" (still
 editable, so they're ready if the mod is added later). Everything else in
 ReCON works exactly as today.
 
-**When the mod isn't connected (builder: the proposed behaviour, user can
+**When the mod isn't connected (builder: the proposed behavior, user can
 correct):** no file is written; `!help` doesn't list the four commands;
 typing one replies `recon-mod isn't running on this server` instead of the
 usual silent drop. Other `livemap.Queue` errors (player not seen by the
@@ -151,5 +151,5 @@ look broken.
   or lazily on first command plus on catalog completion).
 - Exact message wording and the clash rule for short names.
 - How the settings dialog shows the "not in vehicles.json" list.
-- Tests: generation from the deerisle catalog above, parsing, colour
+- Tests: generation from the deerisle catalog above, parsing, color
   defaults/random, role gating, mod-offline replies.

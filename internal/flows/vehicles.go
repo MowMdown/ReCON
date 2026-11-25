@@ -1,7 +1,7 @@
 package flows
 
 // vehicles.go is !car, !truck, !boat and !vehicle: a mod or admin spawns a
-// whole vehicle in front of themselves, picked by short name and colour
+// whole vehicle in front of themselves, picked by short name and color
 // from the map's vehicles.json (internal/livemap/vehiclefile.go).
 
 import (
@@ -38,7 +38,7 @@ var (
 		}
 		return it.Name, nil
 	}
-	pickColour = func(n int) int { return rand.IntN(n) }
+	pickColor = func(n int) int { return rand.IntN(n) }
 	// removeChatVehicle queues the removal of the player's chat car and
 	// returns its display name (livemap.ErrNoChatVehicle: they have none).
 	removeChatVehicle = func(guid string) (string, error) {
@@ -56,7 +56,7 @@ var (
 
 var vehicleCategoryText = map[string]string{"car": "Cars", "truck": "Trucks", "boat": "Boats", "vehicle": "Vehicles"}
 
-// runVehicleCommand runs !<cmd> [name] [colour] for p. Every answer goes
+// runVehicleCommand runs !<cmd> [name] [color] for p. Every answer goes
 // to p alone.
 func runVehicleCommand(cmd string, p battleye.Player, set chatSetting, args []string) {
 	file, _, err := vehicleChoices()
@@ -110,19 +110,19 @@ func runVehicleCommand(cmd string, p battleye.Player, set chatSetting, args []st
 		return
 	}
 	name := strings.ToLower(args[0])
-	colours, ok := names[name]
-	if !ok || len(colours) == 0 {
+	colors, ok := names[name]
+	if !ok || len(colors) == 0 {
 		list("")
 		return
 	}
-	colour := "default"
+	color := "default"
 	if len(args) > 1 {
-		colour = strings.ToLower(args[1])
-	} else if _, ok := colours["default"]; !ok {
-		cs := sortedKeys(colours)
-		colour = cs[pickColour(len(cs))]
+		color = strings.ToLower(args[1])
+	} else if _, ok := colors["default"]; !ok {
+		cs := sortedKeys(colors)
+		color = cs[pickColor(len(cs))]
 	}
-	class, ok := colours[colour]
+	class, ok := colors[color]
 	if !ok {
 		list(name)
 		return
@@ -132,7 +132,7 @@ func runVehicleCommand(cmd string, p battleye.Player, set chatSetting, args []st
 		chatSay(p, false, err.Error())
 		return
 	}
-	if chatSay(p, false, fillTemplate(set.Msgs["spawned"], map[string]string{"vehicle": shown, "colour": colour})) {
+	if chatSay(p, false, fillTemplate(set.Msgs["spawned"], map[string]string{"vehicle": shown, "color": color, "colour": color /* messages saved before {color} */})) {
 		markUsed(cmd)
 	}
 }
