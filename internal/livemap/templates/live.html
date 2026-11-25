@@ -104,7 +104,8 @@ html[data-theme]:not([data-theme="default"]) {
 .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.45; min-width: 210px; }
 .leaflet-container a.leaflet-popup-close-button, #popWrap a.leaflet-popup-close-button { color: var(--lm-muted); }
 /* On a small map a popup is a card in the middle of the screen, in front of the map (see POPUP_SMALL_W). */
-#popWrap { position: fixed; inset: 0; z-index: 950; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.35); }
+/* Above Leaflet's controls (+/−, zoom to an area: 1000), under the dialogs. */
+#popWrap { position: fixed; inset: 0; z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.35); }
 #popWrap[hidden] { display: none; }
 #popWrap .leaflet-popup { position: relative !important; left: auto !important; bottom: auto !important; transform: none !important; margin: 0; width: 100%; max-width: 480px; }
 #popWrap .leaflet-popup-content { width: auto !important; min-width: 0; }
@@ -317,7 +318,7 @@ html[data-theme]:not([data-theme="default"]) .gridlbl span { border-color: var(-
 .pmark .dx { display: none; }
 .pmark.dead .dx { display: inline; }
 .pmark.dead .arr { display: none; }
-.modal { z-index: 1000; align-items: flex-start; padding-top: 4vh; overflow-y: auto; }
+.modal { z-index: 1100; align-items: flex-start; padding-top: 4vh; overflow-y: auto; }
 .box.wide { width: min(860px, 95vw); box-sizing: border-box; margin-bottom: 4vh; }
 .dlg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .dlg-head h2 { margin: 0; font-size: 20px; }
