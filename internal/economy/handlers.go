@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"strconv"
 )
 
 //go:embed templates
@@ -24,6 +25,8 @@ type Host struct {
 	AddNavLink func(key, label, href string)
 	AddQuiet   func(func(*http.Request) bool)
 	Page       func(fs.FS, string) http.HandlerFunc
+	QueueMissionWrites func([]MissionWrite) ([]int, error)
+	MissionWriteStatuses func([]int) []MissionWriteResult
 }
 
 func Start(h Host) error {
@@ -41,6 +44,10 @@ func Start(h Host) error {
 	h.AddRoute("POST /api/economy/validate", validateHandler())
 	h.AddRoute("POST /api/economy/import", importHandler(store))
 	h.AddRoute("GET /api/economy/export", exportHandler(store))
+	if h.QueueMissionWrites != nil && h.MissionWriteStatuses != nil {
+		h.AddRoute("POST /api/economy/publish", publishHandler(store, h.QueueMissionWrites))
+		h.AddRoute("GET /api/economy/publish/status", publishStatusHandler(h.MissionWriteStatuses))
+	}
 	if h.AddNavLink != nil { h.AddNavLink("economy", "Economy", "/economy") }
 	if h.AddQuiet != nil {
 		h.AddQuiet(func(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/economy/") })
@@ -174,4 +181,42 @@ func writeEconomyJSON(w http.ResponseWriter, status int, value any) {
 }
 func economyError(w http.ResponseWriter, status int, err error) {
 	writeEconomyJSON(w, status, map[string]any{"ok": false, "error": err.Error()})
+}
+
+type MissionWrite struct {
+	Name string
+	Text string
+}
+type MissionWriteResult struct {
+	ID int `json:"id"`
+	OK bool `json:"ok"`
+	Error string `json:"error"`
+}
+
+func publishHandler(s *Store, queue func([]MissionWrite) ([]int, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		files, err := s.ChangedFiles()
+		if err != nil { economyError(w, http.StatusInternalServerError, err); return }
+		if len(files) == 0 { economyError(w, http.StatusConflict, errors.New("there are no unsaved mission changes to publish")); return }
+		writes := make([]MissionWrite, 0, len(files))
+		for _, f := range files { writes = append(writes, MissionWrite{Name:f.Path, Text:f.Content}) }
+		ids, err := queue(writes)
+		if err != nil { economyError(w, http.StatusBadRequest, err); return }
+		writeEconomyJSON(w, http.StatusAccepted, map[string]any{"ok":true, "message":"Publish queued; waiting for ReCON-Mod to confirm each file write.", "ids":ids})
+	}
+}
+
+func publishStatusHandler(statuses func([]int) []MissionWriteResult) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var ids []int
+		for _, raw := range strings.Split(r.URL.Query().Get("ids"), ",") {
+			if raw == "" { continue }
+			id, err := strconv.Atoi(raw)
+			if err != nil || id <= 0 { economyError(w, http.StatusBadRequest, errors.New("invalid publish request ID")); return }
+			ids = append(ids, id)
+		}
+		if len(ids) == 0 || len(ids) > 100 { economyError(w, http.StatusBadRequest, errors.New("provide 1 to 100 publish request IDs")); return }
+		results := statuses(ids)
+		writeEconomyJSON(w, http.StatusOK, map[string]any{"ok":true, "results":results, "complete":len(results)==len(ids)})
+	}
 }
