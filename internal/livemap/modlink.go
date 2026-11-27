@@ -18,8 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"encoding/xml"
-	"path"
 	"slices"
 	"sort"
 	"strconv"
@@ -763,11 +761,6 @@ func QueueMissionWrites(files []MissionWrite) ([]int, error) {
 			return nil, fmt.Errorf("unsafe mission XML path %q", file.Name)
 		}
 		if len(file.Text) == 0 || len(file.Text) > 2<<20 { return nil, fmt.Errorf("%s must be between 1 byte and 2 MiB", name) }
-		if _, err := xml.Unmarshal([]byte(file.Text), new(any)); err != nil {
-			// The mod is deliberately a transport layer; XML validation is performed by ReCON.
-			// This basic check only rejects obviously malformed payloads before queueing.
-			return nil, fmt.Errorf("%s is not valid XML: %w", name, err)
-		}
 		state.nextMissionWriteID++
 		file.ID = state.nextMissionWriteID
 		file.Name = name
