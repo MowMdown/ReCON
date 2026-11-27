@@ -752,19 +752,26 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 func QueueMissionWrites(files []MissionWrite) ([]int, error) {
 	if len(files) == 0 { return nil, errors.New("no mission files supplied") }
 	if len(files) > 100 { return nil, errors.New("a publish batch cannot exceed 100 files") }
-	state.Lock()
-	defer state.Unlock()
-	ids := make([]int, 0, len(files))
+
+	// Validate the entire batch before mutating the queue.
 	for _, file := range files {
 		name := strings.ReplaceAll(strings.TrimSpace(file.Name), "\\", "/")
 		clean := path.Clean(name)
 		if name == "" || clean != name || strings.HasPrefix(name, "/") || strings.Contains(name, "..") || strings.Contains(name, ":") || !strings.HasSuffix(strings.ToLower(name), ".xml") {
 			return nil, fmt.Errorf("unsafe mission XML path %q", file.Name)
 		}
-		if len(file.Text) == 0 || len(file.Text) > 2<<20 { return nil, fmt.Errorf("%s must be between 1 byte and 2 MiB", name) }
+		if len(file.Text) == 0 || len(file.Text) > 2<<20 {
+			return nil, fmt.Errorf("%s must be between 1 byte and 2 MiB", name)
+		}
+	}
+
+	state.Lock()
+	defer state.Unlock()
+	ids := make([]int, 0, len(files))
+	for _, file := range files {
+		file.Name = strings.ReplaceAll(strings.TrimSpace(file.Name), "\\", "/")
 		state.nextMissionWriteID++
 		file.ID = state.nextMissionWriteID
-		file.Name = name
 		state.missionWrites = append(state.missionWrites, file)
 		ids = append(ids, file.ID)
 	}
