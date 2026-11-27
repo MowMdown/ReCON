@@ -18,6 +18,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"encoding/xml"
+	"path"
 	"slices"
 	"sort"
 	"strconv"
@@ -128,6 +130,7 @@ type SyncRequest struct {
 	CrewVehicles []Vehicle `json:"crewVehicles"`
 	// Mission files the reply's WantMission asked for (eventspots.go).
 	MissionFiles []MissionFile `json:"missionFiles"`
+	MissionWriteResults []MissionWriteResult `json:"missionWriteResults"`
 	// How many event spots the mod holds to check, and the ones it checked
 	// this sync.
 	SpotsHeld *int        `json:"spotsHeld"`
@@ -384,6 +387,7 @@ type SyncReply struct {
 	// Mission files to send, and the event spots to check (SpotsSet:
 	// SpotChecks is the new list).
 	WantMission []string    `json:"wantMission,omitempty"`
+	WriteMission []MissionWrite `json:"writeMission,omitempty"`
 	SpotsSet    bool        `json:"spotsSet,omitempty"`
 	SpotChecks  []SpotCheck `json:"spotChecks,omitempty"`
 }
@@ -462,6 +466,9 @@ var state struct {
 	placesFor string
 	nextID    int
 	commands  []*CommandStatus // oldest first: queued and sent ones, then the last keepResults finished
+	missionWrites []MissionWrite
+	missionWriteResults map[int]MissionWriteResult
+	nextMissionWriteID int
 	// SteamIDs saved to the players table this run (one write per player).
 	steamSaved map[string]bool
 	refused    string // the last refusal logged, so it isn't logged every second
@@ -633,6 +640,15 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	}
 	// What to send: everything queued, unless it waited too long.
 	reply := SyncReply{OK: true, Commands: []Command{}, Watch: []string{}}
+	for _, result := range req.MissionWriteResults {
+		if state.missionWriteResults == nil { state.missionWriteResults = map[int]MissionWriteResult{} }
+		state.missionWriteResults[result.ID] = result
+	}
+	// Send queued writes once. The mod returns an acknowledgement in its next sync.
+	if len(state.missionWrites) > 0 {
+		reply.WriteMission = append(reply.WriteMission, state.missionWrites...)
+		state.missionWrites = nil
+	}
 	if len(state.catalog) < state.catalogTotal {
 		reply.CatalogNext = len(state.catalog) + 1
 	}
@@ -730,6 +746,46 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 		}
 	}
 	return reply, nil
+}
+
+// QueueMissionWrites queues validated, mission-relative XML writes for the
+// next authenticated mod sync. Results are retained for the web UI to poll.
+func QueueMissionWrites(files []MissionWrite) ([]int, error) {
+	if len(files) == 0 { return nil, errors.New("no mission files supplied") }
+	if len(files) > 100 { return nil, errors.New("a publish batch cannot exceed 100 files") }
+	state.Lock()
+	defer state.Unlock()
+	ids := make([]int, 0, len(files))
+	for _, file := range files {
+		name := strings.ReplaceAll(strings.TrimSpace(file.Name), "\\", "/")
+		clean := path.Clean(name)
+		if name == "" || clean != name || strings.HasPrefix(name, "/") || strings.Contains(name, "..") || strings.Contains(name, ":") || !strings.HasSuffix(strings.ToLower(name), ".xml") {
+			return nil, fmt.Errorf("unsafe mission XML path %q", file.Name)
+		}
+		if len(file.Text) == 0 || len(file.Text) > 2<<20 { return nil, fmt.Errorf("%s must be between 1 byte and 2 MiB", name) }
+		if _, err := xml.Unmarshal([]byte(file.Text), new(any)); err != nil {
+			// The mod is deliberately a transport layer; XML validation is performed by ReCON.
+			// This basic check only rejects obviously malformed payloads before queueing.
+			return nil, fmt.Errorf("%s is not valid XML: %w", name, err)
+		}
+		state.nextMissionWriteID++
+		file.ID = state.nextMissionWriteID
+		file.Name = name
+		state.missionWrites = append(state.missionWrites, file)
+		ids = append(ids, file.ID)
+	}
+	return ids, nil
+}
+
+// MissionWriteStatuses returns acknowledgements received from ReCON-Mod.
+func MissionWriteStatuses(ids []int) []MissionWriteResult {
+	state.Lock()
+	defer state.Unlock()
+	out := make([]MissionWriteResult, 0, len(ids))
+	for _, id := range ids {
+		if result, ok := state.missionWriteResults[id]; ok { out = append(out, result) }
+	}
+	return out
 }
 
 // takeCatalog adds the catalog entries a sync carries (state is locked).
