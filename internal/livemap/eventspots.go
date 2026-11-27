@@ -30,6 +30,20 @@ type MissionFile struct {
 	Text  string `json:"text"`
 }
 
+// MissionWrite is a bounded request for the mod to replace an existing mission XML file.
+type MissionWrite struct {
+	ID int `json:"id"`
+	Name string `json:"name"`
+	Text string `json:"text"`
+}
+
+// MissionWriteResult acknowledges a mission file write performed by the mod.
+type MissionWriteResult struct {
+	ID int `json:"id"`
+	OK bool `json:"ok"`
+	Error string `json:"error"`
+}
+
 // SpotCheck is a spot for the mod to check (ReCON_SpotCheck): up when an
 // object of one of Types is within Radius of X, Z.
 type SpotCheck struct {
