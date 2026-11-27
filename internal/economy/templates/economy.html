@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DayZ Economy</title>
+{{template "icons" .}}
+{{template "style" .}}
+<style>
+.economy-layout{display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr);gap:16px;min-height:65vh}
+.economy-files,.economy-editor{background:var(--color-surface,#1a1a1a);border:1px solid var(--color-divider,#333);border-radius:8px;min-width:0}
+.economy-files{padding:12px}.economy-section-title{font-size:13px;font-weight:650;margin-bottom:10px}
+.economy-file-list{display:flex;flex-direction:column;gap:5px}
+.economy-file{display:flex;justify-content:space-between;gap:8px;width:100%;text-align:left;padding:9px;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit;cursor:pointer}
+.economy-file:hover,.economy-file.active{background:var(--color-bg,#111);border-color:var(--color-divider,#444)}
+.economy-file small,.muted{color:var(--color-neutral-400,#999)}
+.economy-editor{display:flex;flex-direction:column;padding:12px;gap:10px}
+.economy-editor-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+#xmlEditor{box-sizing:border-box;width:100%;flex:1;min-height:55vh;resize:vertical;font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:2;white-space:pre;overflow:auto;background:var(--color-bg,#111);color:var(--color-text,#eee);border:1px solid var(--color-divider,#444);padding:10px}
+#validationResults{font-size:13px;white-space:pre-wrap}
+@media(max-width:760px){.economy-layout{grid-template-columns:1fr}.economy-files{max-height:220px;overflow:auto}}
+</style>
+{{template "theme" .}}
+</head>
+<body>
+<nav>{{template "navlinks" "economy"}}</nav>
+{{template "statusbar" .}}
+<div class="top">
+  <h1>Economy</h1>
+  <div>
+    <button type="button" onclick="document.getElementById('importFiles').click()">Import XML / ZIP</button>
+    <input id="importFiles" type="file" accept=".xml,.zip,application/xml,application/zip" multiple hidden>
+    <button type="button" onclick="exportEconomy()">Export changes</button>
+  </div>
+</div>
+<div id="economyStatus" class="statusbar">Loading economy workspace…</div>
+<div class="economy-layout">
+  <aside class="economy-files">
+    <div class="economy-section-title">Mission files</div>
+    <div id="economyFiles" class="economy-file-list">Import XML/ZIP to begin.</div>
+  </aside>
+  <main class="economy-editor">
+    <div class="economy-editor-head">
+      <strong id="activeFile">Select or import an economy XML file</strong>
+      <div><button type="button" id="validateButton" disabled>Validate</button><button type="button" id="saveButton" disabled>Save draft</button></div>
+    </div>
+    <textarea id="xmlEditor" spellcheck="false" placeholder="The selected XML file will appear here."></textarea>
+    <div id="validationResults" aria-live="polite"></div>
+  </main>
+</div>
+<script>
+(()=>{
+ const $=id=>document.getElementById(id);
+ let currentPath="",sourceHash="",files=[];
+ const request=async(url,options={})=>{const response=await fetch(url,options);const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.error||("HTTP "+response.status));return data;};
+ async function refresh(){
+  const data=await request("/api/economy/status");files=data.files||[];const changed=data.workspace.changed;
+  $("economyStatus").textContent=files.length+" file(s) in workspace · "+changed+" changed file(s)"+(changed?" · restart required after publishing":"");
+  $("economyFiles").replaceChildren();
+  if(!files.length){$("economyFiles").textContent="Import XML/ZIP to begin.";return;}
+  for(const file of files){const button=document.createElement("button");button.type="button";button.className="economy-file"+(file.path===currentPath?" active":"");const name=document.createElement("span");name.textContent=file.path;const state=document.createElement("small");state.textContent=file.hasChanges?"Modified":"Clean";button.append(name,state);button.onclick=()=>openFile(file.path);$("economyFiles").append(button);}
+ }
+ async function openFile(name){const data=await request("/api/economy/file?path="+encodeURIComponent(name));currentPath=name;sourceHash=data.sourceHash;$("activeFile").textContent=name;$("xmlEditor").value=data.xml;$("saveButton").disabled=false;$("validateButton").disabled=false;$("validationResults").textContent="";await refresh();}
+ $("importFiles").addEventListener("change",async event=>{const selected=event.target.files;if(!selected.length)return;const body=new FormData();for(const file of selected)body.append("files",file);try{const data=await request("/api/economy/import",{method:"POST",body});await refresh();$("economyStatus").textContent="Imported "+data.imported+" XML file(s).";if(files.length)await openFile(files[0].path);}catch(error){alert(error.message);}finally{event.target.value="";}});
+ $("saveButton").onclick=async()=>{try{await request("/api/economy/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:currentPath,xml:$("xmlEditor").value,sourceHash})});await refresh();$("validationResults").textContent="Draft saved in ReCON. It has not been written to the DayZ mission yet.";}catch(error){alert(error.message);}};
+ $("validateButton").onclick=async()=>{try{const data=await request("/api/economy/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:currentPath,xml:$("xmlEditor").value})});$("validationResults").textContent=data.result.valid?"XML syntax is valid.":data.result.issues.map(i=>i.severity.toUpperCase()+": "+i.message).join("\n");}catch(error){alert(error.message);}};
+ window.exportEconomy=()=>{window.location.href="/api/economy/export";};
+ refresh().catch(error=>$("economyStatus").textContent=error.message);
+})();
+</script>
+</body>
+</html>
