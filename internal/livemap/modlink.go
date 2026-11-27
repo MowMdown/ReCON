@@ -639,15 +639,20 @@ func Sync(req SyncRequest, now time.Time) (SyncReply, error) {
 	}
 	// What to send: everything queued, unless it waited too long.
 	reply := SyncReply{OK: true, Commands: []Command{}, Watch: []string{}}
+	ackedWrites := map[int]bool{}
 	for _, result := range req.MissionWriteResults {
 		if state.missionWriteResults == nil { state.missionWriteResults = map[int]MissionWriteResult{} }
 		state.missionWriteResults[result.ID] = result
+		ackedWrites[result.ID] = true
 	}
-	// Send queued writes once. The mod returns an acknowledgement in its next sync.
-	if len(state.missionWrites) > 0 {
-		reply.WriteMission = append(reply.WriteMission, state.missionWrites...)
-		state.missionWrites = nil
+	if len(ackedWrites) > 0 {
+		pending := make([]MissionWrite, 0, len(state.missionWrites))
+		for _, write := range state.missionWrites { if !ackedWrites[write.ID] { pending = append(pending, write) } }
+		state.missionWrites = pending
 	}
+	// Resend until acknowledged; writes are idempotent because each request
+	// carries the complete desired file content and a stable request ID.
+	reply.WriteMission = append(reply.WriteMission, state.missionWrites...)
 	if len(state.catalog) < state.catalogTotal {
 		reply.CatalogNext = len(state.catalog) + 1
 	}
